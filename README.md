@@ -28,6 +28,18 @@ cd sas7bdat-parser-rs
 cargo build
 ```
 
+### CLI usage
+
+This repo also ships a small CLI to batch‑convert SAS7BDAT files to Parquet/CSV/TSV using streaming sinks. It supports directory recursion, simple projection, and pagination.
+
+```
+cargo run --bin sas7bd -- convert path/to/dir --sink parquet --jobs 4
+cargo run --bin sas7bd -- convert file.sas7bdat --sink csv --out file.csv --columns COL1,COL2 --skip 100 --max-rows 1000
+cargo run --bin sas7bd -- inspect file.sas7bdat --json
+```
+
+Options include `--out-dir`, `--out`, `--sink {parquet|csv|tsv}`, CSV/TSV `--headers/--no-headers` and `--delimiter`, projection via `--columns` or `--column-indices`, pagination with `--skip` and `--max-rows`, and Parquet tuning flags `--parquet-row-group-size` and `--parquet-target-bytes`.
+
 ### Converting the AHS dataset
 
 The repository includes an example that downloads the 2013 AHS public-use file ZIP archive, extracts the embedded `.sas7bdat`, and writes `ahs2013n.parquet` to the working directory:

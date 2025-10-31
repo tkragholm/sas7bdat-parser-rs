@@ -1,4 +1,5 @@
 mod parquet;
+mod csv;
 
 use crate::error::Result;
 use crate::metadata::DatasetMetadata;
@@ -6,6 +7,7 @@ use crate::parser::{ColumnInfo, ParsedMetadata};
 use crate::value::Value;
 
 pub use parquet::ParquetSink;
+pub use csv::CsvSink;
 
 /// Provides high-level dataset information to sinks during initialisation.
 pub struct SinkContext<'a> {
