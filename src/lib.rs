@@ -12,6 +12,11 @@ pub use sinks::{CsvSink, ParquetSink, RowSink, SinkContext};
 ///
 /// This preserves the old API name to maintain compatibility with existing
 /// tests and callers; it simply forwards to `parser::parse_metadata`.
+/// Parses SAS metadata and returns the decoded layout information.
+///
+/// # Errors
+///
+/// Returns an error if the metadata pages cannot be decoded.
 pub fn parse_layout<R: std::io::Read + std::io::Seek>(
     reader: &mut R,
 ) -> Result<parser::ParsedMetadata> {

@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -108,23 +107,24 @@ struct InspectArgs {
 }
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
+type ProjectionResult = (Option<Vec<usize>>, DatasetMetadata, Vec<ColumnInfo>);
 
 fn main() -> Result<(), AnyError> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Convert(args) => run_convert(args),
-        Command::Inspect(args) => run_inspect(args),
+        Command::Convert(args) => run_convert(&args),
+        Command::Inspect(args) => run_inspect(&args),
     }
 }
 
-fn run_convert(args: ConvertArgs) -> Result<(), AnyError> {
+fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
     if let Some(jobs) = args.jobs {
         // Best-effort: configure global rayon pool once. Ignore error if already set.
         let _ = rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global();
     }
 
-    let files = discover_inputs(&args.inputs)?;
+    let files = discover_inputs(&args.inputs);
 
     if args.out.is_some() && files.len() != 1 {
         return Err("--out requires a single input".into());
@@ -135,7 +135,7 @@ fn run_convert(args: ConvertArgs) -> Result<(), AnyError> {
         tasks.push((files[0].clone(), out.clone()));
     } else {
         for input in files {
-            let output = compute_output_path_unchecked(&input, &args);
+            let output = compute_output_path_unchecked(&input, args);
             tasks.push((input, output));
         }
     }
@@ -143,7 +143,7 @@ fn run_convert(args: ConvertArgs) -> Result<(), AnyError> {
     // If single input with explicit --out, keep the order (just one task).
     // Otherwise, process in parallel.
     let process = |(input, output): (PathBuf, PathBuf)| -> Result<(), AnyError> {
-        convert_one(&input, &output, &args)
+        convert_one(&input, &output, args)
     };
 
     if args.fail_fast {
@@ -171,7 +171,7 @@ fn run_convert(args: ConvertArgs) -> Result<(), AnyError> {
     Ok(())
 }
 
-fn run_inspect(args: InspectArgs) -> Result<(), AnyError> {
+fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
     let sas = SasFile::open(&args.input)?;
     let meta = sas.metadata().clone();
     if args.json {
@@ -266,7 +266,19 @@ fn convert_one(
             if let Some(bytes) = args.parquet_target_bytes {
                 sink = sink.with_target_row_group_bytes(bytes);
             }
-            stream_into_sink(&mut reader, &parsed, &meta_filtered, &cols_filtered, indices.as_deref(), args.skip, args.max_rows, &mut sink)?;
+            let options = StreamOptions {
+                indices: indices.as_deref(),
+                skip: args.skip,
+                max_rows: args.max_rows,
+            };
+            stream_into_sink(
+                &mut reader,
+                &parsed,
+                &meta_filtered,
+                &cols_filtered,
+                &options,
+                &mut sink,
+            )?;
             let _ = sink.into_inner()?;
         }
         SinkKind::Csv | SinkKind::Tsv => {
@@ -278,7 +290,19 @@ fn convert_one(
                     (_, Some(ch)) => ch as u8,
                     _ => b',',
                 });
-            stream_into_sink(&mut reader, &parsed, &meta_filtered, &cols_filtered, indices.as_deref(), args.skip, args.max_rows, &mut sink)?;
+            let options = StreamOptions {
+                indices: indices.as_deref(),
+                skip: args.skip,
+                max_rows: args.max_rows,
+            };
+            stream_into_sink(
+                &mut reader,
+                &parsed,
+                &meta_filtered,
+                &cols_filtered,
+                &options,
+                &mut sink,
+            )?;
         }
     }
 
@@ -286,14 +310,19 @@ fn convert_one(
     Ok(())
 }
 
+#[derive(Copy, Clone)]
+struct StreamOptions<'a> {
+    indices: Option<&'a [usize]>,
+    skip: Option<u64>,
+    max_rows: Option<u64>,
+}
+
 fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
     reader: &mut W,
     parsed: &sas7bdat_parser_rs::parser::ParsedMetadata,
     meta_filtered: &DatasetMetadata,
-    cols_filtered: &Vec<ColumnInfo>,
-    indices: Option<&[usize]>,
-    skip: Option<u64>,
-    max_rows: Option<u64>,
+    cols_filtered: &[ColumnInfo],
+    options: &StreamOptions<'_>,
     sink: &mut S,
 ) -> Result<(), AnyError> {
     // Begin sink with filtered context
@@ -305,19 +334,19 @@ fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
 
     let mut it = parsed.row_iterator(reader)?;
     let mut skipped = 0u64;
-    let to_skip = skip.unwrap_or(0);
-    let mut remaining = max_rows;
+    let to_skip = options.skip.unwrap_or(0);
+    let mut remaining = options.max_rows;
     let mut projected: Vec<Value<'static>> = Vec::new();
 
     loop {
-        if indices.is_some() { projected.clear(); }
+        if options.indices.is_some() { projected.clear(); }
         let Some(row) = it.try_next()? else { break };
         if skipped < to_skip {
             skipped += 1;
             continue;
         }
 
-        if let Some(idxs) = indices {
+        if let Some(idxs) = options.indices {
             projected.reserve(idxs.len());
             for &idx in idxs {
                 projected.push(row[idx].clone().into_owned());
@@ -339,9 +368,9 @@ fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
 
 fn resolve_projection(
     meta: &DatasetMetadata,
-    cols: &Vec<ColumnInfo>,
+    cols: &[ColumnInfo],
     args: &ConvertArgs,
-) -> Result<(Option<Vec<usize>>, DatasetMetadata, Vec<ColumnInfo>), AnyError> {
+) -> Result<ProjectionResult, AnyError> {
     let column_count = meta.column_count as usize;
     let mut indices: Option<Vec<usize>> = None;
     if let Some(ref idxs) = args.column_indices {
@@ -375,16 +404,16 @@ fn resolve_projection(
 
     // Filter metadata clone and columns to match the projection
     let mut filtered = meta.clone();
-    filtered.column_count = selected.len() as u32;
-    filtered.variables = selected
-        .iter()
-        .enumerate()
-        .map(|(new_idx, &old_idx)| {
-            let mut v = meta.variables[old_idx].clone();
-            v.index = new_idx as u32;
-            v
-        })
-        .collect();
+    filtered.column_count = u32::try_from(selected.len())
+        .map_err(|_| "projected column count exceeds u32 range".to_string())?;
+    let mut new_vars = Vec::with_capacity(selected.len());
+    for (new_idx, &old_idx) in selected.iter().enumerate() {
+        let mut v = meta.variables[old_idx].clone();
+        v.index = u32::try_from(new_idx)
+            .map_err(|_| "projected column index exceeds u32 range".to_string())?;
+        new_vars.push(v);
+    }
+    filtered.variables = new_vars;
     // column_list not needed for sinks; keep as-is
 
     let filtered_cols: Vec<ColumnInfo> = selected.iter().map(|&i| cols[i].clone()).collect();
@@ -392,7 +421,7 @@ fn resolve_projection(
     Ok((indices, filtered, filtered_cols))
 }
 
-fn discover_inputs(inputs: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
+fn discover_inputs(inputs: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for input in inputs {
         if input.is_dir() {
@@ -412,7 +441,7 @@ fn discover_inputs(inputs: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
     }
     files.sort();
     files.dedup();
-    Ok(files)
+    files
 }
 
 fn is_sas7bdat(path: &Path) -> bool {
@@ -426,11 +455,12 @@ fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
         SinkKind::Csv => "csv",
         SinkKind::Tsv => "tsv",
     };
-    if let Some(ref dir) = args.out_dir {
-        let fname = input.file_name().unwrap_or_else(|| OsStr::new("output"));
-        let renamed = PathBuf::from(fname).with_extension(new_ext);
-        dir.join(renamed)
-    } else {
-        input.with_extension(new_ext)
-    }
+    args.out_dir.as_ref().map_or_else(
+        || input.with_extension(new_ext),
+        |dir| {
+            let fname = input.file_name().unwrap_or_else(|| OsStr::new("output"));
+            let renamed = PathBuf::from(fname).with_extension(new_ext);
+            dir.join(renamed)
+        },
+    )
 }

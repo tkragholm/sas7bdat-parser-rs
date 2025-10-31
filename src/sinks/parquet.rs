@@ -96,6 +96,11 @@ impl<W: Write + Send> ParquetSink<W> {
     }
 
     /// Returns the underlying writer once the sink has been finalised.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the writer has not been finished or if the
+    /// internal output has already been taken.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn into_inner(mut self) -> Result<W> {
         if self.writer.is_some() {
@@ -408,7 +413,7 @@ impl ColumnPlan {
                 }
             }
             ColumnValueEncoder::Utf8 => {
-                let coerced = self.coerce_utf8(value)?;
+                let coerced = self.coerce_utf8(value);
                 match (&mut self.values, coerced) {
                     (ColumnValues::ByteArray(values), Some(bytes)) => {
                         self.def_levels.push(1);
@@ -466,9 +471,28 @@ impl ColumnPlan {
             Value::Missing(_) => Ok(None),
             Value::Float(v) => Ok(Some(*v)),
             Value::Int32(v) => Ok(Some(f64::from(*v))),
-            Value::Int64(v) => Ok(Some(*v as f64)),
-            Value::NumericString(text) => self.parse_f64(text.as_ref()),
-            Value::Str(text) => self.parse_f64(text.as_ref()),
+            Value::Int64(v) => {
+                // Only accept integers that are exactly representable as f64 (|v| <= 2^53).
+                const MAX_SAFE: i64 = 9_007_199_254_740_992; // 2^53
+                const MIN_SAFE: i64 = -9_007_199_254_740_992;
+                if *v < MIN_SAFE || *v > MAX_SAFE {
+                    return Err(Error::InvalidMetadata {
+                        details: Cow::Owned(format!(
+                            "column '{}' int64 value {} cannot be represented exactly as f64",
+                            self.name, v
+                        )),
+                    });
+                }
+                let text = v.to_string();
+                let parsed = text.parse::<f64>().map_err(|_| Error::InvalidMetadata {
+                    details: Cow::Owned(format!(
+                        "column '{}' int64 value '{text}' cannot be parsed as f64",
+                        self.name
+                    )),
+                })?;
+                Ok(Some(parsed))
+            }
+            Value::NumericString(text) | Value::Str(text) => self.parse_f64(text.as_ref()),
             Value::Bytes(bytes) => {
                 let text =
                     std::str::from_utf8(bytes.as_ref()).map_err(|_| Error::InvalidMetadata {
@@ -536,11 +560,12 @@ impl ColumnPlan {
         }
     }
 
-    fn coerce_utf8(&mut self, value: &Value<'_>) -> Result<Option<ByteArray>> {
-        let result = match value {
+    fn coerce_utf8(&mut self, value: &Value<'_>) -> Option<ByteArray> {
+        match value {
             Value::Missing(_) => None,
-            Value::Str(text) => Some(ByteArray::from(text.as_ref())),
-            Value::NumericString(text) => Some(ByteArray::from(text.as_ref())),
+            Value::Str(text) | Value::NumericString(text) => {
+                Some(ByteArray::from(text.as_ref()))
+            }
             Value::Bytes(bytes) => Some(ByteArray::from(bytes.as_ref())),
             Value::Float(v) => {
                 let scratch = self
@@ -578,8 +603,7 @@ impl ColumnPlan {
                 let text = duration.to_string();
                 Some(ByteArray::from(text.as_str()))
             }
-        };
-        Ok(result)
+        }
     }
 
     fn parse_f64(&self, text: &str) -> Result<Option<f64>> {

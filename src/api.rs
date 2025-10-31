@@ -205,6 +205,11 @@ impl<'a, R: Read + Seek> WindowedRows<'a, R> {
         Ok(Some(()))
     }
 
+    /// Advances the iterator by one row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
         if !self.skipped && self.consume_skip()?.is_none() {
@@ -263,6 +268,11 @@ impl<'a, R: Read + Seek> WindowedProjectedRows<'a, R> {
         Ok(Some(()))
     }
 
+    /// Advances the iterator by one row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn try_next(&mut self) -> Result<Option<Vec<Value<'static>>>> {
         if !self.skipped && self.consume_skip()?.is_none() {
@@ -443,6 +453,11 @@ impl<R: Read + Seek> SasFile<R> {
     ///
     /// This method is intended for pagination without column projection. Use
     /// [`project_rows_with_options`] when selecting a subset of columns.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the options specify a projection, if the reader
+    /// cannot be positioned, or if row iteration cannot be initialised.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn rows_with_options(&mut self, options: &ReadOptions) -> Result<WindowedRows<'_, R>> {
         if options.has_projection() {
