@@ -83,8 +83,8 @@ impl<W: Write + Send> CsvSink<W> {
         Ok(())
     }
 
-    fn encode_value<'v>(
-        value: &'v Value<'_>,
+    fn encode_value(
+        value: &Value<'_>,
         out: &mut Vec<u8>,
         ryu: &mut RyuBuffer,
         itoa: &mut ItoaBuffer,
@@ -258,7 +258,7 @@ fn write_time(dur: &Duration, out: &mut Vec<u8>) {
     let nanos = nanos_total - (dur.whole_seconds() as i128) * 1_000_000_000;
     if nanos != 0 {
         out.push(b'.');
-        let millis = ((nanos + 500_000) / 1_000_000) as i128; // round to ms
+        let millis = (nanos + 500_000) / 1_000_000 ; // round to ms
         write_three(millis as u16, out);
     }
 }
