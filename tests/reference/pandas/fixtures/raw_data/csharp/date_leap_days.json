@@ -1,0 +1,169 @@
+{
+  "columns": [
+    "d",
+    "dt"
+  ],
+  "row_count": 16,
+  "rows": [
+    [
+      {
+        "kind": "datetime",
+        "value": 1267315200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1267315200.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1267401600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1267401600.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1267488000.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1267488000.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1293840000.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1293840000.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 64381219200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 64381219200.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 64381305600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 64381305600.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 64407657600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 64407657600.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 127495036800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 127495036800.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 127495123200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 127495123200.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 127495209600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 127495209600.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 127521561600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 127521561600.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 190608940800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 190608940800.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 190609027200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 190609027200.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 190635379200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 190635379200.0
+      }
+    ],
+    [
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 253717660800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253717660800.0
+      }
+    ]
+  ]
+}

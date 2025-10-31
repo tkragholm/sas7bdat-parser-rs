@@ -1,0 +1,1088 @@
+use std::borrow::Cow;
+use std::cell::Cell;
+use std::convert::{TryFrom, TryInto};
+use std::io::{Read, Seek, SeekFrom};
+
+use crate::error::{Error, Result, Section};
+use crate::metadata::{Compression, Endianness, MissingLiteral, TaggedMissing, Vendor};
+use crate::parser::column::{ColumnKind, NumericKind};
+use crate::parser::meta::ParsedMetadata;
+use crate::value::{MissingValue, Value};
+use encoding_rs::{Encoding, UTF_8};
+use simdutf8::basic;
+use smallvec::SmallVec;
+use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
+
+const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
+const SAS_PAGE_TYPE_DATA: u16 = 0x0100;
+const SAS_PAGE_TYPE_MIX: u16 = 0x0200;
+const SAS_PAGE_TYPE_COMP: u16 = 0x9000;
+
+const SAS_SUBHEADER_SIGNATURE_COLUMN_TEXT: u32 = 0xFFFF_FFFD;
+const SAS_SUBHEADER_SIGNATURE_COLUMN_ATTRS: u32 = 0xFFFF_FFFC;
+const SAS_SUBHEADER_SIGNATURE_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
+const SAS_SUBHEADER_SIGNATURE_COLUMN_NAME: u32 = 0xFFFF_FFFF;
+const SAS_SUBHEADER_SIGNATURE_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
+const SAS_SUBHEADER_SIGNATURE_ROW_SIZE: u32 = 0xF7F7_F7F7;
+const SAS_SUBHEADER_SIGNATURE_COUNTS: u32 = 0xFFFF_FC00;
+const SAS_SUBHEADER_SIGNATURE_COLUMN_LIST: u32 = 0xFFFF_FFFE;
+
+const SAS_COMPRESSION_NONE: u8 = 0x00;
+const SAS_COMPRESSION_TRUNC: u8 = 0x01;
+const SAS_COMPRESSION_ROW: u8 = 0x04;
+const SUBHEADER_POINTER_OFFSET: usize = 8;
+
+pub struct RowIterator<'a, R: Read + Seek> {
+    reader: &'a mut R,
+    parsed: &'a ParsedMetadata,
+    page_buffer: Vec<u8>,
+    current_rows: Vec<RowData>,
+    reusable_row_buffers: Vec<Vec<u8>>,
+    page_row_count: Cell<u16>,
+    row_in_page: Cell<u16>,
+    next_page_index: u64,
+    emitted_rows: Cell<u64>,
+    encoding: &'static Encoding,
+    exhausted: Cell<bool>,
+}
+
+enum RowData {
+    Borrowed(usize),
+    Owned(Vec<u8>),
+}
+
+enum NumericCell {
+    Missing(MissingValue),
+    Number(f64),
+}
+
+impl<'a, R: Read + Seek> RowIterator<'a, R> {
+    /// Constructs a new row iterator for the provided reader and metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the dataset uses an unsupported compression mode
+    /// or the page size cannot be represented on this platform.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub fn new(reader: &'a mut R, parsed: &'a ParsedMetadata) -> Result<Self> {
+        match parsed.row_info.compression {
+            Compression::None | Compression::Row | Compression::Binary => {}
+            Compression::Unknown(code) => {
+                return Err(Error::Unsupported {
+                    feature: Cow::from(format!(
+                        "row iteration for unsupported {code:?} compression"
+                    )),
+                });
+            }
+        }
+
+        let encoding = resolve_encoding(parsed.header.metadata.file_encoding.as_deref());
+        let page_size =
+            usize::try_from(parsed.header.page_size).map_err(|_| Error::Unsupported {
+                feature: Cow::from("page size exceeds platform pointer width"),
+            })?;
+
+        Ok(Self {
+            reader,
+            parsed,
+            page_buffer: vec![0u8; page_size],
+            current_rows: Vec::new(),
+            reusable_row_buffers: Vec::new(),
+            page_row_count: Cell::new(0),
+            row_in_page: Cell::new(0),
+            next_page_index: 0,
+            emitted_rows: Cell::new(0),
+            encoding,
+            exhausted: Cell::new(false),
+        })
+    }
+
+    /// Advances the iterator by one row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
+        if self.exhausted.get() {
+            return Ok(None);
+        }
+        if self.emitted_rows.get() >= self.parsed.row_info.total_rows {
+            self.exhausted.set(true);
+            return Ok(None);
+        }
+
+        if self.row_in_page.get() >= self.page_row_count.get() {
+            if let Err(err) = self.fetch_next_page() {
+                self.exhausted.set(true);
+                return Err(err);
+            }
+            if self.page_row_count.get() == 0 {
+                self.exhausted.set(true);
+                return Ok(None);
+            }
+        }
+
+        let row_index = self.row_in_page.get();
+        let prev_row_in_page = row_index;
+        let prev_emitted = self.emitted_rows.get();
+        self.row_in_page.set(row_index.saturating_add(1));
+        self.emitted_rows.set(prev_emitted.saturating_add(1));
+
+        let row_result = self.decode_row(row_index);
+        let row = match row_result {
+            Ok(row) => row,
+            Err(err) => {
+                self.row_in_page.set(prev_row_in_page);
+                self.emitted_rows.set(prev_emitted);
+                self.exhausted.set(true);
+                return Err(err);
+            }
+        };
+        Ok(Some(row))
+    }
+
+    fn recycle_current_rows(&mut self) {
+        for entry in self.current_rows.drain(..) {
+            if let RowData::Owned(mut buffer) = entry {
+                buffer.clear();
+                self.reusable_row_buffers.push(buffer);
+            }
+        }
+    }
+
+    fn take_row_buffer(&mut self) -> Vec<u8> {
+        self.reusable_row_buffers.pop().unwrap_or_default()
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    #[allow(clippy::too_many_lines)]
+    fn fetch_next_page(&mut self) -> Result<()> {
+        let header = &self.parsed.header;
+        let row_length = self.parsed.row_info.row_length as usize;
+
+        while self.next_page_index < header.page_count {
+            let offset = header.data_offset + self.next_page_index * u64::from(header.page_size);
+            self.reader
+                .seek(SeekFrom::Start(offset))
+                .map_err(Error::from)?;
+            self.reader
+                .read_exact(&mut self.page_buffer)
+                .map_err(Error::from)?;
+            let page_index = self.next_page_index;
+            self.next_page_index += 1;
+
+            let page_type = read_u16_at(
+                header.endianness,
+                &self.page_buffer[(header.page_header_size as usize) - 8..],
+            );
+            if (page_type & SAS_PAGE_TYPE_COMP) == SAS_PAGE_TYPE_COMP {
+                continue;
+            }
+
+            let base_page_type = page_type & SAS_PAGE_TYPE_MASK;
+
+            let mut page_row_count = read_u16_at(
+                header.endianness,
+                &self.page_buffer[(header.page_header_size as usize) - 6..],
+            );
+            let target_rows = if page_row_count == 0 {
+                None
+            } else {
+                Some(page_row_count as usize)
+            };
+
+            self.recycle_current_rows();
+
+            let subheader_count_pos = header.page_header_size as usize - 4;
+            let subheader_count =
+                read_u16_at(header.endianness, &self.page_buffer[subheader_count_pos..]);
+
+            let pointer_size = header.subheader_pointer_size as usize;
+            let mut ptr_cursor = header.page_header_size as usize;
+
+            for _ in 0..subheader_count {
+                if ptr_cursor + pointer_size > self.page_buffer.len() {
+                    return Err(Error::Corrupted {
+                        section: Section::Page { index: page_index },
+                        details: Cow::from("subheader pointer exceeds page bounds"),
+                    });
+                }
+
+                let pointer = &self.page_buffer[ptr_cursor..ptr_cursor + pointer_size];
+                ptr_cursor += pointer_size;
+
+                let info = parse_pointer(pointer, header.uses_u64, header.endianness)?;
+                if info.length == 0 {
+                    continue;
+                }
+                if info.offset + info.length > self.page_buffer.len() {
+                    return Err(Error::Corrupted {
+                        section: Section::Page { index: page_index },
+                        details: Cow::from("subheader pointer references data beyond page bounds"),
+                    });
+                }
+
+                let data_start = info.offset;
+                let data_end = info.offset + info.length;
+                match info.compression {
+                    SAS_COMPRESSION_NONE => {
+                        let data = &self.page_buffer[data_start..data_end];
+                        let signature = read_signature(data, header.endianness, header.uses_u64);
+                        if info.is_compressed_data && !signature_is_recognized(signature) {
+                            let mut local_offset = info.offset;
+                            let mut remaining = info.length;
+                            while remaining >= row_length {
+                                self.current_rows.push(RowData::Borrowed(local_offset));
+                                remaining -= row_length;
+                                local_offset += row_length;
+                                if let Some(target) = target_rows
+                                    && self.current_rows.len() >= target
+                                {
+                                    break;
+                                }
+                            }
+                            if let Some(target) = target_rows
+                                && self.current_rows.len() >= target
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    SAS_COMPRESSION_TRUNC => {
+                        // Truncated rows are continuations that reappear in the
+                        // next page; skip them to avoid emitting partial data.
+                        continue;
+                    }
+                    SAS_COMPRESSION_ROW => {
+                        let mut buffer = self.take_row_buffer();
+                        let data = &self.page_buffer[data_start..data_end];
+                        match self.parsed.row_info.compression {
+                            Compression::Row => decompress_rle(data, row_length, &mut buffer),
+                            Compression::Binary => decompress_rdc(data, row_length, &mut buffer),
+                            Compression::None => {
+                                return Err(Error::Unsupported {
+                                    feature: Cow::from(
+                                        "row compression pointer seen in uncompressed dataset",
+                                    ),
+                                });
+                            }
+                            Compression::Unknown(code) => {
+                                return Err(Error::Unsupported {
+                                    feature: Cow::from(format!(
+                                        "row compression pointer for unsupported mode {code}",
+                                    )),
+                                });
+                            }
+                        }
+                        .map_err(|msg| Error::Corrupted {
+                            section: Section::Page { index: page_index },
+                            details: Cow::from(msg),
+                        })?;
+                        self.current_rows.push(RowData::Owned(buffer));
+                        if let Some(target) = target_rows
+                            && self.current_rows.len() >= target
+                        {
+                            break;
+                        }
+                    }
+                    other => {
+                        return Err(Error::Unsupported {
+                            feature: Cow::from(format!(
+                                "unsupported subheader compression mode {other}",
+                            )),
+                        });
+                    }
+                }
+                if let Some(target) = target_rows
+                    && self.current_rows.len() >= target
+                {
+                    break;
+                }
+            }
+
+            if self.current_rows.is_empty() {
+                if base_page_type != SAS_PAGE_TYPE_DATA && base_page_type != SAS_PAGE_TYPE_MIX {
+                    continue;
+                }
+
+                let bit_offset = if header.uses_u64 { 32usize } else { 16usize };
+                let pointer_section_len = (subheader_count as usize) * pointer_size;
+                let base_offset = header.page_header_size as usize + pointer_section_len;
+                let alignment_base = bit_offset + SUBHEADER_POINTER_OFFSET + pointer_section_len;
+                let align_adjust = if alignment_base.is_multiple_of(8) {
+                    0
+                } else {
+                    8 - (alignment_base % 8)
+                };
+                let mut data_start = base_offset.saturating_add(align_adjust);
+
+                if base_page_type == SAS_PAGE_TYPE_MIX
+                    && (data_start % 8) == 4
+                    && data_start + 4 <= self.page_buffer.len()
+                {
+                    let word = u32::from_le_bytes(
+                        self.page_buffer[data_start..data_start + 4]
+                            .try_into()
+                            .unwrap(),
+                    );
+                    if word == 0
+                        || word == 0x2020_2020
+                        || header.metadata.vendor != Vendor::StatTransfer
+                    {
+                        data_start = data_start.saturating_add(4);
+                    }
+                }
+
+                if data_start >= self.page_buffer.len() {
+                    continue;
+                }
+
+                let available = self.page_buffer.len().saturating_sub(data_start);
+                let possible_rows = available / row_length;
+                if possible_rows == 0 {
+                    continue;
+                }
+
+                let remaining_rows_u64 = self
+                    .parsed
+                    .row_info
+                    .total_rows
+                    .saturating_sub(self.emitted_rows.get());
+                let remaining_rows =
+                    usize::try_from(remaining_rows_u64).map_or(usize::MAX, |value| value);
+
+                let mut rows_to_take = if base_page_type == SAS_PAGE_TYPE_MIX {
+                    let mix_limit = usize::try_from(self.parsed.row_info.rows_per_page)
+                        .map_or(usize::MAX, |value| value);
+                    let mix_limit = if mix_limit == 0 {
+                        possible_rows
+                    } else {
+                        mix_limit
+                    };
+                    mix_limit.min(possible_rows)
+                } else {
+                    let header_limit = usize::from(page_row_count);
+                    let header_limit = if header_limit == 0 {
+                        possible_rows
+                    } else {
+                        header_limit
+                    };
+                    header_limit.min(possible_rows)
+                };
+
+                rows_to_take = rows_to_take.min(remaining_rows);
+                rows_to_take = rows_to_take.min(possible_rows);
+
+                if rows_to_take == 0 {
+                    continue;
+                }
+
+                for idx in 0..rows_to_take {
+                    let offset = data_start + idx * row_length;
+                    if offset + row_length > self.page_buffer.len() {
+                        return Err(Error::Corrupted {
+                            section: Section::Page { index: page_index },
+                            details: Cow::from("row slice exceeds page bounds"),
+                        });
+                    }
+                    self.current_rows.push(RowData::Borrowed(offset));
+                }
+
+                page_row_count = rows_to_take.try_into().unwrap_or(u16::MAX);
+            }
+
+            self.page_row_count
+                .set(self.current_rows.len().try_into().unwrap_or(u16::MAX));
+            self.row_in_page.set(0);
+            if self.page_row_count.get() > 0 {
+                return Ok(());
+            }
+        }
+
+        self.page_row_count.set(0);
+        Ok(())
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    fn decode_row(&self, row_index: u16) -> Result<Vec<Value<'_>>> {
+        let row_length = self.parsed.row_info.row_length as usize;
+        let row: &[u8] = match &self.current_rows[row_index as usize] {
+            RowData::Borrowed(offset) => &self.page_buffer[*offset..*offset + row_length],
+            RowData::Owned(buffer) => buffer.as_slice(),
+        };
+
+        let mut values: SmallVec<[Value<'_>; 16]> =
+            SmallVec::with_capacity(self.parsed.columns.len());
+        for column in &self.parsed.columns {
+            let offset =
+                usize::try_from(column.offsets.offset).map_err(|_| Error::Unsupported {
+                    feature: Cow::from("column offset exceeds platform pointer width"),
+                })?;
+            let width = usize::try_from(column.offsets.width).map_err(|_| Error::Unsupported {
+                feature: Cow::from("column width exceeds platform pointer width"),
+            })?;
+            if offset + width > row.len() {
+                return Err(Error::Corrupted {
+                    section: Section::Column {
+                        index: column.index,
+                    },
+                    details: Cow::from("column slice out of bounds"),
+                });
+            }
+            let slice = &row[offset..offset + width];
+            let value = match column.kind {
+                ColumnKind::Character => Value::Str(decode_string(slice, self.encoding)),
+                ColumnKind::Numeric(kind) => {
+                    match decode_numeric_cell(slice, self.parsed.header.endianness) {
+                        NumericCell::Missing(missing) => Value::Missing(missing),
+                        NumericCell::Number(number) => match kind {
+                            NumericKind::Double => {
+                                numeric_value_from_width(number, column.offsets.width)
+                            }
+                            NumericKind::Date => sas_days_to_datetime(number).map_or_else(
+                                || numeric_value_from_width(number, column.offsets.width),
+                                Value::Date,
+                            ),
+                            NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
+                                || numeric_value_from_width(number, column.offsets.width),
+                                Value::DateTime,
+                            ),
+                            NumericKind::Time => sas_seconds_to_time(number).map_or_else(
+                                || numeric_value_from_width(number, column.offsets.width),
+                                Value::Time,
+                            ),
+                        },
+                    }
+                }
+            };
+            values.push(value);
+        }
+
+        Ok(values.into_vec())
+    }
+}
+
+impl<R: Read + Seek> Iterator for RowIterator<'_, R> {
+    type Item = Result<Vec<Value<'static>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.try_next() {
+            Ok(Some(row)) => {
+                let owned = row.into_iter().map(Value::into_owned).collect();
+                Some(Ok(owned))
+            }
+            Ok(None) => None,
+            Err(err) => {
+                self.exhausted.set(true);
+                Some(Err(err))
+            }
+        }
+    }
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn decode_string<'a>(slice: &'a [u8], encoding: &'static Encoding) -> Cow<'a, str> {
+    let trimmed = trim_trailing(slice);
+    if trimmed.is_empty() {
+        return Cow::Borrowed("");
+    }
+
+    if let Ok(text) = basic::from_utf8(trimmed) {
+        return maybe_fix_mojibake(Cow::Borrowed(text));
+    }
+
+    if encoding == UTF_8 {
+        let mut owned = String::from_utf8_lossy(trimmed).into_owned();
+        let trimmed_len = owned.trim_end_matches([' ', '\u{0000}']).len();
+        if trimmed_len != owned.len() {
+            owned.truncate(trimmed_len);
+        }
+        return maybe_fix_mojibake(Cow::Owned(owned));
+    }
+
+    let (decoded, had_errors) = encoding.decode_without_bom_handling(trimmed);
+    let mut owned = decoded.into_owned();
+    if had_errors && owned.is_empty() {
+        owned = String::from_utf8_lossy(trimmed).into_owned();
+    }
+    let trimmed_len = owned.trim_end_matches([' ', '\u{0000}']).len();
+    if trimmed_len != owned.len() {
+        owned.truncate(trimmed_len);
+    }
+    maybe_fix_mojibake(Cow::Owned(owned))
+}
+
+fn maybe_fix_mojibake(value: Cow<'_, str>) -> Cow<'_, str> {
+    if value.chars().all(|c| (c as u32) <= 0xFF) {
+        let bytes: Vec<u8> = value.chars().map(|c| c as u8).collect();
+        if let Ok(decoded) = std::str::from_utf8(&bytes)
+            && decoded != value
+        {
+            return Cow::Owned(decoded.to_owned());
+        }
+    }
+    value
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn decode_numeric_cell(slice: &[u8], endian: Endianness) -> NumericCell {
+    if slice.is_empty() {
+        return NumericCell::Missing(MissingValue::system());
+    }
+    let mut raw = 0u64;
+    match endian {
+        Endianness::Little => {
+            for byte in slice.iter().rev() {
+                raw = (raw << 8) | u64::from(*byte);
+            }
+        }
+        Endianness::Big => {
+            for byte in slice {
+                raw = (raw << 8) | u64::from(*byte);
+            }
+        }
+    }
+    raw <<= (8 - slice.len()) * 8;
+    let number = f64::from_bits(raw);
+    if number.is_nan() {
+        NumericCell::Missing(decode_missing_from_bits(raw))
+    } else {
+        NumericCell::Number(number)
+    }
+}
+
+const fn decode_missing_from_bits(raw: u64) -> MissingValue {
+    let upper = (raw >> 40) & 0xFF;
+    let tag_byte = !(upper as u8);
+    match tag_byte {
+        0 => MissingValue::Tagged(TaggedMissing {
+            tag: Some('_'),
+            literal: MissingLiteral::Numeric(f64::from_bits(raw)),
+        }),
+        2..=27 => {
+            let ch = (b'A' + (tag_byte - 2)) as char;
+            MissingValue::Tagged(TaggedMissing {
+                tag: Some(ch),
+                literal: MissingLiteral::Numeric(f64::from_bits(raw)),
+            })
+        }
+        _ => MissingValue::System,
+    }
+}
+
+fn numeric_value_from_width(number: f64, width: u32) -> Value<'static> {
+    if let Some(int) = try_i64_from_f64(number) {
+        if width <= 4 {
+            if let Ok(value32) = i32::try_from(int) {
+                return Value::Int32(value32);
+            }
+            return Value::Int64(int);
+        } else if width <= 8 {
+            return Value::Int64(int);
+        }
+    }
+    Value::Float(number)
+}
+
+fn try_i64_from_f64(value: f64) -> Option<i64> {
+    if !value.is_finite() {
+        return None;
+    }
+    if value == 0.0 {
+        return Some(0);
+    }
+
+    let bits = value.to_bits();
+    let sign = (bits >> 63) != 0;
+    let exponent_bits = ((bits >> 52) & 0x7FF) as i32;
+
+    if exponent_bits == 0 {
+        return None;
+    }
+
+    let exponent = exponent_bits - 1023;
+    if exponent < 0 {
+        return None;
+    }
+
+    let mut mantissa = bits & ((1_u64 << 52) - 1);
+    mantissa |= 1_u64 << 52;
+
+    let magnitude_bits = if exponent >= 52 {
+        let shift = u32::try_from(exponent - 52).ok()?;
+        mantissa.checked_shl(shift)?
+    } else {
+        let shift = u32::try_from(52 - exponent).ok()?;
+        let mask = (1_u64 << shift) - 1;
+        if mantissa & mask != 0 {
+            return None;
+        }
+        mantissa >> shift
+    };
+
+    let magnitude = i128::from(magnitude_bits);
+    let signed = if sign { -magnitude } else { magnitude };
+
+    i64::try_from(signed).ok()
+}
+
+fn trim_trailing(slice: &[u8]) -> &[u8] {
+    match slice.iter().rposition(|b| *b != 0 && *b != b' ') {
+        Some(last) => &slice[..=last],
+        None => &[],
+    }
+}
+
+fn resolve_encoding(label: Option<&str>) -> &'static Encoding {
+    label
+        .and_then(|name| {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            try_encoding_label(trimmed).or_else(|| {
+                let lower = trimmed.to_ascii_lowercase();
+                try_encoding_label(&lower)
+                    .or_else(|| try_encoding_label(&lower.replace('_', "-")))
+                    .or_else(|| mac_compat_encoding(&lower))
+            })
+        })
+        .unwrap_or(UTF_8)
+}
+
+fn try_encoding_label(label: &str) -> Option<&'static Encoding> {
+    Encoding::for_label(label.as_bytes())
+}
+
+fn mac_compat_encoding(lower_label: &str) -> Option<&'static Encoding> {
+    match lower_label {
+        "macroman" => Encoding::for_label(b"macintosh"),
+        "macarabic" => Encoding::for_label(b"x-mac-arabic"),
+        "machebrew" => Encoding::for_label(b"x-mac-hebrew"),
+        "macgreek" => Encoding::for_label(b"x-mac-greek"),
+        "macthai" => Encoding::for_label(b"x-mac-thai"),
+        "macturkish" => Encoding::for_label(b"x-mac-turkish"),
+        "macukraine" => Encoding::for_label(b"x-mac-ukrainian"),
+        "maciceland" => Encoding::for_label(b"x-mac-icelandic"),
+        "maccroatian" => Encoding::for_label(b"x-mac-croatian"),
+        "maccyrillic" => Encoding::for_label(b"x-mac-cyrillic"),
+        "macromania" => Encoding::for_label(b"x-mac-romanian"),
+        _ => None,
+    }
+}
+
+fn read_u16_at(endian: Endianness, bytes: &[u8]) -> u16 {
+    match endian {
+        Endianness::Little => u16::from_le_bytes(bytes[0..2].try_into().unwrap()),
+        Endianness::Big => u16::from_be_bytes(bytes[0..2].try_into().unwrap()),
+    }
+}
+
+fn read_u32_at(endian: Endianness, bytes: &[u8]) -> u32 {
+    match endian {
+        Endianness::Little => u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
+        Endianness::Big => u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
+    }
+}
+
+fn read_u64_at(endian: Endianness, bytes: &[u8]) -> u64 {
+    match endian {
+        Endianness::Little => u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
+        Endianness::Big => u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
+    }
+}
+
+fn read_signature(data: &[u8], endian: Endianness, uses_u64: bool) -> u32 {
+    if data.len() < 4 {
+        return 0;
+    }
+    let mut signature = read_u32_at(endian, &data[0..4]);
+    if matches!(endian, Endianness::Big) && signature == u32::MAX && uses_u64 && data.len() >= 8 {
+        signature = read_u32_at(endian, &data[4..8]);
+    }
+    signature
+}
+
+const fn signature_is_recognized(signature: u32) -> bool {
+    matches!(
+        signature,
+        SAS_SUBHEADER_SIGNATURE_COLUMN_TEXT
+            | SAS_SUBHEADER_SIGNATURE_COLUMN_ATTRS
+            | SAS_SUBHEADER_SIGNATURE_COLUMN_FORMAT
+            | SAS_SUBHEADER_SIGNATURE_COLUMN_NAME
+            | SAS_SUBHEADER_SIGNATURE_COLUMN_SIZE
+            | SAS_SUBHEADER_SIGNATURE_ROW_SIZE
+            | SAS_SUBHEADER_SIGNATURE_COUNTS
+            | SAS_SUBHEADER_SIGNATURE_COLUMN_LIST
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn decompress_rle(
+    input: &[u8],
+    expected_len: usize,
+    output: &mut Vec<u8>,
+) -> std::result::Result<(), &'static str> {
+    const COMMAND_LENGTHS: [usize; 16] = [1, 1, 0, 0, 2, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0];
+
+    output.clear();
+    output.resize(expected_len, 0);
+    let buffer = output.as_mut_slice();
+    let mut out_pos = 0usize;
+    let mut i = 0usize;
+
+    while i < input.len() {
+        let control = input[i];
+        i += 1;
+        let command = (control >> 4) as usize;
+        if command >= COMMAND_LENGTHS.len() {
+            return Err("unknown RLE command");
+        }
+        let length_nibble = (control & 0x0F) as usize;
+        if i + COMMAND_LENGTHS[command] > input.len() {
+            return Err("RLE command exceeds input length");
+        }
+
+        let mut copy_len = 0usize;
+        let mut insert_len = 0usize;
+        let mut insert_byte = 0u8;
+
+        match command {
+            0 => {
+                let next = input[i] as usize;
+                i += 1;
+                copy_len = next + 64 + length_nibble * 256;
+            }
+            1 => {
+                let next = input[i] as usize;
+                i += 1;
+                copy_len = next + 64 + length_nibble * 256 + 4096;
+            }
+            2 => {
+                copy_len = length_nibble + 96;
+            }
+            4 => {
+                let next = input[i] as usize;
+                i += 1;
+                insert_len = next + 18 + length_nibble * 256;
+                insert_byte = input[i];
+                i += 1;
+            }
+            5 => {
+                let next = input[i] as usize;
+                i += 1;
+                insert_len = next + 17 + length_nibble * 256;
+                insert_byte = b'@';
+            }
+            6 => {
+                let next = input[i] as usize;
+                i += 1;
+                insert_len = next + 17 + length_nibble * 256;
+                insert_byte = b' ';
+            }
+            7 => {
+                let next = input[i] as usize;
+                i += 1;
+                insert_len = next + 17 + length_nibble * 256;
+                insert_byte = 0;
+            }
+            8 => {
+                copy_len = length_nibble + 1;
+            }
+            9 => {
+                copy_len = length_nibble + 17;
+            }
+            10 => {
+                copy_len = length_nibble + 33;
+            }
+            11 => {
+                copy_len = length_nibble + 49;
+            }
+            12 => {
+                insert_byte = input[i];
+                i += 1;
+                insert_len = length_nibble + 3;
+            }
+            13 => {
+                insert_len = length_nibble + 2;
+                insert_byte = b'@';
+            }
+            14 => {
+                insert_len = length_nibble + 2;
+                insert_byte = b' ';
+            }
+            15 => {
+                insert_len = length_nibble + 2;
+                insert_byte = 0;
+            }
+            _ => {}
+        }
+
+        if copy_len > 0 {
+            if out_pos + copy_len > expected_len {
+                return Err("RLE copy exceeds output length");
+            }
+            if i + copy_len > input.len() {
+                return Err("RLE copy exceeds input length");
+            }
+            buffer[out_pos..out_pos + copy_len].copy_from_slice(&input[i..i + copy_len]);
+            i += copy_len;
+            out_pos += copy_len;
+        }
+
+        if insert_len > 0 {
+            if out_pos + insert_len > expected_len {
+                return Err("RLE insert exceeds output length");
+            }
+            buffer[out_pos..out_pos + insert_len].fill(insert_byte);
+            out_pos += insert_len;
+        }
+    }
+
+    if out_pos != expected_len {
+        return Err("RLE output length mismatch");
+    }
+
+    Ok(())
+}
+
+fn decompress_rdc(
+    input: &[u8],
+    expected_len: usize,
+    output: &mut Vec<u8>,
+) -> std::result::Result<(), &'static str> {
+    output.clear();
+    output.resize(expected_len, 0);
+    let buffer = output.as_mut_slice();
+    let mut out_pos = 0usize;
+    let mut i = 0usize;
+    while i + 2 <= input.len() {
+        let prefix = u16::from_be_bytes([input[i], input[i + 1]]);
+        i += 2;
+        for bit in 0..16 {
+            if (prefix & (1 << (15 - bit))) == 0 {
+                if i >= input.len() {
+                    break;
+                }
+                if out_pos >= expected_len {
+                    return Err("RDC output overflow");
+                }
+                buffer[out_pos] = input[i];
+                out_pos += 1;
+                i += 1;
+                continue;
+            }
+
+            if i + 2 > input.len() {
+                return Err("RDC marker exceeds input");
+            }
+            let marker = input[i];
+            let next = input[i + 1];
+            i += 2;
+
+            let mut insert_len = 0usize;
+            let mut insert_byte = 0u8;
+            let mut copy_len = 0usize;
+            let mut back_offset = 0usize;
+
+            if marker <= 0x0F {
+                insert_len = 3 + marker as usize;
+                insert_byte = next;
+            } else if (marker >> 4) == 1 {
+                if i >= input.len() {
+                    return Err("RDC insert length exceeds input");
+                }
+                insert_len = 19 + (marker as usize & 0x0F) + (next as usize) * 16;
+                insert_byte = input[i];
+                i += 1;
+            } else if (marker >> 4) == 2 {
+                if i >= input.len() {
+                    return Err("RDC copy length exceeds input");
+                }
+                copy_len = 16 + input[i] as usize;
+                i += 1;
+                back_offset = 3 + (marker as usize & 0x0F) + (next as usize) * 16;
+            } else {
+                copy_len = (marker >> 4) as usize;
+                back_offset = 3 + (marker as usize & 0x0F) + (next as usize) * 16;
+            }
+
+            if insert_len > 0 {
+                if out_pos + insert_len > expected_len {
+                    return Err("RDC insert exceeds output length");
+                }
+                buffer[out_pos..out_pos + insert_len].fill(insert_byte);
+                out_pos += insert_len;
+            } else if copy_len > 0 {
+                if back_offset == 0
+                    || out_pos < back_offset
+                    || copy_len > back_offset
+                    || out_pos + copy_len > expected_len
+                {
+                    return Err("RDC copy invalid");
+                }
+                let start = out_pos - back_offset;
+                for j in 0..copy_len {
+                    let byte = buffer[start + j];
+                    buffer[out_pos + j] = byte;
+                }
+                out_pos += copy_len;
+            }
+        }
+    }
+
+    if out_pos != expected_len {
+        return Err("RDC output length mismatch");
+    }
+    Ok(())
+}
+
+fn sas_epoch() -> PrimitiveDateTime {
+    PrimitiveDateTime::new(
+        Date::from_calendar_date(1960, Month::January, 1).expect("valid SAS epoch"),
+        Time::MIDNIGHT,
+    )
+}
+
+fn sas_days_to_datetime(days: f64) -> Option<OffsetDateTime> {
+    if !days.is_finite() {
+        return None;
+    }
+    let seconds = days * 86_400.0;
+    let duration = Duration::seconds_f64(seconds.abs());
+    if seconds >= 0.0 {
+        sas_epoch()
+            .checked_add(duration)
+            .map(time::PrimitiveDateTime::assume_utc)
+    } else {
+        sas_epoch()
+            .checked_sub(duration)
+            .map(time::PrimitiveDateTime::assume_utc)
+    }
+}
+
+fn sas_seconds_to_datetime(seconds: f64) -> Option<OffsetDateTime> {
+    if !seconds.is_finite() {
+        return None;
+    }
+    let duration = Duration::seconds_f64(seconds.abs());
+    if seconds >= 0.0 {
+        sas_epoch()
+            .checked_add(duration)
+            .map(time::PrimitiveDateTime::assume_utc)
+    } else {
+        sas_epoch()
+            .checked_sub(duration)
+            .map(time::PrimitiveDateTime::assume_utc)
+    }
+}
+
+fn sas_seconds_to_time(seconds: f64) -> Option<Duration> {
+    if !seconds.is_finite() {
+        return None;
+    }
+    Some(Duration::seconds_f64(seconds))
+}
+
+struct PointerInfo {
+    offset: usize,
+    length: usize,
+    compression: u8,
+    is_compressed_data: bool,
+}
+
+fn parse_pointer(pointer: &[u8], uses_u64: bool, endian: Endianness) -> Result<PointerInfo> {
+    if uses_u64 {
+        if pointer.len() < 18 {
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::from("64-bit pointer too short"),
+            });
+        }
+        let offset = usize::try_from(read_u64_at(endian, &pointer[0..8])).map_err(|_| {
+            Error::Unsupported {
+                feature: Cow::from("64-bit pointer offset exceeds platform pointer width"),
+            }
+        })?;
+        let length = usize::try_from(read_u64_at(endian, &pointer[8..16])).map_err(|_| {
+            Error::Unsupported {
+                feature: Cow::from("64-bit pointer length exceeds platform pointer width"),
+            }
+        })?;
+        Ok(PointerInfo {
+            offset,
+            length,
+            compression: pointer[16],
+            is_compressed_data: pointer[17] != 0,
+        })
+    } else {
+        if pointer.len() < 10 {
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::from("32-bit pointer too short"),
+            });
+        }
+        let offset = usize::try_from(read_u32_at(endian, &pointer[0..4])).map_err(|_| {
+            Error::Unsupported {
+                feature: Cow::from("32-bit pointer offset exceeds platform pointer width"),
+            }
+        })?;
+        let length = usize::try_from(read_u32_at(endian, &pointer[4..8])).map_err(|_| {
+            Error::Unsupported {
+                feature: Cow::from("32-bit pointer length exceeds platform pointer width"),
+            }
+        })?;
+        Ok(PointerInfo {
+            offset,
+            length,
+            compression: pointer[8],
+            is_compressed_data: pointer[9] != 0,
+        })
+    }
+}
+
+/// Creates a [`RowIterator`] for the provided reader and parsed metadata.
+///
+/// # Errors
+///
+/// Returns an error if the iterator cannot be constructed, for example when
+/// the dataset uses unsupported compression.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub fn row_iterator<'a, R: Read + Seek>(
+    reader: &'a mut R,
+    parsed: &'a ParsedMetadata,
+) -> Result<RowIterator<'a, R>> {
+    RowIterator::new(reader, parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    #[test]
+    fn decode_respects_encoding_and_trimming() {
+        let encoding = Encoding::for_label(b"windows-1252").unwrap();
+        let text = decode_string(b"\xC9clair  ", encoding);
+        assert_eq!(text, "Éclair");
+    }
+
+    #[test]
+    fn blank_strings_preserve_empty_text() {
+        assert_eq!(decode_string(b"   \0\0", UTF_8), Cow::Borrowed(""));
+    }
+
+    #[test]
+    fn fixes_mojibake_sequences() {
+        let encoding = Encoding::for_label(b"windows-1252").unwrap();
+        let repaired = decode_string(b"\xE9\xAB\x98\xE9\x9B\x84\xE5\xB8\x82", encoding);
+        assert_eq!(repaired, "高雄市");
+    }
+
+    #[test]
+    fn resolves_mac_aliases() {
+        let encoding = resolve_encoding(Some("MACCYRILLIC"));
+        assert_eq!(encoding.name(), "x-mac-cyrillic");
+    }
+}

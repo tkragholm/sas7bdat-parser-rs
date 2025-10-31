@@ -1,0 +1,2509 @@
+{
+  "columns": [
+    "WEEKDATX",
+    "WEEKDATX3",
+    "WEEKDATX4",
+    "WEEKDATX5",
+    "WEEKDATX6",
+    "WEEKDATX7",
+    "WEEKDATX8",
+    "WEEKDATX9",
+    "WEEKDATX10",
+    "WEEKDATX11",
+    "WEEKDATX12",
+    "WEEKDATX13",
+    "WEEKDATX14",
+    "WEEKDATX15",
+    "WEEKDATX16",
+    "WEEKDATX17",
+    "WEEKDATX18",
+    "WEEKDATX19",
+    "WEEKDATX20",
+    "WEEKDATX21",
+    "WEEKDATX22",
+    "WEEKDATX23",
+    "WEEKDATX24",
+    "WEEKDATX25",
+    "WEEKDATX26",
+    "WEEKDATX27",
+    "WEEKDATX28",
+    "WEEKDATX29",
+    "WEEKDATX30",
+    "WEEKDATX31",
+    "WEEKDATX32",
+    "WEEKDATX33"
+  ],
+  "row_count": 19,
+  "rows": [
+    [
+      {
+        "kind": "date",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": -1.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      },
+      {
+        "kind": "number",
+        "value": 3652.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      },
+      {
+        "kind": "number",
+        "value": 3653.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      },
+      {
+        "kind": "number",
+        "value": 14668.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      },
+      {
+        "kind": "number",
+        "value": 14669.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      },
+      {
+        "kind": "number",
+        "value": 14670.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      },
+      {
+        "kind": "number",
+        "value": 14975.0
+      }
+    ],
+    [
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      },
+      {
+        "kind": "number",
+        "value": 21883.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      },
+      {
+        "kind": "number",
+        "value": 21847.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      },
+      {
+        "kind": "number",
+        "value": 21814.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      },
+      {
+        "kind": "number",
+        "value": 21780.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      },
+      {
+        "kind": "number",
+        "value": 21745.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      },
+      {
+        "kind": "number",
+        "value": 21713.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      },
+      {
+        "kind": "number",
+        "value": 21679.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      },
+      {
+        "kind": "number",
+        "value": 21648.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      },
+      {
+        "kind": "number",
+        "value": 21610.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      },
+      {
+        "kind": "number",
+        "value": 21581.0
+      }
+    ]
+  ]
+}

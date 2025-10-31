@@ -1,0 +1,44 @@
+{
+  "columns": [
+    "E8601LZ",
+    "E8601TM",
+    "HHMM",
+    "HOUR",
+    "MMSS",
+    "TIME",
+    "TIMEAMPM"
+  ],
+  "row_count": 1,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 36610
+      },
+      {
+        "kind": "time",
+        "value": 36610
+      },
+      {
+        "kind": "time",
+        "value": 36610
+      },
+      {
+        "kind": "number",
+        "value": 36610
+      },
+      {
+        "kind": "number",
+        "value": 36610
+      },
+      {
+        "kind": "time",
+        "value": 36610
+      },
+      {
+        "kind": "time",
+        "value": 36610
+      }
+    ]
+  ]
+}

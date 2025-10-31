@@ -1,0 +1,1509 @@
+{
+  "columns": [
+    "SCORE",
+    "AGE"
+  ],
+  "row_count": 150,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -10.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -3.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 2.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 2.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 2.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 2.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -10.0
+      },
+      {
+        "kind": "number",
+        "value": 2.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 2.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -8.0
+      },
+      {
+        "kind": "number",
+        "value": 2.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 2.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -8.0
+      },
+      {
+        "kind": "number",
+        "value": 2.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 2.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 2.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 2.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 2.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -8.0
+      },
+      {
+        "kind": "number",
+        "value": 2.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 2.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -3.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -3.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -3.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 2.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 2.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 2.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 2.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 2.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -8.0
+      },
+      {
+        "kind": "number",
+        "value": 2.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -14.0
+      },
+      {
+        "kind": "number",
+        "value": 2.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 2.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -3.0
+      },
+      {
+        "kind": "number",
+        "value": 2.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 2.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 2.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -11.0
+      },
+      {
+        "kind": "number",
+        "value": 2.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 2.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 2.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 2.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -14.0
+      },
+      {
+        "kind": "number",
+        "value": 2.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 2.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -10.0
+      },
+      {
+        "kind": "number",
+        "value": 2.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -10.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 3.0999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 3.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -6.0
+      },
+      {
+        "kind": "number",
+        "value": 3.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -10.0
+      },
+      {
+        "kind": "number",
+        "value": 3.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 3.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 3.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 3.200000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 3.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 3.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 3.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 3.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 3.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -11.0
+      },
+      {
+        "kind": "number",
+        "value": 3.299999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 3.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -7.0
+      },
+      {
+        "kind": "number",
+        "value": 3.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 3.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 3.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 3.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 3.4000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -10.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -8.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -11.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -8.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -3.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5999999046325684
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 3.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 3.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 3.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 3.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 3.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 3.700000047683716
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 3.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -3.0
+      },
+      {
+        "kind": "number",
+        "value": 3.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -9.0
+      },
+      {
+        "kind": "number",
+        "value": 3.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 3.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -5.0
+      },
+      {
+        "kind": "number",
+        "value": 3.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 3.799999952316284
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 3.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 3.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 3.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 3.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 3.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 3.9000000953674316
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -4.0
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -2.0
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 4.099999904632568
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 4.099999904632568
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 4.099999904632568
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 4.099999904632568
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "number",
+        "value": 4.099999904632568
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": -1.0
+      },
+      {
+        "kind": "number",
+        "value": 4.099999904632568
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 4.199999809265137
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 4.199999809265137
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.0
+      },
+      {
+        "kind": "number",
+        "value": 4.199999809265137
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.0
+      },
+      {
+        "kind": "number",
+        "value": 4.199999809265137
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.0
+      },
+      {
+        "kind": "number",
+        "value": 4.199999809265137
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 4.199999809265137
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": 4.300000190734863
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 4.300000190734863
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 4.300000190734863
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "number",
+        "value": 4.300000190734863
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "number",
+        "value": 4.300000190734863
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 4.300000190734863
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 4.400000095367432
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 4.400000095367432
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": 4.400000095367432
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "number",
+        "value": 4.400000095367432
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "number",
+        "value": 4.400000095367432
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 4.400000095367432
+      }
+    ]
+  ]
+}

@@ -1,0 +1,2139 @@
+---
+source: tests/fixtures_snapshot.rs
+expression: snapshot.clone()
+---
+{
+  "columns": [
+    "PRICE",
+    "AGE",
+    "OLD",
+    "NET"
+  ],
+  "row_count": 118,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 14.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.8799991607666
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 21.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 21.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.489999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.880000114440918
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.579999923706055
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.489999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.989999771118164
+      },
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      }
+    ]
+  ]
+}

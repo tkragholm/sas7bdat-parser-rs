@@ -1,0 +1,7099 @@
+{
+  "columns": [
+    "SUBJECT",
+    "COMPLICATION"
+  ],
+  "row_count": 709,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 1001
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1033
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1048
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1054
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1073
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1135
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1149
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1368
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1379
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1536
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1545
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1615
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1643
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1645
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1796
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1859
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1921
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1921
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2023
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2039
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2074
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2076
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2076
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2076
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2173
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2173
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2181
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2196
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2223
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2227
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2234
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2244
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2244
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2246
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2247
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2306
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2329
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2361
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2366
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2369
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2369
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2389
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2389
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2394
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2417
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2418
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2422
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2422
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2423
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2450
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2457
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2457
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2458
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2483
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2485
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2487
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2515
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2537
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2571
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2572
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2572
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2602
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2610
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2688
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2710
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2958
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2958
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2963
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2967
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2984
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3001
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3025
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3038
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3065
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3076
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3100
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3105
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3109
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3119
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3130
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3130
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3134
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3153
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3176
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3187
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3187
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3202
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3202
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3208
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3220
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3254
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3279
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3338
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3365
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3373
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3394
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3399
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3507
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3585
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3585
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3585
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3588
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3630
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3630
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3630
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3630
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3633
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3633
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3657
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3671
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3680
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3694
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3714
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3733
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3733
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3750
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3756
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3756
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3777
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3779
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3790
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3793
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3842
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3863
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3883
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3886
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3894
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3911
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3954
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3954
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3968
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3968
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3978
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4025
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4039
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4039
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4099
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4148
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4157
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4188
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4217
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4236
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4245
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4259
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4270
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4295
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4307
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4313
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4328
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4330
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4338
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4360
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4375
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4383
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4384
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4393
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4399
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4406
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4406
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4464
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4476
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4487
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4502
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4514
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4517
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4526
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4555
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4575
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4577
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4585
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4585
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4585
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4599
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4599
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4599
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4602
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4619
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4620
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4622
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4660
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4661
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4661
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4663
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4670
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4674
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4697
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4714
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4723
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4731
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4735
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4753
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4760
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4760
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4760
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4761
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4775
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4775
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4775
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4775
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4795
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4795
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4795
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4795
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4820
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4830
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4844
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4858
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4868
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4880
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4880
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4883
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4887
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4893
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4895
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4908
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4943
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4944
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4954
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4987
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4987
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4995
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5016
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5021
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5026
+      },
+      {
+        "kind": "string",
+        "value": "Dehiscence/+Evisceration"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5032
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5033
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5046
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5050
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5050
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5050
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5057
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5085
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5112
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5145
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5153
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5153
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5157
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5170
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5175
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5183
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5183
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5187
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5219
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5235
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5248
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5248
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5249
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5260
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5261
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5261
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5268
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5278
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5286
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5298
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5327
+      },
+      {
+        "kind": "string",
+        "value": "Hypothermia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5333
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5343
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5343
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5356
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5368
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5370
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5373
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5376
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5380
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5400
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5411
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5436
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5436
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5436
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5436
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5438
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5438
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5442
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5487
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5501
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5512
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5512
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5520
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5520
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5523
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5533
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5535
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5550
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5556
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5565
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5576
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5576
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5577
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5586
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5587
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5651
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5651
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5652
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5684
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5698
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5708
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5719
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5719
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5721
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5742
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5750
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5763
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5764
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5771
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5788
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5790
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5790
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5825
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5831
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5837
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5856
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5857
+      },
+      {
+        "kind": "string",
+        "value": "Dehiscence/+Evisceration"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5872
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5890
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5891
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5895
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5895
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5895
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5897
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5903
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5923
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5927
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5927
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5936
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5945
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5949
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5949
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6015
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6054
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6054
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6054
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6065
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6069
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6069
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6069
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6070
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6070
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6079
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6087
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6103
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6104
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6133
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6164
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6164
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6169
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6177
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6180
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6183
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6183
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6197
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6197
+      },
+      {
+        "kind": "string",
+        "value": "Pulmonary Embolus"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6207
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6213
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6246
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6260
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6297
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6327
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6327
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6338
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6356
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6359
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6361
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6361
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6374
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6394
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6405
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6405
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6409
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6416
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6420
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6426
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6426
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6438
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6451
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6456
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6459
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6459
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6490
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6535
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6535
+      },
+      {
+        "kind": "string",
+        "value": "Dehiscence/+Evisceration"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6537
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6538
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6555
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6557
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6560
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6583
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6585
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6597
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6598
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6598
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6620
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6641
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6659
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6728
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6729
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6744
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6761
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6764
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6764
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6794
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6803
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6823
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6825
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6826
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6828
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6831
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6834
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6883
+      },
+      {
+        "kind": "string",
+        "value": "Aspiration Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6883
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6884
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6892
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6892
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6917
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6919
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6919
+      },
+      {
+        "kind": "string",
+        "value": "Empyema"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7113
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7167
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7167
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7167
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7192
+      },
+      {
+        "kind": "string",
+        "value": "Loss of Operative Reduction/Fixation"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7195
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7234
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7252
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7257
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7283
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7324
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7324
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7342
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7350
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7350
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7350
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7373
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7411
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7422
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7645
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8174
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8211
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8230
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8272
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8280
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8289
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8289
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8414
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8462
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8469
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8485
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8521
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8521
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8542
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8603
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8611
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8611
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8733
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8755
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8808
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8825
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8825
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8838
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8851
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8867
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8885
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8885
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8908
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8935
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8977
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8977
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8997
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9019
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9055
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9095
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9096
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9098
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9134
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9134
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9140
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9245
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9245
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9247
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9259
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9259
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9259
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9307
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9307
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9307
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9348
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9348
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9348
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9348
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9355
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9377
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9377
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9395
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9420
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9436
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9440
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9440
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9440
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9440
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9440
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9462
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9467
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9470
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9471
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9471
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9491
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9497
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9497
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9497
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9497
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9501
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9508
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9527
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9527
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9529
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9530
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9531
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9531
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9531
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9575
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9575
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9575
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9577
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9583
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9583
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9583
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9583
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9583
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9587
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9587
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9587
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9587
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9606
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9606
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9611
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9611
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9611
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9611
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9611
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9611
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9612
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9621
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9621
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9629
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9653
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9655
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9655
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9655
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9655
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9713
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9730
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9741
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9751
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9791
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9799
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9799
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9799
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9799
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9800
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9803
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9804
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9804
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9804
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9806
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9826
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9832
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9837
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9837
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9837
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9837
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9840
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9845
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9848
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9848
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9848
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9863
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9863
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9887
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9887
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9887
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9899
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9900
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9915
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9920
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9921
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9976
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9979
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10003
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10016
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10016
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10016
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10016
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10016
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10047
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10056
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10056
+      },
+      {
+        "kind": "string",
+        "value": "Intra-Abdominal Abscess"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10063
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10063
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10063
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10063
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10063
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10065
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10065
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10065
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10065
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10065
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10073
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10075
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10075
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10075
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10086
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10092
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10097
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10097
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10114
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10114
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10144
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10144
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10144
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10144
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10144
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10144
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10144
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10170
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10171
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10172
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10172
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10173
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10191
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10191
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10195
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10208
+      },
+      {
+        "kind": "string",
+        "value": "Acute Respiratory Distress Syndrome (ARDS)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10208
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10208
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10208
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10216
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10228
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10228
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10228
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10228
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10241
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10243
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10257
+      },
+      {
+        "kind": "string",
+        "value": "Pancreatitis"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10257
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10258
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10283
+      },
+      {
+        "kind": "string",
+        "value": "Compartment Syndrome"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10288
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10289
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10295
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10298
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10314
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10315
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10320
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10368
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10371
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10377
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10380
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10380
+      },
+      {
+        "kind": "string",
+        "value": "Renal Failure"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10380
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10382
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10389
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10414
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10419
+      },
+      {
+        "kind": "string",
+        "value": "Coagulopathy"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10420
+      },
+      {
+        "kind": "string",
+        "value": "Pneumothorax"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10470
+      },
+      {
+        "kind": "string",
+        "value": "DVT (Lower Extremity)"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10470
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10492
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10524
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10525
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10534
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10536
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10543
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10546
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10554
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10566
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10570
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10589
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10593
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10603
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10628
+      },
+      {
+        "kind": "string",
+        "value": "Skin Breakdown"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10629
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10630
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10669
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10685
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10697
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10699
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10712
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10720
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10726
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10728
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10733
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10735
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10751
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10759
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10761
+      },
+      {
+        "kind": "string",
+        "value": "Pneumonia"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10761
+      },
+      {
+        "kind": "string",
+        "value": "Wound Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10775
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10794
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10798
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10803
+      },
+      {
+        "kind": "string",
+        "value": "Urinary Tract Infection"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10840
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10850
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10862
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10870
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10873
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10886
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10916
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10918
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10919
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10937
+      },
+      {
+        "kind": "string",
+        "value": "Heart Attack"
+      }
+    ]
+  ]
+}

@@ -1,0 +1,30 @@
+# General
+.DS_Store
+.python-version
+.uv_cache/
+
+# Rust build artifacts
+/target/
+debug/
+**/*.rs.bk
+
+# Generated data files
+ahs2013n.sas7bdat
+ahs2013n.parquet
+ahs2013n_new.parquet
+
+# Python environments & caches
+.venv/
+venv/
+env/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+*.pyo
+
+# Coverage and tooling outputs
+htmlcov/
+.coverage
+.cache/

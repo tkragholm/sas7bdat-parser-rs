@@ -1,0 +1,829 @@
+{
+  "columns": [
+    "CONSUMPTION",
+    "INCOME"
+  ],
+  "row_count": 82,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 32659.0
+      },
+      {
+        "kind": "number",
+        "value": 40835.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 33728.0
+      },
+      {
+        "kind": "number",
+        "value": 41209.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 34985.0
+      },
+      {
+        "kind": "number",
+        "value": 42660.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 35984.0
+      },
+      {
+        "kind": "number",
+        "value": 43899.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 36272.0
+      },
+      {
+        "kind": "number",
+        "value": 44918.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 37353.0
+      },
+      {
+        "kind": "number",
+        "value": 45009.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 38466.0
+      },
+      {
+        "kind": "number",
+        "value": 47101.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 39157.0
+      },
+      {
+        "kind": "number",
+        "value": 47731.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 40069.0
+      },
+      {
+        "kind": "number",
+        "value": 47789.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 41051.0
+      },
+      {
+        "kind": "number",
+        "value": 49183.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 42542.0
+      },
+      {
+        "kind": "number",
+        "value": 52077.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 43768.0
+      },
+      {
+        "kind": "number",
+        "value": 51289.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 44930.0
+      },
+      {
+        "kind": "number",
+        "value": 52988.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 46136.0
+      },
+      {
+        "kind": "number",
+        "value": 55370.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 47126.0
+      },
+      {
+        "kind": "number",
+        "value": 56254.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 48577.0
+      },
+      {
+        "kind": "number",
+        "value": 58672.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 50339.0
+      },
+      {
+        "kind": "number",
+        "value": 60545.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 51527.0
+      },
+      {
+        "kind": "number",
+        "value": 62777.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 52868.0
+      },
+      {
+        "kind": "number",
+        "value": 64071.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 53937.0
+      },
+      {
+        "kind": "number",
+        "value": 65735.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 55386.0
+      },
+      {
+        "kind": "number",
+        "value": 68009.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 56664.0
+      },
+      {
+        "kind": "number",
+        "value": 68255.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 57527.0
+      },
+      {
+        "kind": "number",
+        "value": 69173.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 58377.0
+      },
+      {
+        "kind": "number",
+        "value": 69300.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 58859.0
+      },
+      {
+        "kind": "number",
+        "value": 69561.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 59115.0
+      },
+      {
+        "kind": "number",
+        "value": 68442.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 60364.0
+      },
+      {
+        "kind": "number",
+        "value": 70269.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 60971.0
+      },
+      {
+        "kind": "number",
+        "value": 71118.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 61640.0
+      },
+      {
+        "kind": "number",
+        "value": 72809.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 62422.0
+      },
+      {
+        "kind": "number",
+        "value": 72500.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 62980.0
+      },
+      {
+        "kind": "number",
+        "value": 73151.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 63511.0
+      },
+      {
+        "kind": "number",
+        "value": 73361.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 64053.0
+      },
+      {
+        "kind": "number",
+        "value": 74813.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 64828.0
+      },
+      {
+        "kind": "number",
+        "value": 75288.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 64956.0
+      },
+      {
+        "kind": "number",
+        "value": 74215.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 66228.0
+      },
+      {
+        "kind": "number",
+        "value": 76033.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 66728.0
+      },
+      {
+        "kind": "number",
+        "value": 77584.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 67441.0
+      },
+      {
+        "kind": "number",
+        "value": 79359.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 68779.0
+      },
+      {
+        "kind": "number",
+        "value": 79613.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 69481.0
+      },
+      {
+        "kind": "number",
+        "value": 81354.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 70992.0
+      },
+      {
+        "kind": "number",
+        "value": 81753.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 72465.0
+      },
+      {
+        "kind": "number",
+        "value": 82430.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 73407.0
+      },
+      {
+        "kind": "number",
+        "value": 84511.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 74416.0
+      },
+      {
+        "kind": "number",
+        "value": 85552.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 75185.0
+      },
+      {
+        "kind": "number",
+        "value": 86674.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 76431.0
+      },
+      {
+        "kind": "number",
+        "value": 87245.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 76642.0
+      },
+      {
+        "kind": "number",
+        "value": 88837.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 77578.0
+      },
+      {
+        "kind": "number",
+        "value": 89853.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 78889.0
+      },
+      {
+        "kind": "number",
+        "value": 90488.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 79784.0
+      },
+      {
+        "kind": "number",
+        "value": 91341.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 81508.0
+      },
+      {
+        "kind": "number",
+        "value": 92444.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 83024.0
+      },
+      {
+        "kind": "number",
+        "value": 92840.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 83620.0
+      },
+      {
+        "kind": "number",
+        "value": 93077.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 85014.0
+      },
+      {
+        "kind": "number",
+        "value": 93791.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 86335.0
+      },
+      {
+        "kind": "number",
+        "value": 97372.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 87305.0
+      },
+      {
+        "kind": "number",
+        "value": 96755.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 88981.0
+      },
+      {
+        "kind": "number",
+        "value": 97643.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 89854.0
+      },
+      {
+        "kind": "number",
+        "value": 100296.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 91089.0
+      },
+      {
+        "kind": "number",
+        "value": 101682.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 92718.0
+      },
+      {
+        "kind": "number",
+        "value": 101558.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 93419.0
+      },
+      {
+        "kind": "number",
+        "value": 103277.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 94857.0
+      },
+      {
+        "kind": "number",
+        "value": 106532.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 98520.0
+      },
+      {
+        "kind": "number",
+        "value": 111964.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 99204.0
+      },
+      {
+        "kind": "number",
+        "value": 110994.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 101210.0
+      },
+      {
+        "kind": "number",
+        "value": 111530.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 102761.0
+      },
+      {
+        "kind": "number",
+        "value": 117026.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 103457.0
+      },
+      {
+        "kind": "number",
+        "value": 114604.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 105240.0
+      },
+      {
+        "kind": "number",
+        "value": 117432.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 107284.0
+      },
+      {
+        "kind": "number",
+        "value": 119054.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 109194.0
+      },
+      {
+        "kind": "number",
+        "value": 120086.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 111023.0
+      },
+      {
+        "kind": "number",
+        "value": 119504.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 112504.0
+      },
+      {
+        "kind": "number",
+        "value": 120933.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 114183.0
+      },
+      {
+        "kind": "number",
+        "value": 121554.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 115665.0
+      },
+      {
+        "kind": "number",
+        "value": 123736.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 117609.0
+      },
+      {
+        "kind": "number",
+        "value": 125356.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 120178.0
+      },
+      {
+        "kind": "number",
+        "value": 127784.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 122383.0
+      },
+      {
+        "kind": "number",
+        "value": 129671.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 123977.0
+      },
+      {
+        "kind": "number",
+        "value": 135387.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 126076.0
+      },
+      {
+        "kind": "number",
+        "value": 136143.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 127275.0
+      },
+      {
+        "kind": "number",
+        "value": 136825.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 128571.0
+      },
+      {
+        "kind": "number",
+        "value": 138216.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 129988.0
+      },
+      {
+        "kind": "number",
+        "value": 140168.0
+      }
+    ]
+  ]
+}

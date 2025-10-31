@@ -1,0 +1,76 @@
+{
+  "columns": [
+    "ID",
+    "SEXA",
+    "SEXB"
+  ],
+  "row_count": 3,
+  "rows": [
+    [
+      {
+        "kind": "bytes",
+        "value": [
+          73,
+          68,
+          49
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": [
+          49
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": [
+          49
+        ]
+      }
+    ],
+    [
+      {
+        "kind": "bytes",
+        "value": [
+          73,
+          68,
+          50
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": [
+          50
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": [
+          50
+        ]
+      }
+    ],
+    [
+      {
+        "kind": "bytes",
+        "value": [
+          73,
+          68,
+          51
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": [
+          49
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": [
+          49
+        ]
+      }
+    ]
+  ]
+}

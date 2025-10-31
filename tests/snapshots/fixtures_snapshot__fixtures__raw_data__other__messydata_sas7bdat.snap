@@ -1,0 +1,4986 @@
+---
+source: tests/fixtures_snapshot.rs
+expression: snapshot.clone()
+---
+{
+  "columns": [
+    "Subject",
+    "DateArrived",
+    "TimeArrive",
+    "DateLeft",
+    "TimeLeft",
+    "Married",
+    "Single",
+    "Age",
+    "Gender",
+    "Education",
+    "Race",
+    "How_Arrived",
+    "Top_Reason",
+    "Arrival",
+    "Satisfaction"
+  ],
+  "row_count": 80,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:18:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:15:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "29"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Bus"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 101.5
+      },
+      {
+        "kind": "number",
+        "value": 84.7
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "3/10/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:23:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/11/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:40:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "21"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 98.6
+      },
+      {
+        "kind": "number",
+        "value": 82.8
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "3/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:08:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "5:07:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "21"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 98.2
+      },
+      {
+        "kind": "number",
+        "value": 68.2
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "string",
+        "value": "5/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:46:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "5/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:45:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 100.0
+      },
+      {
+        "kind": "number",
+        "value": 70.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.0
+      },
+      {
+        "kind": "string",
+        "value": "1/31/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:09:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "2/1/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:30:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "29"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "NA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 101.0
+      },
+      {
+        "kind": "number",
+        "value": 81.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "string",
+        "value": "2/1/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:27:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "2/1/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:40:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "47"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 37.2
+      },
+      {
+        "kind": "number",
+        "value": 87.7
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "string",
+        "value": "2/3/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:50:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/3/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:08:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "45"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1,3"
+      },
+      {
+        "kind": "number",
+        "value": 99.8
+      },
+      {
+        "kind": "number",
+        "value": 68.7
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.0
+      },
+      {
+        "kind": "string",
+        "value": "2/4/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:47:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "#VALUE!"
+      },
+      {
+        "kind": "string",
+        "value": "11:50:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "21"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Bus"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 99.5
+      },
+      {
+        "kind": "number",
+        "value": 89.2
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "2/5/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:42:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/5/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:51:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "46"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "string",
+        "value": "MEX"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 97.1
+      },
+      {
+        "kind": "number",
+        "value": 88.7
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "string",
+        "value": "1/30/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:53:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/30/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:40:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "28"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 36.7
+      },
+      {
+        "kind": "number",
+        "value": 85.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "string",
+        "value": "2/6/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:22:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/6/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:40:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "28"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "C"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 101.0
+      },
+      {
+        "kind": "number",
+        "value": 73.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "1/30/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:30:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "Missing"
+      },
+      {
+        "kind": "string",
+        "value": "8:00:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "34"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 37.2
+      },
+      {
+        "kind": "number",
+        "value": 79.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "string",
+        "value": "2/6/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:10:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2006"
+      },
+      {
+        "kind": "string",
+        "value": "12:20:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "20"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Bus"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 97.8
+      },
+      {
+        "kind": "number",
+        "value": 86.9
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "string",
+        "value": "2/6/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:35:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/6/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:25:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "35"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Walk"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 37.5
+      },
+      {
+        "kind": "number",
+        "value": 87.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:50:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:30:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "33"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 101.8
+      },
+      {
+        "kind": "number",
+        "value": 79.1
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:55:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:20:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "27"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 100.2
+      },
+      {
+        "kind": "number",
+        "value": 81.0
+      }
+    ],
+    [
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 17.0
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:40:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "3:15:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "36"
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Bus, Walk"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 97.1
+      },
+      {
+        "kind": "number",
+        "value": -99.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 18.0
+      },
+      {
+        "kind": "string",
+        "value": "5/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:20:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "5/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:20:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "34"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 38.0
+      },
+      {
+        "kind": "number",
+        "value": 81.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 19.0
+      },
+      {
+        "kind": "string",
+        "value": "2/7/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:40:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "2/8/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:00:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "26"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "X"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1.5"
+      },
+      {
+        "kind": "number",
+        "value": 97.8
+      },
+      {
+        "kind": "number",
+        "value": 86.3
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "string",
+        "value": "2/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:00:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:45:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "44"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 99.2
+      },
+      {
+        "kind": "number",
+        "value": 87.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 21.0
+      },
+      {
+        "kind": "string",
+        "value": "3/21/2005"
+      },
+      {
+        "kind": "string",
+        "value": "4:35:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/21/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:36:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": ">29"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "string",
+        "value": ""
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 36.8
+      },
+      {
+        "kind": "number",
+        "value": 86.8
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 22.0
+      },
+      {
+        "kind": "string",
+        "value": "1/31/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:20:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/1/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:50:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "53"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "string",
+        "value": "C"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 37.6
+      },
+      {
+        "kind": "number",
+        "value": 84.8
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 23.0
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:25:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "10/28/2001"
+      },
+      {
+        "kind": "string",
+        "value": "12:00:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "45"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "A"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 99.8
+      },
+      {
+        "kind": "number",
+        "value": 85.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 24.0
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2007"
+      },
+      {
+        "kind": "string",
+        "value": "12:10:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:45:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "22"
+      },
+      {
+        "kind": "string",
+        "value": "f"
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 97.4
+      },
+      {
+        "kind": "number",
+        "value": 85.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 25.0
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:44:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "3:25:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "22"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "C"
+      },
+      {
+        "kind": "string",
+        "value": "UKN"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 98.6
+      },
+      {
+        "kind": "number",
+        "value": 84.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 26.0
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:29:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:30:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "42"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Bus"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 99.2
+      },
+      {
+        "kind": "number",
+        "value": 86.1
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 26.0
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:52:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:30:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "39"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 8.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 98.8
+      },
+      {
+        "kind": "number",
+        "value": 86.1
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 28.0
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:30:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "3:20:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "48"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 99.7
+      },
+      {
+        "kind": "number",
+        "value": 72.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 29.0
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:25:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:25:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "39"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 98.3
+      },
+      {
+        "kind": "number",
+        "value": 83.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 30.0
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:00:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:45:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "28"
+      },
+      {
+        "kind": "string",
+        "value": "f"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 37.8
+      },
+      {
+        "kind": "number",
+        "value": 86.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 31.0
+      },
+      {
+        "kind": "string",
+        "value": "1/25/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:20:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:45:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "21"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Cra"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 101.9
+      },
+      {
+        "kind": "number",
+        "value": 74.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 32.0
+      },
+      {
+        "kind": "string",
+        "value": "1/30/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:38:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/31/2005"
+      },
+      {
+        "kind": "string",
+        "value": "3:10:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "22"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "C"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3&1"
+      },
+      {
+        "kind": "number",
+        "value": 98.5
+      },
+      {
+        "kind": "number",
+        "value": 86.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 33.0
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:55:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:40:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "33"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "NA"
+      },
+      {
+        "kind": "string",
+        "value": "1,2,3"
+      },
+      {
+        "kind": "number",
+        "value": 97.0
+      },
+      {
+        "kind": "number",
+        "value": 74.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 34.0
+      },
+      {
+        "kind": "string",
+        "value": "2/13/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:15:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "6:30:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "45"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Walk, Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 97.7
+      },
+      {
+        "kind": "number",
+        "value": 86.7
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 35.0
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:45:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:40:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "31"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 36.6
+      },
+      {
+        "kind": "number",
+        "value": 84.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 36.0
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:15:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "5:10:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "65"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 1018.0
+      },
+      {
+        "kind": "number",
+        "value": 84.1
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 37.0
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:30:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "5:15:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "28"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 101.3
+      },
+      {
+        "kind": "number",
+        "value": 67.8
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 38.0
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:52:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "6:25:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "49"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 98.6
+      },
+      {
+        "kind": "number",
+        "value": 88.7
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 39.0
+      },
+      {
+        "kind": "string",
+        "value": "1/28/2005"
+      },
+      {
+        "kind": "string",
+        "value": "Noon"
+      },
+      {
+        "kind": "string",
+        "value": "1/28/2005"
+      },
+      {
+        "kind": "string",
+        "value": "6:15:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "29"
+      },
+      {
+        "kind": "string",
+        "value": "f"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 97.4
+      },
+      {
+        "kind": "number",
+        "value": 58.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 40.0
+      },
+      {
+        "kind": "string",
+        "value": "1/28/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:00:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "1/28/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:35:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "36"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 99.3
+      },
+      {
+        "kind": "number",
+        "value": 78.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 41.0
+      },
+      {
+        "kind": "string",
+        "value": "1/28/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:30:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "1/28/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:40:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "23"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 100.4
+      },
+      {
+        "kind": "number",
+        "value": 88.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 42.0
+      },
+      {
+        "kind": "string",
+        "value": "1/30/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:00:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/30/2005"
+      },
+      {
+        "kind": "string",
+        "value": "4:30:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "29"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 8.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 98.5
+      },
+      {
+        "kind": "number",
+        "value": 68.9
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 43.0
+      },
+      {
+        "kind": "string",
+        "value": "1/30/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:20:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/30/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:30:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "28"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Costa Rica"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 98.9
+      },
+      {
+        "kind": "number",
+        "value": 94.1
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 44.0
+      },
+      {
+        "kind": "string",
+        "value": "1/26/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:40:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "1/27/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:00:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "31"
+      },
+      {
+        "kind": "string",
+        "value": "X"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 97.1
+      },
+      {
+        "kind": "number",
+        "value": 78.9
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 45.0
+      },
+      {
+        "kind": "string",
+        "value": "3/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:55:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:30:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "18"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 8.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 101.5
+      },
+      {
+        "kind": "number",
+        "value": 85.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 46.0
+      },
+      {
+        "kind": "string",
+        "value": "2/10/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:43:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/10/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:28:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "40"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 100.6
+      },
+      {
+        "kind": "number",
+        "value": 67.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 47.0
+      },
+      {
+        "kind": "string",
+        "value": "3/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:35:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/3/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:30:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "54"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 99.3
+      },
+      {
+        "kind": "number",
+        "value": 88.9
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 48.0
+      },
+      {
+        "kind": "string",
+        "value": "3/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:20:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "5:20:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "24"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 97.6
+      },
+      {
+        "kind": "number",
+        "value": 65.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 49.0
+      },
+      {
+        "kind": "string",
+        "value": "3/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "4:30:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "10/28/2001"
+      },
+      {
+        "kind": "string",
+        "value": "12:00:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "18"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 98.9
+      },
+      {
+        "kind": "number",
+        "value": 89.9
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 50.0
+      },
+      {
+        "kind": "string",
+        "value": "3/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:50:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/2/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:20:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "220"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 101.5
+      },
+      {
+        "kind": "number",
+        "value": 85.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 51.0
+      },
+      {
+        "kind": "string",
+        "value": "3/8/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:00:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/8/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:30:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "19"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 37.4
+      },
+      {
+        "kind": "number",
+        "value": 89.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 52.0
+      },
+      {
+        "kind": "string",
+        "value": "3/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:20:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "6:17:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "24"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 36.3
+      },
+      {
+        "kind": "number",
+        "value": 71.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 53.0
+      },
+      {
+        "kind": "string",
+        "value": "3/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:30:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:10:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "0"
+      },
+      {
+        "kind": "string",
+        "value": "m"
+      },
+      {
+        "kind": "number",
+        "value": 99.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 98.0
+      },
+      {
+        "kind": "number",
+        "value": 76.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 54.0
+      },
+      {
+        "kind": "string",
+        "value": "2/20/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:50:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/20/2005"
+      },
+      {
+        "kind": "string",
+        "value": "5:35:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "25"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Bus"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 99.7
+      },
+      {
+        "kind": "number",
+        "value": 85.9
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 55.0
+      },
+      {
+        "kind": "string",
+        "value": "3/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:45:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:50:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "48"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "C"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 98.4
+      },
+      {
+        "kind": "number",
+        "value": 84.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 56.0
+      },
+      {
+        "kind": "string",
+        "value": "2/28/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:01:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "10/28/2001"
+      },
+      {
+        "kind": "string",
+        "value": "12:00:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "21"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 101.4
+      },
+      {
+        "kind": "number",
+        "value": 67.8
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 57.0
+      },
+      {
+        "kind": "string",
+        "value": "3/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:32:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "6:35:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "34"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 97.0
+      },
+      {
+        "kind": "number",
+        "value": 85.1
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 58.0
+      },
+      {
+        "kind": "string",
+        "value": "3/16/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:25:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/16/2005"
+      },
+      {
+        "kind": "string",
+        "value": "4:35:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "30"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 8.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 99.1
+      },
+      {
+        "kind": "number",
+        "value": 75.2
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 59.0
+      },
+      {
+        "kind": "string",
+        "value": "3/16/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:50:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/17/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:15:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "26"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 97.3
+      },
+      {
+        "kind": "number",
+        "value": 65.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 60.0
+      },
+      {
+        "kind": "string",
+        "value": "3/16/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:05:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/16/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:30:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "42"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 101.0
+      },
+      {
+        "kind": "number",
+        "value": 85.9
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 61.0
+      },
+      {
+        "kind": "string",
+        "value": "3/17/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:45:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "10/28/2001"
+      },
+      {
+        "kind": "string",
+        "value": "12:00:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "0"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 99.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Bus"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 98.7
+      },
+      {
+        "kind": "number",
+        "value": 87.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 62.0
+      },
+      {
+        "kind": "string",
+        "value": "3/17/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:50:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/17/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:38:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "29"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 101.7
+      },
+      {
+        "kind": "number",
+        "value": 77.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 63.0
+      },
+      {
+        "kind": "string",
+        "value": "3/17/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:15:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/18/2005"
+      },
+      {
+        "kind": "string",
+        "value": "2:15:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "20"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 98.6
+      },
+      {
+        "kind": "number",
+        "value": 73.8
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 64.0
+      },
+      {
+        "kind": "string",
+        "value": "3/21/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:55:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/21/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:10:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "24"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 100.5
+      },
+      {
+        "kind": "number",
+        "value": 65.5
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 65.0
+      },
+      {
+        "kind": "string",
+        "value": "3/21/2005"
+      },
+      {
+        "kind": "string",
+        "value": "11:50:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/21/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:46:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "34"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 38.7
+      },
+      {
+        "kind": "number",
+        "value": 70.4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 66.0
+      },
+      {
+        "kind": "string",
+        "value": "3/9/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:10:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "3/10/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:30:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "43"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Bus"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 101.3
+      },
+      {
+        "kind": "number",
+        "value": 85.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 67.0
+      },
+      {
+        "kind": "string",
+        "value": "2/16/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:45:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "10/28/2001"
+      },
+      {
+        "kind": "string",
+        "value": "12:00:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "43 or 44"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 37.3
+      },
+      {
+        "kind": "number",
+        "value": 61.7
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 68.0
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:20:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:40:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "41"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 99.3
+      },
+      {
+        "kind": "number",
+        "value": 86.9
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 69.0
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:16:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:04:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "32"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 99.5
+      },
+      {
+        "kind": "number",
+        "value": 78.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 70.0
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:30:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:15:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "33"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Taxi"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 36.6
+      },
+      {
+        "kind": "number",
+        "value": 66.6
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 71.0
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:35:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:50:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "47"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 99.5
+      },
+      {
+        "kind": "number",
+        "value": 81.2
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 72.0
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:50:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:20:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "45"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Auto"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 36.3
+      },
+      {
+        "kind": "number",
+        "value": 72.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 73.0
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:40:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "5:08:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "19"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 37.6
+      },
+      {
+        "kind": "number",
+        "value": 78.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 74.0
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:35:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "9:40:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "19"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 37.8
+      },
+      {
+        "kind": "number",
+        "value": 80.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 75.0
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:00:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/14/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:00:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "22"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 22.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 37.2
+      },
+      {
+        "kind": "number",
+        "value": 88.3
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 76.0
+      },
+      {
+        "kind": "string",
+        "value": "10/28/2001"
+      },
+      {
+        "kind": "string",
+        "value": "10:05:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "3/1/2005"
+      },
+      {
+        "kind": "string",
+        "value": "8:20:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "28"
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 99.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 101.6
+      },
+      {
+        "kind": "number",
+        "value": 86.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 77.0
+      },
+      {
+        "kind": "string",
+        "value": "2/16/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:45:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "2/17/2005"
+      },
+      {
+        "kind": "string",
+        "value": "1:20:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "23"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 37.6
+      },
+      {
+        "kind": "number",
+        "value": 86.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 78.0
+      },
+      {
+        "kind": "string",
+        "value": "1/20/2005"
+      },
+      {
+        "kind": "string",
+        "value": "10:55:00 AM"
+      },
+      {
+        "kind": "string",
+        "value": "1/20/2005"
+      },
+      {
+        "kind": "string",
+        "value": "7:30:00 PM"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "19"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "string",
+        "value": "AA"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 100.8
+      },
+      {
+        "kind": "number",
+        "value": 75.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 79.0
+      },
+      {
+        "kind": "string",
+        "value": "2/18/2005"
+      },
+      {
+        "kind": "string",
+        "value": "12:38:00 PM"
+      },
+      {
+        "kind": "string",
+        "value": "10/28/2001"
+      },
+      {
+        "kind": "string",
+        "value": "12:00:00 AM"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "21"
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "string",
+        "value": "H"
+      },
+      {
+        "kind": "string",
+        "value": "Car"
+      },
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 99.4
+      },
+      {
+        "kind": "number",
+        "value": 83.6
+      }
+    ]
+  ]
+}

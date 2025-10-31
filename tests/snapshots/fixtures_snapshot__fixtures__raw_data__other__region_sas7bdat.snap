@@ -1,0 +1,1889 @@
+---
+source: tests/fixtures_snapshot.rs
+expression: snapshot.clone()
+---
+{
+  "columns": [
+    "REGION",
+    "AREA",
+    "SITE",
+    "TYPE",
+    "MONTH",
+    "SALES_K"
+  ],
+  "row_count": 72,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 57.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 41.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 66.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 72.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 34.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 31.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 49.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 40.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 47.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 73.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 35.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 43.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 26.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 40.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 61.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 32.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 52.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 26.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 26.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 64.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 62.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "NOV"
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 64.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 41.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 51.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 44.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 34.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 64.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 53.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 27.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 29.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 67.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 43.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 35.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 32.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 59.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 43.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 52.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 38.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 35.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 45.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 32.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 31.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 70.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 30.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 51.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 56.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 60.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 59.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 37.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 39.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 44.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 46.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 74.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 58.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 58.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 42.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 71.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 67.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 64.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "DOWNSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 68.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "S"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 71.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 58.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 50.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "E"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "KIOSK"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 26.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "N"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 65.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 61.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "string",
+        "value": "W"
+      },
+      {
+        "kind": "string",
+        "value": "UPSTAIRS"
+      },
+      {
+        "kind": "string",
+        "value": "STORE"
+      },
+      {
+        "kind": "string",
+        "value": "DEC"
+      },
+      {
+        "kind": "number",
+        "value": 43.0
+      }
+    ]
+  ]
+}

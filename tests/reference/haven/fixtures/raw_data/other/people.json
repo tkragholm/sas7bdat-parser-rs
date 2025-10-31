@@ -1,0 +1,143 @@
+{
+  "columns": [
+    "ID",
+    "SBP",
+    "DBP",
+    "GENDER",
+    "AGE",
+    "WT"
+  ],
+  "row_count": 5,
+  "rows": [
+    [
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 120
+      },
+      {
+        "kind": "number",
+        "value": 80
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 115
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 130
+      },
+      {
+        "kind": "number",
+        "value": 70
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 25
+      },
+      {
+        "kind": "number",
+        "value": 180
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 140
+      },
+      {
+        "kind": "number",
+        "value": 100
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 89
+      },
+      {
+        "kind": "number",
+        "value": 170
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "4"
+      },
+      {
+        "kind": "number",
+        "value": 120
+      },
+      {
+        "kind": "number",
+        "value": 80
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 30
+      },
+      {
+        "kind": "number",
+        "value": 150
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "5"
+      },
+      {
+        "kind": "number",
+        "value": 125
+      },
+      {
+        "kind": "number",
+        "value": 80
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 20
+      },
+      {
+        "kind": "number",
+        "value": 110
+      }
+    ]
+  ]
+}

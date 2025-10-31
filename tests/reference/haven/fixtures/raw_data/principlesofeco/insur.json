@@ -1,0 +1,209 @@
+{
+  "columns": [
+    "INSURANCE",
+    "INCOME"
+  ],
+  "row_count": 20,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 90
+      },
+      {
+        "kind": "number",
+        "value": 25
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 165
+      },
+      {
+        "kind": "number",
+        "value": 40
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 220
+      },
+      {
+        "kind": "number",
+        "value": 60
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 145
+      },
+      {
+        "kind": "number",
+        "value": 30
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 114
+      },
+      {
+        "kind": "number",
+        "value": 29
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 175
+      },
+      {
+        "kind": "number",
+        "value": 41
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 145
+      },
+      {
+        "kind": "number",
+        "value": 37
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 192
+      },
+      {
+        "kind": "number",
+        "value": 46
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 395
+      },
+      {
+        "kind": "number",
+        "value": 105
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 339
+      },
+      {
+        "kind": "number",
+        "value": 81
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 230
+      },
+      {
+        "kind": "number",
+        "value": 57
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 262
+      },
+      {
+        "kind": "number",
+        "value": 72
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 570
+      },
+      {
+        "kind": "number",
+        "value": 140
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 100
+      },
+      {
+        "kind": "number",
+        "value": 23
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 210
+      },
+      {
+        "kind": "number",
+        "value": 55
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 243
+      },
+      {
+        "kind": "number",
+        "value": 58
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 335
+      },
+      {
+        "kind": "number",
+        "value": 87
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 299
+      },
+      {
+        "kind": "number",
+        "value": 72
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 305
+      },
+      {
+        "kind": "number",
+        "value": 80
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 205
+      },
+      {
+        "kind": "number",
+        "value": 48
+      }
+    ]
+  ]
+}

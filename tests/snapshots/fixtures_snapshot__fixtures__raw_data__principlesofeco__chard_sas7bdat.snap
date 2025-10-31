@@ -1,0 +1,1666 @@
+---
+source: tests/fixtures_snapshot.rs
+expression: snapshot.clone()
+---
+{
+  "columns": [
+    "Q",
+    "XPER",
+    "CAP",
+    "LAB",
+    "AGE"
+  ],
+  "row_count": 75,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 8.463899612426758
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "number",
+        "value": 0.1875
+      },
+      {
+        "kind": "number",
+        "value": 3.9054999351501465
+      },
+      {
+        "kind": "number",
+        "value": 42.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.311599731445313
+      },
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "number",
+        "value": 6.341899871826172
+      },
+      {
+        "kind": "number",
+        "value": 7.125500202178955
+      },
+      {
+        "kind": "number",
+        "value": 44.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.164400100708008
+      },
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "number",
+        "value": 11.802800178527832
+      },
+      {
+        "kind": "number",
+        "value": 18.27440071105957
+      },
+      {
+        "kind": "number",
+        "value": 43.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0.07880000025033951
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": 0.3659999966621399
+      },
+      {
+        "kind": "number",
+        "value": 0.9241999983787537
+      },
+      {
+        "kind": "number",
+        "value": 58.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.3100004196167
+      },
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "number",
+        "value": 7.326499938964844
+      },
+      {
+        "kind": "number",
+        "value": 10.150500297546387
+      },
+      {
+        "kind": "number",
+        "value": 28.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.251700401306152
+      },
+      {
+        "kind": "number",
+        "value": 21.0
+      },
+      {
+        "kind": "number",
+        "value": 8.329700469970703
+      },
+      {
+        "kind": "number",
+        "value": 6.056099891662598
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.916799545288086
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 6.387400150299072
+      },
+      {
+        "kind": "number",
+        "value": 10.887800216674805
+      },
+      {
+        "kind": "number",
+        "value": 49.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.66189956665039
+      },
+      {
+        "kind": "number",
+        "value": 8.0
+      },
+      {
+        "kind": "number",
+        "value": 6.416399955749512
+      },
+      {
+        "kind": "number",
+        "value": 6.933499813079834
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.507800102233887
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 5.4654998779296875
+      },
+      {
+        "kind": "number",
+        "value": 2.9344000816345215
+      },
+      {
+        "kind": "number",
+        "value": 28.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.746999979019165
+      },
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "number",
+        "value": 4.231900215148926
+      },
+      {
+        "kind": "number",
+        "value": 5.8780999183654785
+      },
+      {
+        "kind": "number",
+        "value": 37.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.718699932098389
+      },
+      {
+        "kind": "number",
+        "value": 19.0
+      },
+      {
+        "kind": "number",
+        "value": 5.935999870300293
+      },
+      {
+        "kind": "number",
+        "value": 5.203999996185303
+      },
+      {
+        "kind": "number",
+        "value": 40.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.373000144958496
+      },
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "number",
+        "value": 1.6684999465942383
+      },
+      {
+        "kind": "number",
+        "value": 5.301300048828125
+      },
+      {
+        "kind": "number",
+        "value": 55.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.024999618530273
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 10.825200080871582
+      },
+      {
+        "kind": "number",
+        "value": 13.963899612426758
+      },
+      {
+        "kind": "number",
+        "value": 54.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.954899787902832
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "number",
+        "value": 16.31100082397461
+      },
+      {
+        "kind": "number",
+        "value": 17.774099349975586
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.8028998374938965
+      },
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "number",
+        "value": 4.273499965667725
+      },
+      {
+        "kind": "number",
+        "value": 12.71720027923584
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.634300231933594
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      },
+      {
+        "kind": "number",
+        "value": 5.405799865722656
+      },
+      {
+        "kind": "number",
+        "value": 4.144899845123291
+      },
+      {
+        "kind": "number",
+        "value": 55.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.746700286865234
+      },
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "number",
+        "value": 9.72819995880127
+      },
+      {
+        "kind": "number",
+        "value": 7.869800090789795
+      },
+      {
+        "kind": "number",
+        "value": 35.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.365900039672852
+      },
+      {
+        "kind": "number",
+        "value": 5.0
+      },
+      {
+        "kind": "number",
+        "value": 7.504499912261963
+      },
+      {
+        "kind": "number",
+        "value": 10.179100036621094
+      },
+      {
+        "kind": "number",
+        "value": 34.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4.442999839782715
+      },
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "number",
+        "value": 4.542200088500977
+      },
+      {
+        "kind": "number",
+        "value": 8.40530014038086
+      },
+      {
+        "kind": "number",
+        "value": 40.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7.698800086975098
+      },
+      {
+        "kind": "number",
+        "value": 5.0
+      },
+      {
+        "kind": "number",
+        "value": 8.032899856567383
+      },
+      {
+        "kind": "number",
+        "value": 7.581600189208984
+      },
+      {
+        "kind": "number",
+        "value": 34.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.175600051879883
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": 5.543799877166748
+      },
+      {
+        "kind": "number",
+        "value": 8.12969970703125
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.373000144958496
+      },
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 12.195799827575684
+      },
+      {
+        "kind": "number",
+        "value": 16.95490074157715
+      },
+      {
+        "kind": "number",
+        "value": 35.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.4247000217437744
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 5.998300075531006
+      },
+      {
+        "kind": "number",
+        "value": 4.096799850463867
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.676199913024902
+      },
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "number",
+        "value": 13.530699729919434
+      },
+      {
+        "kind": "number",
+        "value": 11.802000045776367
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.650799751281738
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 16.164100646972656
+      },
+      {
+        "kind": "number",
+        "value": 18.55500030517578
+      },
+      {
+        "kind": "number",
+        "value": 37.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.543299674987793
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "number",
+        "value": 9.51159954071045
+      },
+      {
+        "kind": "number",
+        "value": 8.5649995803833
+      },
+      {
+        "kind": "number",
+        "value": 51.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.869400024414063
+      },
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "number",
+        "value": 5.9085001945495605
+      },
+      {
+        "kind": "number",
+        "value": 11.73859977722168
+      },
+      {
+        "kind": "number",
+        "value": 41.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.136099815368652
+      },
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "number",
+        "value": 10.819000244140625
+      },
+      {
+        "kind": "number",
+        "value": 11.844099998474121
+      },
+      {
+        "kind": "number",
+        "value": 30.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.261799812316895
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "number",
+        "value": 14.080699920654297
+      },
+      {
+        "kind": "number",
+        "value": 15.481900215148926
+      },
+      {
+        "kind": "number",
+        "value": 27.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7.281199932098389
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "number",
+        "value": 8.73490047454834
+      },
+      {
+        "kind": "number",
+        "value": 9.11709976196289
+      },
+      {
+        "kind": "number",
+        "value": 48.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.878499984741211
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 8.38539981842041
+      },
+      {
+        "kind": "number",
+        "value": 8.772000312805176
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.946100234985352
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": 10.159899711608887
+      },
+      {
+        "kind": "number",
+        "value": 6.9721999168396
+      },
+      {
+        "kind": "number",
+        "value": 31.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.2382001876831055
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 1.3301000595092773
+      },
+      {
+        "kind": "number",
+        "value": 6.226799964904785
+      },
+      {
+        "kind": "number",
+        "value": 56.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.8726999759674072
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.797300100326538
+      },
+      {
+        "kind": "number",
+        "value": 4.1427998542785645
+      },
+      {
+        "kind": "number",
+        "value": 40.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.458700180053711
+      },
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "number",
+        "value": 11.719099998474121
+      },
+      {
+        "kind": "number",
+        "value": 12.074600219726563
+      },
+      {
+        "kind": "number",
+        "value": 44.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.273500442504883
+      },
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "number",
+        "value": 7.391300201416016
+      },
+      {
+        "kind": "number",
+        "value": 9.357099533081055
+      },
+      {
+        "kind": "number",
+        "value": 51.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.093000411987305
+      },
+      {
+        "kind": "number",
+        "value": 17.0
+      },
+      {
+        "kind": "number",
+        "value": 14.645099639892578
+      },
+      {
+        "kind": "number",
+        "value": 13.42490005493164
+      },
+      {
+        "kind": "number",
+        "value": 57.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.731500148773193
+      },
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "number",
+        "value": 1.5716999769210815
+      },
+      {
+        "kind": "number",
+        "value": 9.049500465393066
+      },
+      {
+        "kind": "number",
+        "value": 34.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.98900032043457
+      },
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "number",
+        "value": 7.101200103759766
+      },
+      {
+        "kind": "number",
+        "value": 7.375199794769287
+      },
+      {
+        "kind": "number",
+        "value": 50.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.515899658203125
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 8.774700164794922
+      },
+      {
+        "kind": "number",
+        "value": 8.277299880981445
+      },
+      {
+        "kind": "number",
+        "value": 52.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.024100303649902
+      },
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "number",
+        "value": 11.299699783325195
+      },
+      {
+        "kind": "number",
+        "value": 8.656499862670898
+      },
+      {
+        "kind": "number",
+        "value": 56.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.708700180053711
+      },
+      {
+        "kind": "number",
+        "value": 22.0
+      },
+      {
+        "kind": "number",
+        "value": 4.985599994659424
+      },
+      {
+        "kind": "number",
+        "value": 1.6015000343322754
+      },
+      {
+        "kind": "number",
+        "value": 43.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7.559800148010254
+      },
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "number",
+        "value": 8.859100341796875
+      },
+      {
+        "kind": "number",
+        "value": 13.092599868774414
+      },
+      {
+        "kind": "number",
+        "value": 50.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.157899856567383
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "number",
+        "value": 8.687800407409668
+      },
+      {
+        "kind": "number",
+        "value": 10.032699584960938
+      },
+      {
+        "kind": "number",
+        "value": 40.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.80720043182373
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": 10.650400161743164
+      },
+      {
+        "kind": "number",
+        "value": 12.635100364685059
+      },
+      {
+        "kind": "number",
+        "value": 42.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.637299537658691
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 2.049299955368042
+      },
+      {
+        "kind": "number",
+        "value": 5.028600215911865
+      },
+      {
+        "kind": "number",
+        "value": 52.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.517200469970703
+      },
+      {
+        "kind": "number",
+        "value": 17.0
+      },
+      {
+        "kind": "number",
+        "value": 7.849999904632568
+      },
+      {
+        "kind": "number",
+        "value": 10.526700019836426
+      },
+      {
+        "kind": "number",
+        "value": 62.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7.316999912261963
+      },
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "number",
+        "value": 3.5789999961853027
+      },
+      {
+        "kind": "number",
+        "value": 8.008600234985352
+      },
+      {
+        "kind": "number",
+        "value": 43.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 15.298500061035156
+      },
+      {
+        "kind": "number",
+        "value": 27.0
+      },
+      {
+        "kind": "number",
+        "value": 6.755799770355225
+      },
+      {
+        "kind": "number",
+        "value": 8.41189956665039
+      },
+      {
+        "kind": "number",
+        "value": 61.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.689499855041504
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": 9.741100311279297
+      },
+      {
+        "kind": "number",
+        "value": 13.938899993896484
+      },
+      {
+        "kind": "number",
+        "value": 35.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.327199935913086
+      },
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "number",
+        "value": 7.953199863433838
+      },
+      {
+        "kind": "number",
+        "value": 20.26219940185547
+      },
+      {
+        "kind": "number",
+        "value": 56.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.297299861907959
+      },
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "number",
+        "value": 2.0815999507904053
+      },
+      {
+        "kind": "number",
+        "value": 6.638199806213379
+      },
+      {
+        "kind": "number",
+        "value": 58.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.98009967803955
+      },
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "number",
+        "value": 15.233799934387207
+      },
+      {
+        "kind": "number",
+        "value": 13.814599990844727
+      },
+      {
+        "kind": "number",
+        "value": 37.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.580399990081787
+      },
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "number",
+        "value": 6.651599884033203
+      },
+      {
+        "kind": "number",
+        "value": 8.559900283813477
+      },
+      {
+        "kind": "number",
+        "value": 31.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.922699928283691
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "number",
+        "value": 6.763800144195557
+      },
+      {
+        "kind": "number",
+        "value": 14.276900291442871
+      },
+      {
+        "kind": "number",
+        "value": 48.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 18.881399154663086
+      },
+      {
+        "kind": "number",
+        "value": 23.0
+      },
+      {
+        "kind": "number",
+        "value": 7.980000019073486
+      },
+      {
+        "kind": "number",
+        "value": 16.853300094604492
+      },
+      {
+        "kind": "number",
+        "value": 52.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14.546299934387207
+      },
+      {
+        "kind": "number",
+        "value": 18.0
+      },
+      {
+        "kind": "number",
+        "value": 12.912099838256836
+      },
+      {
+        "kind": "number",
+        "value": 15.072600364685059
+      },
+      {
+        "kind": "number",
+        "value": 61.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.451899528503418
+      },
+      {
+        "kind": "number",
+        "value": 14.0
+      },
+      {
+        "kind": "number",
+        "value": 10.140999794006348
+      },
+      {
+        "kind": "number",
+        "value": 13.755900382995605
+      },
+      {
+        "kind": "number",
+        "value": 55.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.238900184631348
+      },
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "number",
+        "value": 10.564399719238281
+      },
+      {
+        "kind": "number",
+        "value": 11.730999946594238
+      },
+      {
+        "kind": "number",
+        "value": 46.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 13.01099967956543
+      },
+      {
+        "kind": "number",
+        "value": 19.0
+      },
+      {
+        "kind": "number",
+        "value": 13.534000396728516
+      },
+      {
+        "kind": "number",
+        "value": 19.044599533081055
+      },
+      {
+        "kind": "number",
+        "value": 49.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.753700017929077
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 5.432600021362305
+      },
+      {
+        "kind": "number",
+        "value": 6.163300037384033
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.356900215148926
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "number",
+        "value": 5.078999996185303
+      },
+      {
+        "kind": "number",
+        "value": 5.872099876403809
+      },
+      {
+        "kind": "number",
+        "value": 48.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.691399574279785
+      },
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "number",
+        "value": 9.081299781799316
+      },
+      {
+        "kind": "number",
+        "value": 10.643699645996094
+      },
+      {
+        "kind": "number",
+        "value": 56.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4.5040998458862305
+      },
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "number",
+        "value": 6.430799961090088
+      },
+      {
+        "kind": "number",
+        "value": 8.404999732971191
+      },
+      {
+        "kind": "number",
+        "value": 47.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.031399726867676
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 5.779699802398682
+      },
+      {
+        "kind": "number",
+        "value": 14.5108003616333
+      },
+      {
+        "kind": "number",
+        "value": 63.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.291200160980225
+      },
+      {
+        "kind": "number",
+        "value": 11.0
+      },
+      {
+        "kind": "number",
+        "value": -0.8357999920845032
+      },
+      {
+        "kind": "number",
+        "value": 3.821700096130371
+      },
+      {
+        "kind": "number",
+        "value": 38.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.210700035095215
+      },
+      {
+        "kind": "number",
+        "value": 13.0
+      },
+      {
+        "kind": "number",
+        "value": 9.43179988861084
+      },
+      {
+        "kind": "number",
+        "value": 13.304100036621094
+      },
+      {
+        "kind": "number",
+        "value": 35.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.297900199890137
+      },
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 4.702099800109863
+      },
+      {
+        "kind": "number",
+        "value": 12.670499801635742
+      },
+      {
+        "kind": "number",
+        "value": 29.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.284000396728516
+      },
+      {
+        "kind": "number",
+        "value": 24.0
+      },
+      {
+        "kind": "number",
+        "value": 6.899199962615967
+      },
+      {
+        "kind": "number",
+        "value": 13.521300315856934
+      },
+      {
+        "kind": "number",
+        "value": 48.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 16.511999130249023
+      },
+      {
+        "kind": "number",
+        "value": 17.0
+      },
+      {
+        "kind": "number",
+        "value": 9.63640022277832
+      },
+      {
+        "kind": "number",
+        "value": 8.424099922180176
+      },
+      {
+        "kind": "number",
+        "value": 57.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.79640007019043
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 3.6407999992370605
+      },
+      {
+        "kind": "number",
+        "value": 4.104400157928467
+      },
+      {
+        "kind": "number",
+        "value": 33.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.465900421142578
+      },
+      {
+        "kind": "number",
+        "value": 19.0
+      },
+      {
+        "kind": "number",
+        "value": 13.300200462341309
+      },
+      {
+        "kind": "number",
+        "value": 9.861100196838379
+      },
+      {
+        "kind": "number",
+        "value": 50.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 12.92770004272461
+      },
+      {
+        "kind": "number",
+        "value": 12.0
+      },
+      {
+        "kind": "number",
+        "value": 13.684300422668457
+      },
+      {
+        "kind": "number",
+        "value": 18.26580047607422
+      },
+      {
+        "kind": "number",
+        "value": 54.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 19.175899505615234
+      },
+      {
+        "kind": "number",
+        "value": 21.0
+      },
+      {
+        "kind": "number",
+        "value": 18.715200424194336
+      },
+      {
+        "kind": "number",
+        "value": 23.820100784301758
+      },
+      {
+        "kind": "number",
+        "value": 40.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.7618000507354736
+      },
+      {
+        "kind": "number",
+        "value": 5.0
+      },
+      {
+        "kind": "number",
+        "value": 0.9042999744415283
+      },
+      {
+        "kind": "number",
+        "value": 0.006800000090152025
+      },
+      {
+        "kind": "number",
+        "value": 29.0
+      }
+    ]
+  ]
+}

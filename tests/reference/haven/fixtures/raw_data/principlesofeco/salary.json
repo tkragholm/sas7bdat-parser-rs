@@ -1,0 +1,1685 @@
+{
+  "columns": [
+    "E",
+    "T",
+    "X",
+    "Y"
+  ],
+  "row_count": 93,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 3900
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 44
+      },
+      {
+        "kind": "number",
+        "value": 7
+      },
+      {
+        "kind": "number",
+        "value": 10
+      },
+      {
+        "kind": "number",
+        "value": 4020
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5
+      },
+      {
+        "kind": "number",
+        "value": 30
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4290
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.19999980926514
+      },
+      {
+        "kind": "number",
+        "value": 7
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 4380
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7.5
+      },
+      {
+        "kind": "number",
+        "value": 6
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 4380
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 7
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4380
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 10
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4380
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4.5
+      },
+      {
+        "kind": "number",
+        "value": 6
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4380
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 75
+      },
+      {
+        "kind": "number",
+        "value": 2
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 4440
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 52
+      },
+      {
+        "kind": "number",
+        "value": 3
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 4500
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 19
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4500
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 52
+      },
+      {
+        "kind": "number",
+        "value": 3
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4620
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 70
+      },
+      {
+        "kind": "number",
+        "value": 20
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6
+      },
+      {
+        "kind": "number",
+        "value": 23
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 17
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 63
+      },
+      {
+        "kind": "number",
+        "value": 22
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 144
+      },
+      {
+        "kind": "number",
+        "value": 24
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 163
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 228
+      },
+      {
+        "kind": "number",
+        "value": 26
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 381
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 214
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 16
+      },
+      {
+        "kind": "number",
+        "value": 4800
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 318
+      },
+      {
+        "kind": "number",
+        "value": 25
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 4980
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 96
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 5100
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 36
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5100
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 59
+      },
+      {
+        "kind": "number",
+        "value": 14
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5100
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 115
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5100
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 165
+      },
+      {
+        "kind": "number",
+        "value": 4
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5100
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 123
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 16
+      },
+      {
+        "kind": "number",
+        "value": 5100
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 18
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5160
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 102
+      },
+      {
+        "kind": "number",
+        "value": 29
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 5220
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 127
+      },
+      {
+        "kind": "number",
+        "value": 29
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5220
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 90
+      },
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 5280
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 190
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 5280
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 107
+      },
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5280
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 173
+      },
+      {
+        "kind": "number",
+        "value": 34
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 228
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 26
+      },
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 26
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 38
+      },
+      {
+        "kind": "number",
+        "value": 22
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 82
+      },
+      {
+        "kind": "number",
+        "value": 29
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 169
+      },
+      {
+        "kind": "number",
+        "value": 27
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 244
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 24
+      },
+      {
+        "kind": "number",
+        "value": 13
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 49
+      },
+      {
+        "kind": "number",
+        "value": 27
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 51
+      },
+      {
+        "kind": "number",
+        "value": 21
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 122
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 97
+      },
+      {
+        "kind": "number",
+        "value": 17
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5520
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 196
+      },
+      {
+        "kind": "number",
+        "value": 32
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5520
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 132.5
+      },
+      {
+        "kind": "number",
+        "value": 30
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5580
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 55
+      },
+      {
+        "kind": "number",
+        "value": 9
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5640
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 90
+      },
+      {
+        "kind": "number",
+        "value": 23
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5700
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 116.5
+      },
+      {
+        "kind": "number",
+        "value": 25
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5700
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 51
+      },
+      {
+        "kind": "number",
+        "value": 17
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5700
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 61
+      },
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5700
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 241
+      },
+      {
+        "kind": "number",
+        "value": 34
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5700
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 121
+      },
+      {
+        "kind": "number",
+        "value": 30
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 78.5
+      },
+      {
+        "kind": "number",
+        "value": 13
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 208.5
+      },
+      {
+        "kind": "number",
+        "value": 21
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6120
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 86.5
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6300
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 231
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6300
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 11.5
+      },
+      {
+        "kind": "number",
+        "value": 22
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 4620
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 14
+      },
+      {
+        "kind": "number",
+        "value": 3
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5040
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 180
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5100
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 315
+      },
+      {
+        "kind": "number",
+        "value": 2
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5100
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 29
+      },
+      {
+        "kind": "number",
+        "value": 14
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5220
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7
+      },
+      {
+        "kind": "number",
+        "value": 21
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 38
+      },
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 113
+      },
+      {
+        "kind": "number",
+        "value": 3
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 17.5
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 359
+      },
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5400
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 36
+      },
+      {
+        "kind": "number",
+        "value": 5
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 5700
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 320
+      },
+      {
+        "kind": "number",
+        "value": 21
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 24
+      },
+      {
+        "kind": "number",
+        "value": 2
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 32
+      },
+      {
+        "kind": "number",
+        "value": 17
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 49
+      },
+      {
+        "kind": "number",
+        "value": 8
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 56
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 252
+      },
+      {
+        "kind": "number",
+        "value": 11
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 272
+      },
+      {
+        "kind": "number",
+        "value": 19
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 25
+      },
+      {
+        "kind": "number",
+        "value": 13
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 35.5
+      },
+      {
+        "kind": "number",
+        "value": 32
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 56
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 64
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 108
+      },
+      {
+        "kind": "number",
+        "value": 16
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 45.5
+      },
+      {
+        "kind": "number",
+        "value": 3
+      },
+      {
+        "kind": "number",
+        "value": 16
+      },
+      {
+        "kind": "number",
+        "value": 6000
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 72
+      },
+      {
+        "kind": "number",
+        "value": 17
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6300
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 64
+      },
+      {
+        "kind": "number",
+        "value": 16
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6600
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 84
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6600
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 215.5
+      },
+      {
+        "kind": "number",
+        "value": 16
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6600
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 41.5
+      },
+      {
+        "kind": "number",
+        "value": 7
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6840
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 175
+      },
+      {
+        "kind": "number",
+        "value": 10
+      },
+      {
+        "kind": "number",
+        "value": 12
+      },
+      {
+        "kind": "number",
+        "value": 6900
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 132
+      },
+      {
+        "kind": "number",
+        "value": 24
+      },
+      {
+        "kind": "number",
+        "value": 15
+      },
+      {
+        "kind": "number",
+        "value": 6900
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 54.5
+      },
+      {
+        "kind": "number",
+        "value": 33
+      },
+      {
+        "kind": "number",
+        "value": 16
+      },
+      {
+        "kind": "number",
+        "value": 8100
+      }
+    ]
+  ]
+}

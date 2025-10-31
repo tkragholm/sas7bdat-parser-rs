@@ -1,0 +1,173 @@
+---
+source: tests/fixtures_snapshot.rs
+expression: snapshot.clone()
+---
+{
+  "columns": [
+    "d",
+    "dt"
+  ],
+  "row_count": 16,
+  "rows": [
+    [
+      {
+        "kind": "date",
+        "value": 14668.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1267315200.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 14669.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1267401600.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 14670.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1267488000.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 14975.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1293840000.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 745153.0
+      },
+      {
+        "kind": "datetime",
+        "value": 64381219200.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 745154.0
+      },
+      {
+        "kind": "datetime",
+        "value": 64381305600.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 745459.0
+      },
+      {
+        "kind": "datetime",
+        "value": 64407657600.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 1475637.0
+      },
+      {
+        "kind": "datetime",
+        "value": 127495036800.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 1475638.0
+      },
+      {
+        "kind": "datetime",
+        "value": 127495123200.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 1475639.0
+      },
+      {
+        "kind": "datetime",
+        "value": 127495209600.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 1475944.0
+      },
+      {
+        "kind": "datetime",
+        "value": 127521561600.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 2206122.0
+      },
+      {
+        "kind": "datetime",
+        "value": 190608940800.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 2206123.0
+      },
+      {
+        "kind": "datetime",
+        "value": 190609027200.0
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 2206428.0
+      },
+      {
+        "kind": "datetime",
+        "value": 190635379200.0
+      }
+    ],
+    [
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      }
+    ],
+    [
+      {
+        "kind": "date",
+        "value": 2936547.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253717660800.0
+      }
+    ]
+  ]
+}

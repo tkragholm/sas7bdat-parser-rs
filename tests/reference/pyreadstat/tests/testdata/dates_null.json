@@ -1,0 +1,29 @@
+{
+  "columns": [
+    "datecol",
+    "datetimecol"
+  ],
+  "row_count": 2,
+  "rows": [
+    [
+      {
+        "kind": "date",
+        "value": 2936547.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253717747199.0
+      }
+    ],
+    [
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      }
+    ]
+  ]
+}

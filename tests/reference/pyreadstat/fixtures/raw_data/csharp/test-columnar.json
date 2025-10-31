@@ -1,0 +1,389 @@
+{
+  "columns": [
+    "recnum",
+    "square",
+    "desc",
+    "pctdone",
+    "pctincr",
+    "date",
+    "datetime",
+    "time"
+  ],
+  "row_count": 11,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            0 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "date",
+        "value": 0.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1.0
+      },
+      {
+        "kind": "time",
+        "value": 1.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            1 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.1
+      },
+      {
+        "kind": "number",
+        "value": 0.0
+      },
+      {
+        "kind": "date",
+        "value": 1.0
+      },
+      {
+        "kind": "datetime",
+        "value": 10.0
+      },
+      {
+        "kind": "time",
+        "value": 3.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 2.0
+      },
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            2 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.2
+      },
+      {
+        "kind": "number",
+        "value": 0.5
+      },
+      {
+        "kind": "date",
+        "value": 16.0
+      },
+      {
+        "kind": "datetime",
+        "value": 100.0
+      },
+      {
+        "kind": "time",
+        "value": 9.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 3.0
+      },
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            3 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.3
+      },
+      {
+        "kind": "number",
+        "value": 0.6666666666666666
+      },
+      {
+        "kind": "date",
+        "value": 81.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1000.0
+      },
+      {
+        "kind": "time",
+        "value": 27.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 4.0
+      },
+      {
+        "kind": "number",
+        "value": 16.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            4 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.4
+      },
+      {
+        "kind": "number",
+        "value": 0.75
+      },
+      {
+        "kind": "date",
+        "value": 256.0
+      },
+      {
+        "kind": "datetime",
+        "value": 10000.0
+      },
+      {
+        "kind": "time",
+        "value": 81.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 5.0
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            5 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.5
+      },
+      {
+        "kind": "number",
+        "value": 0.8
+      },
+      {
+        "kind": "date",
+        "value": 625.0
+      },
+      {
+        "kind": "datetime",
+        "value": 100000.0
+      },
+      {
+        "kind": "time",
+        "value": 243.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 6.0
+      },
+      {
+        "kind": "number",
+        "value": 36.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            6 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.6
+      },
+      {
+        "kind": "number",
+        "value": 0.8333333333333334
+      },
+      {
+        "kind": "date",
+        "value": 1296.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1000000.0
+      },
+      {
+        "kind": "time",
+        "value": 729.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 7.0
+      },
+      {
+        "kind": "number",
+        "value": 49.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            7 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.7
+      },
+      {
+        "kind": "number",
+        "value": 0.8571428571428571
+      },
+      {
+        "kind": "date",
+        "value": 2401.0
+      },
+      {
+        "kind": "datetime",
+        "value": 10000000.0
+      },
+      {
+        "kind": "time",
+        "value": 2187.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 8.0
+      },
+      {
+        "kind": "number",
+        "value": 64.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            8 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.8
+      },
+      {
+        "kind": "number",
+        "value": 0.875
+      },
+      {
+        "kind": "date",
+        "value": 4096.0
+      },
+      {
+        "kind": "datetime",
+        "value": 100000000.0
+      },
+      {
+        "kind": "time",
+        "value": 6561.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 9.0
+      },
+      {
+        "kind": "number",
+        "value": 81.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row            9 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 0.9
+      },
+      {
+        "kind": "number",
+        "value": 0.8888888888888888
+      },
+      {
+        "kind": "date",
+        "value": 6561.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1000000000.0
+      },
+      {
+        "kind": "time",
+        "value": 19683.0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 10.0
+      },
+      {
+        "kind": "number",
+        "value": 100.0
+      },
+      {
+        "kind": "string",
+        "value": "This is row           10 of           10"
+      },
+      {
+        "kind": "number",
+        "value": 1.0
+      },
+      {
+        "kind": "number",
+        "value": 0.9
+      },
+      {
+        "kind": "date",
+        "value": 10000.0
+      },
+      {
+        "kind": "datetime",
+        "value": 10000000000.0
+      },
+      {
+        "kind": "time",
+        "value": 59049.0
+      }
+    ]
+  ]
+}

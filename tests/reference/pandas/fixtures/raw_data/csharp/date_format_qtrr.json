@@ -1,0 +1,14 @@
+{
+  "columns": [
+    "QTRR"
+  ],
+  "row_count": 1,
+  "rows": [
+    [
+      {
+        "kind": "datetime",
+        "value": 1887580800.0
+      }
+    ]
+  ]
+}

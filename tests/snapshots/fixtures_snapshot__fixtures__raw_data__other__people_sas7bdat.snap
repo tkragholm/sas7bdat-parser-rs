@@ -1,0 +1,147 @@
+---
+source: tests/fixtures_snapshot.rs
+expression: snapshot.clone()
+---
+{
+  "columns": [
+    "ID",
+    "SBP",
+    "DBP",
+    "GENDER",
+    "AGE",
+    "WT"
+  ],
+  "row_count": 5,
+  "rows": [
+    [
+      {
+        "kind": "string",
+        "value": "1"
+      },
+      {
+        "kind": "number",
+        "value": 120.0
+      },
+      {
+        "kind": "number",
+        "value": 80.0
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 15.0
+      },
+      {
+        "kind": "number",
+        "value": 115.0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "2"
+      },
+      {
+        "kind": "number",
+        "value": 130.0
+      },
+      {
+        "kind": "number",
+        "value": 70.0
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 25.0
+      },
+      {
+        "kind": "number",
+        "value": 180.0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "3"
+      },
+      {
+        "kind": "number",
+        "value": 140.0
+      },
+      {
+        "kind": "number",
+        "value": 100.0
+      },
+      {
+        "kind": "string",
+        "value": "M"
+      },
+      {
+        "kind": "number",
+        "value": 89.0
+      },
+      {
+        "kind": "number",
+        "value": 170.0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "4"
+      },
+      {
+        "kind": "number",
+        "value": 120.0
+      },
+      {
+        "kind": "number",
+        "value": 80.0
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 30.0
+      },
+      {
+        "kind": "number",
+        "value": 150.0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "5"
+      },
+      {
+        "kind": "number",
+        "value": 125.0
+      },
+      {
+        "kind": "number",
+        "value": 80.0
+      },
+      {
+        "kind": "string",
+        "value": "F"
+      },
+      {
+        "kind": "number",
+        "value": 20.0
+      },
+      {
+        "kind": "number",
+        "value": 110.0
+      }
+    ]
+  ]
+}

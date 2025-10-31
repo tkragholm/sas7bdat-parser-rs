@@ -1,0 +1,100 @@
+{
+  "columns": [
+    "Date1",
+    "Date2",
+    "DateTime",
+    "DateTimeHi",
+    "Taiw"
+  ],
+  "row_count": 4,
+  "rows": [
+    [
+      {
+        "kind": "datetime",
+        "value": -8907667200.0
+      },
+      {
+        "kind": "datetime",
+        "value": -8907667200.0
+      },
+      {
+        "kind": "datetime",
+        "value": -8907752836.0
+      },
+      {
+        "kind": "datetime",
+        "value": -8907752836.855
+      },
+      {
+        "kind": "datetime",
+        "value": -1514764800.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 0.0
+      },
+      {
+        "kind": "datetime",
+        "value": 0.0
+      },
+      {
+        "kind": "datetime",
+        "value": 0.0
+      },
+      {
+        "kind": "datetime",
+        "value": 0.0
+      },
+      {
+        "kind": "datetime",
+        "value": 0.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1772323200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1772323200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1772409599.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1772409599.123
+      },
+      {
+        "kind": "datetime",
+        "value": 1772323200.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 9538905600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 9538905600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 9538991236.0
+      },
+      {
+        "kind": "datetime",
+        "value": 9538991236.855
+      },
+      {
+        "kind": "datetime",
+        "value": 9538905600.0
+      }
+    ]
+  ]
+}

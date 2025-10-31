@@ -1,0 +1,119 @@
+{
+  "columns": [
+    "KILLS",
+    "MONTHS"
+  ],
+  "row_count": 11,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 352
+      },
+      {
+        "kind": "number",
+        "value": 43
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 301
+      },
+      {
+        "kind": "number",
+        "value": 42
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 258
+      },
+      {
+        "kind": "number",
+        "value": 40
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 160
+      },
+      {
+        "kind": "number",
+        "value": 37
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 158
+      },
+      {
+        "kind": "number",
+        "value": 30
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 135
+      },
+      {
+        "kind": "number",
+        "value": 27
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 115
+      },
+      {
+        "kind": "number",
+        "value": 24
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 108
+      },
+      {
+        "kind": "number",
+        "value": 25
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 103
+      },
+      {
+        "kind": "number",
+        "value": 21
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 101
+      },
+      {
+        "kind": "number",
+        "value": 24
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 71
+      },
+      {
+        "kind": "number",
+        "value": 18
+      }
+    ]
+  ]
+}

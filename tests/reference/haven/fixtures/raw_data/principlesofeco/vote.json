@@ -1,0 +1,1954 @@
+{
+  "columns": [
+    "STATE",
+    "VOTE",
+    "INCOME",
+    "SCHOOL",
+    "URBAN",
+    "NORTHEAST",
+    "SOUTHEAST",
+    "MIDWEST",
+    "WEST"
+  ],
+  "row_count": 51,
+  "rows": [
+    [
+      {
+        "kind": "string",
+        "value": "Alabama"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 11.7849998474121
+      },
+      {
+        "kind": "number",
+        "value": 12.1999998092651
+      },
+      {
+        "kind": "number",
+        "value": 61.7999992370605
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Alaska"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 22.431999206543
+      },
+      {
+        "kind": "number",
+        "value": 12.6999998092651
+      },
+      {
+        "kind": "number",
+        "value": 43.7000007629395
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Arizona"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 13.5690002441406
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 74.6999969482422
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Arkansa"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 10.1059999465942
+      },
+      {
+        "kind": "number",
+        "value": 12.1999998092651
+      },
+      {
+        "kind": "number",
+        "value": 38.4000015258789
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "California"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 15.0690002441406
+      },
+      {
+        "kind": "number",
+        "value": 12.6999998092651
+      },
+      {
+        "kind": "number",
+        "value": 92.6999969482422
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Colorado"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.9919996261597
+      },
+      {
+        "kind": "number",
+        "value": 12.8000001907349
+      },
+      {
+        "kind": "number",
+        "value": 80.5999984741211
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Connecticut"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 16.2439994812012
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 88.1999969482422
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Delaware"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 15.7320003509521
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 68.5
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "DC"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 15.0019998550415
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 100
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Florida"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12.2049999237061
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 85.9000015258789
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Georgia"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12.4409999847412
+      },
+      {
+        "kind": "number",
+        "value": 12.3000001907349
+      },
+      {
+        "kind": "number",
+        "value": 56.7999992370605
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Hawaii"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 17.7700004577637
+      },
+      {
+        "kind": "number",
+        "value": 12.6999998092651
+      },
+      {
+        "kind": "number",
+        "value": 80.5
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Idaho"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 12.8439998626709
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 16.8999996185303
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Illinois"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 16.0319995880127
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 81.3000030517578
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Indiana"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.41100025177
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 67.8000030517578
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Iowa"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.46399974823
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 37.4000015258789
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Kansas"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 13.4119997024536
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 46.2000007629395
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Kentucky"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 11.0190000534058
+      },
+      {
+        "kind": "number",
+        "value": 12.1000003814697
+      },
+      {
+        "kind": "number",
+        "value": 45.0999984741211
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Louisiana"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12.576000213623
+      },
+      {
+        "kind": "number",
+        "value": 12.3000001907349
+      },
+      {
+        "kind": "number",
+        "value": 63.2000007629395
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Maine"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 11.83899974823
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 23.2999992370605
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Maryland"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 17.5559997558594
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 84.8000030517578
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Massachusetts"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 15.5310001373291
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 86.0999984741211
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Michigan"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 15.3850002288818
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 81.3000030517578
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Minnesota"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 14.7399997711182
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 63.9000015258789
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Mississippi"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 9.99899959564209
+      },
+      {
+        "kind": "number",
+        "value": 12.1000003814697
+      },
+      {
+        "kind": "number",
+        "value": 26.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Missouri"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 13.0109996795654
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 63.5
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Montana"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 13.6079998016357
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 24.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Nebraska"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.2089996337891
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 44.5999984741211
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Nevada"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.9610004425049
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 81.3000030517578
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "NewHampshire"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.2580003738403
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 36.5999984741211
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "NewJersey"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 16.431999206543
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 92.0999984741211
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "NewMexico"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 11.7980003356934
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 33.5999984741211
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "NewYork"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 15.2880001068115
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 88.4000015258789
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "NorthCarolina"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 11.8339996337891
+      },
+      {
+        "kind": "number",
+        "value": 12.1999998092651
+      },
+      {
+        "kind": "number",
+        "value": 45.2000007629395
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "NorthDakota"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 13.6260004043579
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 22.7000007629395
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Ohio"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 14.8219995498657
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 79.8000030517578
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Oklahoma"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 12.1719999313354
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 55.5999984741211
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Oregon"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 13.8540000915527
+      },
+      {
+        "kind": "number",
+        "value": 12.6999998092651
+      },
+      {
+        "kind": "number",
+        "value": 59.9000015258789
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Pennsylvania"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 14.1529998779297
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 80.4000015258789
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "RhodeIsland"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 14.5299997329712
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 92.1999969482422
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "SouthCarolina"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12.1879997253418
+      },
+      {
+        "kind": "number",
+        "value": 12.1999998092651
+      },
+      {
+        "kind": "number",
+        "value": 48.2999992370605
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "SouthDakota"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 12.0509996414185
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 27.8999996185303
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Tennesse"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 11.3409996032715
+      },
+      {
+        "kind": "number",
+        "value": 12.1999998092651
+      },
+      {
+        "kind": "number",
+        "value": 63
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Texas"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12.6719999313354
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 79.4000015258789
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Utah"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.3290004730225
+      },
+      {
+        "kind": "number",
+        "value": 12.8000001907349
+      },
+      {
+        "kind": "number",
+        "value": 78.6999969482422
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Vermont"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 12.414999961853
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Virginia"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.5790004730225
+      },
+      {
+        "kind": "number",
+        "value": 12.3999996185303
+      },
+      {
+        "kind": "number",
+        "value": 65.5999984741211
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Washington"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.9619998931885
+      },
+      {
+        "kind": "number",
+        "value": 12.6999998092651
+      },
+      {
+        "kind": "number",
+        "value": 71.0999984741211
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "WestVirginia"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 12.0069999694824
+      },
+      {
+        "kind": "number",
+        "value": 12.1000003814697
+      },
+      {
+        "kind": "number",
+        "value": 36.0999984741211
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Wisconsin"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 15.0640001296997
+      },
+      {
+        "kind": "number",
+        "value": 12.5
+      },
+      {
+        "kind": "number",
+        "value": 63
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "Wyoming"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 14.7840003967285
+      },
+      {
+        "kind": "number",
+        "value": 12.6000003814697
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ]
+  ]
+}

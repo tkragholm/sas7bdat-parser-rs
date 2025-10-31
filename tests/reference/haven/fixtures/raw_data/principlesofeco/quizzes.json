@@ -1,0 +1,229 @@
+{
+  "columns": [
+    "MIDTERM",
+    "MISSED"
+  ],
+  "row_count": 22,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 92.5
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 86.8000030517578
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 81.0999984741211
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 75.5
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 86.8000030517578
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 92.5
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 83
+      },
+      {
+        "kind": "number",
+        "value": 2
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 96.1999969482422
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 94.3000030517578
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 83
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 75.0999984741211
+      },
+      {
+        "kind": "number",
+        "value": 1
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 75.5
+      },
+      {
+        "kind": "number",
+        "value": 2
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 62.2999992370605
+      },
+      {
+        "kind": "number",
+        "value": 3
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 81.3000030517578
+      },
+      {
+        "kind": "number",
+        "value": 3
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 77.4000015258789
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 52.7999992370605
+      },
+      {
+        "kind": "number",
+        "value": 4
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 47.2000007629395
+      },
+      {
+        "kind": "number",
+        "value": 3
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 73.5999984741211
+      },
+      {
+        "kind": "number",
+        "value": 8
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 67.9000015258789
+      },
+      {
+        "kind": "number",
+        "value": 3
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 66
+      },
+      {
+        "kind": "number",
+        "value": 7
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 84.9000015258789
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ],
+    [
+      {
+        "kind": "number",
+        "value": 88.6999969482422
+      },
+      {
+        "kind": "number",
+        "value": 0
+      }
+    ]
+  ]
+}

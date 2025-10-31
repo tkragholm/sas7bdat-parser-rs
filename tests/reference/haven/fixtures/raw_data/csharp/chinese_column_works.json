@@ -1,0 +1,14 @@
+{
+  "columns": [
+    "测试"
+  ],
+  "row_count": 1,
+  "rows": [
+    [
+      {
+        "kind": "number",
+        "value": 123
+      }
+    ]
+  ]
+}

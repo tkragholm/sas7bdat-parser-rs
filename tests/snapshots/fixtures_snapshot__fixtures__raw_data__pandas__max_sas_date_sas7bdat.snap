@@ -1,0 +1,60 @@
+---
+source: tests/fixtures_snapshot.rs
+expression: snapshot.clone()
+---
+{
+  "columns": [
+    "text",
+    "dt_as_float",
+    "dt_as_dt",
+    "date_as_float",
+    "date_as_date"
+  ],
+  "row_count": 2,
+  "rows": [
+    [
+      {
+        "kind": "string",
+        "value": "max"
+      },
+      {
+        "kind": "number",
+        "value": 253717747199.999
+      },
+      {
+        "kind": "datetime",
+        "value": 253717747199.99896
+      },
+      {
+        "kind": "number",
+        "value": 2936547.0
+      },
+      {
+        "kind": "date",
+        "value": 2936547.0
+      }
+    ],
+    [
+      {
+        "kind": "string",
+        "value": "normal"
+      },
+      {
+        "kind": "number",
+        "value": 1880323199.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1880323199.999
+      },
+      {
+        "kind": "number",
+        "value": 21762.0
+      },
+      {
+        "kind": "date",
+        "value": 21762.0
+      }
+    ]
+  ]
+}
