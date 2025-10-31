@@ -150,10 +150,8 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
                 ColumnKind::Character => {
                     let _ = var; // ok
                 }
-                ColumnKind::Numeric(NumericKind::Double)
-                | ColumnKind::Numeric(NumericKind::Date)
-                | ColumnKind::Numeric(NumericKind::DateTime)
-                | ColumnKind::Numeric(NumericKind::Time) => {}
+                ColumnKind::Numeric(NumericKind::Double | NumericKind::Date |
+NumericKind::DateTime | NumericKind::Time) => {}
             }
         }
 
@@ -255,7 +253,7 @@ fn write_time(dur: &Duration, out: &mut Vec<u8>) {
     write_two(seconds as u8, out);
 
     let nanos_total = dur.whole_nanoseconds();
-    let nanos = nanos_total - (dur.whole_seconds() as i128) * 1_000_000_000;
+    let nanos = nanos_total - i128::from(dur.whole_seconds()) * 1_000_000_000;
     if nanos != 0 {
         out.push(b'.');
         let millis = (nanos + 500_000) / 1_000_000 ; // round to ms
@@ -265,7 +263,7 @@ fn write_time(dur: &Duration, out: &mut Vec<u8>) {
 
 fn round_to_millisecond(dt: &OffsetDateTime) -> OffsetDateTime {
     use time::Duration as TDuration;
-    let nanos = dt.time().nanosecond() as u64;
+    let nanos = u64::from(dt.time().nanosecond());
     let mut millis = (nanos + 500_000) / 1_000_000; // round to nearest ms
     let mut adjusted = *dt;
     if millis == 1_000 {

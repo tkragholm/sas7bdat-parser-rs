@@ -134,7 +134,7 @@ fn run_convert(args: ConvertArgs) -> Result<(), AnyError> {
     if let Some(ref out) = args.out {
         tasks.push((files[0].clone(), out.clone()));
     } else {
-        for input in files.into_iter() {
+        for input in files {
             let output = compute_output_path_unchecked(&input, &args);
             tasks.push((input, output));
         }
@@ -347,8 +347,8 @@ fn resolve_projection(
     if let Some(ref idxs) = args.column_indices {
         let mut seen = std::collections::HashSet::with_capacity(idxs.len());
         for &i in idxs {
-            if i >= column_count { return Err(format!("column index {} out of range ({} columns)", i, column_count).into()); }
-            if !seen.insert(i) { return Err(format!("duplicate column index {}", i).into()); }
+            if i >= column_count { return Err(format!("column index {i} out of range ({column_count} columns)").into()); }
+            if !seen.insert(i) { return Err(format!("duplicate column index {i}").into()); }
         }
         indices = Some(idxs.clone());
     } else if let Some(ref names) = args.columns {
@@ -362,9 +362,9 @@ fn resolve_projection(
         let mut seen = std::collections::HashSet::with_capacity(names.len());
         for name in names {
             let key = if let Some(&idx) = map.get(name) { idx } else if let Some(&idx) = map.get(name.trim_end()) { idx } else {
-                return Err(format!("column '{}' not found", name).into());
+                return Err(format!("column '{name}' not found").into());
             };
-            if !seen.insert(key) { return Err(format!("duplicate column '{}' (index {})", name, key).into()); }
+            if !seen.insert(key) { return Err(format!("duplicate column '{name}' (index {key})").into()); }
             resolved.push(key);
         }
         if resolved.is_empty() { return Err("projection resolved to empty set".into()); }
@@ -416,7 +416,7 @@ fn discover_inputs(inputs: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
 }
 
 fn is_sas7bdat(path: &Path) -> bool {
-    path.extension().map(|e| e.eq_ignore_ascii_case("sas7bdat")).unwrap_or(false)
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("sas7bdat"))
 }
 
 fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
