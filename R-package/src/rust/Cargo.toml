@@ -1,0 +1,21 @@
+[package]
+name = "s_a_sreader_r_u_s_t"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+savvy = "*"
+serde_json = "1"
+# Use an absolute path so R's temp-install staging can still locate the core crate
+sas7bdat_parser_rs = { path = "/home/tkragholm/Development/sas7bdat-parser-rs", package = "sas7bdat-parser-rs" }
+
+[profile.release]
+panic = "unwind"
+
+[profile.dist-release]
+inherits = "release"
+codegen-units = 1
+lto = "fat"
