@@ -7,7 +7,7 @@
 #   export R_PKG_DIR=/path/to/SASreaderRUST
 
 # Default R package directory (can be overridden by env var R_PKG_DIR)
-r_pkg_dir := `echo ${R_PKG_DIR:-/home/tkragholm/Development/SASreaderRUST}`
+r_pkg_dir := `echo ${R_PKG_DIR:-/home/tkragholm/Development/sas7bdat-parser-rs/R-package}`
 # Core Rust crate directory (absolute path is fine for Cargo)
 core_dir := `echo ${RUST_CORE_DIR:-/home/tkragholm/Development/sas7bdat-parser-rs}`
 
@@ -35,9 +35,9 @@ help: _echo-env
     @echo "  cargo-build Build core Rust crate (debug)"
     @echo "  cargo-build-release Build core Rust crate (release)"
 
-# One-time initialization if you created an empty R pkg
-r-init: _echo-env
-    {{r_bin}} -q -e 'setwd("{{r_pkg_dir}}"); if (requireNamespace("savvy", quietly=TRUE)) { savvy::savvy_init() } else { system("savvy-cli init .") }; if (!requireNamespace("devtools", quietly=TRUE)) message("Install R pkg `devtools` for docs/check/install"); if (requireNamespace("devtools", quietly=TRUE)) devtools::document()'
+# # One-time initialization if you created an empty R pkg
+# r-init: _echo-env
+#     {{r_bin}} -q -e 'setwd("{{r_pkg_dir}}"); if (requireNamespace("savvy", quietly=TRUE)) { savvy::savvy_init() } else { system("savvy-cli init .") }; if (!requireNamespace("devtools", quietly=TRUE)) message("Install R pkg `devtools` for docs/check/install"); if (requireNamespace("devtools", quietly=TRUE)) devtools::document()'
 
 # Update C/R wrappers after editing Rust code, then update docs
 r-update: _echo-env

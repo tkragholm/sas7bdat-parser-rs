@@ -1,0 +1,9 @@
+source(
+  "/home/tkragholm/Development/sas7bdat-parser-rs/scripts/R/00_update_package.R"
+)
+source(
+  "/home/tkragholm/Development/sas7bdat-parser-rs/scripts/R/01_install_package.R"
+)
+source(
+  "/home/tkragholm/Development/sas7bdat-parser-rs/scripts/R/02_test_package.R"
+)
