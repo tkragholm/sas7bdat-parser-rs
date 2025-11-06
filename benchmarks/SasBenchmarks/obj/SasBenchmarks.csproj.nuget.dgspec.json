@@ -26,6 +26,70 @@
         "frameworks": {
           "net9.0": {
             "targetAlias": "net9.0",
+            "projectReferences": {
+              "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/lib/csharp/Sas7Bdat.Core/Sas7Bdat.Core.csproj": {
+                "projectPath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/lib/csharp/Sas7Bdat.Core/Sas7Bdat.Core.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "9.0.100"
+      },
+      "frameworks": {
+        "net9.0": {
+          "targetAlias": "net9.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/home/linuxbrew/.linuxbrew/Cellar/dotnet/9.0.8/libexec/sdk/9.0.109/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/lib/csharp/Sas7Bdat.Core/Sas7Bdat.Core.csproj": {
+      "version": "2.0.1",
+      "restore": {
+        "projectUniqueName": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/lib/csharp/Sas7Bdat.Core/Sas7Bdat.Core.csproj",
+        "projectName": "Sas7Bdat",
+        "projectPath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/lib/csharp/Sas7Bdat.Core/Sas7Bdat.Core.csproj",
+        "packagesPath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/.nuget/packages",
+        "outputPath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/lib/csharp/Sas7Bdat.Core/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net9.0"
+        ],
+        "sources": {
+          "/home/linuxbrew/.linuxbrew/Cellar/dotnet/9.0.8/libexec/library-packs": {},
+          "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/nuget-packages": {}
+        },
+        "frameworks": {
+          "net9.0": {
+            "targetAlias": "net9.0",
             "projectReferences": {}
           }
         },
@@ -44,12 +108,6 @@
       "frameworks": {
         "net9.0": {
           "targetAlias": "net9.0",
-          "dependencies": {
-            "Sas7Bdat": {
-              "target": "Package",
-              "version": "[2.0.2, )"
-            }
-          },
           "imports": [
             "net461",
             "net462",

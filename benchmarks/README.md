@@ -5,15 +5,12 @@ readers.
 
 ### C# (`SasBenchmarks`)
 
-The `SasBenchmarks` project wraps the [`Sas7Bdat`](https://www.nuget.org/packages/Sas7Bdat)
-library and streams a dataset while timing the read.
+The `SasBenchmarks` project wraps the vendored `Sas7Bdat.Core` sources under
+`benchmarks/lib/csharp` and streams a dataset while timing the read.
 
 Build prerequisites:
 
 * .NET SDK 9.0 (or later)
-* `Sas7Bdat` NuGet package. With restricted network access, copy the package
-  `.nupkg` and any dependencies into `benchmarks/nuget-packages/`. The supplied
-  `NuGet.Config` points the restore process at this local feed.
 
 Usage:
 
@@ -21,10 +18,9 @@ Usage:
 benchmarks/run_csharp.sh tests/data_AHS2013/omov.sas7bdat
 ```
 
-`run_csharp.sh` restores packages using the local feed defined in
-`NuGet.Config`, primes a self-contained cache under `benchmarks/.nuget/`, builds
-the harness when necessary, and then runs the benchmark. The program reports
-total rows, column count, and elapsed time in milliseconds.
+`run_csharp.sh` restores any framework dependencies, builds the local library if
+needed, and then runs the benchmark. The program reports total rows, column
+count, and elapsed time in milliseconds.
 
 ### Additional Benchmarks
 
@@ -48,26 +44,50 @@ benchmarks/run_rust.sh tests/data_AHS2013/omov.sas7bdat
 
 ### ReadStat Library (C)
 
-`run_readstat.sh` compiles the bundled ReadStat sources under `read-stat-src/`
-alongside `readstat_bench.c`, producing a self-contained binary in
-`benchmarks/.build/`. No system-wide `libreadstat` installation is required.
-The resulting benchmark streams every value in the file:
+`run_readstat.sh` compiles the vendored ReadStat sources under
+`benchmarks/lib/c/` alongside `readstat_bench.c`, producing a self-contained
+binary in `benchmarks/.build/`. No system-wide `libreadstat` installation is
+required. The resulting benchmark streams every value in the file:
 
 ```bash
 benchmarks/run_readstat.sh tests/data_AHS2013/omov.sas7bdat
 ```
 
+### C++ (`cppsas7bdat`)
+
+The C++ benchmark builds the `cppsas7bdat` reader from the sources in
+`benchmarks/lib/cpp/` and measures streaming throughput using a lightweight sink
+that touches every cell.
+
+Build prerequisites:
+
+* CMake 3.16+
+* A C++20 compiler (e.g. `g++` 10+ or `clang++` 12+)
+* Development packages for `fmt`, `spdlog`, and Boost date\_time (Debian/Ubuntu:
+  `libfmt-dev`, `libspdlog-dev`, `libboost-date-time-dev`)
+
+Usage:
+
+```bash
+benchmarks/run_cpp.sh tests/data_AHS2013/omov.sas7bdat
+```
+
+The script configures a local build directory under `benchmarks/.build/`,
+rebuilds when sources change, and runs the resulting `cpp_bench` executable.
+
 ### Hyperfine Setup
 
 After building the necessary binaries once (Rust `cargo run --release`,
-`dotnet build` inside `SasBenchmarks`), you can compare all three readers with
+`dotnet build` inside `SasBenchmarks`, C `run_readstat.sh`, C++
+`run_cpp.sh`), you can compare all readers with
 [`hyperfine`](https://github.com/sharkdp/hyperfine). Example:
 
 ```bash
 hyperfine \
   'benchmarks/run_rust.sh tests/data_AHS2013/omov.sas7bdat' \
   'benchmarks/run_csharp.sh tests/data_AHS2013/omov.sas7bdat' \
-  'benchmarks/run_readstat.sh tests/data_AHS2013/omov.sas7bdat'
+  'benchmarks/run_readstat.sh tests/data_AHS2013/omov.sas7bdat' \
+  'benchmarks/run_cpp.sh tests/data_AHS2013/omov.sas7bdat'
 ```
 
 Replace the input path with the dataset you want to benchmark. Each command

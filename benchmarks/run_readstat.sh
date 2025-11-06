@@ -10,7 +10,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FILE="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1")"
 BIN="${ROOT}/benchmarks/.build/readstat_bench"
 SRC="${ROOT}/benchmarks/readstat_bench.c"
-READSTAT_SRC="${ROOT}/read-stat-src"
+READSTAT_ROOT="${ROOT}/benchmarks/lib/c"
+READSTAT_SRC="${READSTAT_ROOT}/src"
 BUILD_DIR="$(dirname "${BIN}")"
 
 if [[ ! -f "${FILE}" ]]; then
@@ -18,8 +19,8 @@ if [[ ! -f "${FILE}" ]]; then
   exit 1
 fi
 
-if [[ ! -d "${READSTAT_SRC}" ]]; then
-  echo "Vendored ReadStat sources not found at ${READSTAT_SRC}" >&2
+if [[ ! -d "${READSTAT_ROOT}" ]]; then
+  echo "Vendored ReadStat sources not found at ${READSTAT_ROOT}" >&2
   exit 1
 fi
 

@@ -35,4 +35,3 @@ benchmarks/.dotnet-cli-cache/
 benchmarks/.nuget/
 benchmarks/SasBenchmarks/bin/
 benchmarks/SasBenchmarks/obj/Debug/
-benchmarks/lib/

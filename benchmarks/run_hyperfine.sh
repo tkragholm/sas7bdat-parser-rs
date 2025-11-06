@@ -17,8 +17,11 @@ fi
 # Ensure binaries are built
 benchmarks/run_rust.sh "${FILE}" >/dev/null
 benchmarks/run_csharp.sh "${FILE}" >/dev/null
+benchmarks/run_readstat.sh "${FILE}" >/dev/null
+benchmarks/run_cpp.sh "${FILE}" >/dev/null
 
 hyperfine "$@" \
   "benchmarks/run_rust.sh ${FILE}" \
   "benchmarks/run_csharp.sh ${FILE}" \
-  "benchmarks/run_readstat.sh ${FILE}"
+  "benchmarks/run_readstat.sh ${FILE}" \
+  "benchmarks/run_cpp.sh ${FILE}"

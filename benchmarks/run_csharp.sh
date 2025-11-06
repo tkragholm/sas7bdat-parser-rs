@@ -9,6 +9,8 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="${ROOT}/benchmarks/SasBenchmarks"
 PROJECT_FILE="${PROJECT_DIR}/SasBenchmarks.csproj"
+LIB_PROJECT_DIR="${ROOT}/benchmarks/lib/csharp/Sas7Bdat.Core"
+LIB_PROJECT_FILE="${LIB_PROJECT_DIR}/Sas7Bdat.Core.csproj"
 FILE="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1")"
 CONFIG_FILE="${ROOT}/benchmarks/NuGet.Config"
 realpath_py() {
@@ -34,7 +36,6 @@ mkdir -p "${NUGET_DIR}/packages"
 
 run_dotnet() {
   DOTNET_CLI_HOME="${CACHE_DIR}" \
-  DOTNET_ROOT="${CACHE_DIR}" \
   NUGET_PACKAGES="${NUGET_DIR}/packages" \
   dotnet "$@"
 }
@@ -44,9 +45,13 @@ if [[ ! -f "${ASSETS_FILE}" ]]; then
   needs_restore=true
 elif [[ "${PROJECT_FILE}" -nt "${ASSETS_FILE}" ]]; then
   needs_restore=true
+elif [[ -f "${LIB_PROJECT_FILE}" && "${LIB_PROJECT_FILE}" -nt "${ASSETS_FILE}" ]]; then
+  needs_restore=true
 elif [[ -f "${CONFIG_FILE}" && "${CONFIG_FILE}" -nt "${ASSETS_FILE}" ]]; then
   needs_restore=true
 elif find "${PROJECT_DIR}" -maxdepth 1 -name '*.csproj' -newer "${ASSETS_FILE}" -print -quit | grep -q .; then
+  needs_restore=true
+elif [[ -d "${LIB_PROJECT_DIR}" ]] && find "${LIB_PROJECT_DIR}" -maxdepth 1 -name '*.csproj' -newer "${ASSETS_FILE}" -print -quit | grep -q .; then
   needs_restore=true
 fi
 
@@ -54,6 +59,8 @@ needs_build=false
 if [[ ! -f "${OUTPUT_DLL}" ]]; then
   needs_build=true
 elif find "${PROJECT_DIR}" -maxdepth 1 -name '*.cs' -newer "${OUTPUT_DLL}" -print -quit | grep -q .; then
+  needs_build=true
+elif [[ -d "${LIB_PROJECT_DIR}" ]] && find "${LIB_PROJECT_DIR}" -name '*.cs' -newer "${OUTPUT_DLL}" -print -quit | grep -q .; then
   needs_build=true
 elif [[ "${PROJECT_FILE}" -nt "${OUTPUT_DLL}" ]]; then
   needs_build=true
