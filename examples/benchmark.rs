@@ -1,10 +1,19 @@
 use std::env;
 use std::time::Instant;
 
-use sas7bdat_parser_rs::value::Value;
 use sas7bdat_parser_rs::SasFile;
+use sas7bdat_parser_rs::value::Value;
+
+#[cfg(feature = "hotpath")]
+use hotpath::{Format, GuardBuilder};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "hotpath")]
+    let _hotpath = GuardBuilder::new("benchmark")
+        .format(Format::Table) // optional: pretty output
+        .limit(20) // optional: how many rows to show
+        .build();
+
     let path = env::args()
         .nth(1)
         .expect("usage: cargo run --release --example benchmark -- <file.sas7bdat>");
@@ -21,7 +30,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while let Some(row) = rows.try_next()? {
         row_count += 1;
-        non_null_cells += row.iter().filter(|value| !matches!(value, Value::Missing(_))).count() as u64;
+        non_null_cells += row
+            .iter()
+            .filter(|value| !matches!(value, Value::Missing(_)))
+            .count() as u64;
     }
 
     let elapsed = start.elapsed();

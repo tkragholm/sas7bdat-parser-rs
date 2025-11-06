@@ -1,27 +1,27 @@
 {
   "format": 1,
   "restore": {
-    "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj": {}
+    "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj": {}
   },
   "projects": {
-    "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj": {
+    "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
+        "projectUniqueName": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
         "projectName": "SasBenchmarks",
-        "projectPath": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
-        "packagesPath": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/../.dotnet-cli-cache/.nuget/packages/",
-        "outputPath": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/",
+        "projectPath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
+        "packagesPath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/.nuget/packages",
+        "outputPath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/NuGet.Config",
-          "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/.dotnet-cli-cache/.nuget/NuGet/NuGet.Config"
+          "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net9.0"
         ],
         "sources": {
-          "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/nuget-packages": {}
+          "/home/linuxbrew/.linuxbrew/Cellar/dotnet/9.0.8/libexec/library-packs": {},
+          "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/nuget-packages": {}
         },
         "frameworks": {
           "net9.0": {
@@ -39,7 +39,7 @@
           "auditLevel": "low",
           "auditMode": "direct"
         },
-        "SdkAnalysisLevel": "9.0.300"
+        "SdkAnalysisLevel": "9.0.100"
       },
       "frameworks": {
         "net9.0": {
@@ -66,7 +66,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/9.0.306/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "/home/linuxbrew/.linuxbrew/Cellar/dotnet/9.0.8/libexec/sdk/9.0.109/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

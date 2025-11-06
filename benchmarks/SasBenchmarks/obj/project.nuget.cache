@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "2JrXo/nI4fM=",
+  "dgSpecHash": "Xs5XqP17sbk=",
   "success": true,
-  "projectFilePath": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
+  "projectFilePath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
   "expectedPackageFiles": [
-    "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/../.dotnet-cli-cache/.nuget/packages/sas7bdat/2.0.2/sas7bdat.2.0.2.nupkg.sha512",
-    "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/../.dotnet-cli-cache/.nuget/packages/system.text.encoding.codepages/9.0.9/system.text.encoding.codepages.9.0.9.nupkg.sha512"
+    "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/.nuget/packages/sas7bdat/2.0.2/sas7bdat.2.0.2.nupkg.sha512",
+    "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/.nuget/packages/system.text.encoding.codepages/9.0.9/system.text.encoding.codepages.9.0.9.nupkg.sha512"
   ],
   "logs": []
 }

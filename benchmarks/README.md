@@ -18,23 +18,13 @@ Build prerequisites:
 Usage:
 
 ```bash
-cd benchmarks/SasBenchmarks
-# First restore (offline sources are already configured)
-DOTNET_CLI_HOME=../.dotnet-cli-cache DOTNET_ROOT=../.dotnet-cli-cache dotnet restore --ignore-failed-sources
-
-# Run against a SAS file
-DOTNET_CLI_HOME=../.dotnet-cli-cache DOTNET_ROOT=../.dotnet-cli-cache \
-  dotnet run --no-restore -- ../../tests/data_AHS2013/omov.sas7bdat
-```
-
-The program reports total rows, column count, and elapsed time in milliseconds.
-
-`run_csharp.sh` provides a convenience wrapper that ensures the project is built
-and invokes the benchmark:
-
-```bash
 benchmarks/run_csharp.sh tests/data_AHS2013/omov.sas7bdat
 ```
+
+`run_csharp.sh` restores packages using the local feed defined in
+`NuGet.Config`, primes a self-contained cache under `benchmarks/.nuget/`, builds
+the harness when necessary, and then runs the benchmark. The program reports
+total rows, column count, and elapsed time in milliseconds.
 
 ### Additional Benchmarks
 
@@ -58,9 +48,10 @@ benchmarks/run_rust.sh tests/data_AHS2013/omov.sas7bdat
 
 ### ReadStat Library (C)
 
-`run_readstat.sh` builds a tiny C program (`readstat_bench.c`) that links
-against the system `libreadstat` (requires headers and library, typically
-installed with the ReadStat CLI) and streams every value:
+`run_readstat.sh` compiles the bundled ReadStat sources under `read-stat-src/`
+alongside `readstat_bench.c`, producing a self-contained binary in
+`benchmarks/.build/`. No system-wide `libreadstat` installation is required.
+The resulting benchmark streams every value in the file:
 
 ```bash
 benchmarks/run_readstat.sh tests/data_AHS2013/omov.sas7bdat

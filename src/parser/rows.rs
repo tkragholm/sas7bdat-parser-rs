@@ -35,6 +35,7 @@ const SUBHEADER_POINTER_OFFSET: usize = 8;
 pub struct RowIterator<'a, R: Read + Seek> {
     reader: &'a mut R,
     parsed: &'a ParsedMetadata,
+    runtime_columns: Vec<RuntimeColumn>,
     page_buffer: Vec<u8>,
     current_rows: Vec<RowData>,
     reusable_row_buffers: Vec<Vec<u8>>,
@@ -44,6 +45,8 @@ pub struct RowIterator<'a, R: Read + Seek> {
     emitted_rows: Cell<u64>,
     encoding: &'static Encoding,
     exhausted: Cell<bool>,
+    row_length: usize,
+    total_rows: u64,
 }
 
 enum RowData {
@@ -54,6 +57,15 @@ enum RowData {
 enum NumericCell {
     Missing(MissingValue),
     Number(f64),
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeColumn {
+    index: u32,
+    offset: usize,
+    width: usize,
+    raw_width: u32,
+    kind: ColumnKind,
 }
 
 impl<'a, R: Read + Seek> RowIterator<'a, R> {
@@ -81,10 +93,36 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             usize::try_from(parsed.header.page_size).map_err(|_| Error::Unsupported {
                 feature: Cow::from("page size exceeds platform pointer width"),
             })?;
+        let row_length =
+            usize::try_from(parsed.row_info.row_length).map_err(|_| Error::Unsupported {
+                feature: Cow::from("row length exceeds platform pointer width"),
+            })?;
+        let runtime_columns = parsed
+            .columns
+            .iter()
+            .map(|column| {
+                let offset =
+                    usize::try_from(column.offsets.offset).map_err(|_| Error::Unsupported {
+                        feature: Cow::from("column offset exceeds platform pointer width"),
+                    })?;
+                let width =
+                    usize::try_from(column.offsets.width).map_err(|_| Error::Unsupported {
+                        feature: Cow::from("column width exceeds platform pointer width"),
+                    })?;
+                Ok(RuntimeColumn {
+                    index: column.index,
+                    offset,
+                    width,
+                    raw_width: column.offsets.width,
+                    kind: column.kind,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(Self {
             reader,
             parsed,
+            runtime_columns,
             page_buffer: vec![0u8; page_size],
             current_rows: Vec::new(),
             reusable_row_buffers: Vec::new(),
@@ -94,6 +132,8 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             emitted_rows: Cell::new(0),
             encoding,
             exhausted: Cell::new(false),
+            row_length,
+            total_rows: parsed.row_info.total_rows,
         })
     }
 
@@ -107,7 +147,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         if self.exhausted.get() {
             return Ok(None);
         }
-        if self.emitted_rows.get() >= self.parsed.row_info.total_rows {
+        if self.emitted_rows.get() >= self.total_rows {
             self.exhausted.set(true);
             return Ok(None);
         }
@@ -159,7 +199,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     #[allow(clippy::too_many_lines)]
     fn fetch_next_page(&mut self) -> Result<()> {
         let header = &self.parsed.header;
-        let row_length = self.parsed.row_info.row_length as usize;
+        let row_length = self.row_length;
 
         while self.next_page_index < header.page_count {
             let offset = header.data_offset + self.next_page_index * u64::from(header.page_size);
@@ -344,11 +384,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                     continue;
                 }
 
-                let remaining_rows_u64 = self
-                    .parsed
-                    .row_info
-                    .total_rows
-                    .saturating_sub(self.emitted_rows.get());
+                let remaining_rows_u64 = self.total_rows.saturating_sub(self.emitted_rows.get());
                 let remaining_rows =
                     usize::try_from(remaining_rows_u64).map_or(usize::MAX, |value| value);
 
@@ -406,23 +442,15 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode_row(&self, row_index: u16) -> Result<Vec<Value<'_>>> {
-        let row_length = self.parsed.row_info.row_length as usize;
         let row: &[u8] = match &self.current_rows[row_index as usize] {
-            RowData::Borrowed(offset) => &self.page_buffer[*offset..*offset + row_length],
+            RowData::Borrowed(offset) => &self.page_buffer[*offset..*offset + self.row_length],
             RowData::Owned(buffer) => buffer.as_slice(),
         };
 
         let mut values: SmallVec<[Value<'_>; 16]> =
-            SmallVec::with_capacity(self.parsed.columns.len());
-        for column in &self.parsed.columns {
-            let offset =
-                usize::try_from(column.offsets.offset).map_err(|_| Error::Unsupported {
-                    feature: Cow::from("column offset exceeds platform pointer width"),
-                })?;
-            let width = usize::try_from(column.offsets.width).map_err(|_| Error::Unsupported {
-                feature: Cow::from("column width exceeds platform pointer width"),
-            })?;
-            if offset + width > row.len() {
+            SmallVec::with_capacity(self.runtime_columns.len());
+        for column in &self.runtime_columns {
+            if column.offset + column.width > row.len() {
                 return Err(Error::Corrupted {
                     section: Section::Column {
                         index: column.index,
@@ -430,7 +458,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                     details: Cow::from("column slice out of bounds"),
                 });
             }
-            let slice = &row[offset..offset + width];
+            let slice = &row[column.offset..column.offset + column.width];
             let value = match column.kind {
                 ColumnKind::Character => Value::Str(decode_string(slice, self.encoding)),
                 ColumnKind::Numeric(kind) => {
@@ -438,18 +466,18 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                         NumericCell::Missing(missing) => Value::Missing(missing),
                         NumericCell::Number(number) => match kind {
                             NumericKind::Double => {
-                                numeric_value_from_width(number, column.offsets.width)
+                                numeric_value_from_width(number, column.raw_width)
                             }
                             NumericKind::Date => sas_days_to_datetime(number).map_or_else(
-                                || numeric_value_from_width(number, column.offsets.width),
+                                || numeric_value_from_width(number, column.raw_width),
                                 Value::Date,
                             ),
                             NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
-                                || numeric_value_from_width(number, column.offsets.width),
+                                || numeric_value_from_width(number, column.raw_width),
                                 Value::DateTime,
                             ),
                             NumericKind::Time => sas_seconds_to_time(number).map_or_else(
-                                || numeric_value_from_width(number, column.offsets.width),
+                                || numeric_value_from_width(number, column.raw_width),
                                 Value::Time,
                             ),
                         },
@@ -514,10 +542,28 @@ fn decode_string<'a>(slice: &'a [u8], encoding: &'static Encoding) -> Cow<'a, st
 }
 
 fn maybe_fix_mojibake(value: Cow<'_, str>) -> Cow<'_, str> {
-    if value.chars().all(|c| (c as u32) <= 0xFF) {
-        let bytes: Vec<u8> = value.chars().map(|c| c as u8).collect();
+    let text = value.as_ref();
+    if text.is_ascii() {
+        return value;
+    }
+
+    let mut bytes = Vec::with_capacity(text.len());
+    let mut has_extended = false;
+
+    for ch in text.chars() {
+        let code = ch as u32;
+        if code > 0xFF {
+            return value;
+        }
+        if code >= 0x80 {
+            has_extended = true;
+        }
+        bytes.push(code as u8);
+    }
+
+    if has_extended {
         if let Ok(decoded) = std::str::from_utf8(&bytes)
-            && decoded != value
+            && decoded != text
         {
             return Cow::Owned(decoded.to_owned());
         }

@@ -4,12 +4,12 @@
     <RestoreSuccess Condition=" '$(RestoreSuccess)' == '' ">True</RestoreSuccess>
     <RestoreTool Condition=" '$(RestoreTool)' == '' ">NuGet</RestoreTool>
     <ProjectAssetsFile Condition=" '$(ProjectAssetsFile)' == '' ">$(MSBuildThisFileDirectory)project.assets.json</ProjectAssetsFile>
-    <NuGetPackageRoot Condition=" '$(NuGetPackageRoot)' == '' ">/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/../.dotnet-cli-cache/.nuget/packages/</NuGetPackageRoot>
-    <NuGetPackageFolders Condition=" '$(NuGetPackageFolders)' == '' ">/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/../.dotnet-cli-cache/.nuget/packages/</NuGetPackageFolders>
+    <NuGetPackageRoot Condition=" '$(NuGetPackageRoot)' == '' ">/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/.nuget/packages</NuGetPackageRoot>
+    <NuGetPackageFolders Condition=" '$(NuGetPackageFolders)' == '' ">/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/.nuget/packages</NuGetPackageFolders>
     <NuGetProjectStyle Condition=" '$(NuGetProjectStyle)' == '' ">PackageReference</NuGetProjectStyle>
-    <NuGetToolVersion Condition=" '$(NuGetToolVersion)' == '' ">6.14.0</NuGetToolVersion>
+    <NuGetToolVersion Condition=" '$(NuGetToolVersion)' == '' ">6.12.4</NuGetToolVersion>
   </PropertyGroup>
   <ItemGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
-    <SourceRoot Include="/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/../.dotnet-cli-cache/.nuget/packages/" />
+    <SourceRoot Include="/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/.nuget/packages/" />
   </ItemGroup>
 </Project>

@@ -1,7 +1,21 @@
+#if !defined(_WIN32)
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#endif
+
 #include <readstat.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <time.h>
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC CLOCK_REALTIME
+#endif
+#endif
 
 typedef struct {
     long row_count;
@@ -42,10 +56,28 @@ int main(int argc, char *argv[]) {
     readstat_set_metadata_handler(parser, &metadata_handler);
     readstat_set_value_handler(parser, &value_handler);
 
+#if defined(_WIN32)
+    LARGE_INTEGER freq;
+    LARGE_INTEGER start, end;
+    if (!QueryPerformanceFrequency(&freq)) {
+        fprintf(stderr, "High-resolution performance counter not available on this system.\n");
+        readstat_parser_free(parser);
+        return EXIT_FAILURE;
+    }
+    QueryPerformanceCounter(&start);
+#else
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
+
     readstat_error_t err = readstat_parse_sas7bdat(parser, path, &context);
+
+#if defined(_WIN32)
+    QueryPerformanceCounter(&end);
+#else
     clock_gettime(CLOCK_MONOTONIC, &end);
+#endif
+
     readstat_parser_free(parser);
 
     if (err != READSTAT_OK) {
@@ -53,8 +85,13 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    double elapsed_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-                        (end.tv_nsec - start.tv_nsec) / 1e6;
+    double elapsed_ms;
+#if defined(_WIN32)
+    elapsed_ms = (end.QuadPart - start.QuadPart) * 1000.0 / (double)freq.QuadPart;
+#else
+    elapsed_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+                 (end.tv_nsec - start.tv_nsec) / 1e6;
+#endif
 
     printf("File            : %s\n", path);
     printf("Rows processed  : %ld\n", context.row_count);
