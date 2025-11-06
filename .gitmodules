@@ -1,0 +1,3 @@
+[submodule "benchmarks/lib/c"]
+	path = benchmarks/lib/c
+	url = https://github.com/WizardMac/ReadStat.git

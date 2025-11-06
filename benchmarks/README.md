@@ -3,6 +3,11 @@
 This directory contains helper programs for comparing different `sas7bdat`
 readers.
 
+> **Note:** some harnesses depend on vendored reference implementations that are
+> committed as a Git submodule. After cloning the repository, run
+> `git submodule update --init --recursive` to populate `benchmarks/lib/c/`
+> (ReadStat) before building the C benchmark.
+
 ### C# (`SasBenchmarks`)
 
 The `SasBenchmarks` project wraps the vendored `Sas7Bdat.Core` sources under

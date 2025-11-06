@@ -25,6 +25,7 @@ Or build the repository directly:
 ```bash
 git clone https://github.com/tkragholm/sas7bdat-parser-rs.git
 cd sas7bdat-parser-rs
+git submodule update --init --recursive
 cargo build
 ```
 
