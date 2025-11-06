@@ -12,6 +12,7 @@ debug/
 ahs2013n.sas7bdat
 ahs2013n.parquet
 ahs2013n_new.parquet
+benchmarks.txt
 
 # Python environments & caches
 .venv/
@@ -34,4 +35,4 @@ benchmarks/.build/
 benchmarks/.dotnet-cli-cache/
 benchmarks/.nuget/
 benchmarks/SasBenchmarks/bin/
-benchmarks/SasBenchmarks/obj/Debug/
+benchmarks/SasBenchmarks/obj/
