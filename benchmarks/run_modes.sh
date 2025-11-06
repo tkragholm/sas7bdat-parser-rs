@@ -21,6 +21,7 @@ prepare_cmd=$(
   cat <<EOF
 benchmarks/run_rust.sh --build-only "${INPUT}" && \
 BENCH_PARALLEL_ROWS=1 benchmarks/run_rust.sh --build-only "${INPUT}" && \
+BENCH_COLUMNAR=1 benchmarks/run_rust.sh --build-only "${INPUT}" && \
 BENCH_COLUMNAR=1 BENCH_COLUMNAR_PAR=1 benchmarks/run_rust.sh --build-only "${INPUT}"
 EOF
 )
@@ -30,4 +31,5 @@ hyperfine \
   "${HYPERFINE_ARGS[@]}" \
   "benchmarks/run_rust.sh \"${INPUT}\"" \
   "BENCH_PARALLEL_ROWS=1 benchmarks/run_rust.sh \"${INPUT}\"" \
+  "BENCH_COLUMNAR=1 benchmarks/run_rust.sh \"${INPUT}\"" \
   "BENCH_COLUMNAR=1 BENCH_COLUMNAR_PAR=1 benchmarks/run_rust.sh \"${INPUT}\""

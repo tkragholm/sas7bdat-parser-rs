@@ -1,9 +1,9 @@
 use std::env;
 use std::time::Instant;
 
-use sas7bdat_parser_rs::SasFile;
 #[cfg(feature = "parallel-rows")]
 use rayon::prelude::*;
+use sas7bdat_parser_rs::SasFile;
 #[cfg(feature = "parallel-rows")]
 use sas7bdat_parser_rs::value::Value;
 

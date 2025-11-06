@@ -6,7 +6,6 @@ use std::io::{Read, Seek, SeekFrom};
 use crate::error::{Error, Result, Section};
 use crate::metadata::{Compression, Endianness, MissingLiteral, TaggedMissing, Vendor};
 use crate::parser::column::{ColumnKind, NumericKind};
-use crate::parser::columnar::{ColumnarBatch, RuntimeColumnRef};
 use crate::parser::meta::ParsedMetadata;
 use crate::value::{MissingValue, Value};
 use encoding_rs::{Encoding, UTF_8};
@@ -14,6 +13,7 @@ use encoding_rs::{Encoding, UTF_8};
 use rayon::prelude::*;
 use simdutf8::basic;
 use smallvec::SmallVec;
+use std::ops::Range;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 #[cfg(feature = "parallel-rows")]
@@ -606,10 +606,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     ///
     /// Returns an error when decoding fails.
     #[allow(clippy::missing_errors_doc)]
-    pub fn next_columnar_batch(
-        &mut self,
-        max_rows: usize,
-    ) -> Result<Option<ColumnarBatch<'_, '_>>> {
+    pub fn next_columnar_batch(&mut self, max_rows: usize) -> Result<Option<ColumnarBatch<'_>>> {
         if self.exhausted.get() {
             return Ok(None);
         }
@@ -642,16 +639,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             let chunk_len = available.min(target);
             let row_end = start + chunk_len;
 
-            let mut row_slices: Vec<&[u8]> = Vec::with_capacity(chunk_len);
-            for (offset, row_data) in self.current_rows[start..row_end].iter().enumerate() {
-                let row_slice = row_data.as_slice(
-                    self.row_length,
-                    &self.page_buffer,
-                    (start + offset) as u64,
-                )?;
-                row_slices.push(row_slice);
-            }
-
             self.row_in_page
                 .set(u16::try_from(row_end).unwrap_or(u16::MAX));
             self.emitted_rows
@@ -661,12 +648,15 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                 self.exhausted.set(true);
             }
 
-            let batch = ColumnarBatch::new(
-                row_slices,
-                &self.columnar_columns,
-                self.parsed.header.endianness,
-            );
-            return Ok(Some(batch));
+        let batch = ColumnarBatch::new(
+            &self.current_rows[start..row_end],
+            start..row_end,
+            &self.columnar_columns,
+            &self.page_buffer,
+            self.row_length,
+            self.parsed.header.endianness,
+        );
+        return Ok(Some(batch));
         }
     }
 
@@ -1170,6 +1160,175 @@ fn trim_trailing(slice: &[u8]) -> &[u8] {
 #[inline]
 fn is_blank(slice: &[u8]) -> bool {
     !slice.iter().any(|&b| b != 0 && b != b' ')
+}
+
+#[derive(Clone, Copy)]
+pub struct RuntimeColumnRef {
+    pub index: u32,
+    pub offset: usize,
+    pub width: usize,
+    pub kind: ColumnKind,
+}
+
+pub struct ColumnarBatch<'rows> {
+    pub row_count: usize,
+    rows: &'rows [RowData],
+    row_range: Range<usize>,
+    columns: &'rows [RuntimeColumnRef],
+    page_buffer: &'rows [u8],
+    row_length: usize,
+    endianness: Endianness,
+}
+
+impl<'rows> ColumnarBatch<'rows> {
+    #[allow(clippy::missing_const_for_fn)]
+    #[must_use]
+    fn new(
+        rows: &'rows [RowData],
+        row_range: Range<usize>,
+        columns: &'rows [RuntimeColumnRef],
+        page_buffer: &'rows [u8],
+        row_length: usize,
+        endianness: Endianness,
+    ) -> Self {
+        Self {
+            row_count: row_range.len(),
+            rows,
+            row_range,
+            columns,
+            page_buffer,
+            row_length,
+            endianness,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.row_count == 0
+    }
+
+    #[must_use]
+    pub fn column(&self, index: usize) -> Option<ColumnarColumn<'_>> {
+        let column = self.columns.get(index)?;
+        Some(ColumnarColumn {
+            column,
+            rows: self.rows,
+            row_range: self.row_range.clone(),
+            page_buffer: self.page_buffer,
+            row_length: self.row_length,
+            endianness: self.endianness,
+        })
+    }
+
+    pub fn columns(&self) -> impl Iterator<Item = ColumnarColumn<'_>> {
+        self.columns.iter().map(move |column| ColumnarColumn {
+            column,
+            rows: self.rows,
+            row_range: self.row_range.clone(),
+            page_buffer: self.page_buffer,
+            row_length: self.row_length,
+            endianness: self.endianness,
+        })
+    }
+
+    #[cfg(feature = "parallel-rows")]
+    pub fn par_columns(&self) -> impl rayon::prelude::ParallelIterator<Item = ColumnarColumn<'_>> {
+        self.columns.par_iter().map(move |column| ColumnarColumn {
+            column,
+            rows: self.rows,
+            row_range: self.row_range.clone(),
+            page_buffer: self.page_buffer,
+            row_length: self.row_length,
+            endianness: self.endianness,
+        })
+    }
+}
+
+pub struct ColumnarColumn<'batch> {
+    column: &'batch RuntimeColumnRef,
+    rows: &'batch [RowData],
+    row_range: Range<usize>,
+    page_buffer: &'batch [u8],
+    row_length: usize,
+    endianness: Endianness,
+}
+
+impl ColumnarColumn<'_> {
+    #[must_use]
+    pub const fn index(&self) -> u32 {
+        self.column.index
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> ColumnKind {
+        self.column.kind
+    }
+
+    fn row_slice(&self, row_index: usize) -> Option<&[u8]> {
+        let row = self.rows.get(row_index)?;
+        row.as_slice(self.row_length, self.page_buffer, row_index as u64)
+            .ok()
+    }
+
+    #[must_use]
+    pub fn iter_numeric_bits(&self) -> impl Iterator<Item = Option<u64>> + '_ {
+        self.row_range.clone().map(move |idx| {
+            self.row_slice(idx).and_then(|slice| {
+                let data = slice.get(self.column.offset..self.column.offset + self.column.width)?;
+                let bits = numeric_bits(data, self.endianness);
+                if numeric_bits_is_missing(bits) {
+                    None
+                } else {
+                    Some(bits)
+                }
+            })
+        })
+    }
+
+    #[must_use]
+    pub fn iter_character_bytes(&self) -> impl Iterator<Item = Option<&[u8]>> + '_ {
+        self.row_range.clone().map(move |idx| {
+            self.row_slice(idx).and_then(|slice| {
+                slice
+                    .get(self.column.offset..self.column.offset + self.column.width)
+                    .filter(|data| !is_blank(data))
+            })
+        })
+    }
+
+    #[must_use]
+    pub fn non_null_count(&self) -> u64 {
+        match self.column.kind {
+            ColumnKind::Numeric(_) => self
+                .row_range
+                .clone()
+                .filter(|&idx| {
+                    self.row_slice(idx)
+                        .and_then(|slice| {
+                            slice
+                                .get(self.column.offset..self.column.offset + self.column.width)
+                                .map(|data| {
+                                    !numeric_bits_is_missing(numeric_bits(data, self.endianness))
+                                })
+                        })
+                        .unwrap_or(false)
+                })
+                .count() as u64,
+            ColumnKind::Character => self
+                .row_range
+                .clone()
+                .filter(|&idx| {
+                    self.row_slice(idx)
+                        .and_then(|slice| {
+                            slice
+                                .get(self.column.offset..self.column.offset + self.column.width)
+                                .map(|data| !is_blank(data))
+                        })
+                        .unwrap_or(false)
+                })
+                .count() as u64,
+        }
+    }
 }
 
 fn resolve_encoding(label: Option<&str>) -> &'static Encoding {
