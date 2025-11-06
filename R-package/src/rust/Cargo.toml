@@ -10,10 +10,10 @@ crate-type = ["staticlib", "lib"]
 savvy = "*"
 serde_json = "1"
 # Use an absolute path so R's temp-install staging can still locate the core crate
-sas7bdat_parser_rs = { path = "/home/tkragholm/Development/sas7bdat-parser-rs", package = "sas7bdat-parser-rs" }
+sas7bdat_parser_rs = { path = "/Users/tobiaskragholm/dev/sas7bdat-parser-rs", package = "sas7bdat-parser-rs" }
 
 [profile.release]
-panic = "unwind"
+panic = "abort"
 
 [profile.dist-release]
 inherits = "release"

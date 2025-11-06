@@ -1,0 +1,174 @@
+{
+  "version": 3,
+  "targets": {
+    "net9.0": {
+      "Sas7Bdat/2.0.2": {
+        "type": "package",
+        "dependencies": {
+          "System.Text.Encoding.CodePages": "9.0.9"
+        },
+        "compile": {
+          "lib/net8.0/Sas7Bdat.Core.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/Sas7Bdat.Core.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "System.Text.Encoding.CodePages/9.0.9": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/System.Text.Encoding.CodePages.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/System.Text.Encoding.CodePages.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        },
+        "runtimeTargets": {
+          "runtimes/win/lib/net9.0/System.Text.Encoding.CodePages.dll": {
+            "assetType": "runtime",
+            "rid": "win"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Sas7Bdat/2.0.2": {
+      "sha512": "xGY/tDM1b5w8uhAW0XymYOtw3RBEBmaY3rgqBkU2Z9gZ4ee454EhOYcTLR6azNqhch0dRNaTYdq+0uDk//a3FQ==",
+      "type": "package",
+      "path": "sas7bdat/2.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "icon.png",
+        "lib/net8.0/Sas7Bdat.Core.dll",
+        "lib/net8.0/Sas7Bdat.Core.xml",
+        "readme.md",
+        "sas7bdat.2.0.2.nupkg.sha512",
+        "sas7bdat.nuspec"
+      ]
+    },
+    "System.Text.Encoding.CodePages/9.0.9": {
+      "sha512": "5D+YO1AmHOPmslqlt+QT4zkR9vQRt46OXHRihqN1v0PLKeFe7KO1YuCJeUE4uNiPGJi0T1Y2fC9GHqhwvfkHDA==",
+      "type": "package",
+      "path": "system.text.encoding.codepages/9.0.9",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/System.Text.Encoding.CodePages.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/System.Text.Encoding.CodePages.targets",
+        "lib/MonoAndroid10/_._",
+        "lib/MonoTouch10/_._",
+        "lib/net462/System.Text.Encoding.CodePages.dll",
+        "lib/net462/System.Text.Encoding.CodePages.xml",
+        "lib/net8.0/System.Text.Encoding.CodePages.dll",
+        "lib/net8.0/System.Text.Encoding.CodePages.xml",
+        "lib/net9.0/System.Text.Encoding.CodePages.dll",
+        "lib/net9.0/System.Text.Encoding.CodePages.xml",
+        "lib/netstandard2.0/System.Text.Encoding.CodePages.dll",
+        "lib/netstandard2.0/System.Text.Encoding.CodePages.xml",
+        "lib/xamarinios10/_._",
+        "lib/xamarinmac20/_._",
+        "lib/xamarintvos10/_._",
+        "lib/xamarinwatchos10/_._",
+        "runtimes/win/lib/net8.0/System.Text.Encoding.CodePages.dll",
+        "runtimes/win/lib/net8.0/System.Text.Encoding.CodePages.xml",
+        "runtimes/win/lib/net9.0/System.Text.Encoding.CodePages.dll",
+        "runtimes/win/lib/net9.0/System.Text.Encoding.CodePages.xml",
+        "system.text.encoding.codepages.9.0.9.nupkg.sha512",
+        "system.text.encoding.codepages.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net9.0": [
+      "Sas7Bdat >= 2.0.2"
+    ]
+  },
+  "packageFolders": {
+    "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/../.dotnet-cli-cache/.nuget/packages/": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
+      "projectName": "SasBenchmarks",
+      "projectPath": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
+      "packagesPath": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/../.dotnet-cli-cache/.nuget/packages/",
+      "outputPath": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/NuGet.Config",
+        "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/.dotnet-cli-cache/.nuget/NuGet/NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "net9.0"
+      ],
+      "sources": {
+        "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/nuget-packages": {}
+      },
+      "frameworks": {
+        "net9.0": {
+          "targetAlias": "net9.0",
+          "projectReferences": {}
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "9.0.300"
+    },
+    "frameworks": {
+      "net9.0": {
+        "targetAlias": "net9.0",
+        "dependencies": {
+          "Sas7Bdat": {
+            "target": "Package",
+            "version": "[2.0.2, )"
+          }
+        },
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/9.0.306/PortableRuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

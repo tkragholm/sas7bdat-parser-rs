@@ -6,13 +6,11 @@
 # - Or export once in your shell:
 #   export R_PKG_DIR=/path/to/SASreaderRUST
 
-# Default R package directory (can be overridden by env var R_PKG_DIR)
-r_pkg_dir := `echo ${R_PKG_DIR:-/home/tkragholm/Development/sas7bdat-parser-rs/R-package}`
-# Core Rust crate directory (absolute path is fine for Cargo)
-core_dir := `echo ${RUST_CORE_DIR:-/home/tkragholm/Development/sas7bdat-parser-rs}`
-
-# R binary (override with R_BIN env var if needed)
-r_bin := `echo ${R_BIN:-R}`
+# Resolve project locations relative to this justfile (overridable via env vars)
+project_root := justfile_directory()
+r_pkg_dir := env_var('R_PKG_DIR', project_root + "/R-package")
+core_dir := env_var('RUST_CORE_DIR', project_root)
+r_bin := env_var('R_BIN', 'R')
 
 set shell := ["bash", "-cu"]
 

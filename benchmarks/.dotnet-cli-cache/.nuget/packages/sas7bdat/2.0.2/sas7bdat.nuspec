@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Sas7Bdat</id>
+    <version>2.0.2</version>
+    <authors>Richard O'Kelly</authors>
+    <license type="expression">Apache-2.0</license>
+    <licenseUrl>https://licenses.nuget.org/Apache-2.0</licenseUrl>
+    <icon>icon.png</icon>
+    <readme>readme.md</readme>
+    <projectUrl>https://github.com/richokelly/Sas7Bdat</projectUrl>
+    <description>High-performance, low-allocation SAS7BDAT file reader for .NETfile</description>
+    <releaseNotes>Version 2 release featuring:
+      - High-performance, incredibly fast SAS7BDAT file reading with minimal memory allocation
+      - Support for extended observation counter format (SAS 9.3+)
+      - Async enumeration with cancellation support
+      - Memory-efficient streaming using Span&lt;T&gt; and Memory&lt;T&gt;
+      - Automatic decompression (RLE and RDC)
+      - Comprehensive encoding support</releaseNotes>
+    <tags>sas sas7bdat data reader performance memory-efficient</tags>
+    <repository type="git" url="https://github.com/richokelly/Sas7Bdat" branch="refs/heads/main" commit="a4f7a35372b6984020edc68bff24e1c007e23a9f" />
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="System.Text.Encoding.CodePages" version="9.0.9" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

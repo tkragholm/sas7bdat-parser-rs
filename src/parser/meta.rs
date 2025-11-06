@@ -38,6 +38,8 @@ const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
 const SAS_PAGE_TYPE_META: u16 = 0x0000;
 const SAS_PAGE_TYPE_MIX: u16 = 0x0200;
 const SAS_PAGE_TYPE_META2: u16 = 0x4000;
+const SAS_PAGE_TYPE_AMD: u16 = 0x0400;
+const SAS_PAGE_TYPE_COMP: u16 = 0x9000;
 
 const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
 const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
@@ -232,6 +234,10 @@ where
             header.endianness,
             &buffer[(header.page_header_size as usize) - 8..],
         );
+        if (page_type & SAS_PAGE_TYPE_COMP) == SAS_PAGE_TYPE_COMP || !is_meta_page(page_type) {
+            continue;
+        }
+
         let subheaders = parse_subheaders(&buffer, header)?;
         f(page_type, subheaders)?;
     }
@@ -258,6 +264,9 @@ fn parse_subheaders<'a>(page: &'a [u8], header: &SasHeader) -> Result<Vec<Parsed
         }
         let end = pointer_info.offset + pointer_info.length;
         if end > page.len() {
+            if pointer_info.is_compressed_data {
+                continue;
+            }
             return Err(Error::Corrupted {
                 section: Section::Header,
                 details: Cow::from("subheader pointer exceeds page bounds"),
@@ -288,6 +297,7 @@ struct PointerInfo {
     offset: usize,
     length: usize,
     compression: u8,
+    is_compressed_data: bool,
 }
 
 fn parse_pointer(pointer: &[u8], header: &SasHeader) -> Result<PointerInfo> {
@@ -314,6 +324,7 @@ fn parse_pointer(pointer: &[u8], header: &SasHeader) -> Result<PointerInfo> {
             offset,
             length,
             compression: pointer[16],
+            is_compressed_data: pointer.get(17).copied().unwrap_or_default() != 0,
         })
     } else {
         if pointer.len() < 10 {
@@ -338,6 +349,7 @@ fn parse_pointer(pointer: &[u8], header: &SasHeader) -> Result<PointerInfo> {
             offset,
             length,
             compression: pointer[8],
+            is_compressed_data: pointer.get(9).copied().unwrap_or_default() != 0,
         })
     }
 }
@@ -346,6 +358,7 @@ const fn is_meta_page(page_type: u16) -> bool {
     let base_type = page_type & SAS_PAGE_TYPE_MASK;
     base_type == SAS_PAGE_TYPE_META
         || base_type == SAS_PAGE_TYPE_MIX
+        || base_type == SAS_PAGE_TYPE_AMD
         || (page_type & SAS_PAGE_TYPE_META2) == SAS_PAGE_TYPE_META2
         || page_type == 0
 }
