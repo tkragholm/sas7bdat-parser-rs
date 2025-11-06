@@ -14,12 +14,11 @@ if [[ ! -f "${FILE}" ]]; then
   exit 1
 fi
 
-PREP_CMD="benchmarks/run_rust.sh --build-only \"${FILE}\" && benchmarks/run_csharp.sh --build-only \"${FILE}\" && benchmarks/run_cpp.sh --build-only \"${FILE}\" && benchmarks/run_readstat.sh --build-only \"${FILE}\""
+PREP_CMD="benchmarks/run_rust.sh --build-only \"${FILE}\" && benchmarks/run_cpp.sh --build-only \"${FILE}\" && benchmarks/run_readstat.sh --build-only \"${FILE}\""
 
 hyperfine \
   --prepare "${PREP_CMD}" \
   "$@" \
   "benchmarks/run_rust.sh \"${FILE}\"" \
-  "benchmarks/run_csharp.sh \"${FILE}\"" \
   "benchmarks/run_readstat.sh \"${FILE}\"" \
   "benchmarks/run_cpp.sh \"${FILE}\""

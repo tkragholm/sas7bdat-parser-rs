@@ -20,13 +20,25 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FILE="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1")"
 BIN="${ROOT}/target/release/examples/benchmark"
+FEATURE_FLAGS=()
+needs_build=false
+STAMP_FILE="${ROOT}/target/benchmark_features.txt"
+
+if [[ -n "${BENCH_PARALLEL_ROWS:-}" ]]; then
+  FEATURE_FLAGS+=(--features parallel-rows)
+  needs_build=true
+fi
+
+if [[ -n "${BENCH_HOTPATH:-}" ]]; then
+  FEATURE_FLAGS+=(--features hotpath)
+  needs_build=true
+fi
 
 if [[ ! -f "${FILE}" ]]; then
   echo "Input file not found: ${FILE}" >&2
   exit 1
 fi
 
-needs_build=false
 if [[ ! -x "${BIN}" ]]; then
   needs_build=true
 elif [[ "${ROOT}/examples/benchmark.rs" -nt "${BIN}" ]]; then
@@ -35,10 +47,35 @@ elif find "${ROOT}/src" -name '*.rs' -newer "${BIN}" -print -quit | grep -q .; t
   needs_build=true
 fi
 
+current_features="none"
+if (( ${#FEATURE_FLAGS[@]} > 0 )); then
+  current_features="${FEATURE_FLAGS[*]}"
+fi
+
+if [[ -f "${STAMP_FILE}" ]]; then
+  stamp_contents="$(<"${STAMP_FILE}")"
+else
+  stamp_contents=""
+fi
+
+if [[ "${stamp_contents}" != "${current_features}" ]]; then
+  needs_build=true
+fi
+
 if [[ "${needs_build}" == true ]]; then
-  cargo build --quiet --release --example benchmark >/dev/null
+  if (( ${#FEATURE_FLAGS[@]} > 0 )); then
+    cargo build --quiet --release --example benchmark "${FEATURE_FLAGS[@]}" >/dev/null
+  else
+    cargo build --quiet --release --example benchmark >/dev/null
+  fi
+  printf '%s' "${current_features}" > "${STAMP_FILE}"
 fi
 
 if [[ "${BUILD_ONLY}" == false ]]; then
-  "${BIN}" "${FILE}"
+  if [[ -n "${BENCH_HOTPATH:-}" ]]; then
+    mkdir -p "${ROOT}/target/hotpath"
+    HOTPATH_OUT="${ROOT}/target/hotpath" "${BIN}" "${FILE}"
+  else
+    "${BIN}" "${FILE}"
+  fi
 fi

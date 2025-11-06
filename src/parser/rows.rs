@@ -9,9 +9,14 @@ use crate::parser::column::{ColumnKind, NumericKind};
 use crate::parser::meta::ParsedMetadata;
 use crate::value::{MissingValue, Value};
 use encoding_rs::{Encoding, UTF_8};
+#[cfg(feature = "parallel-rows")]
+use rayon::prelude::*;
 use simdutf8::basic;
 use smallvec::SmallVec;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
+
+#[cfg(feature = "parallel-rows")]
+const PARALLEL_CHUNK_ROWS: usize = 64;
 
 const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
 const SAS_PAGE_TYPE_DATA: u16 = 0x0100;
@@ -51,7 +56,33 @@ pub struct RowIterator<'a, R: Read + Seek> {
 
 enum RowData {
     Borrowed(usize),
-    Owned(Vec<u8>),
+   Owned(Vec<u8>),
+}
+
+impl RowData {
+    fn as_slice<'data>(
+        &'data self,
+        row_length: usize,
+        page_buffer: &'data [u8],
+        row_index: u64,
+    ) -> Result<&'data [u8]> {
+        match self {
+            Self::Borrowed(offset) => {
+                let start = *offset;
+                let end = start.saturating_add(row_length);
+                if end > page_buffer.len() {
+                    return Err(Error::Corrupted {
+                        section: Section::Row { index: row_index },
+                        details: Cow::from("row offset exceeds page bounds"),
+                    });
+                }
+                Ok(&page_buffer[start..end])
+            }
+            Self::Owned(buffer) => {
+                Ok(buffer.as_slice())
+            }
+        }
+    }
 }
 
 /// Lightweight view over a row slice with associated metadata for streaming sinks.
@@ -91,6 +122,17 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
         self.columns.len()
     }
 
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.columns.is_empty()
+    }
+
+    /// Returns the streaming cell at `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the index is out of bounds or the column slice
+    /// exceeds the row buffer.
     pub fn cell(&self, index: usize) -> Result<StreamingCell<'data, 'meta>> {
         let column = self
             .columns
@@ -121,19 +163,41 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
         })
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = Result<StreamingCell<'data, 'meta>>> + '_ {
-        self.columns
-            .iter()
-            .map(|column| self.cell_from_column(column))
+    #[must_use]
+    pub const fn iter(&self) -> StreamingRowIter<'_, 'data, 'meta> {
+        StreamingRowIter {
+            row: self,
+            index: 0,
+        }
     }
 
+    /// Materialises the row into an owned vector of values.
+    ///
+    /// # Errors
+    ///
+    /// Propagates decoding failures for individual cells.
     pub fn materialize(&self) -> Result<Vec<Value<'data>>> {
         let mut values = SmallVec::<[Value<'data>; 16]>::with_capacity(self.columns.len());
-        for cell in self.iter() {
+        self.materialize_into(&mut values)?;
+        Ok(values.into_vec())
+    }
+
+    /// Materialises the row into the provided buffer, reusing its capacity.
+    ///
+    /// # Errors
+    ///
+    /// Propagates decoding failures for individual cells.
+    pub fn materialize_into(
+        &self,
+        values: &mut SmallVec<[Value<'data>; 16]>,
+    ) -> Result<()> {
+        values.clear();
+        values.reserve(self.columns.len());
+        for cell in self {
             let cell = cell?;
             values.push(cell.decode_value()?);
         }
-        Ok(values.into_vec())
+        Ok(())
     }
 }
 
@@ -161,14 +225,19 @@ impl<'data> StreamingCell<'data, '_> {
     #[must_use]
     pub fn is_missing(&self) -> bool {
         match self.column.kind {
-            ColumnKind::Character => trim_trailing(self.slice).is_empty(),
-            ColumnKind::Numeric(_) => matches!(
-                decode_numeric_cell(self.slice, self.endianness),
-                NumericCell::Missing(_)
-            ),
+            ColumnKind::Character => is_blank(self.slice),
+            ColumnKind::Numeric(_) => {
+                let raw = numeric_bits(self.slice, self.endianness);
+                numeric_bits_is_missing(raw)
+            }
         }
     }
 
+    /// Decodes the cell into a `Value`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when decoding fails (e.g. invalid metadata).
     pub fn decode_value(&self) -> Result<Value<'data>> {
         match self.column.kind {
             ColumnKind::Character => Ok(Value::Str(decode_string(self.slice, self.encoding))),
@@ -176,12 +245,52 @@ impl<'data> StreamingCell<'data, '_> {
                 NumericCell::Missing(missing) => Ok(Value::Missing(missing)),
                 NumericCell::Number(number) => Ok(match kind {
                     NumericKind::Double => numeric_value_from_width(number, self.column.raw_width),
-                    NumericKind::Date => sas_days_to_datetime(number).map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::Date),
-                    NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::DateTime),
-                    NumericKind::Time => sas_seconds_to_time(number).map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::Time),
+                    NumericKind::Date => sas_days_to_datetime(number)
+                        .map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::Date),
+                    NumericKind::DateTime => sas_seconds_to_datetime(number)
+                        .map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::DateTime),
+                    NumericKind::Time => sas_seconds_to_time(number)
+                        .map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::Time),
                 }),
             },
         }
+    }
+}
+
+impl<'row, 'data, 'meta> IntoIterator for &'row StreamingRow<'data, 'meta> {
+    type Item = Result<StreamingCell<'data, 'meta>>;
+    type IntoIter = StreamingRowIter<'row, 'data, 'meta>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+pub struct StreamingRowIter<'row, 'data, 'meta> {
+    row: &'row StreamingRow<'data, 'meta>,
+    index: usize,
+}
+
+impl<'data, 'meta> Iterator for StreamingRowIter<'_, 'data, 'meta> {
+    type Item = Result<StreamingCell<'data, 'meta>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let column = self.row.columns.get(self.index)?;
+        self.index += 1;
+        if column.offset + column.width > self.row.data.len() {
+            return Some(Err(Error::Corrupted {
+                section: Section::Column {
+                    index: column.index,
+                },
+                details: Cow::from("column slice out of bounds"),
+            }));
+        }
+        Some(Ok(StreamingCell {
+            column,
+            slice: &self.row.data[column.offset..column.offset + column.width],
+            encoding: self.row.encoding,
+            endianness: self.row.endianness,
+        }))
     }
 }
 
@@ -318,6 +427,10 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     ///
     /// Returns `Ok(None)` when no more rows remain or `Ok(Some(()))` when a row
     /// was processed successfully.
+    ///
+    /// # Errors
+    ///
+    /// Propagates decoding failures from the iterator or errors returned by `f`.
     pub fn try_next_streaming<F>(&mut self, f: &mut F) -> Result<Option<()>>
     where
         F: for<'row> FnMut(StreamingRow<'row, '_>) -> Result<()>,
@@ -369,11 +482,107 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     /// Streams all remaining rows into the provided visitor without allocating intermediate vectors.
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures reported by the iterator or the visitor closure.
     pub fn stream_all<F>(&mut self, mut f: F) -> Result<()>
     where
         F: for<'row> FnMut(StreamingRow<'row, '_>) -> Result<()>,
     {
         while self.try_next_streaming(&mut f)?.is_some() {}
+        self.exhausted.set(true);
+        Ok(())
+    }
+
+    #[cfg(feature = "parallel-rows")]
+    /// Prototype: materialises all rows on a page in parallel and invokes `f` with owned values.
+    ///
+    /// This keeps the existing streaming API untouched while allowing benchmarks to evaluate
+    /// Rayon-based decoding throughput.
+    pub fn stream_all_parallel_owned<F>(&mut self, mut f: F) -> Result<()>
+    where
+        F: FnMut(Vec<Value<'static>>) -> Result<()>,
+    {
+        if self.exhausted.get() {
+            return Ok(());
+        }
+
+        while self.emitted_rows.get() < self.total_rows {
+            if self.row_in_page.get() >= self.page_row_count.get() {
+                if let Err(err) = self.fetch_next_page() {
+                    self.exhausted.set(true);
+                    return Err(err);
+                }
+                if self.page_row_count.get() == 0 {
+                    self.exhausted.set(true);
+                    return Ok(());
+                }
+            }
+
+            let page_total = usize::from(self.page_row_count.get());
+            let start = usize::from(self.row_in_page.get());
+            if start >= page_total {
+                continue;
+            }
+
+            let processed = {
+                let rows_slice = &self.current_rows[start..page_total];
+                if rows_slice.is_empty() {
+                    0usize
+                } else {
+                    let page_buffer = &self.page_buffer;
+                    let columns = &self.runtime_columns;
+                    let encoding = self.encoding;
+                    let endianness = self.parsed.header.endianness;
+                    let row_length = self.row_length;
+
+                    let chunk_results: Result<Vec<Vec<Vec<Value<'static>>>>> = rows_slice
+                        .par_chunks(PARALLEL_CHUNK_ROWS)
+                        .enumerate()
+                        .map(|(chunk_idx, chunk)| {
+                            let mut chunk_output: Vec<Vec<Value<'static>>> =
+                                Vec::with_capacity(chunk.len());
+                            for (offset, row_data) in chunk.iter().enumerate() {
+                                let row_index =
+                                    start + chunk_idx * PARALLEL_CHUNK_ROWS + offset;
+                                let data = row_data.as_slice(
+                                    row_length,
+                                    page_buffer,
+                                    row_index as u64,
+                                )?;
+                                let view =
+                                    StreamingRow::new(data, columns, encoding, endianness);
+                                let mut owned = Vec::with_capacity(view.len());
+                                for cell_result in view.iter() {
+                                    let cell = cell_result?;
+                                    owned.push(cell.decode_value()?.into_owned());
+                                }
+                                chunk_output.push(owned);
+                            }
+                            Ok(chunk_output)
+                        })
+                        .collect();
+
+                    for chunk in chunk_results? {
+                        for row in chunk {
+                            f(row)?;
+                        }
+                    }
+
+                    rows_slice.len()
+                }
+            };
+
+            let emitted = self.emitted_rows.get();
+            self.emitted_rows
+                .set(emitted.saturating_add(processed as u64));
+
+            let advanced = start.saturating_add(processed);
+            self.row_in_page
+                .set(u16::try_from(advanced).unwrap_or(u16::MAX));
+        }
+
         self.exhausted.set(true);
         Ok(())
     }
@@ -637,29 +846,19 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     }
 
     fn streaming_row(&self, row_index: u16) -> Result<StreamingRow<'_, '_>> {
-        let data = match self.current_rows.get(row_index as usize) {
-            Some(RowData::Borrowed(offset)) => {
-                let end = offset.saturating_add(self.row_length);
-                if end > self.page_buffer.len() {
-                    return Err(Error::Corrupted {
-                        section: Section::Row {
-                            index: u64::from(row_index),
-                        },
-                        details: Cow::from("row offset exceeds page bounds"),
-                    });
-                }
-                &self.page_buffer[*offset..end]
+        let row = self.current_rows.get(row_index as usize).ok_or_else(|| {
+            Error::Corrupted {
+                section: Section::Row {
+                    index: u64::from(row_index),
+                },
+                details: Cow::from("row index out of bounds for current page"),
             }
-            Some(RowData::Owned(buffer)) => buffer.as_slice(),
-            None => {
-                return Err(Error::Corrupted {
-                    section: Section::Row {
-                        index: u64::from(row_index),
-                    },
-                    details: Cow::from("row index out of bounds for current page"),
-                });
-            }
-        };
+        })?;
+        let data = row.as_slice(
+            self.row_length,
+            &self.page_buffer,
+            u64::from(row_index),
+        )?;
 
         Ok(StreamingRow::new(
             data,
@@ -743,7 +942,7 @@ fn maybe_fix_mojibake(value: Cow<'_, str>) -> Cow<'_, str> {
         if code >= 0x80 {
             has_extended = true;
         }
-        bytes.push(code as u8);
+        bytes.push(u8::try_from(code).expect("code <= 0xFF enforced above"));
     }
 
     if has_extended
@@ -760,26 +959,50 @@ fn decode_numeric_cell(slice: &[u8], endian: Endianness) -> NumericCell {
     if slice.is_empty() {
         return NumericCell::Missing(MissingValue::system());
     }
-    let mut raw = 0u64;
-    match endian {
-        Endianness::Little => {
-            for byte in slice.iter().rev() {
-                raw = (raw << 8) | u64::from(*byte);
-            }
-        }
-        Endianness::Big => {
-            for byte in slice {
-                raw = (raw << 8) | u64::from(*byte);
-            }
-        }
-    }
-    raw <<= (8 - slice.len()) * 8;
-    let number = f64::from_bits(raw);
-    if number.is_nan() {
+    let raw = numeric_bits(slice, endian);
+    if numeric_bits_is_missing(raw) {
         NumericCell::Missing(decode_missing_from_bits(raw))
     } else {
-        NumericCell::Number(number)
+        NumericCell::Number(f64::from_bits(raw))
     }
+}
+
+#[inline]
+fn numeric_bits(slice: &[u8], endian: Endianness) -> u64 {
+    debug_assert!(slice.len() <= 8);
+    if slice.len() == 8 {
+        match endian {
+            Endianness::Little => {
+                let bytes: [u8; 8] = slice.try_into().expect("len == 8");
+                u64::from_le_bytes(bytes)
+            }
+            Endianness::Big => {
+                let bytes: [u8; 8] = slice.try_into().expect("len == 8");
+                u64::from_be_bytes(bytes)
+            }
+        }
+    } else {
+        let mut buf = [0u8; 8];
+        match endian {
+            Endianness::Big => {
+                let len = slice.len();
+                buf[..len].copy_from_slice(slice);
+            }
+            Endianness::Little => {
+                for (idx, &byte) in slice.iter().rev().enumerate() {
+                    buf[idx] = byte;
+                }
+            }
+        }
+        u64::from_be_bytes(buf)
+    }
+}
+
+#[inline]
+const fn numeric_bits_is_missing(raw: u64) -> bool {
+    const EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
+    const FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
+    (raw & EXP_MASK) == EXP_MASK && (raw & FRACTION_MASK) != 0
 }
 
 const fn decode_missing_from_bits(raw: u64) -> MissingValue {
@@ -862,6 +1085,11 @@ fn trim_trailing(slice: &[u8]) -> &[u8] {
         Some(last) => &slice[..=last],
         None => &[],
     }
+}
+
+#[inline]
+fn is_blank(slice: &[u8]) -> bool {
+    !slice.iter().any(|&b| b != 0 && b != b' ')
 }
 
 fn resolve_encoding(label: Option<&str>) -> &'static Encoding {

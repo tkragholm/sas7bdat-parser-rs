@@ -18,3 +18,11 @@
 /home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.pdb
 /home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.genruntimeconfig.cache
 /home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/ref/SasBenchmarks.dll
+/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.GeneratedMSBuildEditorConfig.editorconfig
+/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.AssemblyInfoInputs.cache
+/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.AssemblyInfo.cs
+/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.csproj.CoreCompileInputs.cache
+/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.sourcelink.json
+/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.dll
+/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/refint/SasBenchmarks.dll
+/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/obj/Release/net9.0/SasBenchmarks.pdb

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SasBenchmarks")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+49e07a829530aa69d4189de7cd1593f5707c3c7e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c498c1393da8e915f461126fda8bab917d244fc9")]
 [assembly: System.Reflection.AssemblyProductAttribute("SasBenchmarks")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SasBenchmarks")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

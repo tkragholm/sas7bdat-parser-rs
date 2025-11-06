@@ -3,6 +3,9 @@ use std::time::Instant;
 
 use sas7bdat_parser_rs::SasFile;
 
+#[cfg(feature = "parallel-rows")]
+use sas7bdat_parser_rs::value::Value;
+
 #[cfg(feature = "hotpath")]
 use hotpath::{Format, GuardBuilder};
 
@@ -27,16 +30,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut row_count: u64 = 0;
     let mut non_null_cells: u64 = 0;
 
-    rows.stream_all(|row| {
-        row_count += 1;
-        for cell in row.iter() {
-            let cell = cell?;
-            if !cell.is_missing() {
-                non_null_cells += 1;
+    let use_parallel = std::env::var("BENCH_PARALLEL_ROWS").is_ok();
+
+    #[cfg(feature = "parallel-rows")]
+    if use_parallel {
+        rows.stream_all_parallel_owned(|values| {
+            row_count += 1;
+            for value in &values {
+                let is_missing = match value {
+                    Value::Missing(_) => true,
+                    Value::Str(text) => text.is_empty(),
+                    _ => false,
+                };
+                if !is_missing {
+                    non_null_cells += 1;
+                }
             }
+            Ok(())
+        })?;
+    } else {
+        rows.stream_all(|row| {
+            row_count += 1;
+            for cell in row.iter() {
+                let cell = cell?;
+                if !cell.is_missing() {
+                    non_null_cells += 1;
+                }
+            }
+            Ok(())
+        })?;
+    }
+
+    #[cfg(not(feature = "parallel-rows"))]
+    {
+        if use_parallel {
+            eprintln!(
+                "BENCH_PARALLEL_ROWS set but the parallel-rows feature is disabled; \
+                 running sequential benchmark instead"
+            );
         }
-        Ok(())
-    })?;
+        rows.stream_all(|row| {
+            row_count += 1;
+            for cell in row.iter() {
+                let cell = cell?;
+                if !cell.is_missing() {
+                    non_null_cells += 1;
+                }
+            }
+            Ok(())
+        })?;
+    }
 
     let elapsed = start.elapsed();
 

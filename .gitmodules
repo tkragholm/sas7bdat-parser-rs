@@ -1,3 +1,7 @@
 [submodule "benchmarks/lib/c"]
 	path = benchmarks/lib/c
 	url = https://github.com/WizardMac/ReadStat.git
+
+[submodule "benchmarks/lib/csharp"]
+	path = benchmarks/lib/csharp
+	url = https://github.com/richokelly/sas7bdat.git

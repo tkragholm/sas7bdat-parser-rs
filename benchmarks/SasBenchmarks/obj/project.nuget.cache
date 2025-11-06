@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "Nt0mD/JgtPM=",
+  "dgSpecHash": "TfkiQ1a0V6s=",
   "success": true,
-  "projectFilePath": "/home/tkragholm/Development/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
-  "expectedPackageFiles": [],
+  "projectFilePath": "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/SasBenchmarks/SasBenchmarks.csproj",
+  "expectedPackageFiles": [
+    "/Users/tobiaskragholm/dev/sas7bdat-parser-rs/benchmarks/.nuget/packages/system.text.encoding.codepages/9.0.9/system.text.encoding.codepages.9.0.9.nupkg.sha512"
+  ],
   "logs": []
 }

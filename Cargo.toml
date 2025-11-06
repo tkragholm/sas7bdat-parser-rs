@@ -38,6 +38,7 @@ hotpath-alloc-bytes-total = ["hotpath", "hotpath/hotpath-alloc-bytes-total"]
 hotpath-alloc-count-total = ["hotpath", "hotpath/hotpath-alloc-count-total"]
 hotpath-alloc-self = ["hotpath", "hotpath/hotpath-alloc-self"]
 hotpath-off = ["hotpath/hotpath-off"]
+parallel-rows = []
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

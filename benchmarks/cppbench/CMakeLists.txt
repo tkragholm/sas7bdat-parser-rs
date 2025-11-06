@@ -84,6 +84,7 @@ target_link_libraries(cppsas7bdat
 )
 
 target_compile_definitions(cppsas7bdat PRIVATE BOOST_DATE_TIME_NO_LIB)
+target_include_directories(cppsas7bdat PUBLIC ${Boost_INCLUDE_DIRS})
 
 add_executable(cpp_bench "${CMAKE_CURRENT_LIST_DIR}/src/main.cpp")
-target_link_libraries(cpp_bench PRIVATE cppsas7bdat)
+target_link_libraries(cpp_bench PRIVATE cppsas7bdat Boost::date_time)
