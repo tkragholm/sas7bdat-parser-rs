@@ -24,7 +24,7 @@ FEATURE_FLAGS=()
 needs_build=false
 STAMP_FILE="${ROOT}/target/benchmark_features.txt"
 
-if [[ -n "${BENCH_PARALLEL_ROWS:-}" ]]; then
+if [[ -n "${BENCH_PARALLEL_ROWS:-}" || -n "${BENCH_COLUMNAR:-}" ]]; then
   FEATURE_FLAGS+=(--features parallel-rows)
   needs_build=true
 fi

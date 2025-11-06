@@ -2,7 +2,8 @@ use std::env;
 use std::time::Instant;
 
 use sas7bdat_parser_rs::SasFile;
-
+#[cfg(feature = "parallel-rows")]
+use rayon::prelude::*;
 #[cfg(feature = "parallel-rows")]
 use sas7bdat_parser_rs::value::Value;
 
@@ -31,9 +32,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut non_null_cells: u64 = 0;
 
     let use_parallel = std::env::var("BENCH_PARALLEL_ROWS").is_ok();
+    let use_columnar = std::env::var("BENCH_COLUMNAR").is_ok();
 
     #[cfg(feature = "parallel-rows")]
-    if use_parallel {
+    if use_columnar {
+        let use_columnar_par = std::env::var("BENCH_COLUMNAR_PAR").is_ok();
+        const COLUMNAR_CHUNK: usize = 1024;
+        while let Some(batch) = rows.next_columnar_batch(COLUMNAR_CHUNK)? {
+            row_count += u64::try_from(batch.row_count).unwrap_or(0);
+            let batch_non_null = if use_columnar_par {
+                batch
+                    .par_columns()
+                    .map(|column| column.non_null_count())
+                    .sum::<u64>()
+            } else {
+                batch
+                    .columns()
+                    .map(|column| column.non_null_count())
+                    .sum::<u64>()
+            };
+            non_null_cells += batch_non_null;
+        }
+    } else if use_parallel {
         rows.stream_all_parallel_owned(|values| {
             row_count += 1;
             for value in &values {
@@ -63,9 +83,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(not(feature = "parallel-rows"))]
     {
-        if use_parallel {
+        if use_parallel || use_columnar {
             eprintln!(
-                "BENCH_PARALLEL_ROWS set but the parallel-rows feature is disabled; \
+                "BENCH_PARALLEL_ROWS or BENCH_COLUMNAR set but the parallel-rows feature is disabled; \
                  running sequential benchmark instead"
             );
         }

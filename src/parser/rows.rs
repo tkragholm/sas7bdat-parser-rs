@@ -6,6 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 use crate::error::{Error, Result, Section};
 use crate::metadata::{Compression, Endianness, MissingLiteral, TaggedMissing, Vendor};
 use crate::parser::column::{ColumnKind, NumericKind};
+use crate::parser::columnar::{ColumnarBatch, RuntimeColumnRef};
 use crate::parser::meta::ParsedMetadata;
 use crate::value::{MissingValue, Value};
 use encoding_rs::{Encoding, UTF_8};
@@ -17,6 +18,7 @@ use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 #[cfg(feature = "parallel-rows")]
 const PARALLEL_CHUNK_ROWS: usize = 64;
+const COLUMNAR_BATCH_ROWS: usize = 256;
 
 const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
 const SAS_PAGE_TYPE_DATA: u16 = 0x0100;
@@ -41,6 +43,7 @@ pub struct RowIterator<'a, R: Read + Seek> {
     reader: &'a mut R,
     parsed: &'a ParsedMetadata,
     runtime_columns: Vec<RuntimeColumn>,
+    columnar_columns: Vec<RuntimeColumnRef>,
     page_buffer: Vec<u8>,
     current_rows: Vec<RowData>,
     reusable_row_buffers: Vec<Vec<u8>>,
@@ -56,7 +59,7 @@ pub struct RowIterator<'a, R: Read + Seek> {
 
 enum RowData {
     Borrowed(usize),
-   Owned(Vec<u8>),
+    Owned(Vec<u8>),
 }
 
 impl RowData {
@@ -78,9 +81,7 @@ impl RowData {
                 }
                 Ok(&page_buffer[start..end])
             }
-            Self::Owned(buffer) => {
-                Ok(buffer.as_slice())
-            }
+            Self::Owned(buffer) => Ok(buffer.as_slice()),
         }
     }
 }
@@ -187,10 +188,7 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
     /// # Errors
     ///
     /// Propagates decoding failures for individual cells.
-    pub fn materialize_into(
-        &self,
-        values: &mut SmallVec<[Value<'data>; 16]>,
-    ) -> Result<()> {
+    pub fn materialize_into(&self, values: &mut SmallVec<[Value<'data>; 16]>) -> Result<()> {
         values.clear();
         values.reserve(self.columns.len());
         for cell in self {
@@ -245,12 +243,18 @@ impl<'data> StreamingCell<'data, '_> {
                 NumericCell::Missing(missing) => Ok(Value::Missing(missing)),
                 NumericCell::Number(number) => Ok(match kind {
                     NumericKind::Double => numeric_value_from_width(number, self.column.raw_width),
-                    NumericKind::Date => sas_days_to_datetime(number)
-                        .map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::Date),
-                    NumericKind::DateTime => sas_seconds_to_datetime(number)
-                        .map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::DateTime),
-                    NumericKind::Time => sas_seconds_to_time(number)
-                        .map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::Time),
+                    NumericKind::Date => sas_days_to_datetime(number).map_or_else(
+                        || numeric_value_from_width(number, self.column.raw_width),
+                        Value::Date,
+                    ),
+                    NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
+                        || numeric_value_from_width(number, self.column.raw_width),
+                        Value::DateTime,
+                    ),
+                    NumericKind::Time => sas_seconds_to_time(number).map_or_else(
+                        || numeric_value_from_width(number, self.column.raw_width),
+                        Value::Time,
+                    ),
                 }),
             },
         }
@@ -308,6 +312,17 @@ struct RuntimeColumn {
     kind: ColumnKind,
 }
 
+impl RuntimeColumn {
+    const fn as_ref(&self) -> RuntimeColumnRef {
+        RuntimeColumnRef {
+            index: self.index,
+            offset: self.offset,
+            width: self.width,
+            kind: self.kind,
+        }
+    }
+}
+
 impl<'a, R: Read + Seek> RowIterator<'a, R> {
     /// Constructs a new row iterator for the provided reader and metadata.
     ///
@@ -359,10 +374,13 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        let columnar_columns = runtime_columns.iter().map(RuntimeColumn::as_ref).collect();
+
         Ok(Self {
             reader,
             parsed,
             runtime_columns,
+            columnar_columns,
             page_buffer: vec![0u8; page_size],
             current_rows: Vec::new(),
             reusable_row_buffers: Vec::new(),
@@ -544,15 +562,10 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                             let mut chunk_output: Vec<Vec<Value<'static>>> =
                                 Vec::with_capacity(chunk.len());
                             for (offset, row_data) in chunk.iter().enumerate() {
-                                let row_index =
-                                    start + chunk_idx * PARALLEL_CHUNK_ROWS + offset;
-                                let data = row_data.as_slice(
-                                    row_length,
-                                    page_buffer,
-                                    row_index as u64,
-                                )?;
-                                let view =
-                                    StreamingRow::new(data, columns, encoding, endianness);
+                                let row_index = start + chunk_idx * PARALLEL_CHUNK_ROWS + offset;
+                                let data =
+                                    row_data.as_slice(row_length, page_buffer, row_index as u64)?;
+                                let view = StreamingRow::new(data, columns, encoding, endianness);
                                 let mut owned = Vec::with_capacity(view.len());
                                 for cell_result in view.iter() {
                                     let cell = cell_result?;
@@ -585,6 +598,76 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
 
         self.exhausted.set(true);
         Ok(())
+    }
+
+    /// Decodes the next chunk of rows into a column-oriented batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when decoding fails.
+    #[allow(clippy::missing_errors_doc)]
+    pub fn next_columnar_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> Result<Option<ColumnarBatch<'_, '_>>> {
+        if self.exhausted.get() {
+            return Ok(None);
+        }
+
+        let target = if max_rows == 0 {
+            COLUMNAR_BATCH_ROWS
+        } else {
+            max_rows
+        };
+
+        loop {
+            if self.row_in_page.get() >= self.page_row_count.get() {
+                if let Err(err) = self.fetch_next_page() {
+                    self.exhausted.set(true);
+                    return Err(err);
+                }
+                if self.page_row_count.get() == 0 {
+                    self.exhausted.set(true);
+                    return Ok(None);
+                }
+            }
+
+            let page_total = usize::from(self.page_row_count.get());
+            let start = usize::from(self.row_in_page.get());
+            if start >= page_total {
+                continue;
+            }
+
+            let available = page_total - start;
+            let chunk_len = available.min(target);
+            let row_end = start + chunk_len;
+
+            let mut row_slices: Vec<&[u8]> = Vec::with_capacity(chunk_len);
+            for (offset, row_data) in self.current_rows[start..row_end].iter().enumerate() {
+                let row_slice = row_data.as_slice(
+                    self.row_length,
+                    &self.page_buffer,
+                    (start + offset) as u64,
+                )?;
+                row_slices.push(row_slice);
+            }
+
+            self.row_in_page
+                .set(u16::try_from(row_end).unwrap_or(u16::MAX));
+            self.emitted_rows
+                .set(self.emitted_rows.get().saturating_add(chunk_len as u64));
+
+            if self.emitted_rows.get() >= self.total_rows {
+                self.exhausted.set(true);
+            }
+
+            let batch = ColumnarBatch::new(
+                row_slices,
+                &self.columnar_columns,
+                self.parsed.header.endianness,
+            );
+            return Ok(Some(batch));
+        }
     }
 
     fn recycle_current_rows(&mut self) {
@@ -846,19 +929,16 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     }
 
     fn streaming_row(&self, row_index: u16) -> Result<StreamingRow<'_, '_>> {
-        let row = self.current_rows.get(row_index as usize).ok_or_else(|| {
-            Error::Corrupted {
+        let row = self
+            .current_rows
+            .get(row_index as usize)
+            .ok_or_else(|| Error::Corrupted {
                 section: Section::Row {
                     index: u64::from(row_index),
                 },
                 details: Cow::from("row index out of bounds for current page"),
-            }
-        })?;
-        let data = row.as_slice(
-            self.row_length,
-            &self.page_buffer,
-            u64::from(row_index),
-        )?;
+            })?;
+        let data = row.as_slice(self.row_length, &self.page_buffer, u64::from(row_index))?;
 
         Ok(StreamingRow::new(
             data,
@@ -947,10 +1027,10 @@ fn maybe_fix_mojibake(value: Cow<'_, str>) -> Cow<'_, str> {
 
     if has_extended
         && let Ok(decoded) = std::str::from_utf8(&bytes)
-            && decoded != text
-        {
-            return Cow::Owned(decoded.to_owned());
-        }
+        && decoded != text
+    {
+        return Cow::Owned(decoded.to_owned());
+    }
     value
 }
 
