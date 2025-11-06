@@ -1,5 +1,5 @@
-use sas7bdat_parser_rs::parser::parse_header;
 use sas7bdat_parser_rs::metadata::Endianness;
+use sas7bdat_parser_rs::parser::parse_header;
 use std::env;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -58,8 +58,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else {
                 match header.endianness {
-                    Endianness::Little => u16::from_le_bytes(pointer[10..12].try_into().unwrap()) as u32,
-                    Endianness::Big => u16::from_be_bytes(pointer[10..12].try_into().unwrap()) as u32,
+                    Endianness::Little => {
+                        u16::from_le_bytes(pointer[10..12].try_into().unwrap()) as u32
+                    }
+                    Endianness::Big => {
+                        u16::from_be_bytes(pointer[10..12].try_into().unwrap()) as u32
+                    }
                 }
             };
             let extra_flag = pointer[if header.uses_u64 { 17 } else { 9 }];
@@ -70,8 +74,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let end = offset + length;
             if end > page.len() {
                 println!(
-                    "page {page_index} pointer {pointer_index}: offset={offset} length={length} end={end} > page_len={} compression={} extra_flag={} page_ref={}"
-                    , page.len(), compression, extra_flag, page_ref
+                    "page {page_index} pointer {pointer_index}: offset={offset} length={length} end={end} > page_len={} compression={} extra_flag={} page_ref={}",
+                    page.len(),
+                    compression,
+                    extra_flag,
+                    page_ref
                 );
             }
         }

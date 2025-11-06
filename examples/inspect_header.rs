@@ -13,7 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("page_count: {}", header.page_count);
     println!("page_header_size: {}", header.page_header_size);
     println!("subheader_pointer_size: {}", header.subheader_pointer_size);
-    println!("subheader_signature_size: {}", header.subheader_signature_size);
+    println!(
+        "subheader_signature_size: {}",
+        header.subheader_signature_size
+    );
     println!("data_offset: {}", header.data_offset);
 
     // read first page raw pointer info

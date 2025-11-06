@@ -2,7 +2,6 @@ use std::env;
 use std::time::Instant;
 
 use sas7bdat_parser_rs::SasFile;
-use sas7bdat_parser_rs::value::Value;
 
 #[cfg(feature = "hotpath")]
 use hotpath::{Format, GuardBuilder};
@@ -28,13 +27,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut row_count: u64 = 0;
     let mut non_null_cells: u64 = 0;
 
-    while let Some(row) = rows.try_next()? {
+    rows.stream_all(|row| {
         row_count += 1;
-        non_null_cells += row
-            .iter()
-            .filter(|value| !matches!(value, Value::Missing(_)))
-            .count() as u64;
-    }
+        for cell in row.iter() {
+            let cell = cell?;
+            if !cell.is_missing() {
+                non_null_cells += 1;
+            }
+        }
+        Ok(())
+    })?;
 
     let elapsed = start.elapsed();
 

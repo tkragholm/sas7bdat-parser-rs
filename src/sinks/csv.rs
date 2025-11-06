@@ -7,14 +7,14 @@ use ryu::Buffer as RyuBuffer;
 use time::{Duration, OffsetDateTime};
 
 use crate::error::{Error, Result};
-use crate::parser::{ColumnKind, NumericKind};
+use crate::parser::{ColumnKind, NumericKind, StreamingRow};
 use crate::sinks::{RowSink, SinkContext};
 use crate::value::Value;
 
 /// Writes decoded rows into a delimited text file (CSV/TSV).
 pub struct CsvSink<W: Write + Send> {
     output: Option<W>,
-    writer: Option<Writer<W>>, 
+    writer: Option<Writer<W>>,
     delimiter: u8,
     write_headers: bool,
     column_count: usize,
@@ -150,15 +150,21 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
                 ColumnKind::Character => {
                     let _ = var; // ok
                 }
-                ColumnKind::Numeric(NumericKind::Double | NumericKind::Date |
-NumericKind::DateTime | NumericKind::Time) => {}
+                ColumnKind::Numeric(
+                    NumericKind::Double
+                    | NumericKind::Date
+                    | NumericKind::DateTime
+                    | NumericKind::Time,
+                ) => {}
             }
         }
 
         self.build_writer()?;
         self.column_count = context.columns.len();
         self.record = ByteRecord::with_capacity(self.column_count, 0);
-        self.scratch = (0..self.column_count).map(|_| Vec::with_capacity(64)).collect();
+        self.scratch = (0..self.column_count)
+            .map(|_| Vec::with_capacity(64))
+            .collect();
 
         self.write_headers(&context)?;
         Ok(())
@@ -169,7 +175,8 @@ NumericKind::DateTime | NumericKind::Time) => {}
             return Err(Error::InvalidMetadata {
                 details: Cow::Owned(format!(
                     "row length {} does not match expected {}",
-                    row.len(), self.column_count
+                    row.len(),
+                    self.column_count
                 )),
             });
         }
@@ -184,6 +191,37 @@ NumericKind::DateTime | NumericKind::Time) => {}
             Self::encode_value(val, buf, &mut ryu, &mut itoa)?;
             self.record.push_field(buf);
         }
+        let writer = self.writer.as_mut().expect("csv writer must be present");
+        writer
+            .write_byte_record(&self.record)
+            .map_err(|e| Error::InvalidMetadata {
+                details: Cow::Owned(format!("csv write failed: {e}")),
+            })?;
+        Ok(())
+    }
+
+    fn write_streaming_row(&mut self, row: StreamingRow<'_, '_>) -> Result<()> {
+        if row.len() != self.column_count {
+            return Err(Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "row length {} does not match expected {}",
+                    row.len(),
+                    self.column_count
+                )),
+            });
+        }
+        self.record.clear();
+        let mut ryu = RyuBuffer::new();
+        let mut itoa = ItoaBuffer::new();
+
+        for (idx, cell_result) in row.iter().enumerate() {
+            let cell = cell_result?;
+            let value = cell.decode_value()?;
+            let buf = &mut self.scratch[idx];
+            Self::encode_value(&value, buf, &mut ryu, &mut itoa)?;
+            self.record.push_field(buf);
+        }
+
         let writer = self.writer.as_mut().expect("csv writer must be present");
         writer
             .write_byte_record(&self.record)
@@ -243,11 +281,10 @@ fn write_time(dur: &Duration, out: &mut Vec<u8>) -> Result<()> {
     let nanos_total = dur.whole_nanoseconds();
     let nanos = nanos_total - i128::from(total_seconds) * 1_000_000_000;
     // Round fractional part to nearest millisecond and carry to seconds if needed.
-    let mut millis = i64::try_from((nanos.abs() + 500_000) / 1_000_000).map_err(|_| {
-        Error::InvalidMetadata {
+    let mut millis =
+        i64::try_from((nanos.abs() + 500_000) / 1_000_000).map_err(|_| Error::InvalidMetadata {
             details: Cow::from("time millisecond rounding overflow"),
-        }
-    })?;
+        })?;
     if millis >= 1000 {
         millis = 0;
         total_seconds += if nanos_total >= 0 { 1 } else { -1 };

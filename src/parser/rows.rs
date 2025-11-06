@@ -54,6 +54,137 @@ enum RowData {
     Owned(Vec<u8>),
 }
 
+/// Lightweight view over a row slice with associated metadata for streaming sinks.
+pub struct StreamingRow<'data, 'meta> {
+    data: &'data [u8],
+    columns: &'meta [RuntimeColumn],
+    encoding: &'static Encoding,
+    endianness: Endianness,
+}
+
+/// Lightweight accessor for a single column within a streaming row.
+pub struct StreamingCell<'data, 'meta> {
+    column: &'meta RuntimeColumn,
+    slice: &'data [u8],
+    encoding: &'static Encoding,
+    endianness: Endianness,
+}
+
+impl<'data, 'meta> StreamingRow<'data, 'meta> {
+    #[must_use]
+    const fn new(
+        data: &'data [u8],
+        columns: &'meta [RuntimeColumn],
+        encoding: &'static Encoding,
+        endianness: Endianness,
+    ) -> Self {
+        Self {
+            data,
+            columns,
+            encoding,
+            endianness,
+        }
+    }
+
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.columns.len()
+    }
+
+    pub fn cell(&self, index: usize) -> Result<StreamingCell<'data, 'meta>> {
+        let column = self
+            .columns
+            .get(index)
+            .ok_or_else(|| Error::InvalidMetadata {
+                details: Cow::Owned(format!("column index {index} out of bounds")),
+            })?;
+        self.cell_from_column(column)
+    }
+
+    fn cell_from_column(
+        &self,
+        column: &'meta RuntimeColumn,
+    ) -> Result<StreamingCell<'data, 'meta>> {
+        if column.offset + column.width > self.data.len() {
+            return Err(Error::Corrupted {
+                section: Section::Column {
+                    index: column.index,
+                },
+                details: Cow::from("column slice out of bounds"),
+            });
+        }
+        Ok(StreamingCell {
+            column,
+            slice: &self.data[column.offset..column.offset + column.width],
+            encoding: self.encoding,
+            endianness: self.endianness,
+        })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Result<StreamingCell<'data, 'meta>>> + '_ {
+        self.columns
+            .iter()
+            .map(|column| self.cell_from_column(column))
+    }
+
+    pub fn materialize(&self) -> Result<Vec<Value<'data>>> {
+        let mut values = SmallVec::<[Value<'data>; 16]>::with_capacity(self.columns.len());
+        for cell in self.iter() {
+            let cell = cell?;
+            values.push(cell.decode_value()?);
+        }
+        Ok(values.into_vec())
+    }
+}
+
+impl<'data> StreamingCell<'data, '_> {
+    #[must_use]
+    pub const fn column_index(&self) -> u32 {
+        self.column.index
+    }
+
+    #[must_use]
+    pub const fn width(&self) -> usize {
+        self.column.width
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> ColumnKind {
+        self.column.kind
+    }
+
+    #[must_use]
+    pub const fn raw_slice(&self) -> &'data [u8] {
+        self.slice
+    }
+
+    #[must_use]
+    pub fn is_missing(&self) -> bool {
+        match self.column.kind {
+            ColumnKind::Character => trim_trailing(self.slice).is_empty(),
+            ColumnKind::Numeric(_) => matches!(
+                decode_numeric_cell(self.slice, self.endianness),
+                NumericCell::Missing(_)
+            ),
+        }
+    }
+
+    pub fn decode_value(&self) -> Result<Value<'data>> {
+        match self.column.kind {
+            ColumnKind::Character => Ok(Value::Str(decode_string(self.slice, self.encoding))),
+            ColumnKind::Numeric(kind) => match decode_numeric_cell(self.slice, self.endianness) {
+                NumericCell::Missing(missing) => Ok(Value::Missing(missing)),
+                NumericCell::Number(number) => Ok(match kind {
+                    NumericKind::Double => numeric_value_from_width(number, self.column.raw_width),
+                    NumericKind::Date => sas_days_to_datetime(number).map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::Date),
+                    NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::DateTime),
+                    NumericKind::Time => sas_seconds_to_time(number).map_or_else(|| numeric_value_from_width(number, self.column.raw_width), Value::Time),
+                }),
+            },
+        }
+    }
+}
+
 enum NumericCell {
     Missing(MissingValue),
     Number(f64),
@@ -180,6 +311,71 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             }
         };
         Ok(Some(row))
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    /// Advances the iterator and invokes the visitor with a zero-copy row view.
+    ///
+    /// Returns `Ok(None)` when no more rows remain or `Ok(Some(()))` when a row
+    /// was processed successfully.
+    pub fn try_next_streaming<F>(&mut self, f: &mut F) -> Result<Option<()>>
+    where
+        F: for<'row> FnMut(StreamingRow<'row, '_>) -> Result<()>,
+    {
+        if self.exhausted.get() {
+            return Ok(None);
+        }
+        if self.emitted_rows.get() >= self.total_rows {
+            self.exhausted.set(true);
+            return Ok(None);
+        }
+
+        if self.row_in_page.get() >= self.page_row_count.get() {
+            if let Err(err) = self.fetch_next_page() {
+                self.exhausted.set(true);
+                return Err(err);
+            }
+            if self.page_row_count.get() == 0 {
+                self.exhausted.set(true);
+                return Ok(None);
+            }
+        }
+
+        let row_index = self.row_in_page.get();
+        let prev_row_in_page = row_index;
+        let prev_emitted = self.emitted_rows.get();
+        self.row_in_page.set(row_index.saturating_add(1));
+        self.emitted_rows.set(prev_emitted.saturating_add(1));
+
+        let row_view = match self.streaming_row(row_index) {
+            Ok(row) => row,
+            Err(err) => {
+                self.row_in_page.set(prev_row_in_page);
+                self.emitted_rows.set(prev_emitted);
+                self.exhausted.set(true);
+                return Err(err);
+            }
+        };
+
+        if let Err(err) = f(row_view) {
+            self.row_in_page.set(prev_row_in_page);
+            self.emitted_rows.set(prev_emitted);
+            self.exhausted.set(true);
+            return Err(err);
+        }
+
+        Ok(Some(()))
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    /// Streams all remaining rows into the provided visitor without allocating intermediate vectors.
+    pub fn stream_all<F>(&mut self, mut f: F) -> Result<()>
+    where
+        F: for<'row> FnMut(StreamingRow<'row, '_>) -> Result<()>,
+    {
+        while self.try_next_streaming(&mut f)?.is_some() {}
+        self.exhausted.set(true);
+        Ok(())
     }
 
     fn recycle_current_rows(&mut self) {
@@ -440,54 +636,43 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         Ok(())
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    fn decode_row(&self, row_index: u16) -> Result<Vec<Value<'_>>> {
-        let row: &[u8] = match &self.current_rows[row_index as usize] {
-            RowData::Borrowed(offset) => &self.page_buffer[*offset..*offset + self.row_length],
-            RowData::Owned(buffer) => buffer.as_slice(),
-        };
-
-        let mut values: SmallVec<[Value<'_>; 16]> =
-            SmallVec::with_capacity(self.runtime_columns.len());
-        for column in &self.runtime_columns {
-            if column.offset + column.width > row.len() {
+    fn streaming_row(&self, row_index: u16) -> Result<StreamingRow<'_, '_>> {
+        let data = match self.current_rows.get(row_index as usize) {
+            Some(RowData::Borrowed(offset)) => {
+                let end = offset.saturating_add(self.row_length);
+                if end > self.page_buffer.len() {
+                    return Err(Error::Corrupted {
+                        section: Section::Row {
+                            index: u64::from(row_index),
+                        },
+                        details: Cow::from("row offset exceeds page bounds"),
+                    });
+                }
+                &self.page_buffer[*offset..end]
+            }
+            Some(RowData::Owned(buffer)) => buffer.as_slice(),
+            None => {
                 return Err(Error::Corrupted {
-                    section: Section::Column {
-                        index: column.index,
+                    section: Section::Row {
+                        index: u64::from(row_index),
                     },
-                    details: Cow::from("column slice out of bounds"),
+                    details: Cow::from("row index out of bounds for current page"),
                 });
             }
-            let slice = &row[column.offset..column.offset + column.width];
-            let value = match column.kind {
-                ColumnKind::Character => Value::Str(decode_string(slice, self.encoding)),
-                ColumnKind::Numeric(kind) => {
-                    match decode_numeric_cell(slice, self.parsed.header.endianness) {
-                        NumericCell::Missing(missing) => Value::Missing(missing),
-                        NumericCell::Number(number) => match kind {
-                            NumericKind::Double => {
-                                numeric_value_from_width(number, column.raw_width)
-                            }
-                            NumericKind::Date => sas_days_to_datetime(number).map_or_else(
-                                || numeric_value_from_width(number, column.raw_width),
-                                Value::Date,
-                            ),
-                            NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
-                                || numeric_value_from_width(number, column.raw_width),
-                                Value::DateTime,
-                            ),
-                            NumericKind::Time => sas_seconds_to_time(number).map_or_else(
-                                || numeric_value_from_width(number, column.raw_width),
-                                Value::Time,
-                            ),
-                        },
-                    }
-                }
-            };
-            values.push(value);
-        }
+        };
 
-        Ok(values.into_vec())
+        Ok(StreamingRow::new(
+            data,
+            &self.runtime_columns,
+            self.encoding,
+            self.parsed.header.endianness,
+        ))
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    fn decode_row(&self, row_index: u16) -> Result<Vec<Value<'_>>> {
+        let row = self.streaming_row(row_index)?;
+        row.materialize()
     }
 }
 
@@ -561,13 +746,12 @@ fn maybe_fix_mojibake(value: Cow<'_, str>) -> Cow<'_, str> {
         bytes.push(code as u8);
     }
 
-    if has_extended {
-        if let Ok(decoded) = std::str::from_utf8(&bytes)
+    if has_extended
+        && let Ok(decoded) = std::str::from_utf8(&bytes)
             && decoded != text
         {
             return Cow::Owned(decoded.to_owned());
         }
-    }
     value
 }
 
@@ -617,7 +801,7 @@ const fn decode_missing_from_bits(raw: u64) -> MissingValue {
     }
 }
 
-fn numeric_value_from_width(number: f64, width: u32) -> Value<'static> {
+fn numeric_value_from_width<'a>(number: f64, width: u32) -> Value<'a> {
     if let Some(int) = try_i64_from_f64(number) {
         if width <= 4 {
             if let Ok(value32) = i32::try_from(int) {

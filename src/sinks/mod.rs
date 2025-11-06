@@ -1,13 +1,13 @@
-mod parquet;
 mod csv;
+mod parquet;
 
 use crate::error::Result;
 use crate::metadata::DatasetMetadata;
-use crate::parser::{ColumnInfo, ParsedMetadata};
+use crate::parser::{ColumnInfo, ParsedMetadata, StreamingRow};
 use crate::value::Value;
 
-pub use parquet::ParquetSink;
 pub use csv::CsvSink;
+pub use parquet::ParquetSink;
 
 /// Provides high-level dataset information to sinks during initialisation.
 pub struct SinkContext<'a> {
@@ -40,6 +40,19 @@ pub trait RowSink {
     ///
     /// Returns an error if the row cannot be encoded or written to the underlying output.
     fn write_row(&mut self, row: &[Value<'_>]) -> Result<()>;
+
+    /// Invoked for every decoded row when using the zero-copy streaming pipeline.
+    ///
+    /// The default implementation materialises the row into a temporary `Vec<Value>`
+    /// before delegating to [`write_row`](RowSink::write_row).
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from materialisation or `write_row`.
+    fn write_streaming_row(&mut self, row: StreamingRow<'_, '_>) -> Result<()> {
+        let values = row.materialize()?;
+        self.write_row(&values)
+    }
 
     /// Called once all rows have been forwarded to the sink.
     ///

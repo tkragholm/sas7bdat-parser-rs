@@ -2,7 +2,18 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <path-to-sas7bdat>" >&2
+  echo "Usage: $0 [--build-only] <path-to-sas7bdat>" >&2
+  exit 1
+fi
+
+BUILD_ONLY=false
+if [[ "${1:-}" == "--build-only" ]]; then
+  BUILD_ONLY=true
+  shift
+fi
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 [--build-only] <path-to-sas7bdat>" >&2
   exit 1
 fi
 
@@ -71,4 +82,6 @@ if [[ "${needs_build}" == true ]]; then
   cc "${CFLAGS[@]}" "${SOURCES[@]}" -o "${BIN}" "${LIBS[@]}"
 fi
 
-"${BIN}" "${FILE}"
+if [[ "${BUILD_ONLY}" == false ]]; then
+  "${BIN}" "${FILE}"
+fi

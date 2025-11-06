@@ -9,6 +9,8 @@ large `sas7bdat` sources into modern, ergonomic data structures efficiently.
   extraction zero-copy for the common case.
 - ✅ Integrate `smallvec` allocations for row decoding to keep the hot path on the
   stack when column counts are modest.
+- ✅ Added a streaming row view (`StreamingRow`/`StreamingCell`) and sink hook so
+  adapters can process rows without materialising an intermediate `Vec<Value>`.
 - Maintain a pool of reusable row buffers (e.g. `SmallVec`) so we can recycle the
   allocation used to hold decoded `Value`s when iterating over large datasets.
 - Cache decoded column names and labels in the metadata builder to avoid

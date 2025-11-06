@@ -2,16 +2,27 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <path-to-sas7bdat>" >&2
+  echo "Usage: $0 [--build-only] <path-to-sas7bdat>" >&2
+  exit 1
+fi
+
+BUILD_ONLY=false
+if [[ "${1:-}" == "--build-only" ]]; then
+  BUILD_ONLY=true
+  shift
+fi
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 [--build-only] <path-to-sas7bdat>" >&2
   exit 1
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FILE="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1")"
 PROJECT_DIR="${ROOT}/benchmarks/SasBenchmarks"
 PROJECT_FILE="${PROJECT_DIR}/SasBenchmarks.csproj"
 LIB_PROJECT_DIR="${ROOT}/benchmarks/lib/csharp/Sas7Bdat.Core"
 LIB_PROJECT_FILE="${LIB_PROJECT_DIR}/Sas7Bdat.Core.csproj"
-FILE="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1")"
 CONFIG_FILE="${ROOT}/benchmarks/NuGet.Config"
 realpath_py() {
   python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"
@@ -19,7 +30,9 @@ realpath_py() {
 CACHE_DIR="$(realpath_py "${PROJECT_DIR}/../.dotnet-cli-cache")"
 NUGET_DIR="$(realpath_py "${PROJECT_DIR}/../.nuget")"
 ASSETS_FILE="${PROJECT_DIR}/obj/project.assets.json"
-OUTPUT_DLL="${PROJECT_DIR}/bin/Debug/net9.0/SasBenchmarks.dll"
+FRAMEWORK="net9.0"
+CONFIGURATION="Release"
+OUTPUT_DLL="${PROJECT_DIR}/bin/${CONFIGURATION}/${FRAMEWORK}/SasBenchmarks.dll"
 
 if [[ ! -f "${FILE}" ]]; then
   echo "Input file not found: ${FILE}" >&2
@@ -79,7 +92,10 @@ if [[ "${needs_restore}" == true ]]; then
 fi
 
 if [[ "${needs_build}" == true ]]; then
-  run_dotnet build --nologo --verbosity quiet --no-restore "${PROJECT_FILE}" >/dev/null
+  run_dotnet build --nologo --verbosity quiet --no-restore "${PROJECT_FILE}" \
+    -c "${CONFIGURATION}" >/dev/null
 fi
 
-run_dotnet run --no-build --no-restore --project "${PROJECT_FILE}" -- "${FILE}"
+if [[ "${BUILD_ONLY}" == false ]]; then
+  run_dotnet exec "${OUTPUT_DLL}" "${FILE}"
+fi

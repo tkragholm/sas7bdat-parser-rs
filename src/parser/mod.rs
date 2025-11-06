@@ -10,4 +10,4 @@ pub use column::{
 };
 pub use header::{SasHeader, parse_header};
 pub use meta::{ParsedMetadata, parse_metadata};
-pub use rows::{RowIterator, row_iterator};
+pub use rows::{RowIterator, StreamingCell, StreamingRow, row_iterator};

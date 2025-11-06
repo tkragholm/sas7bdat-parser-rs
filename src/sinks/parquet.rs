@@ -563,9 +563,7 @@ impl ColumnPlan {
     fn coerce_utf8(&mut self, value: &Value<'_>) -> Option<ByteArray> {
         match value {
             Value::Missing(_) => None,
-            Value::Str(text) | Value::NumericString(text) => {
-                Some(ByteArray::from(text.as_ref()))
-            }
+            Value::Str(text) | Value::NumericString(text) => Some(ByteArray::from(text.as_ref())),
             Value::Bytes(bytes) => Some(ByteArray::from(bytes.as_ref())),
             Value::Float(v) => {
                 let scratch = self

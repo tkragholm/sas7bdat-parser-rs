@@ -559,9 +559,7 @@ impl<R: Read + Seek> SasFile<R> {
         let context = SinkContext::new(&self.metadata);
         sink.begin(context)?;
         let mut iterator = self.metadata.row_iterator(&mut self.reader)?;
-        while let Some(row) = iterator.try_next()? {
-            sink.write_row(&row)?;
-        }
+        iterator.stream_all(|row| sink.write_streaming_row(row))?;
         sink.finish()?;
         self.reader.seek(SeekFrom::Start(0))?;
         Ok(())

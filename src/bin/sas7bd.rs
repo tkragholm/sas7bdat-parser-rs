@@ -5,13 +5,17 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
-use sas7bdat_parser_rs::{CsvSink, ParquetSink, RowSink, SasFile};
-use sas7bdat_parser_rs::parser::ColumnInfo;
 use sas7bdat_parser_rs::metadata::DatasetMetadata;
+use sas7bdat_parser_rs::parser::ColumnInfo;
 use sas7bdat_parser_rs::value::Value;
+use sas7bdat_parser_rs::{CsvSink, ParquetSink, RowSink, SasFile};
 
 #[derive(Parser)]
-#[command(name = "sas7bd", version, about = "Batch convert SAS7BDAT to Parquet/CSV/TSV")] 
+#[command(
+    name = "sas7bd",
+    version,
+    about = "Batch convert SAS7BDAT to Parquet/CSV/TSV"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -39,7 +43,7 @@ struct ConvertArgs {
     inputs: Vec<PathBuf>,
 
     /// Output directory (computed file names).
-    #[arg(long, conflicts_with = "out")] 
+    #[arg(long, conflicts_with = "out")]
     out_dir: Option<PathBuf>,
 
     /// Output file (only valid with a single input).
@@ -121,7 +125,9 @@ fn main() -> Result<(), AnyError> {
 fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
     if let Some(jobs) = args.jobs {
         // Best-effort: configure global rayon pool once. Ignore error if already set.
-        let _ = rayon::ThreadPoolBuilder::new().num_threads(jobs).build_global();
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(jobs)
+            .build_global();
     }
 
     let files = discover_inputs(&args.inputs);
@@ -197,7 +203,10 @@ fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
                 index: v.index,
                 name: v.name.clone(),
                 label: v.label.clone(),
-                kind: match v.kind { sas7bdat_parser_rs::metadata::VariableKind::Numeric => "numeric", sas7bdat_parser_rs::metadata::VariableKind::Character => "character" },
+                kind: match v.kind {
+                    sas7bdat_parser_rs::metadata::VariableKind::Numeric => "numeric",
+                    sas7bdat_parser_rs::metadata::VariableKind::Character => "character",
+                },
                 format: v.format.as_ref().map(|f| f.name.clone()),
                 width: v.storage_width,
             })
@@ -239,11 +248,7 @@ fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
     Ok(())
 }
 
-fn convert_one(
-    input: &Path,
-    output: &Path,
-    args: &ConvertArgs,
-) -> Result<(), AnyError> {
+fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), AnyError> {
     // Prepare reader and metadata
     let mut sas = SasFile::open(input)?;
     if let Some(cat) = &args.catalog {
@@ -252,7 +257,8 @@ fn convert_one(
     let (mut reader, parsed) = sas.into_parts();
 
     // Resolve projection
-    let (indices, meta_filtered, cols_filtered) = resolve_projection(&parsed.header.metadata, &parsed.columns, args)?;
+    let (indices, meta_filtered, cols_filtered) =
+        resolve_projection(&parsed.header.metadata, &parsed.columns, args)?;
 
     // Build sink
     let sink_kind = args.sink;
@@ -339,7 +345,9 @@ fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
     let mut projected: Vec<Value<'static>> = Vec::new();
 
     loop {
-        if options.indices.is_some() { projected.clear(); }
+        if options.indices.is_some() {
+            projected.clear();
+        }
         let Some(row) = it.try_next()? else { break };
         if skipped < to_skip {
             skipped += 1;
@@ -357,9 +365,13 @@ fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
         }
 
         if let Some(rem) = remaining.as_mut() {
-            if *rem == 0 { break; }
+            if *rem == 0 {
+                break;
+            }
             *rem -= 1;
-            if *rem == 0 { break; }
+            if *rem == 0 {
+                break;
+            }
         }
     }
     sink.finish()?;
@@ -376,8 +388,14 @@ fn resolve_projection(
     if let Some(ref idxs) = args.column_indices {
         let mut seen = std::collections::HashSet::with_capacity(idxs.len());
         for &i in idxs {
-            if i >= column_count { return Err(format!("column index {i} out of range ({column_count} columns)").into()); }
-            if !seen.insert(i) { return Err(format!("duplicate column index {i}").into()); }
+            if i >= column_count {
+                return Err(
+                    format!("column index {i} out of range ({column_count} columns)").into(),
+                );
+            }
+            if !seen.insert(i) {
+                return Err(format!("duplicate column index {i}").into());
+            }
         }
         indices = Some(idxs.clone());
     } else if let Some(ref names) = args.columns {
@@ -385,22 +403,33 @@ fn resolve_projection(
         let mut map = std::collections::HashMap::with_capacity(meta.variables.len());
         for v in &meta.variables {
             map.entry(v.name.clone()).or_insert(v.index as usize);
-            map.entry(v.name.trim_end().to_owned()).or_insert(v.index as usize);
+            map.entry(v.name.trim_end().to_owned())
+                .or_insert(v.index as usize);
         }
         let mut resolved = Vec::with_capacity(names.len());
         let mut seen = std::collections::HashSet::with_capacity(names.len());
         for name in names {
-            let key = if let Some(&idx) = map.get(name) { idx } else if let Some(&idx) = map.get(name.trim_end()) { idx } else {
+            let key = if let Some(&idx) = map.get(name) {
+                idx
+            } else if let Some(&idx) = map.get(name.trim_end()) {
+                idx
+            } else {
                 return Err(format!("column '{name}' not found").into());
             };
-            if !seen.insert(key) { return Err(format!("duplicate column '{name}' (index {key})").into()); }
+            if !seen.insert(key) {
+                return Err(format!("duplicate column '{name}' (index {key})").into());
+            }
             resolved.push(key);
         }
-        if resolved.is_empty() { return Err("projection resolved to empty set".into()); }
+        if resolved.is_empty() {
+            return Err("projection resolved to empty set".into());
+        }
         indices = Some(resolved);
     }
 
-    let selected: Vec<usize> = indices.clone().unwrap_or_else(|| (0..column_count).collect());
+    let selected: Vec<usize> = indices
+        .clone()
+        .unwrap_or_else(|| (0..column_count).collect());
 
     // Filter metadata clone and columns to match the projection
     let mut filtered = meta.clone();
@@ -425,7 +454,11 @@ fn discover_inputs(inputs: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for input in inputs {
         if input.is_dir() {
-            for entry in WalkDir::new(input).follow_links(false).into_iter().filter_map(Result::ok) {
+            for entry in WalkDir::new(input)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(Result::ok)
+            {
                 let path = entry.path();
                 if path.is_file() && is_sas7bdat(path) {
                     files.push(path.to_path_buf());
@@ -445,7 +478,8 @@ fn discover_inputs(inputs: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 fn is_sas7bdat(path: &Path) -> bool {
-    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("sas7bdat"))
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("sas7bdat"))
 }
 
 fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
