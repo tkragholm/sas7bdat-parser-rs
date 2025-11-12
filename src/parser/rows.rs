@@ -564,7 +564,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                                     row_data.as_slice(row_length, page_buffer, row_index as u64)?;
                                 let view = StreamingRow::new(data, columns, encoding, endianness);
                                 let mut owned = Vec::with_capacity(view.len());
-                                for cell_result in view.iter() {
+                                for cell_result in &view {
                                     let cell = cell_result?;
                                     owned.push(cell.decode_value()?.into_owned());
                                 }
@@ -602,7 +602,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     /// # Errors
     ///
     /// Returns an error when decoding fails.
-    #[allow(clippy::missing_errors_doc)]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn next_columnar_batch(&mut self, max_rows: usize) -> Result<Option<ColumnarBatch<'_>>> {
         if self.exhausted.get() {
             return Ok(None);
@@ -677,7 +677,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    #[allow(clippy::too_many_lines)]
     fn fetch_next_page(&mut self) -> Result<()> {
         let header = &self.parsed.header;
         let row_length = self.row_length;
@@ -1161,8 +1160,29 @@ fn trim_trailing(slice: &[u8]) -> &[u8] {
 }
 
 #[inline]
+const fn repeat_byte_usize(byte: u8) -> usize {
+    let mut value = 0usize;
+    let mut i = 0usize;
+    while i < (usize::BITS / 8) as usize {
+        value |= (byte as usize) << (i * 8);
+        i += 1;
+    }
+    value
+}
+
+const USIZE_BYTES: usize = std::mem::size_of::<usize>();
+const SPACE_MASK_USIZE: usize = repeat_byte_usize(b' ');
+
+#[inline]
 fn is_blank(slice: &[u8]) -> bool {
-    !slice.iter().any(|&b| b != 0 && b != b' ')
+    let mut chunks = slice.chunks_exact(USIZE_BYTES);
+    for chunk in chunks.by_ref() {
+        let word = usize::from_ne_bytes(chunk.try_into().unwrap());
+        if word & !SPACE_MASK_USIZE != 0 {
+            return false;
+        }
+    }
+    chunks.remainder().iter().all(|&b| b == 0 || b == b' ')
 }
 
 #[derive(Clone, Copy)]
@@ -1181,7 +1201,7 @@ pub struct ColumnarBatch<'rows> {
 }
 
 impl<'rows> ColumnarBatch<'rows> {
-    #[allow(clippy::missing_const_for_fn)]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     #[must_use]
     fn new(
         row_slices: SmallVec<[&'rows [u8]; COLUMNAR_INLINE_ROWS]>,
@@ -1220,6 +1240,7 @@ impl<'rows> ColumnarBatch<'rows> {
         })
     }
 
+    #[must_use]
     pub fn par_columns(
         &self,
     ) -> impl rayon::prelude::ParallelIterator<Item = ColumnarColumn<'_, 'rows>> {
@@ -1238,7 +1259,7 @@ pub struct ColumnarColumn<'batch, 'rows> {
     endianness: Endianness,
 }
 
-impl<'batch, 'rows> ColumnarColumn<'batch, 'rows> {
+impl ColumnarColumn<'_, '_> {
     #[must_use]
     pub const fn index(&self) -> u32 {
         self.column.index
@@ -1251,6 +1272,11 @@ impl<'batch, 'rows> ColumnarColumn<'batch, 'rows> {
 
     fn row_slice(&self, row_index: usize) -> Option<&[u8]> {
         self.rows.get(row_index).copied()
+    }
+
+    #[inline]
+    fn column_slice<'a>(&self, row: &'a [u8]) -> Option<&'a [u8]> {
+        row.get(self.column.offset..self.column.offset + self.column.width)
     }
 
     #[must_use]
@@ -1282,37 +1308,29 @@ impl<'batch, 'rows> ColumnarColumn<'batch, 'rows> {
     #[must_use]
     pub fn non_null_count(&self) -> u64 {
         match self.column.kind {
-            ColumnKind::Numeric(_) => self
-                .rows
-                .iter()
-                .enumerate()
-                .filter(|&(idx, _)| {
-                    self.row_slice(idx)
-                        .and_then(|slice| {
-                            slice
-                                .get(self.column.offset..self.column.offset + self.column.width)
-                                .map(|data| {
-                                    !numeric_bits_is_missing(numeric_bits(data, self.endianness))
-                                })
-                        })
-                        .unwrap_or(false)
-                })
-                .count() as u64,
-            ColumnKind::Character => self
-                .rows
-                .iter()
-                .enumerate()
-                .filter(|&(idx, _)| {
-                    self.row_slice(idx)
-                        .and_then(|slice| {
-                            slice
-                                .get(self.column.offset..self.column.offset + self.column.width)
-                                .map(|data| !is_blank(data))
-                        })
-                        .unwrap_or(false)
-                })
-                .count() as u64,
+            ColumnKind::Numeric(_) => self.numeric_non_null_count(),
+            ColumnKind::Character => self.character_non_null_count(),
         }
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    fn numeric_non_null_count(&self) -> u64 {
+        self.rows
+            .iter()
+            .copied()
+            .filter_map(|row| self.column_slice(row))
+            .filter(|data| !numeric_bits_is_missing(numeric_bits(data, self.endianness)))
+            .count() as u64
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    fn character_non_null_count(&self) -> u64 {
+        self.rows
+            .iter()
+            .copied()
+            .filter_map(|row| self.column_slice(row))
+            .filter(|data| !is_blank(data))
+            .count() as u64
     }
 }
 
@@ -1400,7 +1418,6 @@ const fn signature_is_recognized(signature: u32) -> bool {
     )
 }
 
-#[allow(clippy::too_many_lines)]
 fn decompress_rle(
     input: &[u8],
     expected_len: usize,

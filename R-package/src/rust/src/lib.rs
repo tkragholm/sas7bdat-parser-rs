@@ -1,7 +1,7 @@
 // Example functions
 
-use savvy::savvy;
 use savvy::NotAvailableValue;
+use savvy::savvy;
 use savvy::{
     IntegerSexp, OwnedIntegerSexp, OwnedListSexp, OwnedRealSexp, OwnedStringSexp, StringSexp,
 };
@@ -10,10 +10,10 @@ use std::fs::File;
 use std::io::BufWriter;
 
 // Bring in the core crate
+use sas7bdat_parser_rs::SasFile;
 use sas7bdat_parser_rs::metadata::{VariableKind, Vendor};
 use sas7bdat_parser_rs::sinks::{CsvSink, ParquetSink};
 use sas7bdat_parser_rs::value::Value;
-use sas7bdat_parser_rs::SasFile;
 
 /// Convert Input To Upper-Case
 ///
@@ -286,7 +286,6 @@ impl NumericColumn {
         }
     }
 
-    #[allow(clippy::cast_precision_loss)]
     fn push(&mut self, value: &Value<'_>, column_name: &str) -> savvy::Result<()> {
         match value {
             Value::Missing(_) => self.values.push(f64::NAN),
@@ -509,8 +508,8 @@ fn write_sas(path: &str, sink: &str, output: &str) -> savvy::Result<()> {
     let sink_kind = sink.trim().to_ascii_lowercase();
     match sink_kind.as_str() {
         "parquet" => {
-            let file = File::create(output)
-                .map_err(|e| map_io_err("create parquet file", output, e))?;
+            let file =
+                File::create(output).map_err(|e| map_io_err("create parquet file", output, e))?;
             let mut writer = ParquetSink::new(file);
             sas.write_into_sink(&mut writer).map_err(map_core_err)?;
         }

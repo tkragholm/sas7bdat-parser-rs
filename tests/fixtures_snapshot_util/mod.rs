@@ -36,7 +36,6 @@ pub fn absolute_path(path: &Path) -> PathBuf {
     }
 }
 
-#[allow(dead_code)]
 pub fn snapshot_name(path: &Path) -> String {
     relative_to_manifest(path)
         .iter()

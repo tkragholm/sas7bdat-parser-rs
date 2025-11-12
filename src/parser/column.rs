@@ -498,7 +498,6 @@ pub fn parse_column_name_subheader(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 pub fn parse_column_attrs_subheader(
     builder: &mut ColumnMetadataBuilder,
     bytes: &[u8],

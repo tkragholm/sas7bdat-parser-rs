@@ -38,7 +38,6 @@ pub fn value_to_json(value: &Value<'_>) -> JsonValue {
     }
 }
 
-#[allow(dead_code)]
 pub fn format_iso_seconds(dt: &OffsetDateTime) -> String {
     let rounded = round_to_millisecond(dt);
     let date = rounded.date();
@@ -63,12 +62,10 @@ pub fn format_iso_seconds(dt: &OffsetDateTime) -> String {
     }
 }
 
-#[allow(dead_code)]
 pub fn format_iso_date(dt: &OffsetDateTime) -> String {
     dt.date().to_string()
 }
 
-#[allow(dead_code)]
 pub fn round_to_millisecond(dt: &OffsetDateTime) -> OffsetDateTime {
     let nanos = dt.time().nanosecond() as u64;
     let mut millis = (nanos + 500_000) / 1_000_000;
