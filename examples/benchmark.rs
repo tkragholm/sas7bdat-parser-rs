@@ -1,11 +1,8 @@
-use std::env;
-use std::time::Instant;
-
-#[cfg(feature = "parallel-rows")]
 use rayon::prelude::*;
 use sas7bdat_parser_rs::SasFile;
-#[cfg(feature = "parallel-rows")]
 use sas7bdat_parser_rs::value::Value;
+use std::env;
+use std::time::Instant;
 
 #[cfg(feature = "hotpath")]
 use hotpath::{Format, GuardBuilder};
@@ -34,7 +31,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let use_parallel = std::env::var("BENCH_PARALLEL_ROWS").is_ok();
     let use_columnar = std::env::var("BENCH_COLUMNAR").is_ok();
 
-    #[cfg(feature = "parallel-rows")]
     if use_columnar {
         let use_columnar_par = std::env::var("BENCH_COLUMNAR_PAR").is_ok();
         const COLUMNAR_CHUNK: usize = 1024;
@@ -69,26 +65,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })?;
     } else {
-        rows.stream_all(|row| {
-            row_count += 1;
-            for cell in row.iter() {
-                let cell = cell?;
-                if !cell.is_missing() {
-                    non_null_cells += 1;
-                }
-            }
-            Ok(())
-        })?;
-    }
-
-    #[cfg(not(feature = "parallel-rows"))]
-    {
-        if use_parallel || use_columnar {
-            eprintln!(
-                "BENCH_PARALLEL_ROWS or BENCH_COLUMNAR set but the parallel-rows feature is disabled; \
-                 running sequential benchmark instead"
-            );
-        }
         rows.stream_all(|row| {
             row_count += 1;
             for cell in row.iter() {

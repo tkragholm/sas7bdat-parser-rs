@@ -38,7 +38,6 @@ hotpath-alloc-bytes-total = ["hotpath", "hotpath/hotpath-alloc-bytes-total"]
 hotpath-alloc-count-total = ["hotpath", "hotpath/hotpath-alloc-count-total"]
 hotpath-alloc-self = ["hotpath", "hotpath/hotpath-alloc-self"]
 hotpath-off = ["hotpath/hotpath-off"]
-parallel-rows = []
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -68,3 +67,11 @@ harness = false
 [[bin]]
 name = "sas7bd"
 path = "src/bin/sas7bd.rs"
+
+[lints.clippy]
+pedantic = "warn"
+nursery = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
