@@ -1159,7 +1159,6 @@ fn trim_trailing(slice: &[u8]) -> &[u8] {
     }
 }
 
-#[inline]
 const fn repeat_byte_usize(byte: u8) -> usize {
     let mut value = 0usize;
     let mut i = 0usize;
