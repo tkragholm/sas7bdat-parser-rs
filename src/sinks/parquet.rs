@@ -362,71 +362,62 @@ impl ColumnPlan {
         match self.encoder {
             ColumnValueEncoder::Double => {
                 let coerced = self.coerce_numeric(value)?;
-                match (&mut self.values, coerced) {
-                    (ColumnValues::Double(values), Some(v)) => {
-                        self.def_levels.push(1);
-                        values.push(v);
-                    }
-                    (ColumnValues::Double(_), None) => {
-                        self.def_levels.push(0);
+                match &mut self.values {
+                    ColumnValues::Double(values) => {
+                        Self::push_optional(&mut self.def_levels, values, coerced);
                     }
                     _ => unreachable!("column value encoder mismatch"),
                 }
             }
             ColumnValueEncoder::Date => {
                 let coerced = self.coerce_date(value)?;
-                match (&mut self.values, coerced) {
-                    (ColumnValues::Int32(values), Some(v)) => {
-                        self.def_levels.push(1);
-                        values.push(v);
-                    }
-                    (ColumnValues::Int32(_), None) => {
-                        self.def_levels.push(0);
+                match &mut self.values {
+                    ColumnValues::Int32(values) => {
+                        Self::push_optional(&mut self.def_levels, values, coerced);
                     }
                     _ => unreachable!("column value encoder mismatch"),
                 }
             }
             ColumnValueEncoder::DateTime => {
                 let coerced = self.coerce_timestamp(value)?;
-                match (&mut self.values, coerced) {
-                    (ColumnValues::Int64(values), Some(v)) => {
-                        self.def_levels.push(1);
-                        values.push(v);
-                    }
-                    (ColumnValues::Int64(_), None) => {
-                        self.def_levels.push(0);
+                match &mut self.values {
+                    ColumnValues::Int64(values) => {
+                        Self::push_optional(&mut self.def_levels, values, coerced);
                     }
                     _ => unreachable!("column value encoder mismatch"),
                 }
             }
             ColumnValueEncoder::Time => {
                 let coerced = self.coerce_time(value)?;
-                match (&mut self.values, coerced) {
-                    (ColumnValues::Int64(values), Some(v)) => {
-                        self.def_levels.push(1);
-                        values.push(v);
-                    }
-                    (ColumnValues::Int64(_), None) => {
-                        self.def_levels.push(0);
+                match &mut self.values {
+                    ColumnValues::Int64(values) => {
+                        Self::push_optional(&mut self.def_levels, values, coerced);
                     }
                     _ => unreachable!("column value encoder mismatch"),
                 }
             }
             ColumnValueEncoder::Utf8 => {
                 let coerced = self.coerce_utf8(value);
-                match (&mut self.values, coerced) {
-                    (ColumnValues::ByteArray(values), Some(bytes)) => {
-                        self.def_levels.push(1);
-                        values.push(bytes);
-                    }
-                    (ColumnValues::ByteArray(_), None) => {
-                        self.def_levels.push(0);
+                match &mut self.values {
+                    ColumnValues::ByteArray(values) => {
+                        Self::push_optional(&mut self.def_levels, values, coerced);
                     }
                     _ => unreachable!("column value encoder mismatch"),
                 }
             }
         }
         Ok(())
+    }
+
+    #[inline]
+    fn push_optional<T>(def_levels: &mut Vec<i16>, values: &mut Vec<T>, value: Option<T>) {
+        match value {
+            Some(v) => {
+                def_levels.push(1);
+                values.push(v);
+            }
+            None => def_levels.push(0),
+        }
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]

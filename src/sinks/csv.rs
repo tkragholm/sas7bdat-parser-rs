@@ -124,6 +124,18 @@ impl<W: Write + Send> CsvSink<W> {
         }
         Ok(())
     }
+
+    fn ensure_row_len(&self, len: usize) -> Result<()> {
+        if len != self.column_count {
+            return Err(Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "row length {len} does not match expected {}",
+                    self.column_count
+                )),
+            });
+        }
+        Ok(())
+    }
 }
 
 impl<W: Write + Send> RowSink for CsvSink<W> {
@@ -171,15 +183,7 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
     }
 
     fn write_row(&mut self, row: &[Value<'_>]) -> Result<()> {
-        if row.len() != self.column_count {
-            return Err(Error::InvalidMetadata {
-                details: Cow::Owned(format!(
-                    "row length {} does not match expected {}",
-                    row.len(),
-                    self.column_count
-                )),
-            });
-        }
+        self.ensure_row_len(row.len())?;
         self.record.clear();
         // Local number formatting buffers to avoid borrowing self while
         // holding a mutable borrow of a scratch column buffer.
@@ -201,15 +205,7 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
     }
 
     fn write_streaming_row(&mut self, row: StreamingRow<'_, '_>) -> Result<()> {
-        if row.len() != self.column_count {
-            return Err(Error::InvalidMetadata {
-                details: Cow::Owned(format!(
-                    "row length {} does not match expected {}",
-                    row.len(),
-                    self.column_count
-                )),
-            });
-        }
+        self.ensure_row_len(row.len())?;
         self.record.clear();
         let mut ryu = RyuBuffer::new();
         let mut itoa = ItoaBuffer::new();

@@ -316,6 +316,7 @@ fn parse_block(
     Ok(Some(label_set))
 }
 
+#[allow(clippy::too_many_lines)]
 fn parse_value_labels(
     bytes: &[u8],
     header: &SasHeader,

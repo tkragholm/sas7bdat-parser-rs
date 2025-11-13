@@ -520,6 +520,10 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     ///
     /// This keeps the existing streaming API untouched while allowing benchmarks to evaluate
     /// Rayon-based decoding throughput.
+    ///
+    /// # Errors
+    ///
+    /// Propagates decoding failures, page fetch errors, or any error returned by the visitor `f`.
     pub fn stream_all_parallel_owned<F>(&mut self, mut f: F) -> Result<()>
     where
         F: FnMut(Vec<Value<'static>>) -> Result<()>,
@@ -675,6 +679,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    #[allow(clippy::too_many_lines)]
     fn fetch_next_page(&mut self) -> Result<()> {
         let header = &self.parsed.header;
         let row_length = self.row_length;
@@ -1267,7 +1272,6 @@ impl ColumnarColumn<'_, '_> {
         row.get(self.column.offset..self.column.offset + self.column.width)
     }
 
-    #[must_use]
     pub fn iter_numeric_bits(&self) -> impl Iterator<Item = Option<u64>> + '_ {
         (0..self.rows.len()).map(move |idx| {
             self.row_slice(idx).and_then(|slice| {
@@ -1282,7 +1286,6 @@ impl ColumnarColumn<'_, '_> {
         })
     }
 
-    #[must_use]
     pub fn iter_character_bytes(&self) -> impl Iterator<Item = Option<&[u8]>> + '_ {
         (0..self.rows.len()).map(move |idx| {
             self.row_slice(idx).and_then(|slice| {
@@ -1347,6 +1350,7 @@ const fn signature_is_recognized(signature: u32) -> bool {
     )
 }
 
+#[allow(clippy::too_many_lines)]
 fn decompress_rle(
     input: &[u8],
     expected_len: usize,

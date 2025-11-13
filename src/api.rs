@@ -93,15 +93,7 @@ impl ReadOptions {
 
     fn resolve_projection(&self, metadata: &DatasetMetadata) -> Result<Option<Vec<usize>>> {
         if let Some(indices) = &self.column_indices {
-            let mut seen = HashSet::with_capacity(indices.len());
-            for &index in indices {
-                if !seen.insert(index) {
-                    return Err(Error::InvalidMetadata {
-                        details: format!("duplicate column projection index {index} in options")
-                            .into(),
-                    });
-                }
-            }
+            Self::ensure_unique_indices(indices)?;
             return Ok(Some(indices.clone()));
         }
 
@@ -124,28 +116,12 @@ impl ReadOptions {
         let mut seen = HashSet::with_capacity(names.len());
         for name in names {
             if let Some(index) = lookup.get(name) {
-                if !seen.insert(*index) {
-                    return Err(Error::InvalidMetadata {
-                        details: format!(
-                            "column projection resolves duplicate column index {index} for name '{name}'"
-                        )
-                        .into(),
-                    });
-                }
-                resolved.push(*index);
+                Self::insert_projection_index(name, *index, &mut seen, &mut resolved)?;
                 continue;
             }
             let normalized = name.trim_end();
             if let Some(index) = lookup.get(normalized) {
-                if !seen.insert(*index) {
-                    return Err(Error::InvalidMetadata {
-                        details: format!(
-                            "column projection resolves duplicate column index {index} for name '{name}'"
-                        )
-                        .into(),
-                    });
-                }
-                resolved.push(*index);
+                Self::insert_projection_index(name, *index, &mut seen, &mut resolved)?;
                 continue;
             }
             return Err(Error::InvalidMetadata {
@@ -159,6 +135,37 @@ impl ReadOptions {
         }
         Ok(Some(resolved))
     }
+
+    fn ensure_unique_indices(indices: &[usize]) -> Result<()> {
+        let mut seen = HashSet::with_capacity(indices.len());
+        for &index in indices {
+            if !seen.insert(index) {
+                return Err(Error::InvalidMetadata {
+                    details: format!("duplicate column projection index {index} in options")
+                        .into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn insert_projection_index(
+        name: &str,
+        index: usize,
+        seen: &mut HashSet<usize>,
+        resolved: &mut Vec<usize>,
+    ) -> Result<()> {
+        if !seen.insert(index) {
+            return Err(Error::InvalidMetadata {
+                details: format!(
+                    "column projection resolves duplicate column index {index} for name '{name}'"
+                )
+                .into(),
+            });
+        }
+        resolved.push(index);
+        Ok(())
+    }
 }
 
 pub struct ProjectedRows<'a, R: Read + Seek> {
@@ -166,6 +173,22 @@ pub struct ProjectedRows<'a, R: Read + Seek> {
     indices: Vec<usize>,
     sorted_indices: Vec<(usize, usize)>,
     exhausted: bool,
+}
+
+trait SkippableRows {
+    fn advance(&mut self) -> Result<bool>;
+}
+
+impl<R: Read + Seek> SkippableRows for RowIterator<'_, R> {
+    fn advance(&mut self) -> Result<bool> {
+        Ok(self.try_next()?.is_some())
+    }
+}
+
+impl<R: Read + Seek> SkippableRows for ProjectedRows<'_, R> {
+    fn advance(&mut self) -> Result<bool> {
+        Ok(self.try_next()?.is_some())
+    }
 }
 
 pub struct WindowedRows<'a, R: Read + Seek> {
@@ -193,16 +216,11 @@ impl<'a, R: Read + Seek> WindowedRows<'a, R> {
     }
 
     fn consume_skip(&mut self) -> Result<Option<()>> {
-        while self.skip_remaining > 0 {
-            if (self.inner.try_next()?).is_some() {
-                self.skip_remaining = self.skip_remaining.saturating_sub(1);
-            } else {
-                self.skipped = true;
-                return Ok(None);
-            }
-        }
-        self.skipped = true;
-        Ok(Some(()))
+        consume_skip_helper(
+            &mut self.skip_remaining,
+            &mut self.skipped,
+            &mut self.inner,
+        )
     }
 
     /// Advances the iterator by one row.
@@ -215,18 +233,7 @@ impl<'a, R: Read + Seek> WindowedRows<'a, R> {
         if !self.skipped && self.consume_skip()?.is_none() {
             return Ok(None);
         }
-        if matches!(self.remaining, Some(0)) {
-            return Ok(None);
-        }
-        let row = self.inner.try_next()?;
-        if let Some(row) = row {
-            if let Some(remaining) = self.remaining.as_mut() {
-                *remaining = remaining.saturating_sub(1);
-            }
-            Ok(Some(row))
-        } else {
-            Ok(None)
-        }
+        fetch_with_remaining(&mut self.remaining, self.inner.try_next())
     }
 }
 
@@ -234,14 +241,9 @@ impl<R: Read + Seek> Iterator for WindowedRows<'_, R> {
     type Item = Result<Vec<Value<'static>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.try_next() {
-            Ok(Some(row)) => {
-                let owned = row.into_iter().map(Value::into_owned).collect();
-                Some(Ok(owned))
-            }
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
-        }
+        map_next(self.try_next(), |row| {
+            row.into_iter().map(Value::into_owned).collect()
+        })
     }
 }
 
@@ -256,16 +258,11 @@ impl<'a, R: Read + Seek> WindowedProjectedRows<'a, R> {
     }
 
     fn consume_skip(&mut self) -> Result<Option<()>> {
-        while self.skip_remaining > 0 {
-            if (self.inner.try_next()?).is_some() {
-                self.skip_remaining = self.skip_remaining.saturating_sub(1);
-            } else {
-                self.skipped = true;
-                return Ok(None);
-            }
-        }
-        self.skipped = true;
-        Ok(Some(()))
+        consume_skip_helper(
+            &mut self.skip_remaining,
+            &mut self.skipped,
+            &mut self.inner,
+        )
     }
 
     /// Advances the iterator by one row.
@@ -278,18 +275,7 @@ impl<'a, R: Read + Seek> WindowedProjectedRows<'a, R> {
         if !self.skipped && self.consume_skip()?.is_none() {
             return Ok(None);
         }
-        if matches!(self.remaining, Some(0)) {
-            return Ok(None);
-        }
-        let row = self.inner.try_next()?;
-        if let Some(row) = row {
-            if let Some(remaining) = self.remaining.as_mut() {
-                *remaining = remaining.saturating_sub(1);
-            }
-            Ok(Some(row))
-        } else {
-            Ok(None)
-        }
+        fetch_with_remaining(&mut self.remaining, self.inner.try_next())
     }
 }
 
@@ -297,12 +283,52 @@ impl<R: Read + Seek> Iterator for WindowedProjectedRows<'_, R> {
     type Item = Result<Vec<Value<'static>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.try_next() {
-            Ok(Some(row)) => Some(Ok(row)),
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
+        map_next(self.try_next(), |row| row)
+    }
+}
+
+fn map_next<T, F>(result: Result<Option<T>>, mut map_row: F) -> Option<Result<Vec<Value<'static>>>>
+where
+    F: FnMut(T) -> Vec<Value<'static>>,
+{
+    match result {
+        Ok(Some(row)) => Some(Ok(map_row(row))),
+        Ok(None) => None,
+        Err(err) => Some(Err(err)),
+    }
+}
+
+fn fetch_with_remaining<T>(
+    remaining: &mut Option<u64>,
+    row: Result<Option<T>>,
+) -> Result<Option<T>> {
+    if matches!(remaining, Some(0)) {
+        return Ok(None);
+    }
+    let row = row?;
+    row.map_or_else(|| Ok(None), |row| {
+        if let Some(rem) = remaining.as_mut() {
+            *rem = rem.saturating_sub(1);
+        }
+        Ok(Some(row))
+    })
+}
+
+fn consume_skip_helper<S: SkippableRows>(
+    skip_remaining: &mut u64,
+    skipped: &mut bool,
+    source: &mut S,
+) -> Result<Option<()>> {
+    while *skip_remaining > 0 {
+        if source.advance()? {
+            *skip_remaining = skip_remaining.saturating_sub(1);
+        } else {
+            *skipped = true;
+            return Ok(None);
         }
     }
+    *skipped = true;
+    Ok(Some(()))
 }
 
 impl SasFile<File> {
