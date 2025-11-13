@@ -3,6 +3,9 @@
 .python-version
 .uv_cache/
 
+# Rust rover
+.idea/
+
 # Rust build artifacts
 /target/
 debug/
