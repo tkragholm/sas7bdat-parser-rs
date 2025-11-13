@@ -57,7 +57,7 @@ impl TextStore {
 
     #[must_use]
     pub fn blob(&self, index: usize) -> Option<&[u8]> {
-        self.blobs.get(index).map(std::vec::Vec::as_slice)
+        self.blobs.get(index).map(Vec::as_slice)
     }
 
     /// Resolves a `TextRef` into a UTF-8 string if possible.
@@ -345,7 +345,7 @@ impl ColumnMetadataBuilder {
                 self.text_store
                     .resolve(column.format_ref)
                     .ok()
-                    .and_then(|opt| opt.map(std::borrow::Cow::into_owned)),
+                    .and_then(|opt| opt.map(Cow::into_owned)),
             );
         }
 
@@ -368,6 +368,12 @@ pub fn expected_remainder(len: usize, signature_len: usize) -> Option<u16> {
     }
     let remainder = len - base;
     u16::try_from(remainder).ok()
+}
+
+#[inline]
+const fn subheader_entries(len: usize, uses_u64: bool, chunk_width: usize) -> usize {
+    let base = if uses_u64 { 28 } else { 20 };
+    len.saturating_sub(base) / chunk_width
 }
 
 pub fn parse_text_ref(endian: Endianness, bytes: &[u8]) -> TextRef {
@@ -437,11 +443,7 @@ pub fn parse_column_name_subheader(
     }
 
     let chunk_width = 8;
-    let entries = if uses_u64 {
-        (bytes.len().saturating_sub(28)) / chunk_width
-    } else {
-        (bytes.len().saturating_sub(20)) / chunk_width
-    };
+    let entries = subheader_entries(bytes.len(), uses_u64, chunk_width);
 
     if entries == 0 {
         return Ok(());
@@ -500,11 +502,7 @@ pub fn parse_column_attrs_subheader(
     }
 
     let row_size = if uses_u64 { 16 } else { 12 };
-    let entries = if uses_u64 {
-        (bytes.len().saturating_sub(28)) / row_size
-    } else {
-        (bytes.len().saturating_sub(20)) / row_size
-    };
+    let entries = subheader_entries(bytes.len(), uses_u64, row_size);
     if entries == 0 {
         return Ok(());
     }

@@ -411,6 +411,13 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         Ok(true)
     }
 
+    #[inline]
+    fn revert_row_progress(&self, prev_row_in_page: u16, prev_emitted: u64) {
+        self.row_in_page.set(prev_row_in_page);
+        self.emitted_rows.set(prev_emitted);
+        self.exhausted.set(true);
+    }
+
     /// Advances the iterator by one row.
     ///
     /// # Errors
@@ -440,9 +447,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         let row = match row_result {
             Ok(row) => row,
             Err(err) => {
-                self.row_in_page.set(prev_row_in_page);
-                self.emitted_rows.set(prev_emitted);
-                self.exhausted.set(true);
+                self.revert_row_progress(prev_row_in_page, prev_emitted);
                 return Err(err);
             }
         };
@@ -483,17 +488,13 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         let row_view = match self.streaming_row(row_index) {
             Ok(row) => row,
             Err(err) => {
-                self.row_in_page.set(prev_row_in_page);
-                self.emitted_rows.set(prev_emitted);
-                self.exhausted.set(true);
+                self.revert_row_progress(prev_row_in_page, prev_emitted);
                 return Err(err);
             }
         };
 
         if let Err(err) = f(row_view) {
-            self.row_in_page.set(prev_row_in_page);
-            self.emitted_rows.set(prev_emitted);
-            self.exhausted.set(true);
+            self.revert_row_progress(prev_row_in_page, prev_emitted);
             return Err(err);
         }
 
