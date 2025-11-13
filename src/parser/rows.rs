@@ -7,6 +7,7 @@ use crate::error::{Error, Result, Section};
 use crate::metadata::{Compression, Endianness, MissingLiteral, TaggedMissing, Vendor};
 use crate::parser::column::{ColumnKind, NumericKind};
 use crate::parser::meta::ParsedMetadata;
+use super::encoding::{resolve_encoding, trim_trailing};
 use crate::value::{MissingValue, Value};
 use encoding_rs::{Encoding, UTF_8};
 use rayon::prelude::*;
@@ -393,6 +394,21 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         })
     }
 
+    #[inline]
+    fn ensure_page_ready(&mut self) -> Result<bool> {
+        if self.row_in_page.get() >= self.page_row_count.get() {
+            if let Err(err) = self.fetch_next_page() {
+                self.exhausted.set(true);
+                return Err(err);
+            }
+            if self.page_row_count.get() == 0 {
+                self.exhausted.set(true);
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// Advances the iterator by one row.
     ///
     /// # Errors
@@ -408,15 +424,8 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             return Ok(None);
         }
 
-        if self.row_in_page.get() >= self.page_row_count.get() {
-            if let Err(err) = self.fetch_next_page() {
-                self.exhausted.set(true);
-                return Err(err);
-            }
-            if self.page_row_count.get() == 0 {
-                self.exhausted.set(true);
-                return Ok(None);
-            }
+        if !self.ensure_page_ready()? {
+            return Ok(None);
         }
 
         let row_index = self.row_in_page.get();
@@ -459,15 +468,8 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             return Ok(None);
         }
 
-        if self.row_in_page.get() >= self.page_row_count.get() {
-            if let Err(err) = self.fetch_next_page() {
-                self.exhausted.set(true);
-                return Err(err);
-            }
-            if self.page_row_count.get() == 0 {
-                self.exhausted.set(true);
-                return Ok(None);
-            }
+        if !self.ensure_page_ready()? {
+            return Ok(None);
         }
 
         let row_index = self.row_in_page.get();
@@ -615,15 +617,8 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         };
 
         loop {
-            if self.row_in_page.get() >= self.page_row_count.get() {
-                if let Err(err) = self.fetch_next_page() {
-                    self.exhausted.set(true);
-                    return Err(err);
-                }
-                if self.page_row_count.get() == 0 {
-                    self.exhausted.set(true);
-                    return Ok(None);
-                }
+            if !self.ensure_page_ready()? {
+                return Ok(None);
             }
 
             let page_total = usize::from(self.page_row_count.get());
@@ -1152,13 +1147,6 @@ fn try_i64_from_f64(value: f64) -> Option<i64> {
     i64::try_from(signed).ok()
 }
 
-fn trim_trailing(slice: &[u8]) -> &[u8] {
-    match slice.iter().rposition(|b| *b != 0 && *b != b' ') {
-        Some(last) => &slice[..=last],
-        None => &[],
-    }
-}
-
 const fn repeat_byte_usize(byte: u8) -> usize {
     let mut value = 0usize;
     let mut i = 0usize;
@@ -1169,7 +1157,7 @@ const fn repeat_byte_usize(byte: u8) -> usize {
     value
 }
 
-const USIZE_BYTES: usize = std::mem::size_of::<usize>();
+const USIZE_BYTES: usize = size_of::<usize>();
 const SPACE_MASK_USIZE: usize = repeat_byte_usize(b' ');
 
 #[inline]
@@ -1240,9 +1228,7 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 
     #[must_use]
-    pub fn par_columns(
-        &self,
-    ) -> impl rayon::prelude::ParallelIterator<Item = ColumnarColumn<'_, 'rows>> {
+    pub fn par_columns(&self) -> impl ParallelIterator<Item = ColumnarColumn<'_, 'rows>> {
         let rows = self.row_slices.as_slice();
         self.columns.par_iter().map(move |column| ColumnarColumn {
             column,
@@ -1330,44 +1316,6 @@ impl ColumnarColumn<'_, '_> {
             .filter_map(|row| self.column_slice(row))
             .filter(|data| !is_blank(data))
             .count() as u64
-    }
-}
-
-fn resolve_encoding(label: Option<&str>) -> &'static Encoding {
-    label
-        .and_then(|name| {
-            let trimmed = name.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            try_encoding_label(trimmed).or_else(|| {
-                let lower = trimmed.to_ascii_lowercase();
-                try_encoding_label(&lower)
-                    .or_else(|| try_encoding_label(&lower.replace('_', "-")))
-                    .or_else(|| mac_compat_encoding(&lower))
-            })
-        })
-        .unwrap_or(UTF_8)
-}
-
-fn try_encoding_label(label: &str) -> Option<&'static Encoding> {
-    Encoding::for_label(label.as_bytes())
-}
-
-fn mac_compat_encoding(lower_label: &str) -> Option<&'static Encoding> {
-    match lower_label {
-        "macroman" => Encoding::for_label(b"macintosh"),
-        "macarabic" => Encoding::for_label(b"x-mac-arabic"),
-        "machebrew" => Encoding::for_label(b"x-mac-hebrew"),
-        "macgreek" => Encoding::for_label(b"x-mac-greek"),
-        "macthai" => Encoding::for_label(b"x-mac-thai"),
-        "macturkish" => Encoding::for_label(b"x-mac-turkish"),
-        "macukraine" => Encoding::for_label(b"x-mac-ukrainian"),
-        "maciceland" => Encoding::for_label(b"x-mac-icelandic"),
-        "maccroatian" => Encoding::for_label(b"x-mac-croatian"),
-        "maccyrillic" => Encoding::for_label(b"x-mac-cyrillic"),
-        "macromania" => Encoding::for_label(b"x-mac-romanian"),
-        _ => None,
     }
 }
 
@@ -1643,24 +1591,7 @@ fn sas_epoch() -> PrimitiveDateTime {
     )
 }
 
-fn sas_days_to_datetime(days: f64) -> Option<OffsetDateTime> {
-    if !days.is_finite() {
-        return None;
-    }
-    let seconds = days * 86_400.0;
-    let duration = Duration::seconds_f64(seconds.abs());
-    if seconds >= 0.0 {
-        sas_epoch()
-            .checked_add(duration)
-            .map(time::PrimitiveDateTime::assume_utc)
-    } else {
-        sas_epoch()
-            .checked_sub(duration)
-            .map(time::PrimitiveDateTime::assume_utc)
-    }
-}
-
-fn sas_seconds_to_datetime(seconds: f64) -> Option<OffsetDateTime> {
+fn sas_offset_datetime(seconds: f64) -> Option<OffsetDateTime> {
     if !seconds.is_finite() {
         return None;
     }
@@ -1668,12 +1599,20 @@ fn sas_seconds_to_datetime(seconds: f64) -> Option<OffsetDateTime> {
     if seconds >= 0.0 {
         sas_epoch()
             .checked_add(duration)
-            .map(time::PrimitiveDateTime::assume_utc)
+            .map(PrimitiveDateTime::assume_utc)
     } else {
         sas_epoch()
             .checked_sub(duration)
-            .map(time::PrimitiveDateTime::assume_utc)
+            .map(PrimitiveDateTime::assume_utc)
     }
+}
+
+fn sas_days_to_datetime(days: f64) -> Option<OffsetDateTime> {
+    sas_offset_datetime(days * 86_400.0)
+}
+
+fn sas_seconds_to_datetime(seconds: f64) -> Option<OffsetDateTime> {
+    sas_offset_datetime(seconds)
 }
 
 fn sas_seconds_to_time(seconds: f64) -> Option<Duration> {
@@ -1758,6 +1697,7 @@ pub fn row_iterator<'a, R: Read + Seek>(
 mod tests {
     use super::*;
     use std::borrow::Cow;
+    use crate::parser::encoding::resolve_encoding;
 
     #[test]
     fn decode_respects_encoding_and_trimming() {

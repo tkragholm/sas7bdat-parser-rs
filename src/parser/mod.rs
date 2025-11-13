@@ -1,5 +1,6 @@
 mod catalog;
 mod column;
+mod encoding;
 mod header;
 mod meta;
 mod rows;

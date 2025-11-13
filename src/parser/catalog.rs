@@ -3,11 +3,12 @@ use std::cmp::min;
 use std::convert::{TryFrom, TryInto};
 use std::io::{Read, Seek, SeekFrom};
 
-use encoding_rs::{Encoding, UTF_8};
+use encoding_rs::Encoding;
 
 use crate::error::{Error, Result, Section};
 use crate::metadata::{LabelSet, ValueKey, ValueLabel, ValueType};
 use crate::parser::header::{SasHeader, parse_header};
+use super::encoding::{resolve_encoding, trim_trailing};
 
 const SAS_CATALOG_FIRST_INDEX_PAGE: u64 = 1;
 const SAS_CATALOG_USELESS_PAGES: u64 = 3;
@@ -580,13 +581,6 @@ fn decode_text(bytes: &[u8], encoding: &'static Encoding) -> Result<String> {
     )
 }
 
-fn trim_trailing(bytes: &[u8]) -> &[u8] {
-    match bytes.iter().rposition(|b| *b != 0 && *b != b' ') {
-        Some(last) => &bytes[..=last],
-        None => &[],
-    }
-}
-
 fn read_u16(endian: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
     match endian {
         crate::metadata::Endianness::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
@@ -610,42 +604,4 @@ fn read_u64(endian: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
 
 fn read_u64_be(bytes: &[u8]) -> u64 {
     u64::from_be_bytes(bytes[0..8].try_into().unwrap())
-}
-
-fn resolve_encoding(label: Option<&str>) -> &'static Encoding {
-    label
-        .and_then(|name| {
-            let trimmed = name.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            try_encoding_label(trimmed).or_else(|| {
-                let lower = trimmed.to_ascii_lowercase();
-                try_encoding_label(&lower)
-                    .or_else(|| try_encoding_label(&lower.replace('_', "-")))
-                    .or_else(|| mac_compat_encoding(&lower))
-            })
-        })
-        .unwrap_or(UTF_8)
-}
-
-fn try_encoding_label(label: &str) -> Option<&'static Encoding> {
-    Encoding::for_label(label.as_bytes())
-}
-
-fn mac_compat_encoding(lower_label: &str) -> Option<&'static Encoding> {
-    match lower_label {
-        "macroman" => Encoding::for_label(b"macintosh"),
-        "macarabic" => Encoding::for_label(b"x-mac-arabic"),
-        "machebrew" => Encoding::for_label(b"x-mac-hebrew"),
-        "macgreek" => Encoding::for_label(b"x-mac-greek"),
-        "macthai" => Encoding::for_label(b"x-mac-thai"),
-        "macturkish" => Encoding::for_label(b"x-mac-turkish"),
-        "macukraine" => Encoding::for_label(b"x-mac-ukrainian"),
-        "maciceland" => Encoding::for_label(b"x-mac-icelandic"),
-        "maccroatian" => Encoding::for_label(b"x-mac-croatian"),
-        "maccyrillic" => Encoding::for_label(b"x-mac-cyrillic"),
-        "macromania" => Encoding::for_label(b"x-mac-romanian"),
-        _ => None,
-    }
 }
