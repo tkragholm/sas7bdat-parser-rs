@@ -15,6 +15,8 @@ use simdutf8::basic;
 use smallvec::SmallVec;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
+use super::byteorder::{read_u16, read_u32, read_u64};
+
 const PARALLEL_CHUNK_ROWS: usize = 64;
 const COLUMNAR_BATCH_ROWS: usize = 256;
 const COLUMNAR_INLINE_ROWS: usize = 32;
@@ -687,7 +689,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             let page_index = self.next_page_index;
             self.next_page_index += 1;
 
-            let page_type = read_u16_at(
+            let page_type = read_u16(
                 header.endianness,
                 &self.page_buffer[(header.page_header_size as usize) - 8..],
             );
@@ -697,7 +699,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
 
             let base_page_type = page_type & SAS_PAGE_TYPE_MASK;
 
-            let mut page_row_count = read_u16_at(
+            let mut page_row_count = read_u16(
                 header.endianness,
                 &self.page_buffer[(header.page_header_size as usize) - 6..],
             );
@@ -711,7 +713,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
 
             let subheader_count_pos = header.page_header_size as usize - 4;
             let subheader_count =
-                read_u16_at(header.endianness, &self.page_buffer[subheader_count_pos..]);
+                read_u16(header.endianness, &self.page_buffer[subheader_count_pos..]);
 
             let pointer_size = header.subheader_pointer_size as usize;
             let mut ptr_cursor = header.page_header_size as usize;
@@ -1319,34 +1321,13 @@ impl ColumnarColumn<'_, '_> {
     }
 }
 
-fn read_u16_at(endian: Endianness, bytes: &[u8]) -> u16 {
-    match endian {
-        Endianness::Little => u16::from_le_bytes(bytes[0..2].try_into().unwrap()),
-        Endianness::Big => u16::from_be_bytes(bytes[0..2].try_into().unwrap()),
-    }
-}
-
-fn read_u32_at(endian: Endianness, bytes: &[u8]) -> u32 {
-    match endian {
-        Endianness::Little => u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
-        Endianness::Big => u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
-    }
-}
-
-fn read_u64_at(endian: Endianness, bytes: &[u8]) -> u64 {
-    match endian {
-        Endianness::Little => u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
-        Endianness::Big => u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
-    }
-}
-
 fn read_signature(data: &[u8], endian: Endianness, uses_u64: bool) -> u32 {
     if data.len() < 4 {
         return 0;
     }
-    let mut signature = read_u32_at(endian, &data[0..4]);
+    let mut signature = read_u32(endian, &data[0..4]);
     if matches!(endian, Endianness::Big) && signature == u32::MAX && uses_u64 && data.len() >= 8 {
-        signature = read_u32_at(endian, &data[4..8]);
+        signature = read_u32(endian, &data[4..8]);
     }
     signature
 }
@@ -1637,12 +1618,12 @@ fn parse_pointer(pointer: &[u8], uses_u64: bool, endian: Endianness) -> Result<P
                 details: Cow::from("64-bit pointer too short"),
             });
         }
-        let offset = usize::try_from(read_u64_at(endian, &pointer[0..8])).map_err(|_| {
+        let offset = usize::try_from(read_u64(endian, &pointer[0..8])).map_err(|_| {
             Error::Unsupported {
                 feature: Cow::from("64-bit pointer offset exceeds platform pointer width"),
             }
         })?;
-        let length = usize::try_from(read_u64_at(endian, &pointer[8..16])).map_err(|_| {
+        let length = usize::try_from(read_u64(endian, &pointer[8..16])).map_err(|_| {
             Error::Unsupported {
                 feature: Cow::from("64-bit pointer length exceeds platform pointer width"),
             }
@@ -1660,12 +1641,12 @@ fn parse_pointer(pointer: &[u8], uses_u64: bool, endian: Endianness) -> Result<P
                 details: Cow::from("32-bit pointer too short"),
             });
         }
-        let offset = usize::try_from(read_u32_at(endian, &pointer[0..4])).map_err(|_| {
+        let offset = usize::try_from(read_u32(endian, &pointer[0..4])).map_err(|_| {
             Error::Unsupported {
                 feature: Cow::from("32-bit pointer offset exceeds platform pointer width"),
             }
         })?;
-        let length = usize::try_from(read_u32_at(endian, &pointer[4..8])).map_err(|_| {
+        let length = usize::try_from(read_u32(endian, &pointer[4..8])).map_err(|_| {
             Error::Unsupported {
                 feature: Cow::from("32-bit pointer length exceeds platform pointer width"),
             }

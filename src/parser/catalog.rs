@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::min;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::io::{Read, Seek, SeekFrom};
 
 use encoding_rs::Encoding;
@@ -8,6 +8,7 @@ use encoding_rs::Encoding;
 use crate::error::{Error, Result, Section};
 use crate::metadata::{LabelSet, ValueKey, ValueLabel, ValueType};
 use crate::parser::header::{SasHeader, parse_header};
+use super::byteorder::{read_u16, read_u32, read_u64, read_u64_be};
 use super::encoding::{resolve_encoding, trim_trailing};
 
 const SAS_CATALOG_FIRST_INDEX_PAGE: u64 = 1;
@@ -579,29 +580,4 @@ fn decode_text(bytes: &[u8], encoding: &'static Encoding) -> Result<String> {
         },
         |text| Ok(text.trim_end_matches('\u{0000}').to_string()),
     )
-}
-
-fn read_u16(endian: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
-    match endian {
-        crate::metadata::Endianness::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
-        crate::metadata::Endianness::Big => u16::from_be_bytes([bytes[0], bytes[1]]),
-    }
-}
-
-fn read_u32(endian: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
-    match endian {
-        crate::metadata::Endianness::Little => u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
-        crate::metadata::Endianness::Big => u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
-    }
-}
-
-fn read_u64(endian: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
-    match endian {
-        crate::metadata::Endianness::Little => u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
-        crate::metadata::Endianness::Big => u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
-    }
-}
-
-fn read_u64_be(bytes: &[u8]) -> u64 {
-    u64::from_be_bytes(bytes[0..8].try_into().unwrap())
 }

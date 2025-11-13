@@ -9,6 +9,7 @@ use crate::parser::column::{
     parse_column_format_subheader, parse_column_list_subheader, parse_column_name_subheader,
     parse_column_size_subheader, parse_column_text_subheader, parse_row_size_subheader,
 };
+use super::byteorder::{read_u16, read_u32, read_u64};
 use crate::parser::header::{SasHeader, parse_header};
 
 #[derive(Debug)]
@@ -230,7 +231,7 @@ where
         reader.seek(SeekFrom::Start(offset)).map_err(Error::from)?;
         reader.read_exact(&mut buffer).map_err(Error::from)?;
 
-        let page_type = read_u16_at(
+        let page_type = read_u16(
             header.endianness,
             &buffer[(header.page_header_size as usize) - 8..],
         );
@@ -246,7 +247,7 @@ where
 
 fn parse_subheaders<'a>(page: &'a [u8], header: &SasHeader) -> Result<Vec<ParsedSubheader<'a>>> {
     let subheader_count_pos = header.page_header_size as usize - 4;
-    let subheader_count = read_u16_at(header.endianness, &page[subheader_count_pos..]);
+    let subheader_count = read_u16(header.endianness, &page[subheader_count_pos..]);
 
     let mut subheaders = Vec::new();
     let pointer_size = header.subheader_pointer_size as usize;
@@ -278,13 +279,13 @@ fn parse_subheaders<'a>(page: &'a [u8], header: &SasHeader) -> Result<Vec<Parsed
             continue;
         }
 
-        let mut signature = read_u32_at(header.endianness, &data[0..4]);
+        let mut signature = read_u32(header.endianness, &data[0..4]);
         if !matches!(header.endianness, crate::metadata::Endianness::Little)
             && header.uses_u64
             && signature == u32::MAX
             && data.len() >= 8
         {
-            signature = read_u32_at(header.endianness, &data[4..8]);
+            signature = read_u32(header.endianness, &data[4..8]);
         }
 
         subheaders.push(ParsedSubheader { signature, data });
@@ -309,13 +310,13 @@ fn parse_pointer(pointer: &[u8], header: &SasHeader) -> Result<PointerInfo> {
             });
         }
         let offset =
-            usize::try_from(read_u64_at(header.endianness, &pointer[0..8])).map_err(|_| {
+            usize::try_from(read_u64(header.endianness, &pointer[0..8])).map_err(|_| {
                 Error::Unsupported {
                     feature: Cow::from("metadata subheader offset exceeds platform pointer width"),
                 }
             })?;
         let length =
-            usize::try_from(read_u64_at(header.endianness, &pointer[8..16])).map_err(|_| {
+            usize::try_from(read_u64(header.endianness, &pointer[8..16])).map_err(|_| {
                 Error::Unsupported {
                     feature: Cow::from("metadata subheader length exceeds platform pointer width"),
                 }
@@ -334,13 +335,13 @@ fn parse_pointer(pointer: &[u8], header: &SasHeader) -> Result<PointerInfo> {
             });
         }
         let offset =
-            usize::try_from(read_u32_at(header.endianness, &pointer[0..4])).map_err(|_| {
+            usize::try_from(read_u32(header.endianness, &pointer[0..4])).map_err(|_| {
                 Error::Unsupported {
                     feature: Cow::from("metadata subheader offset exceeds platform pointer width"),
                 }
             })?;
         let length =
-            usize::try_from(read_u32_at(header.endianness, &pointer[4..8])).map_err(|_| {
+            usize::try_from(read_u32(header.endianness, &pointer[4..8])).map_err(|_| {
                 Error::Unsupported {
                     feature: Cow::from("metadata subheader length exceeds platform pointer width"),
                 }
@@ -361,25 +362,4 @@ const fn is_meta_page(page_type: u16) -> bool {
         || base_type == SAS_PAGE_TYPE_AMD
         || (page_type & SAS_PAGE_TYPE_META2) == SAS_PAGE_TYPE_META2
         || page_type == 0
-}
-
-fn read_u16_at(endian: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
-    match endian {
-        crate::metadata::Endianness::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
-        crate::metadata::Endianness::Big => u16::from_be_bytes([bytes[0], bytes[1]]),
-    }
-}
-
-fn read_u32_at(endian: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
-    match endian {
-        crate::metadata::Endianness::Little => u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
-        crate::metadata::Endianness::Big => u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
-    }
-}
-
-fn read_u64_at(endian: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
-    match endian {
-        crate::metadata::Endianness::Little => u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
-        crate::metadata::Endianness::Big => u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
-    }
 }

@@ -5,6 +5,7 @@ use crate::error::{Error, Result, Section};
 use crate::metadata::{
     Alignment, Compression, Endianness, Format, Measure, MissingValuePolicy, Variable, VariableKind,
 };
+use super::byteorder::{read_i16, read_u16, read_u32, read_u64};
 
 /// Reference into the text blob storage used by SAS column metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,34 +368,6 @@ pub fn expected_remainder(len: usize, signature_len: usize) -> Option<u16> {
     }
     let remainder = len - base;
     u16::try_from(remainder).ok()
-}
-
-pub fn read_u16(endian: Endianness, bytes: &[u8]) -> u16 {
-    match endian {
-        Endianness::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
-        Endianness::Big => u16::from_be_bytes([bytes[0], bytes[1]]),
-    }
-}
-
-pub fn read_i16(endian: Endianness, bytes: &[u8]) -> i16 {
-    match endian {
-        Endianness::Little => i16::from_le_bytes([bytes[0], bytes[1]]),
-        Endianness::Big => i16::from_be_bytes([bytes[0], bytes[1]]),
-    }
-}
-
-pub fn read_u32(endian: Endianness, bytes: &[u8]) -> u32 {
-    match endian {
-        Endianness::Little => u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
-        Endianness::Big => u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
-    }
-}
-
-pub fn read_u64(endian: Endianness, bytes: &[u8]) -> u64 {
-    match endian {
-        Endianness::Little => u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
-        Endianness::Big => u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
-    }
 }
 
 pub fn parse_text_ref(endian: Endianness, bytes: &[u8]) -> TextRef {
