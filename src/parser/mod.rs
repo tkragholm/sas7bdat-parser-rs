@@ -6,14 +6,14 @@ mod header;
 mod meta;
 mod rows;
 
-pub use catalog::{ParsedCatalog, parse_catalog};
+pub use byteorder::{read_i16, read_u16, read_u32, read_u64, read_u64_be};
+pub use catalog::{parse_catalog, ParsedCatalog};
 pub use column::{
     ColumnInfo, ColumnKind, ColumnMetadataBuilder, ColumnOffsets, NumericKind, TextRef, TextStore,
 };
-pub use header::{SasHeader, parse_header};
-pub use meta::{ParsedMetadata, parse_metadata};
-pub use byteorder::{read_i16, read_u16, read_u32, read_u64, read_u64_be};
+pub use header::{parse_header, SasHeader};
+pub use meta::{parse_metadata, ParsedMetadata};
 pub use rows::{
-    ColumnarBatch, ColumnarColumn, RowIterator, RuntimeColumnRef, StreamingCell, StreamingRow,
-    row_iterator,
+    row_iterator, ColumnarBatch, ColumnarColumn, RowIterator, RuntimeColumnRef, StreamingCell,
+    StreamingRow,
 };

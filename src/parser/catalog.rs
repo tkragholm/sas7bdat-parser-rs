@@ -5,11 +5,11 @@ use std::io::{Read, Seek, SeekFrom};
 
 use encoding_rs::Encoding;
 
-use crate::error::{Error, Result, Section};
-use crate::metadata::{LabelSet, ValueKey, ValueLabel, ValueType};
-use crate::parser::header::{SasHeader, parse_header};
 use super::byteorder::{read_u16, read_u32, read_u64, read_u64_be};
 use super::encoding::{resolve_encoding, trim_trailing};
+use crate::error::{Error, Result, Section};
+use crate::metadata::{LabelSet, ValueKey, ValueLabel, ValueType};
+use crate::parser::header::{parse_header, SasHeader};
 
 const SAS_CATALOG_FIRST_INDEX_PAGE: u64 = 1;
 const SAS_CATALOG_USELESS_PAGES: u64 = 3;

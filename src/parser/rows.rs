@@ -3,11 +3,11 @@ use std::cell::Cell;
 use std::convert::{TryFrom, TryInto};
 use std::io::{Read, Seek, SeekFrom};
 
+use super::encoding::{resolve_encoding, trim_trailing};
 use crate::error::{Error, Result, Section};
 use crate::metadata::{Compression, Endianness, MissingLiteral, TaggedMissing, Vendor};
 use crate::parser::column::{ColumnKind, NumericKind};
 use crate::parser::meta::ParsedMetadata;
-use super::encoding::{resolve_encoding, trim_trailing};
 use crate::value::{MissingValue, Value};
 use encoding_rs::{Encoding, UTF_8};
 use rayon::prelude::*;
@@ -1623,16 +1623,14 @@ fn parse_pointer(pointer: &[u8], uses_u64: bool, endian: Endianness) -> Result<P
                 details: Cow::from("64-bit pointer too short"),
             });
         }
-        let offset = usize::try_from(read_u64(endian, &pointer[0..8])).map_err(|_| {
-            Error::Unsupported {
+        let offset =
+            usize::try_from(read_u64(endian, &pointer[0..8])).map_err(|_| Error::Unsupported {
                 feature: Cow::from("64-bit pointer offset exceeds platform pointer width"),
-            }
-        })?;
-        let length = usize::try_from(read_u64(endian, &pointer[8..16])).map_err(|_| {
-            Error::Unsupported {
+            })?;
+        let length =
+            usize::try_from(read_u64(endian, &pointer[8..16])).map_err(|_| Error::Unsupported {
                 feature: Cow::from("64-bit pointer length exceeds platform pointer width"),
-            }
-        })?;
+            })?;
         Ok(PointerInfo {
             offset,
             length,
@@ -1646,16 +1644,14 @@ fn parse_pointer(pointer: &[u8], uses_u64: bool, endian: Endianness) -> Result<P
                 details: Cow::from("32-bit pointer too short"),
             });
         }
-        let offset = usize::try_from(read_u32(endian, &pointer[0..4])).map_err(|_| {
-            Error::Unsupported {
+        let offset =
+            usize::try_from(read_u32(endian, &pointer[0..4])).map_err(|_| Error::Unsupported {
                 feature: Cow::from("32-bit pointer offset exceeds platform pointer width"),
-            }
-        })?;
-        let length = usize::try_from(read_u32(endian, &pointer[4..8])).map_err(|_| {
-            Error::Unsupported {
+            })?;
+        let length =
+            usize::try_from(read_u32(endian, &pointer[4..8])).map_err(|_| Error::Unsupported {
                 feature: Cow::from("32-bit pointer length exceeds platform pointer width"),
-            }
-        })?;
+            })?;
         Ok(PointerInfo {
             offset,
             length,
@@ -1682,8 +1678,8 @@ pub fn row_iterator<'a, R: Read + Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::borrow::Cow;
     use crate::parser::encoding::resolve_encoding;
+    use std::borrow::Cow;
 
     #[test]
     fn decode_respects_encoding_and_trimming() {

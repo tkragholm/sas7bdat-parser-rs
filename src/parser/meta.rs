@@ -2,15 +2,15 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::io::{Read, Seek, SeekFrom};
 
+use super::byteorder::{read_u16, read_u32, read_u64};
 use crate::error::{Error, Result, Section};
 use crate::metadata::{Compression, Variable};
 use crate::parser::column::{
-    ColumnInfo, ColumnMetadataBuilder, RowInfo, TextStore, parse_column_attrs_subheader,
-    parse_column_format_subheader, parse_column_list_subheader, parse_column_name_subheader,
-    parse_column_size_subheader, parse_column_text_subheader, parse_row_size_subheader,
+    parse_column_attrs_subheader, parse_column_format_subheader, parse_column_list_subheader, parse_column_name_subheader, parse_column_size_subheader,
+    parse_column_text_subheader, parse_row_size_subheader, ColumnInfo,
+    ColumnMetadataBuilder, RowInfo, TextStore,
 };
-use super::byteorder::{read_u16, read_u32, read_u64};
-use crate::parser::header::{SasHeader, parse_header};
+use crate::parser::header::{parse_header, SasHeader};
 
 #[derive(Debug)]
 pub struct ParsedMetadata {

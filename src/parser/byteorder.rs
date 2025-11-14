@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use crate::metadata::Endianness;
 
 #[inline]
-#[must_use] 
+#[must_use]
 pub fn read_u16(endian: Endianness, bytes: &[u8]) -> u16 {
     match endian {
         Endianness::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
@@ -12,7 +12,7 @@ pub fn read_u16(endian: Endianness, bytes: &[u8]) -> u16 {
 }
 
 #[inline]
-#[must_use] 
+#[must_use]
 pub fn read_i16(endian: Endianness, bytes: &[u8]) -> i16 {
     match endian {
         Endianness::Little => i16::from_le_bytes([bytes[0], bytes[1]]),

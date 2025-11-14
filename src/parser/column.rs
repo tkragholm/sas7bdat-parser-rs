@@ -1,11 +1,11 @@
 use std::borrow::Cow;
 use std::convert::TryFrom;
 
+use super::byteorder::{read_i16, read_u16, read_u32, read_u64};
 use crate::error::{Error, Result, Section};
 use crate::metadata::{
     Alignment, Compression, Endianness, Format, Measure, MissingValuePolicy, Variable, VariableKind,
 };
-use super::byteorder::{read_i16, read_u16, read_u32, read_u64};
 
 /// Reference into the text blob storage used by SAS column metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

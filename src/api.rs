@@ -8,7 +8,7 @@ use crate::metadata::{
     DatasetMetadata, LabelSet, MissingLiteral, MissingRange, MissingValuePolicy, TaggedMissing,
     ValueKey, ValueType,
 };
-use crate::parser::{ParsedMetadata, RowIterator, parse_catalog, parse_metadata};
+use crate::parser::{parse_catalog, parse_metadata, ParsedMetadata, RowIterator};
 use crate::sinks::{RowSink, SinkContext};
 use crate::value::{MissingValue, Value};
 
@@ -141,8 +141,7 @@ impl ReadOptions {
         for &index in indices {
             if !seen.insert(index) {
                 return Err(Error::InvalidMetadata {
-                    details: format!("duplicate column projection index {index} in options")
-                        .into(),
+                    details: format!("duplicate column projection index {index} in options").into(),
                 });
             }
         }
@@ -216,11 +215,7 @@ impl<'a, R: Read + Seek> WindowedRows<'a, R> {
     }
 
     fn consume_skip(&mut self) -> Result<Option<()>> {
-        consume_skip_helper(
-            &mut self.skip_remaining,
-            &mut self.skipped,
-            &mut self.inner,
-        )
+        consume_skip_helper(&mut self.skip_remaining, &mut self.skipped, &mut self.inner)
     }
 
     /// Advances the iterator by one row.
@@ -258,11 +253,7 @@ impl<'a, R: Read + Seek> WindowedProjectedRows<'a, R> {
     }
 
     fn consume_skip(&mut self) -> Result<Option<()>> {
-        consume_skip_helper(
-            &mut self.skip_remaining,
-            &mut self.skipped,
-            &mut self.inner,
-        )
+        consume_skip_helper(&mut self.skip_remaining, &mut self.skipped, &mut self.inner)
     }
 
     /// Advances the iterator by one row.
@@ -306,12 +297,15 @@ fn fetch_with_remaining<T>(
         return Ok(None);
     }
     let row = row?;
-    row.map_or_else(|| Ok(None), |row| {
-        if let Some(rem) = remaining.as_mut() {
-            *rem = rem.saturating_sub(1);
-        }
-        Ok(Some(row))
-    })
+    row.map_or_else(
+        || Ok(None),
+        |row| {
+            if let Some(rem) = remaining.as_mut() {
+                *rem = rem.saturating_sub(1);
+            }
+            Ok(Some(row))
+        },
+    )
 }
 
 fn consume_skip_helper<S: SkippableRows>(
