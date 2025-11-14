@@ -4,6 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use std::io::{Read, Seek, SeekFrom};
 
 use super::encoding::{resolve_encoding, trim_trailing};
+use super::float_utils::try_int_from_f64;
 use crate::error::{Error, Result, Section};
 use crate::metadata::{Compression, Endianness, MissingLiteral, TaggedMissing, Vendor};
 use crate::parser::column::{ColumnKind, NumericKind};
@@ -56,6 +57,13 @@ pub struct RowIterator<'a, R: Read + Seek> {
     exhausted: Cell<bool>,
     row_length: usize,
     total_rows: u64,
+}
+
+#[derive(Clone, Copy)]
+struct RowProgress {
+    row_index: u16,
+    prev_row_in_page: u16,
+    prev_emitted: u64,
 }
 
 enum RowData {
@@ -418,13 +426,8 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         self.exhausted.set(true);
     }
 
-    /// Advances the iterator by one row.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if row decoding fails.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
+    #[inline]
+    fn reserve_next_row(&mut self) -> Result<Option<RowProgress>> {
         if self.exhausted.get() {
             return Ok(None);
         }
@@ -443,15 +446,31 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         self.row_in_page.set(row_index.saturating_add(1));
         self.emitted_rows.set(prev_emitted.saturating_add(1));
 
-        let row_result = self.decode_row(row_index);
-        let row = match row_result {
-            Ok(row) => row,
-            Err(err) => {
-                self.revert_row_progress(prev_row_in_page, prev_emitted);
-                return Err(err);
-            }
+        Ok(Some(RowProgress {
+            row_index,
+            prev_row_in_page,
+            prev_emitted,
+        }))
+    }
+
+    /// Advances the iterator by one row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
+        let Some(progress) = self.reserve_next_row()? else {
+            return Ok(None);
         };
-        Ok(Some(row))
+
+        match self.decode_row(progress.row_index) {
+            Ok(row) => Ok(Some(row)),
+            Err(err) => {
+                self.revert_row_progress(progress.prev_row_in_page, progress.prev_emitted);
+                Err(err)
+            }
+        }
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -467,34 +486,20 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     where
         F: for<'row> FnMut(StreamingRow<'row, '_>) -> Result<()>,
     {
-        if self.exhausted.get() {
+        let Some(progress) = self.reserve_next_row()? else {
             return Ok(None);
-        }
-        if self.emitted_rows.get() >= self.total_rows {
-            self.exhausted.set(true);
-            return Ok(None);
-        }
+        };
 
-        if !self.ensure_page_ready()? {
-            return Ok(None);
-        }
-
-        let row_index = self.row_in_page.get();
-        let prev_row_in_page = row_index;
-        let prev_emitted = self.emitted_rows.get();
-        self.row_in_page.set(row_index.saturating_add(1));
-        self.emitted_rows.set(prev_emitted.saturating_add(1));
-
-        let row_view = match self.streaming_row(row_index) {
+        let row_view = match self.streaming_row(progress.row_index) {
             Ok(row) => row,
             Err(err) => {
-                self.revert_row_progress(prev_row_in_page, prev_emitted);
+                self.revert_row_progress(progress.prev_row_in_page, progress.prev_emitted);
                 return Err(err);
             }
         };
 
         if let Err(err) = f(row_view) {
-            self.revert_row_progress(prev_row_in_page, prev_emitted);
+            self.revert_row_progress(progress.prev_row_in_page, progress.prev_emitted);
             return Err(err);
         }
 
@@ -1100,7 +1105,7 @@ const fn decode_missing_from_bits(raw: u64) -> MissingValue {
 }
 
 fn numeric_value_from_width<'a>(number: f64, width: u32) -> Value<'a> {
-    if let Some(int) = try_i64_from_f64(number) {
+    if let Some(int) = try_int_from_f64::<i64>(number) {
         if width <= 4 {
             if let Ok(value32) = i32::try_from(int) {
                 return Value::Int32(value32);
@@ -1111,48 +1116,6 @@ fn numeric_value_from_width<'a>(number: f64, width: u32) -> Value<'a> {
         }
     }
     Value::Float(number)
-}
-
-fn try_i64_from_f64(value: f64) -> Option<i64> {
-    if !value.is_finite() {
-        return None;
-    }
-    if value == 0.0 {
-        return Some(0);
-    }
-
-    let bits = value.to_bits();
-    let sign = (bits >> 63) != 0;
-    let exponent_bits = ((bits >> 52) & 0x7FF) as i32;
-
-    if exponent_bits == 0 {
-        return None;
-    }
-
-    let exponent = exponent_bits - 1023;
-    if exponent < 0 {
-        return None;
-    }
-
-    let mut mantissa = bits & ((1_u64 << 52) - 1);
-    mantissa |= 1_u64 << 52;
-
-    let magnitude_bits = if exponent >= 52 {
-        let shift = u32::try_from(exponent - 52).ok()?;
-        mantissa.checked_shl(shift)?
-    } else {
-        let shift = u32::try_from(52 - exponent).ok()?;
-        let mask = (1_u64 << shift) - 1;
-        if mantissa & mask != 0 {
-            return None;
-        }
-        mantissa >> shift
-    };
-
-    let magnitude = i128::from(magnitude_bits);
-    let signed = if sign { -magnitude } else { magnitude };
-
-    i64::try_from(signed).ok()
 }
 
 const fn repeat_byte_usize(byte: u8) -> usize {

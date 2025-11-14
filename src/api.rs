@@ -8,7 +8,7 @@ use crate::metadata::{
     DatasetMetadata, LabelSet, MissingLiteral, MissingRange, MissingValuePolicy, TaggedMissing,
     ValueKey, ValueType,
 };
-use crate::parser::{parse_catalog, parse_metadata, ParsedMetadata, RowIterator};
+use crate::parser::{ParsedMetadata, RowIterator, parse_catalog, parse_metadata};
 use crate::sinks::{RowSink, SinkContext};
 use crate::value::{MissingValue, Value};
 
@@ -190,22 +190,15 @@ impl<R: Read + Seek> SkippableRows for ProjectedRows<'_, R> {
     }
 }
 
-pub struct WindowedRows<'a, R: Read + Seek> {
-    inner: RowIterator<'a, R>,
+struct WindowState<I> {
+    inner: I,
     skip_remaining: u64,
     remaining: Option<u64>,
     skipped: bool,
 }
 
-pub struct WindowedProjectedRows<'a, R: Read + Seek> {
-    inner: ProjectedRows<'a, R>,
-    skip_remaining: u64,
-    remaining: Option<u64>,
-    skipped: bool,
-}
-
-impl<'a, R: Read + Seek> WindowedRows<'a, R> {
-    const fn new(inner: RowIterator<'a, R>, skip: u64, remaining: Option<u64>) -> Self {
+impl<I> WindowState<I> {
+    const fn new(inner: I, skip: u64, remaining: Option<u64>) -> Self {
         Self {
             inner,
             skip_remaining: skip,
@@ -213,9 +206,38 @@ impl<'a, R: Read + Seek> WindowedRows<'a, R> {
             skipped: skip == 0,
         }
     }
+}
 
+impl<I: SkippableRows> WindowState<I> {
     fn consume_skip(&mut self) -> Result<Option<()>> {
         consume_skip_helper(&mut self.skip_remaining, &mut self.skipped, &mut self.inner)
+    }
+
+    fn try_next_with<'s, T, F>(&'s mut self, mut next_row: F) -> Result<Option<T>>
+    where
+        T: 's,
+        F: FnMut(&'s mut I) -> Result<Option<T>>,
+    {
+        if !self.skipped && self.consume_skip()?.is_none() {
+            return Ok(None);
+        }
+        fetch_with_remaining(&mut self.remaining, next_row(&mut self.inner))
+    }
+}
+
+pub struct WindowedRows<'a, R: Read + Seek> {
+    state: WindowState<RowIterator<'a, R>>,
+}
+
+pub struct WindowedProjectedRows<'a, R: Read + Seek> {
+    state: WindowState<ProjectedRows<'a, R>>,
+}
+
+impl<'a, R: Read + Seek> WindowedRows<'a, R> {
+    const fn new(inner: RowIterator<'a, R>, skip: u64, remaining: Option<u64>) -> Self {
+        Self {
+            state: WindowState::new(inner, skip, remaining),
+        }
     }
 
     /// Advances the iterator by one row.
@@ -225,10 +247,7 @@ impl<'a, R: Read + Seek> WindowedRows<'a, R> {
     /// Returns an error if row decoding fails.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
-        if !self.skipped && self.consume_skip()?.is_none() {
-            return Ok(None);
-        }
-        fetch_with_remaining(&mut self.remaining, self.inner.try_next())
+        self.state.try_next_with(RowIterator::try_next)
     }
 }
 
@@ -245,15 +264,8 @@ impl<R: Read + Seek> Iterator for WindowedRows<'_, R> {
 impl<'a, R: Read + Seek> WindowedProjectedRows<'a, R> {
     const fn new(inner: ProjectedRows<'a, R>, skip: u64, remaining: Option<u64>) -> Self {
         Self {
-            inner,
-            skip_remaining: skip,
-            remaining,
-            skipped: skip == 0,
+            state: WindowState::new(inner, skip, remaining),
         }
-    }
-
-    fn consume_skip(&mut self) -> Result<Option<()>> {
-        consume_skip_helper(&mut self.skip_remaining, &mut self.skipped, &mut self.inner)
     }
 
     /// Advances the iterator by one row.
@@ -263,10 +275,7 @@ impl<'a, R: Read + Seek> WindowedProjectedRows<'a, R> {
     /// Returns an error if row decoding fails.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn try_next(&mut self) -> Result<Option<Vec<Value<'static>>>> {
-        if !self.skipped && self.consume_skip()?.is_none() {
-            return Ok(None);
-        }
-        fetch_with_remaining(&mut self.remaining, self.inner.try_next())
+        self.state.try_next_with(ProjectedRows::try_next)
     }
 }
 

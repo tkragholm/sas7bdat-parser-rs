@@ -7,9 +7,10 @@ use encoding_rs::Encoding;
 
 use super::byteorder::{read_u16, read_u32, read_u64, read_u64_be};
 use super::encoding::{resolve_encoding, trim_trailing};
+use super::float_utils::try_int_from_f64;
 use crate::error::{Error, Result, Section};
 use crate::metadata::{LabelSet, ValueKey, ValueLabel, ValueType};
-use crate::parser::header::{parse_header, SasHeader};
+use crate::parser::header::{SasHeader, parse_header};
 
 const SAS_CATALOG_FIRST_INDEX_PAGE: u64 = 1;
 const SAS_CATALOG_USELESS_PAGES: u64 = 3;
@@ -498,45 +499,6 @@ const fn decode_pointer(pointer: u64) -> (u64, u64) {
     (page, pos)
 }
 
-fn try_i32_from_f64(value: f64) -> Option<i32> {
-    if !value.is_finite() {
-        return None;
-    }
-    if value == 0.0 {
-        return Some(0);
-    }
-
-    let bits = value.to_bits();
-    let sign = (bits >> 63) != 0;
-    let exponent_bits = ((bits >> 52) & 0x7FF) as i32;
-
-    if exponent_bits == 0 {
-        // Subnormal numbers cannot represent non-zero integers exactly.
-        return None;
-    }
-
-    let exponent = exponent_bits - 1023;
-    if exponent < 0 {
-        return None;
-    }
-
-    let mut mantissa = bits & ((1_u64 << 52) - 1);
-    mantissa |= 1_u64 << 52;
-
-    let magnitude = if exponent >= 52 {
-        let shift = u32::try_from(exponent - 52).ok()?;
-        mantissa.checked_shl(shift)?
-    } else {
-        let shift = u32::try_from(52 - exponent).ok()?;
-        mantissa >> shift
-    };
-
-    let magnitude = i64::try_from(magnitude).ok()?;
-    let signed = if sign { -magnitude } else { magnitude };
-
-    i32::try_from(signed).ok()
-}
-
 fn decode_numeric_key(raw: u64) -> ValueKey {
     if (raw | 0xFF00_0000_0000) == 0xFFFF_FFFF_FFFF {
         let tag = decode_missing_tag(u8::try_from((raw >> 40) & 0xFF).unwrap_or_default());
@@ -549,7 +511,7 @@ fn decode_numeric_key(raw: u64) -> ValueKey {
             value = -value;
         }
         if value.fract() == 0.0 && value >= f64::from(i32::MIN) && value <= f64::from(i32::MAX) {
-            try_i32_from_f64(value).map_or(ValueKey::Numeric(value), ValueKey::Integer)
+            try_int_from_f64::<i32>(value).map_or(ValueKey::Numeric(value), ValueKey::Integer)
         } else {
             ValueKey::Numeric(value)
         }
