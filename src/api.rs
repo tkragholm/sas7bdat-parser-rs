@@ -251,31 +251,51 @@ impl<I: WindowSource> WindowState<I> {
     }
 }
 
-pub struct WindowedRows<'a, R: Read + Seek> {
-    state: WindowState<RowIterator<'a, R>>,
+struct WindowedInner<I> {
+    state: WindowState<I>,
 }
 
-pub struct WindowedProjectedRows<'a, R: Read + Seek> {
-    state: WindowState<ProjectedRows<'a, R>>,
-}
-
-impl<'a, R: Read + Seek> WindowedRows<'a, R> {
-    const fn new(inner: RowIterator<'a, R>, skip: u64, remaining: Option<u64>) -> Self {
+impl<I> WindowedInner<I> {
+    const fn new(inner: I, skip: u64, remaining: Option<u64>) -> Self {
         Self {
             state: WindowState::new(inner, skip, remaining),
         }
     }
+}
 
-    /// Advances the iterator by one row.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if row decoding fails.
+impl<I: WindowSource> WindowedInner<I> {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
+    fn try_next(&mut self) -> Result<Option<I::Row<'_>>> {
         self.state.try_next()
     }
 }
+
+pub struct WindowedRows<'a, R: Read + Seek>(WindowedInner<RowIterator<'a, R>>);
+
+pub struct WindowedProjectedRows<'a, R: Read + Seek>(WindowedInner<ProjectedRows<'a, R>>);
+
+macro_rules! impl_windowed_type {
+    ($name:ident => $inner:ty, $row:ty) => {
+        impl<'a, R: Read + Seek> $name<'a, R> {
+            const fn new(inner: $inner, skip: u64, remaining: Option<u64>) -> Self {
+                Self(WindowedInner::new(inner, skip, remaining))
+            }
+
+            /// Advances the iterator by one row.
+            ///
+            /// # Errors
+            ///
+            /// Returns an error if row decoding fails.
+            #[cfg_attr(feature = "hotpath", hotpath::measure)]
+            pub fn try_next(&mut self) -> Result<Option<$row>> {
+                self.0.try_next()
+            }
+        }
+    };
+}
+
+impl_windowed_type!(WindowedRows => RowIterator<'a, R>, Vec<Value<'_>>);
+impl_windowed_type!(WindowedProjectedRows => ProjectedRows<'a, R>, Vec<Value<'static>>);
 
 impl<R: Read + Seek> Iterator for WindowedRows<'_, R> {
     type Item = Result<Vec<Value<'static>>>;
@@ -284,24 +304,6 @@ impl<R: Read + Seek> Iterator for WindowedRows<'_, R> {
         map_next(self.try_next(), |row| {
             row.into_iter().map(Value::into_owned).collect()
         })
-    }
-}
-
-impl<'a, R: Read + Seek> WindowedProjectedRows<'a, R> {
-    const fn new(inner: ProjectedRows<'a, R>, skip: u64, remaining: Option<u64>) -> Self {
-        Self {
-            state: WindowState::new(inner, skip, remaining),
-        }
-    }
-
-    /// Advances the iterator by one row.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if row decoding fails.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    pub fn try_next(&mut self) -> Result<Option<Vec<Value<'static>>>> {
-        self.state.try_next()
     }
 }
 

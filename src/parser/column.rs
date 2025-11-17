@@ -422,6 +422,44 @@ struct SubheaderValidationMessages {
     remainder_mismatch: &'static str,
 }
 
+enum ColumnSubheaderKind {
+    Name,
+    Attributes,
+}
+
+impl ColumnSubheaderKind {
+    const fn messages(self) -> SubheaderValidationMessages {
+        match self {
+            Self::Name => SubheaderValidationMessages {
+                too_short: "column name subheader too short",
+                length_invalid: "column name subheader length invalid",
+                remainder_mismatch: "column name remainder mismatch",
+            },
+            Self::Attributes => SubheaderValidationMessages {
+                too_short: "column attributes subheader too short",
+                length_invalid: "column attributes subheader length invalid",
+                remainder_mismatch: "column attributes remainder mismatch",
+            },
+        }
+    }
+
+    fn validate(
+        self,
+        bytes: &[u8],
+        signature_len: usize,
+        endian: Endianness,
+        uses_u64: bool,
+    ) -> Result<()> {
+        validate_subheader_lengths(
+            bytes,
+            signature_len,
+            endian,
+            uses_u64,
+            self.messages(),
+        )
+    }
+}
+
 fn validate_subheader_lengths(
     bytes: &[u8],
     signature_len: usize,
@@ -458,17 +496,7 @@ pub fn parse_column_name_subheader(
     endian: Endianness,
     uses_u64: bool,
 ) -> Result<()> {
-    validate_subheader_lengths(
-        bytes,
-        signature_len,
-        endian,
-        uses_u64,
-        SubheaderValidationMessages {
-            too_short: "column name subheader too short",
-            length_invalid: "column name subheader length invalid",
-            remainder_mismatch: "column name remainder mismatch",
-        },
-    )?;
+    ColumnSubheaderKind::Name.validate(bytes, signature_len, endian, uses_u64)?;
 
     let chunk_width = 8;
     let entries = subheader_entries(bytes.len(), uses_u64, chunk_width);
@@ -508,17 +536,7 @@ pub fn parse_column_attrs_subheader(
     endian: Endianness,
     uses_u64: bool,
 ) -> Result<()> {
-    validate_subheader_lengths(
-        bytes,
-        signature_len,
-        endian,
-        uses_u64,
-        SubheaderValidationMessages {
-            too_short: "column attributes subheader too short",
-            length_invalid: "column attributes subheader length invalid",
-            remainder_mismatch: "column attributes remainder mismatch",
-        },
-    )?;
+    ColumnSubheaderKind::Attributes.validate(bytes, signature_len, endian, uses_u64)?;
 
     let row_size = if uses_u64 { 16 } else { 12 };
     let entries = subheader_entries(bytes.len(), uses_u64, row_size);
