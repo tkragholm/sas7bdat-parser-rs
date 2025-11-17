@@ -262,6 +262,11 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
 
     // Build sink
     let sink_kind = args.sink;
+    let options = StreamOptions {
+        indices: indices.as_deref(),
+        skip: args.skip,
+        max_rows: args.max_rows,
+    };
     match sink_kind {
         SinkKind::Parquet => {
             let file = File::create(output)?;
@@ -272,11 +277,6 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
             if let Some(bytes) = args.parquet_target_bytes {
                 sink = sink.with_target_row_group_bytes(bytes);
             }
-            let options = StreamOptions {
-                indices: indices.as_deref(),
-                skip: args.skip,
-                max_rows: args.max_rows,
-            };
             stream_into_sink(
                 &mut reader,
                 &parsed,
@@ -296,11 +296,6 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
                     (_, Some(ch)) => ch as u8,
                     _ => b',',
                 });
-            let options = StreamOptions {
-                indices: indices.as_deref(),
-                skip: args.skip,
-                max_rows: args.max_rows,
-            };
             stream_into_sink(
                 &mut reader,
                 &parsed,

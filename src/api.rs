@@ -190,6 +190,34 @@ impl<R: Read + Seek> SkippableRows for ProjectedRows<'_, R> {
     }
 }
 
+trait WindowSource: SkippableRows {
+    type Row<'a>
+    where
+        Self: 'a;
+
+    fn next_row(&mut self) -> Result<Option<Self::Row<'_>>>;
+}
+
+impl<R: Read + Seek> WindowSource for RowIterator<'_, R> {
+    type Row<'s> = Vec<Value<'s>>
+    where
+        Self: 's;
+
+    fn next_row(&mut self) -> Result<Option<Self::Row<'_>>> {
+        self.try_next()
+    }
+}
+
+impl<R: Read + Seek> WindowSource for ProjectedRows<'_, R> {
+    type Row<'s> = Vec<Value<'static>>
+    where
+        Self: 's;
+
+    fn next_row(&mut self) -> Result<Option<Self::Row<'_>>> {
+        self.try_next()
+    }
+}
+
 struct WindowState<I> {
     inner: I,
     skip_remaining: u64,
@@ -212,16 +240,14 @@ impl<I: SkippableRows> WindowState<I> {
     fn consume_skip(&mut self) -> Result<Option<()>> {
         consume_skip_helper(&mut self.skip_remaining, &mut self.skipped, &mut self.inner)
     }
+}
 
-    fn try_next_with<'s, T, F>(&'s mut self, mut next_row: F) -> Result<Option<T>>
-    where
-        T: 's,
-        F: FnMut(&'s mut I) -> Result<Option<T>>,
-    {
+impl<I: WindowSource> WindowState<I> {
+    fn try_next(&mut self) -> Result<Option<I::Row<'_>>> {
         if !self.skipped && self.consume_skip()?.is_none() {
             return Ok(None);
         }
-        fetch_with_remaining(&mut self.remaining, next_row(&mut self.inner))
+        fetch_with_remaining(&mut self.remaining, self.inner.next_row())
     }
 }
 
@@ -247,7 +273,7 @@ impl<'a, R: Read + Seek> WindowedRows<'a, R> {
     /// Returns an error if row decoding fails.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
-        self.state.try_next_with(RowIterator::try_next)
+        self.state.try_next()
     }
 }
 
@@ -275,7 +301,7 @@ impl<'a, R: Read + Seek> WindowedProjectedRows<'a, R> {
     /// Returns an error if row decoding fails.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn try_next(&mut self) -> Result<Option<Vec<Value<'static>>>> {
-        self.state.try_next_with(ProjectedRows::try_next)
+        self.state.try_next()
     }
 }
 

@@ -415,6 +415,42 @@ pub fn parse_column_text_subheader(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+struct SubheaderValidationMessages {
+    too_short: &'static str,
+    length_invalid: &'static str,
+    remainder_mismatch: &'static str,
+}
+
+fn validate_subheader_lengths(
+    bytes: &[u8],
+    signature_len: usize,
+    endian: Endianness,
+    uses_u64: bool,
+    messages: SubheaderValidationMessages,
+) -> Result<()> {
+    let base = if uses_u64 { 28 } else { 20 };
+    if bytes.len() < base {
+        return Err(Error::Corrupted {
+            section: Section::Header,
+            details: Cow::from(messages.too_short),
+        });
+    }
+    let remainder = read_u16(endian, &bytes[signature_len..signature_len + 2]);
+    let expected =
+        expected_remainder(bytes.len(), signature_len).ok_or_else(|| Error::Corrupted {
+            section: Section::Header,
+            details: Cow::from(messages.length_invalid),
+        })?;
+    if remainder != expected {
+        return Err(Error::Corrupted {
+            section: Section::Header,
+            details: Cow::from(messages.remainder_mismatch),
+        });
+    }
+    Ok(())
+}
+
 pub fn parse_column_name_subheader(
     builder: &mut ColumnMetadataBuilder,
     bytes: &[u8],
@@ -422,25 +458,17 @@ pub fn parse_column_name_subheader(
     endian: Endianness,
     uses_u64: bool,
 ) -> Result<()> {
-    let base = if uses_u64 { 28 } else { 20 };
-    if bytes.len() < base {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column name subheader too short"),
-        });
-    }
-    let remainder = read_u16(endian, &bytes[signature_len..signature_len + 2]);
-    let expected =
-        expected_remainder(bytes.len(), signature_len).ok_or_else(|| Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column name subheader length invalid"),
-        })?;
-    if remainder != expected {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column name remainder mismatch"),
-        });
-    }
+    validate_subheader_lengths(
+        bytes,
+        signature_len,
+        endian,
+        uses_u64,
+        SubheaderValidationMessages {
+            too_short: "column name subheader too short",
+            length_invalid: "column name subheader length invalid",
+            remainder_mismatch: "column name remainder mismatch",
+        },
+    )?;
 
     let chunk_width = 8;
     let entries = subheader_entries(bytes.len(), uses_u64, chunk_width);
@@ -480,26 +508,17 @@ pub fn parse_column_attrs_subheader(
     endian: Endianness,
     uses_u64: bool,
 ) -> Result<()> {
-    let base = if uses_u64 { 28 } else { 20 };
-    if bytes.len() < base {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column attributes subheader too short"),
-        });
-    }
-
-    let remainder = read_u16(endian, &bytes[signature_len..signature_len + 2]);
-    let expected =
-        expected_remainder(bytes.len(), signature_len).ok_or_else(|| Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column attributes subheader length invalid"),
-        })?;
-    if remainder != expected {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column attributes remainder mismatch"),
-        });
-    }
+    validate_subheader_lengths(
+        bytes,
+        signature_len,
+        endian,
+        uses_u64,
+        SubheaderValidationMessages {
+            too_short: "column attributes subheader too short",
+            length_invalid: "column attributes subheader length invalid",
+            remainder_mismatch: "column attributes remainder mismatch",
+        },
+    )?;
 
     let row_size = if uses_u64 { 16 } else { 12 };
     let entries = subheader_entries(bytes.len(), uses_u64, row_size);

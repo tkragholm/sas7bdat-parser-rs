@@ -136,6 +136,23 @@ impl<W: Write + Send> CsvSink<W> {
         }
         Ok(())
     }
+
+    fn prepare_row_buffers(&mut self, len: usize) -> Result<(RyuBuffer, ItoaBuffer)> {
+        self.ensure_row_len(len)?;
+        self.record.clear();
+        // Local number formatting buffers to avoid borrowing self while
+        // holding a mutable borrow of a scratch column buffer.
+        Ok((RyuBuffer::new(), ItoaBuffer::new()))
+    }
+
+    fn flush_record(&mut self) -> Result<()> {
+        let writer = self.writer.as_mut().expect("csv writer must be present");
+        writer
+            .write_byte_record(&self.record)
+            .map_err(|e| Error::InvalidMetadata {
+                details: Cow::Owned(format!("csv write failed: {e}")),
+            })
+    }
 }
 
 impl<W: Write + Send> RowSink for CsvSink<W> {
@@ -183,32 +200,18 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
     }
 
     fn write_row(&mut self, row: &[Value<'_>]) -> Result<()> {
-        self.ensure_row_len(row.len())?;
-        self.record.clear();
-        // Local number formatting buffers to avoid borrowing self while
-        // holding a mutable borrow of a scratch column buffer.
-        let mut ryu = RyuBuffer::new();
-        let mut itoa = ItoaBuffer::new();
+        let (mut ryu, mut itoa) = self.prepare_row_buffers(row.len())?;
 
         for (idx, val) in row.iter().enumerate() {
             let buf = &mut self.scratch[idx];
             Self::encode_value(val, buf, &mut ryu, &mut itoa)?;
             self.record.push_field(buf);
         }
-        let writer = self.writer.as_mut().expect("csv writer must be present");
-        writer
-            .write_byte_record(&self.record)
-            .map_err(|e| Error::InvalidMetadata {
-                details: Cow::Owned(format!("csv write failed: {e}")),
-            })?;
-        Ok(())
+        self.flush_record()
     }
 
     fn write_streaming_row(&mut self, row: StreamingRow<'_, '_>) -> Result<()> {
-        self.ensure_row_len(row.len())?;
-        self.record.clear();
-        let mut ryu = RyuBuffer::new();
-        let mut itoa = ItoaBuffer::new();
+        let (mut ryu, mut itoa) = self.prepare_row_buffers(row.len())?;
 
         for (idx, cell_result) in row.iter().enumerate() {
             let cell = cell_result?;
@@ -218,13 +221,7 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
             self.record.push_field(buf);
         }
 
-        let writer = self.writer.as_mut().expect("csv writer must be present");
-        writer
-            .write_byte_record(&self.record)
-            .map_err(|e| Error::InvalidMetadata {
-                details: Cow::Owned(format!("csv write failed: {e}")),
-            })?;
-        Ok(())
+        self.flush_record()
     }
 
     fn finish(&mut self) -> Result<()> {
