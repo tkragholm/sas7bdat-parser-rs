@@ -32,19 +32,25 @@ count, and elapsed time in milliseconds.
 Place other benchmark harnesses (Rust, ReadStat CLI wrappers, etc.) in this
 directory alongside `SasBenchmarks` for easy comparison.
 
-### Rust Library (`examples/benchmark.rs`)
+### Rust CLI (`sas7bd convert`)
 
-The repository now includes an example program that iterates over all rows using
-the core Rust crate:
+Use the primary CLI to exercise the same pipelines exposed to end users. The
+`convert` subcommand writes Parquet/CSV/TSV files; pass `--columnar` to route
+through the columnar decoder when targeting Parquet:
 
 ```bash
-cargo run --release --example benchmark -- tests/data_AHS2013/omov.sas7bdat
+cargo run --release --bin sas7bd -- convert tests/data_AHS2013/omov.sas7bdat \
+  --out /tmp/out.parquet --columnar
 ```
 
-For convenience, use:
+The `benchmarks/run_rust.sh` helper wraps `sas7bd convert`, rebuilds incrementally,
+and writes to a temporary output so you can compare row vs. columnar modes:
 
 ```bash
+# Default row pipeline
 benchmarks/run_rust.sh tests/data_AHS2013/omov.sas7bdat
+# Columnar pipeline
+benchmarks/run_rust.sh tests/data_AHS2013/omov.sas7bdat --columnar
 ```
 
 ### ReadStat Library (C)

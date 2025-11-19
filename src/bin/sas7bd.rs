@@ -8,7 +8,10 @@ use walkdir::WalkDir;
 use sas7bdat_parser_rs::metadata::DatasetMetadata;
 use sas7bdat_parser_rs::parser::ColumnInfo;
 use sas7bdat_parser_rs::value::Value;
-use sas7bdat_parser_rs::{CsvSink, ParquetSink, RowSink, SasFile};
+use sas7bdat_parser_rs::{ColumnarSink, CsvSink, ParquetSink, RowSink, SasFile};
+
+#[cfg(feature = "hotpath")]
+use hotpath::{Format, GuardBuilder};
 
 #[derive(Parser)]
 #[command(
@@ -24,12 +27,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Convert one or more inputs to a chosen sink format.
-    Convert(ConvertArgs),
+    Convert(Box<ConvertArgs>),
     /// Inspect dataset metadata and print a summary.
     Inspect(InspectArgs),
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum SinkKind {
     Parquet,
     Csv,
@@ -37,6 +40,7 @@ enum SinkKind {
 }
 
 #[derive(Parser, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 struct ConvertArgs {
     /// Input files or directories (recurses directories).
     #[arg(required = true)]
@@ -100,7 +104,22 @@ struct ConvertArgs {
     /// Stop on first error.
     #[arg(long)]
     fail_fast: bool,
+
+    /// Use the columnar decoding pipeline (Parquet sink only).
+    #[arg(long)]
+    columnar: bool,
+
+    /// Override the columnar batch size (rows) when `--columnar` is set.
+    #[arg(long, requires = "columnar")]
+    columnar_batch_rows: Option<usize>,
+
+    /// Copy batches into a contiguous buffer so Parquet row groups can span pages.
+    #[arg(long, requires = "columnar")]
+    columnar_staging: bool,
 }
+
+const DEFAULT_COLUMNAR_BATCH_ROWS: usize = 4096;
+const COLUMNAR_ROW_GROUP_MULTIPLIER: usize = 16;
 
 #[derive(Parser, Clone)]
 struct InspectArgs {
@@ -111,9 +130,20 @@ struct InspectArgs {
 }
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
-type ProjectionResult = (Option<Vec<usize>>, DatasetMetadata, Vec<ColumnInfo>);
+type ProjectionResult = (
+    Option<Vec<usize>>,
+    Vec<usize>,
+    DatasetMetadata,
+    Vec<ColumnInfo>,
+);
 
 fn main() -> Result<(), AnyError> {
+    #[cfg(feature = "hotpath")]
+    let _hotpath = GuardBuilder::new("sas7bd")
+        .format(Format::Table)
+        .limit(20)
+        .build();
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -128,6 +158,13 @@ fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
         let _ = rayon::ThreadPoolBuilder::new()
             .num_threads(jobs)
             .build_global();
+    }
+
+    if args.columnar && args.sink != SinkKind::Parquet {
+        return Err("--columnar is only supported for Parquet conversions".into());
+    }
+    if args.columnar && (args.skip.is_some() || args.max_rows.is_some()) {
+        return Err("--columnar cannot be combined with --skip or --max-rows".into());
     }
 
     let files = discover_inputs(&args.inputs);
@@ -257,11 +294,18 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
     let (mut reader, parsed) = sas.into_parts();
 
     // Resolve projection
-    let (indices, meta_filtered, cols_filtered) =
+    let (indices, selection, meta_filtered, cols_filtered) =
         resolve_projection(&parsed.header.metadata, &parsed.columns, args)?;
 
     // Build sink
     let sink_kind = args.sink;
+    let columnar_batch_rows = args
+        .columnar_batch_rows
+        .unwrap_or(DEFAULT_COLUMNAR_BATCH_ROWS)
+        .max(1);
+    let derived_row_group_rows = columnar_batch_rows
+        .saturating_mul(COLUMNAR_ROW_GROUP_MULTIPLIER)
+        .max(columnar_batch_rows);
     let options = StreamOptions {
         indices: indices.as_deref(),
         skip: args.skip,
@@ -271,20 +315,49 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
         SinkKind::Parquet => {
             let file = File::create(output)?;
             let mut sink = ParquetSink::new(file);
+            let mut columnar_row_group_rows = None;
             if let Some(rows) = args.parquet_row_group_size {
                 sink = sink.with_row_group_size(rows);
+                columnar_row_group_rows = Some(rows);
+            } else if args.columnar {
+                sink = sink.with_row_group_size(derived_row_group_rows);
+                columnar_row_group_rows = Some(derived_row_group_rows);
             }
             if let Some(bytes) = args.parquet_target_bytes {
                 sink = sink.with_target_row_group_bytes(bytes);
             }
-            stream_into_sink(
-                &mut reader,
-                &parsed,
-                &meta_filtered,
-                &cols_filtered,
-                &options,
-                &mut sink,
-            )?;
+            if args.columnar && args.columnar_staging {
+                sink = sink.with_streaming_columnar(true);
+            }
+            if args.columnar {
+                let mode = if args.columnar_staging {
+                    ColumnarStreamMode::Contiguous {
+                        batch_rows: columnar_row_group_rows.unwrap_or(columnar_batch_rows),
+                    }
+                } else {
+                    ColumnarStreamMode::PageBound {
+                        batch_rows: columnar_batch_rows,
+                    }
+                };
+                stream_columnar_into_sink(
+                    &mut reader,
+                    &parsed,
+                    &meta_filtered,
+                    &cols_filtered,
+                    &selection,
+                    mode,
+                    &mut sink,
+                )?;
+            } else {
+                stream_into_sink(
+                    &mut reader,
+                    &parsed,
+                    &meta_filtered,
+                    &cols_filtered,
+                    &options,
+                    &mut sink,
+                )?;
+            }
             let _ = sink.into_inner()?;
         }
         SinkKind::Csv | SinkKind::Tsv => {
@@ -296,6 +369,9 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
                     (_, Some(ch)) => ch as u8,
                     _ => b',',
                 });
+            if args.columnar {
+                return Err("columnar mode is only supported for Parquet sinks".into());
+            }
             stream_into_sink(
                 &mut reader,
                 &parsed,
@@ -373,6 +449,43 @@ fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
     Ok(())
 }
 
+fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
+    reader: &mut W,
+    parsed: &sas7bdat_parser_rs::parser::ParsedMetadata,
+    meta_filtered: &DatasetMetadata,
+    cols_filtered: &[ColumnInfo],
+    selection: &[usize],
+    mode: ColumnarStreamMode,
+    sink: &mut S,
+) -> Result<(), AnyError> {
+    if selection.len() != cols_filtered.len() {
+        return Err("column selection length mismatch".into());
+    }
+
+    let context = sas7bdat_parser_rs::sinks::SinkContext {
+        metadata: meta_filtered,
+        columns: cols_filtered,
+    };
+    sink.begin(context)?;
+
+    let mut it = parsed.row_iterator(reader)?;
+    match mode {
+        ColumnarStreamMode::PageBound { batch_rows } => {
+            while let Some(batch) = it.next_columnar_batch(batch_rows)? {
+                sink.write_columnar_batch(&batch, selection)?;
+            }
+        }
+        ColumnarStreamMode::Contiguous { batch_rows } => {
+            while let Some(batch) = it.next_columnar_batch_contiguous(batch_rows)? {
+                sink.write_columnar_batch(&batch, selection)?;
+            }
+        }
+    }
+
+    sink.finish()?;
+    Ok(())
+}
+
 fn resolve_projection(
     meta: &DatasetMetadata,
     cols: &[ColumnInfo],
@@ -442,7 +555,7 @@ fn resolve_projection(
 
     let filtered_cols: Vec<ColumnInfo> = selected.iter().map(|&i| cols[i].clone()).collect();
 
-    Ok((indices, filtered, filtered_cols))
+    Ok((indices, selected, filtered, filtered_cols))
 }
 
 fn discover_inputs(inputs: &[PathBuf]) -> Vec<PathBuf> {
@@ -492,4 +605,8 @@ fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
             dir.join(renamed)
         },
     )
+}
+enum ColumnarStreamMode {
+    PageBound { batch_rows: usize },
+    Contiguous { batch_rows: usize },
 }

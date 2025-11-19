@@ -18,3 +18,4 @@ pub use rows::{
     ColumnarBatch, ColumnarColumn, RowIterator, RuntimeColumnRef, StreamingCell, StreamingRow,
     row_iterator,
 };
+pub(crate) use rows::{sas_days_to_datetime, sas_seconds_to_datetime, sas_seconds_to_time};

@@ -3,7 +3,7 @@ mod parquet;
 
 use crate::error::Result;
 use crate::metadata::DatasetMetadata;
-use crate::parser::{ColumnInfo, ParsedMetadata, StreamingRow};
+use crate::parser::{ColumnInfo, ColumnarBatch, ParsedMetadata, StreamingRow};
 use crate::value::Value;
 
 pub use csv::CsvSink;
@@ -60,4 +60,19 @@ pub trait RowSink {
     ///
     /// Returns an error if finalising the sink or flushing the underlying output fails.
     fn finish(&mut self) -> Result<()>;
+}
+
+/// Trait implemented by sinks that can consume columnar batches directly.
+pub trait ColumnarSink: RowSink {
+    /// Writes a batch of rows that may be filtered via `selection`, which maps sink columns
+    /// to their corresponding source column indices.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if decoding fails or if the column selection is invalid.
+    fn write_columnar_batch(
+        &mut self,
+        batch: &ColumnarBatch<'_>,
+        selection: &[usize],
+    ) -> Result<()>;
 }

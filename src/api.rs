@@ -199,7 +199,8 @@ trait WindowSource: SkippableRows {
 }
 
 impl<R: Read + Seek> WindowSource for RowIterator<'_, R> {
-    type Row<'s> = Vec<Value<'s>>
+    type Row<'s>
+        = Vec<Value<'s>>
     where
         Self: 's;
 
@@ -209,7 +210,8 @@ impl<R: Read + Seek> WindowSource for RowIterator<'_, R> {
 }
 
 impl<R: Read + Seek> WindowSource for ProjectedRows<'_, R> {
-    type Row<'s> = Vec<Value<'static>>
+    type Row<'s>
+        = Vec<Value<'static>>
     where
         Self: 's;
 

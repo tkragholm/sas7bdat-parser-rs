@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 [--build-only] <path-to-sas7bdat>" >&2
+echo "Usage: $0 [--build-only] <path-to-sas7bdat> [benchmark-args...]" >&2
   exit 1
 fi
 
@@ -13,13 +13,15 @@ if [[ "$1" == "--build-only" ]]; then
 fi
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 [--build-only] <path-to-sas7bdat>" >&2
+  echo "Usage: $0 [--build-only] <path-to-sas7bdat> [benchmark-args...]" >&2
   exit 1
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FILE="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1")"
-BIN="${ROOT}/target/release/examples/benchmark"
+shift
+CLI_ARGS=("$@")
+BIN="${ROOT}/target/release/sas7bd"
 FEATURE_FLAGS=()
 needs_build=false
 STAMP_FILE="${ROOT}/target/benchmark_features.txt"
@@ -36,7 +38,7 @@ fi
 
 if [[ ! -x "${BIN}" ]]; then
   needs_build=true
-elif [[ "${ROOT}/examples/benchmark.rs" -nt "${BIN}" ]]; then
+elif [[ "${ROOT}/src/bin/sas7bd.rs" -nt "${BIN}" ]]; then
   needs_build=true
 elif find "${ROOT}/src" -name '*.rs' -newer "${BIN}" -print -quit | grep -q .; then
   needs_build=true
@@ -59,9 +61,9 @@ fi
 
 if [[ "${needs_build}" == true ]]; then
   if (( ${#FEATURE_FLAGS[@]} > 0 )); then
-    cargo build --quiet --release --example benchmark "${FEATURE_FLAGS[@]}" >/dev/null
+    cargo build --quiet --release --bin sas7bd "${FEATURE_FLAGS[@]}" >/dev/null
   else
-    cargo build --quiet --release --example benchmark >/dev/null
+    cargo build --quiet --release --bin sas7bd >/dev/null
   fi
   printf '%s' "${current_features}" > "${STAMP_FILE}"
 fi
@@ -69,8 +71,24 @@ fi
 if [[ "${BUILD_ONLY}" == false ]]; then
   if [[ -n "${BENCH_HOTPATH:-}" ]]; then
     mkdir -p "${ROOT}/target/hotpath"
-    HOTPATH_OUT="${ROOT}/target/hotpath" "${BIN}" "${FILE}"
+  fi
+  if [[ -n "${BENCH_OUTPUT:-}" ]]; then
+    OUT_FILE="${BENCH_OUTPUT}"
+    CLEANUP=false
   else
-    "${BIN}" "${FILE}"
+    OUT_FILE="$(mktemp "${ROOT}/target/bench-rust-XXXXXX.parquet")"
+    CLEANUP=true
+  fi
+  cmd=("${BIN}" "convert" "--out" "${OUT_FILE}" "${FILE}")
+  if (( ${#CLI_ARGS[@]} > 0 )); then
+    cmd+=("${CLI_ARGS[@]}")
+  fi
+  if [[ -n "${BENCH_HOTPATH:-}" ]]; then
+    HOTPATH_OUT="${ROOT}/target/hotpath" "${cmd[@]}"
+  else
+    "${cmd[@]}"
+  fi
+  if [[ "${CLEANUP}" == true ]]; then
+    rm -f "${OUT_FILE}"
   fi
 fi

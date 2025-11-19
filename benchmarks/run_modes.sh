@@ -19,10 +19,7 @@ HYPERFINE_ARGS=("$@")
 
 prepare_cmd=$(
   cat <<EOF
-benchmarks/run_rust.sh --build-only "${INPUT}" && \
-BENCH_PARALLEL_ROWS=1 benchmarks/run_rust.sh --build-only "${INPUT}" && \
-BENCH_COLUMNAR=1 benchmarks/run_rust.sh --build-only "${INPUT}" && \
-BENCH_COLUMNAR=1 BENCH_COLUMNAR_PAR=1 benchmarks/run_rust.sh --build-only "${INPUT}"
+benchmarks/run_rust.sh --build-only "${INPUT}"
 EOF
 )
 
@@ -30,6 +27,5 @@ hyperfine \
   --prepare "${prepare_cmd}" \
   "${HYPERFINE_ARGS[@]}" \
   "benchmarks/run_rust.sh \"${INPUT}\"" \
-  "BENCH_PARALLEL_ROWS=1 benchmarks/run_rust.sh \"${INPUT}\"" \
-  "BENCH_COLUMNAR=1 benchmarks/run_rust.sh \"${INPUT}\"" \
-  "BENCH_COLUMNAR=1 BENCH_COLUMNAR_PAR=1 benchmarks/run_rust.sh \"${INPUT}\""
+  "benchmarks/run_rust.sh \"${INPUT}\" --columnar" \
+  "benchmarks/run_rust.sh \"${INPUT}\" --columnar --columnar-batch-rows 512"

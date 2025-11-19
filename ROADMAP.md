@@ -35,6 +35,18 @@ large `sas7bdat` sources into modern, ergonomic data structures efficiently.
   that downstream adapters (Arrow writer, serde consumer, etc.) can implement.
 - Ship reference adapters for common sinks (Arrow arrays/parquet files) so users
   can plug the parser straight into modern analytics stacks.
+- Stream Parquet column writers directly from SAS pages: keep Parquet column
+  writers open for the lifetime of a row group, feed them consecutive SAS pages
+  (rather than buffering entire row groups), and reuse fixed-size scratch
+  buffers so we eliminate the `extend_columnar` allocations entirely. Combine
+  this with optional uncompressed/dictionary-off writer properties for maximum
+  throughput.
+- SIMD/memcpy column encoders: for numeric widths copy an entire column via
+  `memcpy`/SIMD lanes into the Parquet buffers, while character columns share a
+  single arena + offset index so we allocate strings only once per row group.
+- Parallel column flushing: when staging full row groups, use Rayon to
+  flush/write columns concurrently so multi-core machines can keep column
+  encoders saturated.
 
 These steps keep the parser lean while opening the door to high-throughput,
 streaming conversions from legacy SAS files into contemporary columnar formats.

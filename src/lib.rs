@@ -6,7 +6,7 @@ pub mod sinks;
 pub mod value;
 pub use crate::error::{Error, Result};
 pub use api::{ReadOptions, SasFile};
-pub use sinks::{CsvSink, ParquetSink, RowSink, SinkContext};
+pub use sinks::{ColumnarSink, CsvSink, ParquetSink, RowSink, SinkContext};
 
 /// Parses SAS metadata and returns the decoded layout information.
 ///

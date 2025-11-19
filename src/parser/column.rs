@@ -197,7 +197,7 @@ impl ColumnInfo {
 }
 
 /// Builder that collects column metadata by interpreting meta-page subheaders.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ColumnMetadataBuilder {
     text_store: TextStore,
     columns: Vec<ColumnInfo>,
@@ -207,12 +207,6 @@ pub struct ColumnMetadataBuilder {
     formats_seen: usize,
     max_width: u32,
     column_list: Option<Vec<i16>>,
-}
-
-impl Default for ColumnMetadataBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl ColumnMetadataBuilder {
@@ -450,13 +444,7 @@ impl ColumnSubheaderKind {
         endian: Endianness,
         uses_u64: bool,
     ) -> Result<()> {
-        validate_subheader_lengths(
-            bytes,
-            signature_len,
-            endian,
-            uses_u64,
-            self.messages(),
-        )
+        validate_subheader_lengths(bytes, signature_len, endian, uses_u64, self.messages())
     }
 }
 

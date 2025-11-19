@@ -18,7 +18,6 @@ use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 use super::byteorder::{read_u16, read_u32, read_u64};
 
-const PARALLEL_CHUNK_ROWS: usize = 64;
 const COLUMNAR_BATCH_ROWS: usize = 256;
 const COLUMNAR_INLINE_ROWS: usize = 32;
 
@@ -49,6 +48,8 @@ pub struct RowIterator<'a, R: Read + Seek> {
     page_buffer: Vec<u8>,
     current_rows: Vec<RowData>,
     reusable_row_buffers: Vec<Vec<u8>>,
+    columnar_owned_offsets: Vec<usize>,
+    columnar_owned_buffer: Vec<u8>,
     page_row_count: Cell<u16>,
     row_in_page: Cell<u16>,
     next_page_index: u64,
@@ -246,27 +247,39 @@ impl<'data> StreamingCell<'data, '_> {
     ///
     /// Returns an error when decoding fails (e.g. invalid metadata).
     pub fn decode_value(&self) -> Result<Value<'data>> {
-        match self.column.kind {
-            ColumnKind::Character => Ok(Value::Str(decode_string(self.slice, self.encoding))),
-            ColumnKind::Numeric(kind) => match decode_numeric_cell(self.slice, self.endianness) {
-                NumericCell::Missing(missing) => Ok(Value::Missing(missing)),
-                NumericCell::Number(number) => Ok(match kind {
-                    NumericKind::Double => numeric_value_from_width(number, self.column.raw_width),
-                    NumericKind::Date => sas_days_to_datetime(number).map_or_else(
-                        || numeric_value_from_width(number, self.column.raw_width),
-                        Value::Date,
-                    ),
-                    NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
-                        || numeric_value_from_width(number, self.column.raw_width),
-                        Value::DateTime,
-                    ),
-                    NumericKind::Time => sas_seconds_to_time(number).map_or_else(
-                        || numeric_value_from_width(number, self.column.raw_width),
-                        Value::Time,
-                    ),
-                }),
+        Ok(decode_value_inner(
+            self.column.kind,
+            self.column.raw_width,
+            self.slice,
+            self.encoding,
+            self.endianness,
+        ))
+    }
+}
+
+fn decode_value_inner<'data>(
+    kind: ColumnKind,
+    raw_width: u32,
+    slice: &'data [u8],
+    encoding: &'static Encoding,
+    endianness: Endianness,
+) -> Value<'data> {
+    match kind {
+        ColumnKind::Character => Value::Str(decode_string(slice, encoding)),
+        ColumnKind::Numeric(numeric_kind) => match decode_numeric_cell(slice, endianness) {
+            NumericCell::Missing(missing) => Value::Missing(missing),
+            NumericCell::Number(number) => match numeric_kind {
+                NumericKind::Double => numeric_value_from_width(number, raw_width),
+                NumericKind::Date => sas_days_to_datetime(number)
+                    .map_or_else(|| numeric_value_from_width(number, raw_width), Value::Date),
+                NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
+                    || numeric_value_from_width(number, raw_width),
+                    Value::DateTime,
+                ),
+                NumericKind::Time => sas_seconds_to_time(number)
+                    .map_or_else(|| numeric_value_from_width(number, raw_width), Value::Time),
             },
-        }
+        },
     }
 }
 
@@ -327,6 +340,7 @@ impl RuntimeColumn {
             index: self.index,
             offset: self.offset,
             width: self.width,
+            raw_width: self.raw_width,
             kind: self.kind,
         }
     }
@@ -393,6 +407,8 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             page_buffer: vec![0u8; page_size],
             current_rows: Vec::new(),
             reusable_row_buffers: Vec::new(),
+            columnar_owned_offsets: Vec::new(),
+            columnar_owned_buffer: Vec::new(),
             page_row_count: Cell::new(0),
             row_in_page: Cell::new(0),
             next_page_index: 0,
@@ -521,96 +537,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         Ok(())
     }
 
-    /// Prototype: materialises all rows on a page in parallel and invokes `f` with owned values.
-    ///
-    /// This keeps the existing streaming API untouched while allowing benchmarks to evaluate
-    /// Rayon-based decoding throughput.
-    ///
-    /// # Errors
-    ///
-    /// Propagates decoding failures, page fetch errors, or any error returned by the visitor `f`.
-    pub fn stream_all_parallel_owned<F>(&mut self, mut f: F) -> Result<()>
-    where
-        F: FnMut(Vec<Value<'static>>) -> Result<()>,
-    {
-        if self.exhausted.get() {
-            return Ok(());
-        }
-
-        while self.emitted_rows.get() < self.total_rows {
-            if self.row_in_page.get() >= self.page_row_count.get() {
-                if let Err(err) = self.fetch_next_page() {
-                    self.exhausted.set(true);
-                    return Err(err);
-                }
-                if self.page_row_count.get() == 0 {
-                    self.exhausted.set(true);
-                    return Ok(());
-                }
-            }
-
-            let page_total = usize::from(self.page_row_count.get());
-            let start = usize::from(self.row_in_page.get());
-            if start >= page_total {
-                continue;
-            }
-
-            let processed = {
-                let rows_slice = &self.current_rows[start..page_total];
-                if rows_slice.is_empty() {
-                    0usize
-                } else {
-                    let page_buffer = &self.page_buffer;
-                    let columns = &self.runtime_columns;
-                    let encoding = self.encoding;
-                    let endianness = self.parsed.header.endianness;
-                    let row_length = self.row_length;
-
-                    let chunk_results: Result<Vec<Vec<Vec<Value<'static>>>>> = rows_slice
-                        .par_chunks(PARALLEL_CHUNK_ROWS)
-                        .enumerate()
-                        .map(|(chunk_idx, chunk)| {
-                            let mut chunk_output: Vec<Vec<Value<'static>>> =
-                                Vec::with_capacity(chunk.len());
-                            for (offset, row_data) in chunk.iter().enumerate() {
-                                let row_index = start + chunk_idx * PARALLEL_CHUNK_ROWS + offset;
-                                let data =
-                                    row_data.as_slice(row_length, page_buffer, row_index as u64)?;
-                                let view = StreamingRow::new(data, columns, encoding, endianness);
-                                let mut owned = Vec::with_capacity(view.len());
-                                for cell_result in &view {
-                                    let cell = cell_result?;
-                                    owned.push(cell.decode_value()?.into_owned());
-                                }
-                                chunk_output.push(owned);
-                            }
-                            Ok(chunk_output)
-                        })
-                        .collect();
-
-                    for chunk in chunk_results? {
-                        for row in chunk {
-                            f(row)?;
-                        }
-                    }
-
-                    rows_slice.len()
-                }
-            };
-
-            let emitted = self.emitted_rows.get();
-            self.emitted_rows
-                .set(emitted.saturating_add(processed as u64));
-
-            let advanced = start.saturating_add(processed);
-            self.row_in_page
-                .set(u16::try_from(advanced).unwrap_or(u16::MAX));
-        }
-
-        self.exhausted.set(true);
-        Ok(())
-    }
-
     /// Decodes the next chunk of rows into a column-oriented batch.
     ///
     /// # Errors
@@ -665,6 +591,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                 row_slices,
                 &self.columnar_columns,
                 self.parsed.header.endianness,
+                self.encoding,
             );
             return Ok(Some(batch));
         }
@@ -679,8 +606,99 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         }
     }
 
+    fn recycle_owned_rows(&mut self) {
+        self.columnar_owned_offsets.clear();
+        self.columnar_owned_buffer.clear();
+    }
+
     fn take_row_buffer(&mut self) -> Vec<u8> {
         self.reusable_row_buffers.pop().unwrap_or_default()
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub fn next_columnar_batch_contiguous(
+        &mut self,
+        max_rows: usize,
+    ) -> Result<Option<ColumnarBatch<'_>>> {
+        if self.exhausted.get() {
+            return Ok(None);
+        }
+
+        let target = if max_rows == 0 {
+            COLUMNAR_BATCH_ROWS
+        } else {
+            max_rows
+        };
+
+        self.recycle_owned_rows();
+        if target > 0 {
+            let target_bytes = target.saturating_mul(self.row_length);
+            if self.columnar_owned_buffer.capacity() < target_bytes {
+                self.columnar_owned_buffer
+                    .reserve(target_bytes - self.columnar_owned_buffer.capacity());
+            }
+        }
+
+        let mut copied = 0usize;
+        while copied < target {
+            if !self.ensure_page_ready()? {
+                break;
+            }
+
+            let page_total = usize::from(self.page_row_count.get());
+            let start = usize::from(self.row_in_page.get());
+            if start >= page_total {
+                continue;
+            }
+
+            let available = page_total - start;
+            let remaining = target - copied;
+            let chunk_len = available.min(remaining);
+            let row_end = start + chunk_len;
+
+            for row_index in start..row_end {
+                let row_data = self.current_rows[row_index].as_slice(
+                    self.row_length,
+                    &self.page_buffer,
+                    row_index as u64,
+                )?;
+                let offset = self.columnar_owned_buffer.len();
+                self.columnar_owned_buffer.extend_from_slice(row_data);
+                self.columnar_owned_offsets.push(offset);
+            }
+
+            copied += chunk_len;
+
+            self.row_in_page
+                .set(u16::try_from(row_end).unwrap_or(u16::MAX));
+            self.emitted_rows
+                .set(self.emitted_rows.get().saturating_add(chunk_len as u64));
+
+            if self.emitted_rows.get() >= self.total_rows {
+                self.exhausted.set(true);
+                break;
+            }
+        }
+
+        if copied == 0 {
+            return Ok(None);
+        }
+
+        let mut row_slices = SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(
+            self.columnar_owned_offsets.len().min(COLUMNAR_INLINE_ROWS),
+        );
+        for &offset in &self.columnar_owned_offsets {
+            let end = offset + self.row_length;
+            row_slices.push(&self.columnar_owned_buffer[offset..end]);
+        }
+
+        let batch = ColumnarBatch::new(
+            row_slices,
+            &self.columnar_columns,
+            self.parsed.header.endianness,
+            self.encoding,
+        );
+        Ok(Some(batch))
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -1148,6 +1166,7 @@ pub struct RuntimeColumnRef {
     pub index: u32,
     pub offset: usize,
     pub width: usize,
+    pub raw_width: u32,
     pub kind: ColumnKind,
 }
 
@@ -1156,6 +1175,7 @@ pub struct ColumnarBatch<'rows> {
     row_slices: SmallVec<[&'rows [u8]; COLUMNAR_INLINE_ROWS]>,
     columns: &'rows [RuntimeColumnRef],
     endianness: Endianness,
+    encoding: &'static Encoding,
 }
 
 impl<'rows> ColumnarBatch<'rows> {
@@ -1165,6 +1185,7 @@ impl<'rows> ColumnarBatch<'rows> {
         row_slices: SmallVec<[&'rows [u8]; COLUMNAR_INLINE_ROWS]>,
         columns: &'rows [RuntimeColumnRef],
         endianness: Endianness,
+        encoding: &'static Encoding,
     ) -> Self {
         let row_count = row_slices.len();
         Self {
@@ -1172,6 +1193,7 @@ impl<'rows> ColumnarBatch<'rows> {
             row_slices,
             columns,
             endianness,
+            encoding,
         }
     }
 
@@ -1187,6 +1209,7 @@ impl<'rows> ColumnarBatch<'rows> {
             column,
             rows: self.row_slices.as_slice(),
             endianness: self.endianness,
+            encoding: self.encoding,
         })
     }
 
@@ -1195,6 +1218,7 @@ impl<'rows> ColumnarBatch<'rows> {
             column,
             rows: self.row_slices.as_slice(),
             endianness: self.endianness,
+            encoding: self.encoding,
         })
     }
 
@@ -1205,7 +1229,13 @@ impl<'rows> ColumnarBatch<'rows> {
             column,
             rows,
             endianness: self.endianness,
+            encoding: self.encoding,
         })
+    }
+
+    #[must_use]
+    pub const fn encoding(&self) -> &'static Encoding {
+        self.encoding
     }
 }
 
@@ -1213,6 +1243,7 @@ pub struct ColumnarColumn<'batch, 'rows> {
     column: &'batch RuntimeColumnRef,
     rows: &'batch [&'rows [u8]],
     endianness: Endianness,
+    encoding: &'static Encoding,
 }
 
 impl ColumnarColumn<'_, '_> {
@@ -1235,8 +1266,91 @@ impl ColumnarColumn<'_, '_> {
         row.get(self.column.offset..self.column.offset + self.column.width)
     }
 
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    #[must_use]
+    pub fn raw_cell(&self, row_index: usize) -> Option<&[u8]> {
+        self.row_slice(row_index)
+            .and_then(|row| self.column_slice(row))
+    }
+
+    #[must_use]
+    pub const fn endianness(&self) -> Endianness {
+        self.endianness
+    }
+
+    #[must_use]
+    pub const fn encoding(&self) -> &'static Encoding {
+        self.encoding
+    }
+
+    #[must_use]
+    pub const fn raw_width(&self) -> u32 {
+        self.column.raw_width
+    }
+
+    pub fn iter_strings(&self) -> impl Iterator<Item = Option<Cow<'_, str>>> {
+        (0..self.rows.len()).map(move |idx| {
+            self.row_slice(idx).and_then(|row| {
+                self.column_slice(row).and_then(|slice| {
+                    if is_blank(slice) {
+                        None
+                    } else {
+                        Some(decode_string(slice, self.encoding))
+                    }
+                })
+            })
+        })
+    }
+
+    pub fn iter_strings_range(
+        &self,
+        start: usize,
+        len: usize,
+    ) -> impl Iterator<Item = Option<Cow<'_, str>>> {
+        let end = start.saturating_add(len).min(self.rows.len());
+        (start..end).map(move |idx| {
+            self.row_slice(idx).and_then(|row| {
+                self.column_slice(row).and_then(|slice| {
+                    if is_blank(slice) {
+                        None
+                    } else {
+                        Some(decode_string(slice, self.encoding))
+                    }
+                })
+            })
+        })
+    }
+
     pub fn iter_numeric_bits(&self) -> impl Iterator<Item = Option<u64>> + '_ {
         (0..self.rows.len()).map(move |idx| {
+            self.row_slice(idx).and_then(|slice| {
+                let data = slice.get(self.column.offset..self.column.offset + self.column.width)?;
+                let bits = numeric_bits(data, self.endianness);
+                if numeric_bits_is_missing(bits) {
+                    None
+                } else {
+                    Some(bits)
+                }
+            })
+        })
+    }
+
+    pub fn iter_numeric_bits_range(
+        &self,
+        start: usize,
+        len: usize,
+    ) -> impl Iterator<Item = Option<u64>> + '_ {
+        let end = start.saturating_add(len).min(self.rows.len());
+        (start..end).map(move |idx| {
             self.row_slice(idx).and_then(|slice| {
                 let data = slice.get(self.column.offset..self.column.offset + self.column.width)?;
                 let bits = numeric_bits(data, self.endianness);
@@ -1257,6 +1371,27 @@ impl ColumnarColumn<'_, '_> {
                     .filter(|data| !is_blank(data))
             })
         })
+    }
+
+    /// Decodes the column value at the provided row index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the row index is out of bounds.
+    pub fn decode_value(&self, row_index: usize) -> Result<Value<'_>> {
+        let slice = self.raw_cell(row_index).ok_or_else(|| Error::Corrupted {
+            section: Section::Column {
+                index: self.column.index,
+            },
+            details: Cow::from("column slice out of bounds"),
+        })?;
+        Ok(decode_value_inner(
+            self.column.kind,
+            self.column.raw_width,
+            slice,
+            self.encoding,
+            self.endianness,
+        ))
     }
 
     #[must_use]
@@ -1556,15 +1691,18 @@ fn sas_offset_datetime(seconds: f64) -> Option<OffsetDateTime> {
     }
 }
 
-fn sas_days_to_datetime(days: f64) -> Option<OffsetDateTime> {
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn sas_days_to_datetime(days: f64) -> Option<OffsetDateTime> {
     sas_offset_datetime(days * 86_400.0)
 }
 
-fn sas_seconds_to_datetime(seconds: f64) -> Option<OffsetDateTime> {
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn sas_seconds_to_datetime(seconds: f64) -> Option<OffsetDateTime> {
     sas_offset_datetime(seconds)
 }
 
-fn sas_seconds_to_time(seconds: f64) -> Option<Duration> {
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn sas_seconds_to_time(seconds: f64) -> Option<Duration> {
     if !seconds.is_finite() {
         return None;
     }
