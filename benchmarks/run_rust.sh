@@ -71,6 +71,8 @@ fi
 if [[ "${BUILD_ONLY}" == false ]]; then
   if [[ -n "${BENCH_HOTPATH:-}" ]]; then
     mkdir -p "${ROOT}/target/hotpath"
+    : "${HOTPATH_SAVE:=json,csv}"
+    : "${HOTPATH_TAG:=$(basename "${FILE}")}"
   fi
   if [[ -n "${BENCH_OUTPUT:-}" ]]; then
     OUT_FILE="${BENCH_OUTPUT}"
@@ -84,7 +86,7 @@ if [[ "${BUILD_ONLY}" == false ]]; then
     cmd+=("${CLI_ARGS[@]}")
   fi
   if [[ -n "${BENCH_HOTPATH:-}" ]]; then
-    HOTPATH_OUT="${ROOT}/target/hotpath" "${cmd[@]}"
+    HOTPATH_OUT="${ROOT}/target/hotpath" HOTPATH_SAVE="${HOTPATH_SAVE}" HOTPATH_TAG="${HOTPATH_TAG}" "${cmd[@]}"
   else
     "${cmd[@]}"
   fi

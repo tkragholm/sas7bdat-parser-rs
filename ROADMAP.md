@@ -13,15 +13,16 @@ This project is still in active development; the priorities below reflect the cu
   - ✅ Streaming chunk size now matches the configured row-group size, so each row group is flushed in a single pass.
   - ✅ Numeric encoders read the materialised vectors from staging when available.
   - ✅ Hotpath instrumentation marks each encoder, making it clear UTF-8 is the remaining bottleneck.
-  - ✅ Staged string arenas feed `stream_columnar::utf8` directly, avoiding per-slice `ByteArray` rebuilds.
+  - ✅ Staged string arenas feed `stream_columnar::utf8` directly; staged UTF-8 writes a single batch per column with reused dictionary/inline handles.
+  - ⏩ Remaining bottleneck: UTF-8 staging/writing still accounts for ~20–27% of end-to-end time on AHS-scale files.
 
 - **Dictionary-aware string handling**
   - ✅ Small per-column dictionaries (capped at 4K unique values) deduplicate common categories without penalising high-cardinality columns.
   - ✅ Dictionaries are promoted to the staging layer so we can emit dictionary IDs per column and share the dictionary with the Parquet writer.
 
 ## Near-Term Tasks
-1. **SIMD trim/null for staged strings**: scan staged character arenas with SIMD to cut remaining UTF-8 hot spots.
-2. **Def-level optimisation**: skip definition levels for all-present columns and evaluate bitmapped/null-boxed defs for sparse columns.
+1. **UTF-8 hot path**: profile and trim remaining 1.9s in `stream_columnar::utf8_staged` (e.g., tighter dictionary hashing for high-cardinality columns, optional dictionary-off mode).
+2. **Def-level optimisation**: safely elide/compact definition levels (e.g., bitmaps for sparse nulls) while keeping Parquet writer requirements satisfied.
 3. **Optional parallel flushing**: revisit Rayon-based column flushing now that staging is in place, or redesign caches to allow controlled parallelism.
 
 ## Done

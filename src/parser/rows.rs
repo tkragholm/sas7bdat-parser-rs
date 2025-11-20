@@ -40,7 +40,7 @@ const SAS_COMPRESSION_NONE: u8 = 0x00;
 const SAS_COMPRESSION_TRUNC: u8 = 0x01;
 const SAS_COMPRESSION_ROW: u8 = 0x04;
 const SUBHEADER_POINTER_OFFSET: usize = 8;
-const STAGED_UTF8_DICTIONARY_LIMIT: usize = 4_096;
+const STAGED_UTF8_DICTIONARY_LIMIT: usize = 2_048;
 
 pub struct RowIterator<'a, R: Read + Seek> {
     reader: &'a mut R,
@@ -1485,6 +1485,7 @@ impl<'rows> ColumnarBatch<'rows> {
         })))
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn materialize_numeric_column(
         &self,
         index: usize,
@@ -1604,6 +1605,7 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 
     #[allow(clippy::too_many_lines)]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn materialize_utf8_column(&self, index: usize) -> MaterializedUtf8Column {
         let column = self.column(index).expect("column index out of bounds");
         let row_count = column.len();
@@ -1644,8 +1646,8 @@ impl<'rows> ColumnarBatch<'rows> {
 
             def_levels.push(1);
             non_null_count = non_null_count.saturating_add(1);
-
             let bytes = bytes.as_ref();
+
             if dictionary_enabled {
                 if dictionary_lookup.len() >= STAGED_UTF8_DICTIONARY_LIMIT {
                     dictionary_lookup.clear();

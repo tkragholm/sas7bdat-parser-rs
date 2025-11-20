@@ -409,12 +409,17 @@ impl<W: Write + Send> ParquetSink<W> {
             let column_writer = row_group.next_column()?.ok_or_else(|| Error::Parquet {
                 details: Cow::from("writer returned fewer columns than metadata described"),
             })?;
-            if let Some(materialized) = batch.materialize_numeric(source_idx)? {
-                plan.stream_columnar_materialized(column_writer, &materialized)?;
-            } else if let Some(materialized) = batch.materialize_utf8(source_idx)? {
-                plan.stream_columnar_materialized_utf8(column_writer, &materialized)?;
-            } else {
-                plan.stream_columnar(column_writer, &column, chunk_rows)?;
+            match plan.encoder {
+                ColumnValueEncoder::Utf8 => {
+                    if let Some(materialized) = batch.materialize_utf8(source_idx)? {
+                        plan.stream_columnar_materialized_utf8(column_writer, &materialized)?;
+                    } else {
+                        plan.stream_columnar(column_writer, &column, chunk_rows)?;
+                    }
+                }
+                _ => {
+                    plan.stream_columnar(column_writer, &column, chunk_rows)?;
+                }
             }
         }
 
@@ -452,6 +457,7 @@ struct ColumnPlan {
     def_levels: Vec<i16>,
     values: ColumnValues,
     utf8_scratch: Option<Utf8Scratch>,
+    utf8_inlines: Vec<ByteArray>,
 }
 
 struct Utf8Scratch {
@@ -550,6 +556,7 @@ impl ColumnPlan {
                 ColumnValueEncoder::Utf8 => Some(Utf8Scratch::new()),
                 _ => None,
             },
+            utf8_inlines: Vec::new(),
         };
         Ok((plan, Arc::new(field)))
     }
@@ -946,7 +953,10 @@ impl ColumnPlan {
                 self.def_levels.clear();
                 self.def_levels.extend_from_slice(materialized.def_levels());
                 values.clear();
+                self.utf8_inlines.clear();
                 values.reserve(materialized.values().len());
+                self.utf8_inlines.reserve(materialized.values().len());
+
                 for value in materialized.values() {
                     match value {
                         StagedUtf8Value::Dictionary(id) => {
@@ -961,7 +971,9 @@ impl ColumnPlan {
                             values.push(handle.clone());
                         }
                         StagedUtf8Value::Inline(bytes) => {
-                            values.push(scratch.intern_slice(bytes));
+                            let interned = scratch.intern_slice(bytes);
+                            self.utf8_inlines.push(interned.clone());
+                            values.push(interned);
                         }
                     }
                 }
