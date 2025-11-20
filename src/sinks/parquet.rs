@@ -26,10 +26,9 @@ use crate::value::Value;
 const SECONDS_PER_DAY: i64 = 86_400;
 
 const DEFAULT_ROW_GROUP_SIZE: usize = 8_192;
-const DEFAULT_TARGET_ROW_GROUP_BYTES: usize = 256 * 1024 * 1024;
+const DEFAULT_TARGET_ROW_GROUP_BYTES: usize = 512 * 1024 * 1024;
 const MIN_AUTO_ROW_GROUP_ROWS: usize = 1_024;
-const MAX_AUTO_ROW_GROUP_ROWS: usize = 131_072;
-const STREAMING_CHUNK_ROWS: usize = 8_192;
+const MAX_AUTO_ROW_GROUP_ROWS: usize = 262_144;
 const UTF8_DICTIONARY_LIMIT: usize = 4_096;
 
 #[cfg(feature = "hotpath")]
@@ -380,11 +379,9 @@ impl<W: Write + Send> ColumnarSink for ParquetSink<W> {
 impl<W: Write + Send> ParquetSink<W> {
     #[inline]
     const fn streaming_chunk_rows(&self) -> usize {
-        if self.row_group_size > 0 {
-            self.row_group_size
-        } else {
-            STREAMING_CHUNK_ROWS
-        }
+        // Align streaming chunking to the configured row group size to reduce write_batch calls.
+        let rows = self.row_group_size;
+        if rows == 0 { 1 } else { rows }
     }
 
     fn write_columnar_batch_streaming(

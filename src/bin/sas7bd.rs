@@ -1,13 +1,8 @@
-#[cfg(feature = "hotpath")]
-use std::cmp::Ordering;
-#[cfg(feature = "hotpath")]
-use std::fs;
 use std::fs::File;
-#[cfg(feature = "hotpath")]
-use std::io::{self, Write};
+
 use std::path::{Path, PathBuf};
 
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
@@ -16,72 +11,6 @@ use sas7bdat_parser_rs::parser::ColumnInfo;
 use sas7bdat_parser_rs::value::Value;
 use sas7bdat_parser_rs::{ColumnarSink, CsvSink, ParquetSink, RowSink, SasFile};
 
-#[cfg(feature = "hotpath")]
-use hotpath::{
-    GuardBuilder, MetricType, MetricsJson, MetricsProvider, Reporter, shorten_function_name,
-};
-#[cfg(feature = "hotpath")]
-use time::{OffsetDateTime, macros::format_description};
-
-#[cfg(feature = "hotpath")]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-enum HotpathOutputFormat {
-    Table,
-    Json,
-    #[value(name = "json-pretty")]
-    JsonPretty,
-    Csv,
-}
-
-#[cfg(feature = "hotpath")]
-impl HotpathOutputFormat {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Table => "table",
-            Self::Json => "json",
-            Self::JsonPretty => "json-pretty",
-            Self::Csv => "csv",
-        }
-    }
-
-    fn extension(self) -> &'static str {
-        match self {
-            Self::Table => "txt",
-            Self::Json | Self::JsonPretty => "json",
-            Self::Csv => "csv",
-        }
-    }
-
-    fn persistable(&self) -> bool {
-        !matches!(self, Self::Table)
-    }
-}
-
-#[cfg(feature = "hotpath")]
-#[derive(Args, Clone, Debug)]
-struct HotpathArgs {
-    /// Directory to write profiling runs (creates timestamped files).
-    #[arg(long, env = "HOTPATH_OUT")]
-    hotpath_out: Option<PathBuf>,
-
-    /// Persist profiling output (comma-separated: json,csv,json-pretty).
-    #[arg(long, env = "HOTPATH_SAVE", value_enum, value_delimiter = ',')]
-    hotpath_save: Vec<HotpathOutputFormat>,
-
-    /// Format to print to stdout (table,json,json-pretty,csv).
-    #[arg(
-        long,
-        env = "HOTPATH_STDOUT",
-        value_enum,
-        default_value_t = HotpathOutputFormat::Table
-    )]
-    hotpath_stdout: HotpathOutputFormat,
-
-    /// Optional tag appended to output filenames (e.g., dataset or change note).
-    #[arg(long, env = "HOTPATH_TAG")]
-    hotpath_tag: Option<String>,
-}
-
 #[derive(Parser)]
 #[command(
     name = "sas7bd",
@@ -89,10 +18,6 @@ struct HotpathArgs {
     about = "Batch convert SAS7BDAT to Parquet/CSV/TSV"
 )]
 struct Cli {
-    #[cfg(feature = "hotpath")]
-    #[command(flatten)]
-    hotpath: HotpathArgs,
-
     #[command(subcommand)]
     command: Command,
 }
@@ -214,356 +139,8 @@ type ProjectionResult = (
     Vec<ColumnInfo>,
 );
 
-#[cfg(feature = "hotpath")]
-#[derive(Clone, Debug)]
-struct HotpathRuntimeConfig {
-    stdout_format: HotpathOutputFormat,
-    save_formats: Vec<HotpathOutputFormat>,
-    out_dir: Option<PathBuf>,
-    tag: Option<String>,
-}
-
-#[cfg(feature = "hotpath")]
-impl HotpathRuntimeConfig {
-    fn from_args(args: &HotpathArgs) -> Self {
-        let mut save_formats = args.hotpath_save.clone();
-        if save_formats.is_empty() && args.hotpath_out.is_some() {
-            save_formats = vec![HotpathOutputFormat::Json, HotpathOutputFormat::Csv];
-        }
-        save_formats.retain(HotpathOutputFormat::persistable);
-        save_formats.sort_unstable();
-        save_formats.dedup();
-
-        Self {
-            stdout_format: args.hotpath_stdout,
-            save_formats,
-            out_dir: args.hotpath_out.clone(),
-            tag: sanitize_tag(args.hotpath_tag.as_deref()),
-        }
-    }
-
-    fn base_filename(&self, caller_name: &'static str) -> String {
-        let timestamp = OffsetDateTime::now_utc();
-        let fmt = format_description!("[year][month][day]-[hour][minute][second]");
-        let ts = timestamp
-            .format(&fmt)
-            .unwrap_or_else(|_| "unknown-time".to_string());
-
-        if let Some(tag) = &self.tag {
-            format!("hotpath-{caller_name}-{ts}-{tag}")
-        } else {
-            format!("hotpath-{caller_name}-{ts}")
-        }
-    }
-
-    fn build_reporter(&self, caller_name: &'static str) -> Result<Box<dyn Reporter>, AnyError> {
-        let mut reporters: Vec<Box<dyn Reporter>> = vec![Box::new(StdoutReporter {
-            format: self.stdout_format,
-        })];
-
-        if let Some(out_dir) = &self.out_dir {
-            if self.save_formats.is_empty() {
-                eprintln!(
-                    "HOTPATH_OUT set to {} but no HOTPATH_SAVE formats selected; skipping file output.",
-                    out_dir.display()
-                );
-            } else {
-                fs::create_dir_all(out_dir)?;
-                let base = self.base_filename(caller_name);
-                for format in &self.save_formats {
-                    let path =
-                        out_dir.join(format!("{base}-{}.{}", format.label(), format.extension()));
-                    match format {
-                        HotpathOutputFormat::Json => reporters.push(Box::new(JsonFileReporter {
-                            path,
-                            pretty: false,
-                        })),
-                        HotpathOutputFormat::JsonPretty => {
-                            reporters.push(Box::new(JsonFileReporter { path, pretty: true }))
-                        }
-                        HotpathOutputFormat::Csv => {
-                            reporters.push(Box::new(CsvFileReporter { path }))
-                        }
-                        HotpathOutputFormat::Table => {}
-                    }
-                }
-            }
-        }
-
-        Ok(if reporters.len() == 1 {
-            reporters.remove(0)
-        } else {
-            Box::new(CompositeReporter { reporters })
-        })
-    }
-}
-
-#[cfg(feature = "hotpath")]
-fn sanitize_tag(tag: Option<&str>) -> Option<String> {
-    let tag = tag?;
-    let filtered: String = tag
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
-        .collect();
-    if filtered.is_empty() {
-        None
-    } else {
-        Some(filtered)
-    }
-}
-
-#[cfg(feature = "hotpath")]
-fn build_hotpath_guard(cli: &Cli) -> Result<hotpath::HotPath, AnyError> {
-    let config = HotpathRuntimeConfig::from_args(&cli.hotpath);
-    let reporter = config.build_reporter("sas7bd")?;
-
-    Ok(GuardBuilder::new("sas7bd")
-        .limit(20)
-        .reporter(reporter)
-        .build())
-}
-
-#[cfg(feature = "hotpath")]
-struct CompositeReporter {
-    reporters: Vec<Box<dyn Reporter>>,
-}
-
-#[cfg(feature = "hotpath")]
-impl Reporter for CompositeReporter {
-    fn report(
-        &self,
-        metrics_provider: &dyn MetricsProvider<'_>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for reporter in &self.reporters {
-            reporter.report(metrics_provider)?;
-        }
-        Ok(())
-    }
-}
-
-#[cfg(feature = "hotpath")]
-struct JsonFileReporter {
-    path: PathBuf,
-    pretty: bool,
-}
-
-#[cfg(feature = "hotpath")]
-impl Reporter for JsonFileReporter {
-    fn report(
-        &self,
-        metrics_provider: &dyn MetricsProvider<'_>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let metrics = MetricsJson::from(metrics_provider);
-        let json = if self.pretty {
-            serde_json::to_string_pretty(&metrics)?
-        } else {
-            serde_json::to_string(&metrics)?
-        };
-        fs::write(&self.path, json)?;
-        Ok(())
-    }
-}
-
-#[cfg(feature = "hotpath")]
-struct CsvFileReporter {
-    path: PathBuf,
-}
-
-#[cfg(feature = "hotpath")]
-impl Reporter for CsvFileReporter {
-    fn report(
-        &self,
-        metrics_provider: &dyn MetricsProvider<'_>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let file = File::create(&self.path)?;
-        write_csv_report(metrics_provider, file)?;
-        Ok(())
-    }
-}
-
-#[cfg(feature = "hotpath")]
-struct StdoutReporter {
-    format: HotpathOutputFormat,
-}
-
-#[cfg(feature = "hotpath")]
-impl Reporter for StdoutReporter {
-    fn report(
-        &self,
-        metrics_provider: &dyn MetricsProvider<'_>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        match self.format {
-            HotpathOutputFormat::Table => print_table_report(metrics_provider)?,
-            HotpathOutputFormat::Json => {
-                let metrics = MetricsJson::from(metrics_provider);
-                println!("{}", serde_json::to_string(&metrics)?);
-            }
-            HotpathOutputFormat::JsonPretty => {
-                let metrics = MetricsJson::from(metrics_provider);
-                println!("{}", serde_json::to_string_pretty(&metrics)?);
-            }
-            HotpathOutputFormat::Csv => {
-                let stdout = io::stdout();
-                let handle = stdout.lock();
-                write_csv_report(metrics_provider, handle)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-#[cfg(feature = "hotpath")]
-fn header_key(header: &str) -> String {
-    header
-        .to_lowercase()
-        .replace(' ', "_")
-        .replace('%', "percent")
-}
-
-#[cfg(feature = "hotpath")]
-fn metric_to_cell(metric: &MetricType) -> String {
-    match metric {
-        MetricType::CallsCount(value) => value.to_string(),
-        MetricType::DurationNs(ns) => ns.to_string(),
-        MetricType::AllocBytes(bytes) => bytes.to_string(),
-        MetricType::AllocCount(count) => count.to_string(),
-        MetricType::Percentage(basis_points) => basis_points.to_string(),
-        MetricType::Unsupported => String::new(),
-    }
-}
-
-#[cfg(feature = "hotpath")]
-fn sorted_entries(metrics_provider: &dyn MetricsProvider<'_>) -> Vec<(String, Vec<MetricType>)> {
-    let mut entries: Vec<(String, Vec<MetricType>)> =
-        metrics_provider.metric_data().into_iter().collect();
-    entries.sort_by(|(_, left_metrics), (_, right_metrics)| {
-        metrics_provider
-            .sort_key(right_metrics)
-            .partial_cmp(&metrics_provider.sort_key(left_metrics))
-            .unwrap_or(Ordering::Equal)
-    });
-    entries
-}
-
-#[cfg(feature = "hotpath")]
-fn write_csv_report(
-    metrics_provider: &dyn MetricsProvider<'_>,
-    writer: impl Write,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let headers = metrics_provider.headers();
-    let mut csv_writer = csv::Writer::from_writer(writer);
-    csv_writer.write_record(
-        headers
-            .iter()
-            .map(|header| header_key(header))
-            .collect::<Vec<_>>(),
-    )?;
-
-    for (function, metrics) in sorted_entries(metrics_provider) {
-        let mut row = Vec::with_capacity(headers.len());
-        row.push(function);
-        for metric in metrics {
-            row.push(metric_to_cell(&metric));
-        }
-        csv_writer.write_record(row)?;
-    }
-    csv_writer.flush()?;
-    Ok(())
-}
-
-#[cfg(feature = "hotpath")]
-fn print_separator(widths: &[usize]) {
-    let mut line = String::from('+');
-    for width in widths {
-        line.push_str(&"-".repeat(*width + 2));
-        line.push('+');
-    }
-    println!("{line}");
-}
-
-#[cfg(feature = "hotpath")]
-fn print_row(cells: &[String], widths: &[usize]) {
-    let mut line = String::from('|');
-    for (cell, width) in cells.iter().zip(widths) {
-        line.push(' ');
-        line.push_str(&format!("{cell:<width$}", cell = cell, width = *width));
-        line.push(' ');
-        line.push('|');
-    }
-    println!("{line}");
-}
-
-#[cfg(feature = "hotpath")]
-fn print_table_report(
-    metrics_provider: &dyn MetricsProvider<'_>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut entries = sorted_entries(metrics_provider);
-    if entries.is_empty() {
-        println!(
-            "[hotpath] No measurements recorded from {} (enable #[hotpath::measure]).",
-            metrics_provider.caller_name()
-        );
-        return Ok(());
-    }
-
-    let headers = metrics_provider.headers();
-    let mut widths: Vec<usize> = headers.iter().map(|header| header.len()).collect();
-    let mut rows: Vec<Vec<String>> = Vec::with_capacity(entries.len());
-
-    for (function, metrics) in entries.drain(..) {
-        let mut row = Vec::with_capacity(headers.len());
-        let display_name = shorten_function_name(&function);
-        widths[0] = widths[0].max(display_name.len());
-        row.push(display_name);
-
-        for (idx, metric) in metrics.iter().enumerate() {
-            let cell = metric.to_string();
-            widths[idx + 1] = widths[idx + 1].max(cell.len());
-            row.push(cell);
-        }
-
-        rows.push(row);
-    }
-
-    println!(
-        "[hotpath] {} - {}",
-        metrics_provider.profiling_mode(),
-        metrics_provider.description()
-    );
-
-    let (displayed, total) = metrics_provider.entry_counts();
-    if displayed < total {
-        println!(
-            "{}: {:.2?} ({}/{})",
-            metrics_provider.caller_name(),
-            std::time::Duration::from_nanos(metrics_provider.total_elapsed()),
-            displayed,
-            total
-        );
-    } else {
-        println!(
-            "{}: {:.2?}",
-            metrics_provider.caller_name(),
-            std::time::Duration::from_nanos(metrics_provider.total_elapsed())
-        );
-    }
-
-    print_separator(&widths);
-    print_row(&headers, &widths);
-    print_separator(&widths);
-    for row in rows {
-        print_row(&row, &widths);
-    }
-    print_separator(&widths);
-
-    Ok(())
-}
-
 fn main() -> Result<(), AnyError> {
     let cli = Cli::parse();
-
-    #[cfg(feature = "hotpath")]
-    let _hotpath = build_hotpath_guard(&cli)?;
 
     match cli.command {
         Command::Convert(args) => run_convert(&args),
@@ -704,7 +281,6 @@ fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
     Ok(())
 }
 
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), AnyError> {
     // Prepare reader and metadata
     let mut sas = SasFile::open(input)?;
@@ -814,7 +390,6 @@ struct StreamOptions<'a> {
     max_rows: Option<u64>,
 }
 
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
     reader: &mut W,
     parsed: &sas7bdat_parser_rs::parser::ParsedMetadata,
@@ -870,7 +445,6 @@ fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
     Ok(())
 }
 
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
     reader: &mut W,
     parsed: &sas7bdat_parser_rs::parser::ParsedMetadata,

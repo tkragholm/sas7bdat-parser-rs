@@ -12,8 +12,10 @@ use crate::parser::meta::ParsedMetadata;
 use crate::value::{MissingValue, Value};
 use encoding_rs::{Encoding, UTF_8};
 use hashbrown::{HashMap, hash_map::RawEntryMut};
+use rustc_hash::FxHasher;
 use simdutf8::basic;
 use smallvec::SmallVec;
+use std::hash::BuildHasherDefault;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 use super::byteorder::{read_u16, read_u32, read_u64};
@@ -355,7 +357,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     ///
     /// Returns an error when the dataset uses an unsupported compression mode
     /// or the page size cannot be represented on this platform.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn new(reader: &'a mut R, parsed: &'a ParsedMetadata) -> Result<Self> {
         match parsed.row_info.compression {
             Compression::None | Compression::Row | Compression::Binary => {}
@@ -482,7 +483,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
         let Some(progress) = self.reserve_next_row()? else {
             return Ok(None);
@@ -497,7 +497,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         }
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     /// Advances the iterator and invokes the visitor with a zero-copy row view.
     ///
     /// Returns `Ok(None)` when no more rows remain or `Ok(Some(()))` when a row
@@ -530,7 +529,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         Ok(Some(()))
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     /// Streams all remaining rows into the provided visitor without allocating intermediate vectors.
     ///
     /// # Errors
@@ -550,7 +548,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     /// # Errors
     ///
     /// Returns an error when decoding fails.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn next_columnar_batch(&mut self, max_rows: usize) -> Result<Option<ColumnarBatch<'_>>> {
         if self.exhausted.get() {
             return Ok(None);
@@ -606,7 +603,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         }
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn next_column_major_batch(
         &mut self,
         max_rows: usize,
@@ -696,7 +692,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         self.reusable_row_buffers.pop().unwrap_or_default()
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn next_columnar_batch_contiguous(
         &mut self,
         max_rows: usize,
@@ -783,7 +778,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         Ok(Some(batch))
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     #[allow(clippy::too_many_lines)]
     fn fetch_next_page(&mut self) -> Result<()> {
         let header = &self.parsed.header;
@@ -1048,7 +1042,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         ))
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode_row(&self, row_index: u16) -> Result<Vec<Value<'_>>> {
         let row = self.streaming_row(row_index)?;
         row.materialize()
@@ -1073,7 +1066,6 @@ impl<R: Read + Seek> Iterator for RowIterator<'_, R> {
     }
 }
 
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn decode_string<'a>(slice: &'a [u8], encoding: &'static Encoding) -> Cow<'a, str> {
     let trimmed = trim_trailing(slice);
     if trimmed.is_empty() {
@@ -1134,7 +1126,6 @@ fn maybe_fix_mojibake(value: Cow<'_, str>) -> Cow<'_, str> {
     value
 }
 
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn decode_numeric_cell(slice: &[u8], endian: Endianness) -> NumericCell {
     if slice.is_empty() {
         return NumericCell::Missing(MissingValue::system());
@@ -1362,7 +1353,6 @@ pub enum StagedUtf8Value {
 }
 
 impl<'rows> ColumnarBatch<'rows> {
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     #[must_use]
     fn new(
         row_slices: SmallVec<[&'rows [u8]; COLUMNAR_INLINE_ROWS]>,
@@ -1485,7 +1475,6 @@ impl<'rows> ColumnarBatch<'rows> {
         })))
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn materialize_numeric_column(
         &self,
         index: usize,
@@ -1605,16 +1594,21 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 
     #[allow(clippy::too_many_lines)]
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn materialize_utf8_column(&self, index: usize) -> MaterializedUtf8Column {
         let column = self.column(index).expect("column index out of bounds");
         let row_count = column.len();
         let mut def_levels = Vec::with_capacity(row_count);
         let mut values = Vec::with_capacity(row_count);
-        let mut dictionary = Vec::new();
-        let mut dictionary_lookup: HashMap<Vec<u8>, u32> = HashMap::new();
+        let mut dictionary = Vec::with_capacity(STAGED_UTF8_DICTIONARY_LIMIT.min(row_count));
+        let mut dictionary_lookup: HashMap<Vec<u8>, u32, BuildHasherDefault<FxHasher>> =
+            HashMap::with_capacity_and_hasher(
+                STAGED_UTF8_DICTIONARY_LIMIT.min(row_count),
+                BuildHasherDefault::<FxHasher>::default(),
+            );
         let mut dictionary_enabled = true;
         let mut non_null_count = 0usize;
+        let high_card_sample = 256usize.min(row_count);
+        let mut unique_sample = 0usize;
 
         for row_index in 0..row_count {
             let Some(raw) = column.raw_cell(row_index) else {
@@ -1649,6 +1643,19 @@ impl<'rows> ColumnarBatch<'rows> {
             let bytes = bytes.as_ref();
 
             if dictionary_enabled {
+                if non_null_count <= high_card_sample {
+                    if dictionary_lookup.len() > unique_sample {
+                        unique_sample = dictionary_lookup.len();
+                    }
+                    if non_null_count == high_card_sample && unique_sample * 4 >= non_null_count * 3
+                    {
+                        dictionary_lookup.clear();
+                        dictionary_enabled = false;
+                        values.push(StagedUtf8Value::Inline(bytes.to_vec()));
+                        continue;
+                    }
+                }
+
                 if dictionary_lookup.len() >= STAGED_UTF8_DICTIONARY_LIMIT {
                     dictionary_lookup.clear();
                     dictionary_enabled = false;
@@ -1978,7 +1985,6 @@ impl ColumnarColumn<'_, '_> {
         }
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn numeric_non_null_count(&self) -> u64 {
         self.rows
             .iter()
@@ -1988,7 +1994,6 @@ impl ColumnarColumn<'_, '_> {
             .count() as u64
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn character_non_null_count(&self) -> u64 {
         self.rows
             .iter()
@@ -2344,7 +2349,6 @@ fn parse_pointer(pointer: &[u8], uses_u64: bool, endian: Endianness) -> Result<P
 ///
 /// Returns an error if the iterator cannot be constructed, for example when
 /// the dataset uses unsupported compression.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn row_iterator<'a, R: Read + Seek>(
     reader: &'a mut R,
     parsed: &'a ParsedMetadata,
