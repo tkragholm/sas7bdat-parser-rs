@@ -1,3 +1,4 @@
+#![allow(clippy::pedantic)]
 use sas7bdat_parser_rs::api::SasFile;
 use sas7bdat_parser_rs::value::Value;
 

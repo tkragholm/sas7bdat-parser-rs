@@ -1,3 +1,4 @@
+#![allow(clippy::pedantic)]
 use std::path::Path;
 
 use datatest_stable::Result;

@@ -1,52 +1,33 @@
 # Roadmap
 
-This document tracks improvements we want to pursue so the parser can turn
-large `sas7bdat` sources into modern, ergonomic data structures efficiently.
+This project is still in active development; the priorities below reflect the current state of the CLI and library after the recent performance work.
 
-## Parser Foundations
-- ✅ Reworked `RowIterator` to yield `Value<'row>` entries instead of cloning into `'static`
-  values. Borrowing data directly from page buffers now keeps string and byte
-  extraction zero-copy for the common case.
-- ✅ Integrate `smallvec` allocations for row decoding to keep the hot path on the
-  stack when column counts are modest.
-- ✅ Added a streaming row view (`StreamingRow`/`StreamingCell`) and sink hook so
-  adapters can process rows without materialising an intermediate `Vec<Value>`.
-- Maintain a pool of reusable row buffers (e.g. `SmallVec`) so we can recycle the
-  allocation used to hold decoded `Value`s when iterating over large datasets.
-- Cache decoded column names and labels in the metadata builder to avoid
-  repeatedly materializing identical `String` values for every consumer.
-- Eliminate remaining compiler warnings by pruning unused constants/pointers and
-  tightening row-page bookkeeping so `cargo test` runs clean.
+## Current Focus
+- **Columnar + staging pipeline**
+  - ✅ Columnar staging now copies SAS pages once and reuses the contiguous buffer per batch.
+  - ✅ Numeric columns are materialised once per row group (date/time/datetime into typed `Vec<i32/i64>`, doubles into `Vec<f64>`), so Parquet streams pre-converted values instead of re-running `sas_*` conversions.
+  - ✅ UTF-8 columns use a per-column intern pool to reuse `ByteArray` handles and avoid reallocating strings when repeated.
+  - ✅ Character columns are staged with per-column arenas/dictionaries; Parquet reads dictionary IDs directly without re-iterating row slices.
 
-## Throughput Optimisations
-- ✅ Integrate `simdutf8` in `decode_string` to fast-path ASCII/UTF-8 validation and
-  fall back to `encoding_rs` only when required.
-- Adopt `smallvec` where per-row buffers are small and short-lived to reduce heap
-  pressure when iterating mixed-width datasets.
-- Explore parallel row decoding by handing fully read pages to Rayon workers
-  while the main reader advances to the next page. Keep the public iterator
-  sequential but let Rayon accelerate value materialisation.
+- **Parquet sink hot path**
+  - ✅ Streaming chunk size now matches the configured row-group size, so each row group is flushed in a single pass.
+  - ✅ Numeric encoders read the materialised vectors from staging when available.
+  - ✅ Hotpath instrumentation marks each encoder, making it clear UTF-8 is the remaining bottleneck.
+  - ✅ Staged string arenas feed `stream_columnar::utf8` directly, avoiding per-slice `ByteArray` rebuilds.
 
-## Conversion Pipeline
-- Expose a chunked conversion API so downstream consumers can build Arrow, Polars
-  or parquet outputs incrementally, even when the full dataset does not fit in
-  memory.
-- Encapsulate metadata and row batches behind a lightweight conversion trait
-  that downstream adapters (Arrow writer, serde consumer, etc.) can implement.
-- Ship reference adapters for common sinks (Arrow arrays/parquet files) so users
-  can plug the parser straight into modern analytics stacks.
-- Stream Parquet column writers directly from SAS pages: keep Parquet column
-  writers open for the lifetime of a row group, feed them consecutive SAS pages
-  (rather than buffering entire row groups), and reuse fixed-size scratch
-  buffers so we eliminate the `extend_columnar` allocations entirely. Combine
-  this with optional uncompressed/dictionary-off writer properties for maximum
-  throughput.
-- SIMD/memcpy column encoders: for numeric widths copy an entire column via
-  `memcpy`/SIMD lanes into the Parquet buffers, while character columns share a
-  single arena + offset index so we allocate strings only once per row group.
-- Parallel column flushing: when staging full row groups, use Rayon to
-  flush/write columns concurrently so multi-core machines can keep column
-  encoders saturated.
+- **Dictionary-aware string handling**
+  - ✅ Small per-column dictionaries (capped at 4K unique values) deduplicate common categories without penalising high-cardinality columns.
+  - ✅ Dictionaries are promoted to the staging layer so we can emit dictionary IDs per column and share the dictionary with the Parquet writer.
 
-These steps keep the parser lean while opening the door to high-throughput,
-streaming conversions from legacy SAS files into contemporary columnar formats.
+## Near-Term Tasks
+1. **SIMD trim/null for staged strings**: scan staged character arenas with SIMD to cut remaining UTF-8 hot spots.
+2. **Def-level optimisation**: skip definition levels for all-present columns and evaluate bitmapped/null-boxed defs for sparse columns.
+3. **Optional parallel flushing**: revisit Rayon-based column flushing now that staging is in place, or redesign caches to allow controlled parallelism.
+
+## Done
+- Reworked `RowIterator` to expose streaming row views and avoid cloning `Value<'_>` into `'static` storage.
+- Added `StreamingRow`/`StreamingCell` hooks so row sinks can process data without heap allocations.
+- Zero-copy ASCII/UTF-8 validation via `simdutf8` and selective `encoding_rs` fallback.
+- Column-major path retains compatibility by copying into per-column buffers for sinks that still rely on row slices.
+
+This roadmap is updated as major milestones land; the emphasis right now is squeezing the remaining 7–8 s out of the columnar+staging path so AHS-scale conversions hit maximum throughput.

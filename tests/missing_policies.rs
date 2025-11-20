@@ -1,3 +1,4 @@
+#![allow(clippy::pedantic)]
 use std::path::Path;
 
 use sas7bdat_parser_rs::SasFile;

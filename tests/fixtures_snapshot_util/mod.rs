@@ -1,3 +1,4 @@
+#![allow(dead_code, clippy::pedantic)]
 use std::path::{Path, PathBuf};
 
 use sas7bdat_parser_rs::SasFile;

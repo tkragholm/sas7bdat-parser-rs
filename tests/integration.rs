@@ -1,3 +1,4 @@
+#![allow(clippy::pedantic)]
 use csv::ReaderBuilder;
 use sas7bdat_parser_rs::SasFile;
 use sas7bdat_parser_rs::value::Value;

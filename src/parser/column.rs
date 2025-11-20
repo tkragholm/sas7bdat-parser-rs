@@ -870,7 +870,8 @@ mod tests {
         let mut bytes = vec![0u8; signature_len + 2];
         bytes[..4].copy_from_slice(&[0xFD, 0xFF, 0xFF, 0xFF]);
         bytes.extend_from_slice(b"Name\0\0");
-        let remainder = (bytes.len() - (4 + 2 * signature_len)) as u16;
+        let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
+            .expect("remainder fits in u16 for test data");
         bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
 
         parse_column_text_subheader(&mut builder, &bytes, 4, Endianness::Little).unwrap();
@@ -892,7 +893,8 @@ mod tests {
         bytes[..4].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
         bytes.extend_from_slice(&[0x00, 0x00, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00]);
         bytes.extend_from_slice(&[0u8; 8]);
-        let remainder = (bytes.len() - (4 + 2 * signature_len)) as u16;
+        let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
+            .expect("remainder fits in u16 for test data");
         bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
         assert_eq!(bytes.len(), 28);
 
@@ -917,7 +919,8 @@ mod tests {
         entry[10] = 0x02;
         bytes.extend_from_slice(&entry);
         bytes.extend_from_slice(&[0u8; 8]);
-        let remainder = (bytes.len() - (4 + 2 * signature_len)) as u16;
+        let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
+            .expect("remainder fits in u16 for test data");
         bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
         assert_eq!(bytes.len(), 32);
 
@@ -945,7 +948,8 @@ mod tests {
         entry[10] = 0x01;
         bytes.extend_from_slice(&entry);
         bytes.extend_from_slice(&[0u8; 8]);
-        let remainder = (bytes.len() - (4 + 2 * signature_len)) as u16;
+        let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
+            .expect("remainder fits in u16 for test data");
         bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
 
         parse_column_attrs_subheader(

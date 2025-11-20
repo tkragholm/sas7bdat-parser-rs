@@ -67,18 +67,15 @@ bench_suite() {
     local suite_desc=$3
 
     CURRENT_FEATURE_FLAG="$feature_flag"
-    local out_plain="$BENCH_OUT_DIR/${suite_name}_columnar.parquet"
-    local out_stage="$BENCH_OUT_DIR/${suite_name}_columnar_staging.parquet"
+    local out_columnar="$BENCH_OUT_DIR/${suite_name}_columnar.parquet"
 
-    local cmd_plain
-    cmd_plain=$(build_command "$out_plain")
-    local cmd_stage
-    cmd_stage=$(build_command "$out_stage" --columnar-staging)
+    local cmd_columnar
+    cmd_columnar=$(build_command "$out_columnar")
 
     echo "==> $suite_desc (dataset: $DATASET)"
-    hyperfine --warmup "$WARMUP" --runs "$RUNS" "$cmd_plain" "$cmd_stage"
-    cleanup_outputs "$out_plain" "$out_stage"
+    hyperfine --warmup "$WARMUP" --runs "$RUNS" "$cmd_columnar"
+    cleanup_outputs "$out_columnar"
 }
 
-bench_suite "baseline" "" "Columnar vs Columnar+staging"
-bench_suite "hotpath" "hotpath" "Columnar vs Columnar+staging (hotpath instrumented)"
+bench_suite "baseline" "" "Columnar contiguous"
+bench_suite "hotpath" "hotpath" "Columnar contiguous (hotpath instrumented)"

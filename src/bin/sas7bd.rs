@@ -113,8 +113,8 @@ struct ConvertArgs {
     #[arg(long, requires = "columnar")]
     columnar_batch_rows: Option<usize>,
 
-    /// Copy batches into a contiguous buffer so Parquet row groups can span pages.
-    #[arg(long, requires = "columnar")]
+    /// Deprecated: columnar mode always uses contiguous staging now.
+    #[arg(long, requires = "columnar", hide = true)]
     columnar_staging: bool,
 
     /// Experimental: decode SAS pages into column-major buffers directly.
@@ -330,7 +330,7 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
             if let Some(bytes) = args.parquet_target_bytes {
                 sink = sink.with_target_row_group_bytes(bytes);
             }
-            if args.columnar && (args.columnar_staging || args.columnar_column_major) {
+            if args.columnar {
                 sink = sink.with_streaming_columnar(true);
             }
             if args.columnar {
@@ -338,13 +338,9 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
                     ColumnarStreamMode::ColumnMajor {
                         batch_rows: columnar_row_group_rows.unwrap_or(columnar_batch_rows),
                     }
-                } else if args.columnar_staging {
+                } else {
                     ColumnarStreamMode::Contiguous {
                         batch_rows: columnar_row_group_rows.unwrap_or(columnar_batch_rows),
-                    }
-                } else {
-                    ColumnarStreamMode::PageBound {
-                        batch_rows: columnar_batch_rows,
                     }
                 };
                 stream_columnar_into_sink(
@@ -353,7 +349,7 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
                     &meta_filtered,
                     &cols_filtered,
                     &selection,
-                    mode,
+                    &mode,
                     &mut sink,
                 )?;
             } else {
@@ -463,7 +459,7 @@ fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
     meta_filtered: &DatasetMetadata,
     cols_filtered: &[ColumnInfo],
     selection: &[usize],
-    mode: ColumnarStreamMode,
+    mode: &ColumnarStreamMode,
     sink: &mut S,
 ) -> Result<(), AnyError> {
     if selection.len() != cols_filtered.len() {
@@ -478,18 +474,13 @@ fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
 
     let mut it = parsed.row_iterator(reader)?;
     match mode {
-        ColumnarStreamMode::PageBound { batch_rows } => {
-            while let Some(batch) = it.next_columnar_batch(batch_rows)? {
-                sink.write_columnar_batch(&batch, selection)?;
-            }
-        }
         ColumnarStreamMode::Contiguous { batch_rows } => {
-            while let Some(batch) = it.next_columnar_batch_contiguous(batch_rows)? {
+            while let Some(batch) = it.next_columnar_batch_contiguous(*batch_rows)? {
                 sink.write_columnar_batch(&batch, selection)?;
             }
         }
         ColumnarStreamMode::ColumnMajor { batch_rows } => {
-            while let Some(batch) = it.next_column_major_batch(batch_rows)? {
+            while let Some(batch) = it.next_column_major_batch(*batch_rows)? {
                 sink.write_column_major_batch(&batch, selection)?;
             }
         }
@@ -620,7 +611,6 @@ fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
     )
 }
 enum ColumnarStreamMode {
-    PageBound { batch_rows: usize },
     Contiguous { batch_rows: usize },
     ColumnMajor { batch_rows: usize },
 }

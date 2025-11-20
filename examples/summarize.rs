@@ -1,3 +1,4 @@
+#![allow(clippy::pedantic, clippy::nursery)]
 use std::env;
 use std::error::Error;
 use std::path::Path;

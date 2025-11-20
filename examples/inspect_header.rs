@@ -1,3 +1,4 @@
+#![allow(clippy::pedantic)]
 use sas7bdat_parser_rs::parser::parse_header;
 use std::env;
 use std::fs::File;

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::cell::Cell;
+use std::cell::{Cell, Ref, RefCell};
 use std::convert::{TryFrom, TryInto};
 use std::io::{Read, Seek, SeekFrom};
 
@@ -11,7 +11,7 @@ use crate::parser::column::{ColumnKind, NumericKind};
 use crate::parser::meta::ParsedMetadata;
 use crate::value::{MissingValue, Value};
 use encoding_rs::{Encoding, UTF_8};
-use rayon::prelude::*;
+use hashbrown::{HashMap, hash_map::RawEntryMut};
 use simdutf8::basic;
 use smallvec::SmallVec;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
@@ -20,6 +20,7 @@ use super::byteorder::{read_u16, read_u32, read_u64};
 
 const COLUMNAR_BATCH_ROWS: usize = 256;
 const COLUMNAR_INLINE_ROWS: usize = 32;
+const SECONDS_PER_DAY_I64: i64 = 86_400;
 
 const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
 const SAS_PAGE_TYPE_DATA: u16 = 0x0100;
@@ -39,6 +40,7 @@ const SAS_COMPRESSION_NONE: u8 = 0x00;
 const SAS_COMPRESSION_TRUNC: u8 = 0x01;
 const SAS_COMPRESSION_ROW: u8 = 0x04;
 const SUBHEADER_POINTER_OFFSET: usize = 8;
+const STAGED_UTF8_DICTIONARY_LIMIT: usize = 4_096;
 
 pub struct RowIterator<'a, R: Read + Seek> {
     reader: &'a mut R,
@@ -598,6 +600,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                 &self.columnar_columns,
                 self.parsed.header.endianness,
                 self.encoding,
+                false,
             );
             return Ok(Some(batch));
         }
@@ -760,10 +763,9 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             return Ok(None);
         }
 
-        let mut row_slices =
-            SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(copied_rows.min(
-                COLUMNAR_INLINE_ROWS,
-            ));
+        let mut row_slices = SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(
+            copied_rows.min(COLUMNAR_INLINE_ROWS),
+        );
         let mut offset = 0usize;
         for _ in 0..copied_rows {
             let end = offset + self.row_length;
@@ -776,6 +778,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             &self.columnar_columns,
             self.parsed.header.endianness,
             self.encoding,
+            true,
         );
         Ok(Some(batch))
     }
@@ -1240,6 +1243,27 @@ fn is_blank(slice: &[u8]) -> bool {
     chunks.remainder().iter().all(|&b| b == 0 || b == b' ')
 }
 
+#[inline]
+fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
+    let mut end = slice.len();
+    while end >= USIZE_BYTES {
+        let chunk = &slice[end - USIZE_BYTES..end];
+        let word = usize::from_ne_bytes(chunk.try_into().unwrap());
+        if word & !SPACE_MASK_USIZE != 0 {
+            break;
+        }
+        end -= USIZE_BYTES;
+    }
+    while end > 0 {
+        let byte = slice[end - 1];
+        if byte != b' ' && byte != 0 {
+            break;
+        }
+        end -= 1;
+    }
+    &slice[..end]
+}
+
 #[derive(Clone, Copy)]
 pub struct RuntimeColumnRef {
     pub index: u32,
@@ -1255,6 +1279,86 @@ pub struct ColumnarBatch<'rows> {
     columns: &'rows [RuntimeColumnRef],
     endianness: Endianness,
     encoding: &'static Encoding,
+    typed_numeric: RefCell<Vec<Option<TypedNumericColumn>>>,
+    utf8_staged: RefCell<Vec<Option<MaterializedUtf8Column>>>,
+    stage_utf8: bool,
+}
+
+pub struct MaterializedColumn<T> {
+    values: Vec<T>,
+    def_levels: Vec<i16>,
+}
+
+impl<T> MaterializedColumn<T> {
+    pub(crate) fn as_slices(&self) -> (&[T], &[i16]) {
+        (&self.values, &self.def_levels)
+    }
+}
+
+pub enum TypedNumericColumn {
+    Double(MaterializedColumn<f64>),
+    Date(MaterializedColumn<i32>),
+    DateTime(MaterializedColumn<i64>),
+    Time(MaterializedColumn<i64>),
+}
+
+pub struct MaterializedUtf8Column {
+    row_count: usize,
+    def_levels: Vec<i16>,
+    values: Vec<StagedUtf8Value>,
+    dictionary: Vec<Vec<u8>>,
+}
+
+impl MaterializedUtf8Column {
+    pub(crate) const fn new(
+        row_count: usize,
+        def_levels: Vec<i16>,
+        values: Vec<StagedUtf8Value>,
+        dictionary: Vec<Vec<u8>>,
+    ) -> Self {
+        Self {
+            row_count,
+            def_levels,
+            values,
+            dictionary,
+        }
+    }
+
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.row_count
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.row_count == 0
+    }
+
+    #[must_use]
+    pub const fn non_null_count(&self) -> usize {
+        self.values.len()
+    }
+
+    #[must_use]
+    pub fn def_levels(&self) -> &[i16] {
+        &self.def_levels
+    }
+
+    #[must_use]
+    pub fn dictionary(&self) -> &[Vec<u8>] {
+        &self.dictionary
+    }
+
+    #[must_use]
+    pub fn values(&self) -> &[StagedUtf8Value] {
+        &self.values
+    }
+}
+
+#[derive(Debug)]
+pub enum StagedUtf8Value {
+    Dictionary(u32),
+    Inline(Vec<u8>),
 }
 
 impl<'rows> ColumnarBatch<'rows> {
@@ -1265,14 +1369,22 @@ impl<'rows> ColumnarBatch<'rows> {
         columns: &'rows [RuntimeColumnRef],
         endianness: Endianness,
         encoding: &'static Encoding,
+        stage_utf8: bool,
     ) -> Self {
         let row_count = row_slices.len();
+        let mut typed_numeric = Vec::with_capacity(columns.len());
+        typed_numeric.resize_with(columns.len(), || None);
+        let mut utf8_staged = Vec::with_capacity(columns.len());
+        utf8_staged.resize_with(columns.len(), || None);
         Self {
             row_count,
             row_slices,
             columns,
             endianness,
             encoding,
+            typed_numeric: RefCell::new(typed_numeric),
+            utf8_staged: RefCell::new(utf8_staged),
+            stage_utf8,
         }
     }
 
@@ -1292,29 +1404,279 @@ impl<'rows> ColumnarBatch<'rows> {
         })
     }
 
-    pub fn columns(&self) -> impl Iterator<Item = ColumnarColumn<'_, 'rows>> {
-        self.columns.iter().map(move |column| ColumnarColumn {
-            column,
-            rows: self.row_slices.as_slice(),
-            endianness: self.endianness,
-            encoding: self.encoding,
-        })
-    }
-
-    #[must_use]
-    pub fn par_columns(&self) -> impl ParallelIterator<Item = ColumnarColumn<'_, 'rows>> {
-        let rows = self.row_slices.as_slice();
-        self.columns.par_iter().map(move |column| ColumnarColumn {
-            column,
-            rows,
-            endianness: self.endianness,
-            encoding: self.encoding,
-        })
-    }
-
     #[must_use]
     pub const fn encoding(&self) -> &'static Encoding {
         self.encoding
+    }
+
+    /// Materialises the numeric column at `index` for reuse.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if numeric decoding fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal cache is inconsistent with the column list.
+    pub fn materialize_numeric(&self, index: usize) -> Result<Option<Ref<'_, TypedNumericColumn>>> {
+        let Some(column) = self.columns.get(index) else {
+            return Ok(None);
+        };
+        let ColumnKind::Numeric(kind) = column.kind else {
+            return Ok(None);
+        };
+
+        {
+            let cache = self.typed_numeric.borrow();
+            if let Some(Some(_)) = cache.get(index) {
+                return Ok(Some(Ref::map(cache, |vec| {
+                    vec[index].as_ref().expect("typed numeric missing")
+                })));
+            }
+        }
+
+        let materialized = self.materialize_numeric_column(index, kind)?;
+        self.typed_numeric.borrow_mut()[index] = Some(materialized);
+        let cache = self.typed_numeric.borrow();
+        Ok(Some(Ref::map(cache, |vec| {
+            vec[index].as_ref().expect("typed numeric missing")
+        })))
+    }
+
+    /// Materialises the UTF-8 column at `index` for reuse.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal cache is inconsistent with the column list.
+    ///
+    /// # Errors
+    ///
+    /// This currently always returns `Ok`, yielding `None` when staging is disabled
+    /// or the column is not UTF-8.
+    pub fn materialize_utf8(
+        &self,
+        index: usize,
+    ) -> Result<Option<Ref<'_, MaterializedUtf8Column>>> {
+        if !self.stage_utf8 {
+            return Ok(None);
+        }
+
+        let Some(column) = self.columns.get(index) else {
+            return Ok(None);
+        };
+        let ColumnKind::Character = column.kind else {
+            return Ok(None);
+        };
+
+        {
+            let cache = self.utf8_staged.borrow();
+            if let Some(Some(_)) = cache.get(index) {
+                return Ok(Some(Ref::map(cache, |vec| {
+                    vec[index].as_ref().expect("staged utf8 missing")
+                })));
+            }
+        }
+
+        let materialized = self.materialize_utf8_column(index);
+        self.utf8_staged.borrow_mut()[index] = Some(materialized);
+        let cache = self.utf8_staged.borrow();
+        Ok(Some(Ref::map(cache, |vec| {
+            vec[index].as_ref().expect("staged utf8 missing")
+        })))
+    }
+
+    fn materialize_numeric_column(
+        &self,
+        index: usize,
+        kind: NumericKind,
+    ) -> Result<TypedNumericColumn> {
+        let column = self.column(index).expect("column index out of bounds");
+        match kind {
+            NumericKind::Double => Ok(TypedNumericColumn::Double(Self::materialize_f64(&column))),
+            NumericKind::Date => Ok(TypedNumericColumn::Date(Self::materialize_date(&column)?)),
+            NumericKind::DateTime => Ok(TypedNumericColumn::DateTime(Self::materialize_datetime(
+                &column,
+            )?)),
+            NumericKind::Time => Ok(TypedNumericColumn::Time(Self::materialize_time(&column)?)),
+        }
+    }
+
+    fn materialize_f64(column: &ColumnarColumn<'_, '_>) -> MaterializedColumn<f64> {
+        let mut values = Vec::with_capacity(column.len());
+        let mut def_levels = Vec::with_capacity(column.len());
+        for maybe_bits in column.iter_numeric_bits() {
+            if let Some(bits) = maybe_bits {
+                def_levels.push(1);
+                values.push(f64::from_bits(bits));
+            } else {
+                def_levels.push(0);
+            }
+        }
+        MaterializedColumn { values, def_levels }
+    }
+
+    fn materialize_date(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i32>> {
+        let mut values = Vec::with_capacity(column.len());
+        let mut def_levels = Vec::with_capacity(column.len());
+        for maybe_bits in column.iter_numeric_bits() {
+            if let Some(bits) = maybe_bits {
+                let days = f64::from_bits(bits);
+                let datetime =
+                    sas_days_to_datetime(days).ok_or_else(|| Error::InvalidMetadata {
+                        details: Cow::Owned(format!(
+                            "column '{}' contains date outside supported range",
+                            column.index()
+                        )),
+                    })?;
+                let seconds = datetime.unix_timestamp();
+                let day = seconds.div_euclid(SECONDS_PER_DAY_I64);
+                let day = i32::try_from(day).map_err(|_| Error::InvalidMetadata {
+                    details: Cow::Owned(format!(
+                        "column '{}' contains date outside Parquet range",
+                        column.index()
+                    )),
+                })?;
+                def_levels.push(1);
+                values.push(day);
+            } else {
+                def_levels.push(0);
+            }
+        }
+        Ok(MaterializedColumn { values, def_levels })
+    }
+
+    fn materialize_datetime(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {
+        let mut values = Vec::with_capacity(column.len());
+        let mut def_levels = Vec::with_capacity(column.len());
+        for maybe_bits in column.iter_numeric_bits() {
+            if let Some(bits) = maybe_bits {
+                let seconds = f64::from_bits(bits);
+                let datetime =
+                    sas_seconds_to_datetime(seconds).ok_or_else(|| Error::InvalidMetadata {
+                        details: Cow::Owned(format!(
+                            "column '{}' contains timestamp outside supported range",
+                            column.index()
+                        )),
+                    })?;
+                let micros = datetime.unix_timestamp_nanos().div_euclid(1_000);
+                let micros = i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
+                    details: Cow::Owned(format!(
+                        "column '{}' contains timestamp outside Parquet range",
+                        column.index()
+                    )),
+                })?;
+                def_levels.push(1);
+                values.push(micros);
+            } else {
+                def_levels.push(0);
+            }
+        }
+        Ok(MaterializedColumn { values, def_levels })
+    }
+
+    fn materialize_time(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {
+        let mut values = Vec::with_capacity(column.len());
+        let mut def_levels = Vec::with_capacity(column.len());
+        for maybe_bits in column.iter_numeric_bits() {
+            if let Some(bits) = maybe_bits {
+                let seconds = f64::from_bits(bits);
+                let duration =
+                    sas_seconds_to_time(seconds).ok_or_else(|| Error::InvalidMetadata {
+                        details: Cow::Owned(format!(
+                            "column '{}' contains time outside supported range",
+                            column.index()
+                        )),
+                    })?;
+                let micros = duration.whole_microseconds();
+                let micros = i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
+                    details: Cow::Owned(format!(
+                        "column '{}' contains time outside Parquet range",
+                        column.index()
+                    )),
+                })?;
+                def_levels.push(1);
+                values.push(micros);
+            } else {
+                def_levels.push(0);
+            }
+        }
+        Ok(MaterializedColumn { values, def_levels })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn materialize_utf8_column(&self, index: usize) -> MaterializedUtf8Column {
+        let column = self.column(index).expect("column index out of bounds");
+        let row_count = column.len();
+        let mut def_levels = Vec::with_capacity(row_count);
+        let mut values = Vec::with_capacity(row_count);
+        let mut dictionary = Vec::new();
+        let mut dictionary_lookup: HashMap<Vec<u8>, u32> = HashMap::new();
+        let mut dictionary_enabled = true;
+        let mut non_null_count = 0usize;
+
+        for row_index in 0..row_count {
+            let Some(raw) = column.raw_cell(row_index) else {
+                def_levels.push(0);
+                continue;
+            };
+            let trimmed = trim_trailing_space_or_nul_simd(raw);
+            if trimmed.is_empty() {
+                def_levels.push(0);
+                continue;
+            }
+
+            let bytes: Cow<'_, [u8]> = if self.encoding == UTF_8 {
+                match basic::from_utf8(trimmed) {
+                    Ok(_) => Cow::Borrowed(trimmed),
+                    Err(_) => Cow::Owned(
+                        decode_string(trimmed, self.encoding)
+                            .into_owned()
+                            .into_bytes(),
+                    ),
+                }
+            } else {
+                Cow::Owned(
+                    decode_string(trimmed, self.encoding)
+                        .into_owned()
+                        .into_bytes(),
+                )
+            };
+
+            def_levels.push(1);
+            non_null_count = non_null_count.saturating_add(1);
+
+            let bytes = bytes.as_ref();
+            if dictionary_enabled {
+                if dictionary_lookup.len() >= STAGED_UTF8_DICTIONARY_LIMIT {
+                    dictionary_lookup.clear();
+                    dictionary_enabled = false;
+                    values.push(StagedUtf8Value::Inline(bytes.to_vec()));
+                    continue;
+                }
+                match dictionary_lookup.raw_entry_mut().from_key(bytes) {
+                    RawEntryMut::Occupied(entry) => {
+                        values.push(StagedUtf8Value::Dictionary(*entry.get()));
+                    }
+                    RawEntryMut::Vacant(vacant) => {
+                        let dict_index = dictionary.len();
+                        let Ok(dict_index) = u32::try_from(dict_index) else {
+                            dictionary_enabled = false;
+                            dictionary_lookup.clear();
+                            values.push(StagedUtf8Value::Inline(bytes.to_vec()));
+                            continue;
+                        };
+                        let owned = bytes.to_vec();
+                        vacant.insert(owned.clone(), dict_index);
+                        dictionary.push(owned);
+                        values.push(StagedUtf8Value::Dictionary(dict_index));
+                    }
+                }
+            } else {
+                values.push(StagedUtf8Value::Inline(bytes.to_vec()));
+            }
+        }
+
+        MaterializedUtf8Column::new(row_count, def_levels, values, dictionary)
     }
 }
 
@@ -1326,7 +1688,7 @@ pub struct ColumnarColumn<'batch, 'rows> {
 }
 
 impl<'columns> ColumnMajorBatch<'columns> {
-    fn new(
+    const fn new(
         columns: &'columns [ColumnMajorColumn],
         row_count: usize,
         endianness: Endianness,
@@ -1340,10 +1702,12 @@ impl<'columns> ColumnMajorBatch<'columns> {
         }
     }
 
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.row_count == 0
     }
 
+    #[must_use]
     pub fn column(&self, index: usize) -> Option<ColumnMajorColumnView<'columns>> {
         let column = self.columns.get(index)?;
         Some(ColumnMajorColumnView {
@@ -1357,7 +1721,7 @@ impl<'columns> ColumnMajorBatch<'columns> {
 }
 
 impl ColumnMajorColumn {
-    fn new(column: RuntimeColumnRef) -> Self {
+    const fn new(column: RuntimeColumnRef) -> Self {
         Self {
             column,
             buffer: Vec::new(),
@@ -1383,8 +1747,14 @@ impl ColumnMajorColumn {
 }
 
 impl ColumnMajorColumnView<'_> {
+    #[must_use]
     pub const fn len(&self) -> usize {
         self.row_count
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.row_count == 0
     }
 
     fn cell_slice(&self, row_index: usize) -> Option<&[u8]> {

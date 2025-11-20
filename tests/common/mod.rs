@@ -1,3 +1,4 @@
+#![allow(dead_code, clippy::pedantic)]
 use sas7bdat_parser_rs::value::Value;
 use serde_json::{Value as JsonValue, json};
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};

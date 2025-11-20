@@ -1,3 +1,4 @@
+#![allow(clippy::pedantic, dead_code)]
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};

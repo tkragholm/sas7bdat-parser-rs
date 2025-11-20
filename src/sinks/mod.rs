@@ -79,6 +79,10 @@ pub trait ColumnarSink: RowSink {
     ) -> Result<()>;
 
     /// Optional hook for column-major batches.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the sink does not support column-major batches.
     fn write_column_major_batch(
         &mut self,
         _batch: &ColumnMajorBatch<'_>,

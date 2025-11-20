@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .format(Format::Table)
         .build();
 
-    let output_path = parse_args()?;
+    let output_path = parse_args();
     let temp_dir = tempdir()?;
 
     let zip_path = temp_dir.path().join("ahs2013.zip");
@@ -49,18 +49,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn parse_args() -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn parse_args() -> PathBuf {
     let mut args = env::args();
     let program = args.next().unwrap_or_else(|| "sas_to_parquet".to_owned());
-    let output = match (args.next(), args.next()) {
+    match (args.next(), args.next()) {
         (Some(path), None) => PathBuf::from(path),
         (None, None) => PathBuf::from(DEFAULT_OUTPUT),
         _ => {
             eprintln!("Usage: {program} [output.parquet]");
             process::exit(1);
         }
-    };
-    Ok(output)
+    }
 }
 
 fn download_zip(url: &str, destination: &Path) -> Result<(), Box<dyn std::error::Error>> {

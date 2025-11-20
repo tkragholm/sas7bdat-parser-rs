@@ -278,6 +278,7 @@ pub struct WindowedProjectedRows<'a, R: Read + Seek>(WindowedInner<ProjectedRows
 
 macro_rules! impl_windowed_type {
     ($name:ident => $inner:ty, $row:ty) => {
+        #[allow(clippy::missing_errors_doc)]
         impl<'a, R: Read + Seek> $name<'a, R> {
             const fn new(inner: $inner, skip: u64, remaining: Option<u64>) -> Self {
                 Self(WindowedInner::new(inner, skip, remaining))
