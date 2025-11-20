@@ -15,7 +15,7 @@ pub use column::{
 pub use header::{SasHeader, parse_header};
 pub use meta::{ParsedMetadata, parse_metadata};
 pub use rows::{
-    ColumnarBatch, ColumnarColumn, RowIterator, RuntimeColumnRef, StreamingCell, StreamingRow,
-    row_iterator,
+    ColumnMajorBatch, ColumnMajorColumnView, ColumnarBatch, ColumnarColumn, RowIterator,
+    RuntimeColumnRef, StreamingCell, StreamingRow, row_iterator,
 };
 pub(crate) use rows::{sas_days_to_datetime, sas_seconds_to_datetime, sas_seconds_to_time};

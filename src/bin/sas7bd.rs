@@ -116,6 +116,10 @@ struct ConvertArgs {
     /// Copy batches into a contiguous buffer so Parquet row groups can span pages.
     #[arg(long, requires = "columnar")]
     columnar_staging: bool,
+
+    /// Experimental: decode SAS pages into column-major buffers directly.
+    #[arg(long, requires = "columnar")]
+    columnar_column_major: bool,
 }
 
 const DEFAULT_COLUMNAR_BATCH_ROWS: usize = 4096;
@@ -326,11 +330,15 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
             if let Some(bytes) = args.parquet_target_bytes {
                 sink = sink.with_target_row_group_bytes(bytes);
             }
-            if args.columnar && args.columnar_staging {
+            if args.columnar && (args.columnar_staging || args.columnar_column_major) {
                 sink = sink.with_streaming_columnar(true);
             }
             if args.columnar {
-                let mode = if args.columnar_staging {
+                let mode = if args.columnar_column_major {
+                    ColumnarStreamMode::ColumnMajor {
+                        batch_rows: columnar_row_group_rows.unwrap_or(columnar_batch_rows),
+                    }
+                } else if args.columnar_staging {
                     ColumnarStreamMode::Contiguous {
                         batch_rows: columnar_row_group_rows.unwrap_or(columnar_batch_rows),
                     }
@@ -480,6 +488,11 @@ fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
                 sink.write_columnar_batch(&batch, selection)?;
             }
         }
+        ColumnarStreamMode::ColumnMajor { batch_rows } => {
+            while let Some(batch) = it.next_column_major_batch(batch_rows)? {
+                sink.write_column_major_batch(&batch, selection)?;
+            }
+        }
     }
 
     sink.finish()?;
@@ -609,4 +622,5 @@ fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
 enum ColumnarStreamMode {
     PageBound { batch_rows: usize },
     Contiguous { batch_rows: usize },
+    ColumnMajor { batch_rows: usize },
 }

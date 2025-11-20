@@ -1875,6 +1875,7 @@ name = "sas7bdat-parser-rs"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "bytes",
  "clap",
  "csv",
  "datatest-stable",

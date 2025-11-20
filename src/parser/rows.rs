@@ -45,10 +45,10 @@ pub struct RowIterator<'a, R: Read + Seek> {
     parsed: &'a ParsedMetadata,
     runtime_columns: Vec<RuntimeColumn>,
     columnar_columns: Vec<RuntimeColumnRef>,
+    column_major_columns: Vec<ColumnMajorColumn>,
     page_buffer: Vec<u8>,
     current_rows: Vec<RowData>,
     reusable_row_buffers: Vec<Vec<u8>>,
-    columnar_owned_offsets: Vec<usize>,
     columnar_owned_buffer: Vec<u8>,
     page_row_count: Cell<u16>,
     row_in_page: Cell<u16>,
@@ -397,17 +397,23 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let columnar_columns = runtime_columns.iter().map(RuntimeColumn::as_ref).collect();
+        let columnar_columns: Vec<RuntimeColumnRef> =
+            runtime_columns.iter().map(RuntimeColumn::as_ref).collect();
+        let column_major_columns = columnar_columns
+            .iter()
+            .copied()
+            .map(ColumnMajorColumn::new)
+            .collect();
 
         Ok(Self {
             reader,
             parsed,
             runtime_columns,
             columnar_columns,
+            column_major_columns,
             page_buffer: vec![0u8; page_size],
             current_rows: Vec::new(),
             reusable_row_buffers: Vec::new(),
-            columnar_owned_offsets: Vec::new(),
             columnar_owned_buffer: Vec::new(),
             page_row_count: Cell::new(0),
             row_in_page: Cell::new(0),
@@ -597,6 +603,79 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub fn next_column_major_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> Result<Option<ColumnMajorBatch<'_>>> {
+        if self.exhausted.get() {
+            return Ok(None);
+        }
+
+        let target = if max_rows == 0 {
+            COLUMNAR_BATCH_ROWS
+        } else {
+            max_rows
+        };
+
+        loop {
+            if !self.ensure_page_ready()? {
+                return Ok(None);
+            }
+
+            let page_total = usize::from(self.page_row_count.get());
+            let start = usize::from(self.row_in_page.get());
+            if start >= page_total {
+                continue;
+            }
+
+            let available = page_total - start;
+            let chunk_len = available.min(target);
+            let row_end = start + chunk_len;
+
+            for column in &mut self.column_major_columns {
+                column.prepare_rows(chunk_len);
+            }
+
+            for (offset, row_data) in self.current_rows[start..row_end].iter().enumerate() {
+                let row_slice = row_data.as_slice(
+                    self.row_length,
+                    &self.page_buffer,
+                    (start + offset) as u64,
+                )?;
+                for column in &mut self.column_major_columns {
+                    let runtime = &column.column;
+                    let cell = row_slice
+                        .get(runtime.offset..runtime.offset + runtime.width)
+                        .ok_or_else(|| Error::Corrupted {
+                            section: Section::Column {
+                                index: runtime.index,
+                            },
+                            details: Cow::from("column slice out of bounds"),
+                        })?;
+                    column.write_cell(offset, cell);
+                }
+            }
+
+            self.row_in_page
+                .set(u16::try_from(row_end).unwrap_or(u16::MAX));
+            self.emitted_rows
+                .set(self.emitted_rows.get().saturating_add(chunk_len as u64));
+
+            if self.emitted_rows.get() >= self.total_rows {
+                self.exhausted.set(true);
+            }
+
+            let batch = ColumnMajorBatch::new(
+                &self.column_major_columns,
+                chunk_len,
+                self.parsed.header.endianness,
+                self.encoding,
+            );
+            return Ok(Some(batch));
+        }
+    }
+
     fn recycle_current_rows(&mut self) {
         for entry in self.current_rows.drain(..) {
             if let RowData::Owned(mut buffer) = entry {
@@ -607,7 +686,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     }
 
     fn recycle_owned_rows(&mut self) {
-        self.columnar_owned_offsets.clear();
         self.columnar_owned_buffer.clear();
     }
 
@@ -639,8 +717,8 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             }
         }
 
-        let mut copied = 0usize;
-        while copied < target {
+        let mut copied_rows = 0usize;
+        while copied_rows < target {
             if !self.ensure_page_ready()? {
                 break;
             }
@@ -652,7 +730,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             }
 
             let available = page_total - start;
-            let remaining = target - copied;
+            let remaining = target - copied_rows;
             let chunk_len = available.min(remaining);
             let row_end = start + chunk_len;
 
@@ -662,12 +740,10 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
                     &self.page_buffer,
                     row_index as u64,
                 )?;
-                let offset = self.columnar_owned_buffer.len();
                 self.columnar_owned_buffer.extend_from_slice(row_data);
-                self.columnar_owned_offsets.push(offset);
             }
 
-            copied += chunk_len;
+            copied_rows += chunk_len;
 
             self.row_in_page
                 .set(u16::try_from(row_end).unwrap_or(u16::MAX));
@@ -680,16 +756,19 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             }
         }
 
-        if copied == 0 {
+        if copied_rows == 0 {
             return Ok(None);
         }
 
-        let mut row_slices = SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(
-            self.columnar_owned_offsets.len().min(COLUMNAR_INLINE_ROWS),
-        );
-        for &offset in &self.columnar_owned_offsets {
+        let mut row_slices =
+            SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(copied_rows.min(
+                COLUMNAR_INLINE_ROWS,
+            ));
+        let mut offset = 0usize;
+        for _ in 0..copied_rows {
             let end = offset + self.row_length;
             row_slices.push(&self.columnar_owned_buffer[offset..end]);
+            offset = end;
         }
 
         let batch = ColumnarBatch::new(
@@ -1242,6 +1321,131 @@ impl<'rows> ColumnarBatch<'rows> {
 pub struct ColumnarColumn<'batch, 'rows> {
     column: &'batch RuntimeColumnRef,
     rows: &'batch [&'rows [u8]],
+    endianness: Endianness,
+    encoding: &'static Encoding,
+}
+
+impl<'columns> ColumnMajorBatch<'columns> {
+    fn new(
+        columns: &'columns [ColumnMajorColumn],
+        row_count: usize,
+        endianness: Endianness,
+        encoding: &'static Encoding,
+    ) -> Self {
+        Self {
+            row_count,
+            columns,
+            endianness,
+            encoding,
+        }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.row_count == 0
+    }
+
+    pub fn column(&self, index: usize) -> Option<ColumnMajorColumnView<'columns>> {
+        let column = self.columns.get(index)?;
+        Some(ColumnMajorColumnView {
+            column: &column.column,
+            buffer: column.buffer.as_slice(),
+            row_count: self.row_count,
+            endianness: self.endianness,
+            encoding: self.encoding,
+        })
+    }
+}
+
+impl ColumnMajorColumn {
+    fn new(column: RuntimeColumnRef) -> Self {
+        Self {
+            column,
+            buffer: Vec::new(),
+        }
+    }
+
+    fn prepare_rows(&mut self, rows: usize) {
+        let width = self.column.width;
+        let len = rows.saturating_mul(width);
+        if self.buffer.len() < len {
+            self.buffer.resize(len, 0u8);
+        } else {
+            self.buffer.truncate(len);
+        }
+    }
+
+    fn write_cell(&mut self, row_index: usize, value: &[u8]) {
+        let width = self.column.width;
+        let start = row_index * width;
+        let end = start + width;
+        self.buffer[start..end].copy_from_slice(value);
+    }
+}
+
+impl ColumnMajorColumnView<'_> {
+    pub const fn len(&self) -> usize {
+        self.row_count
+    }
+
+    fn cell_slice(&self, row_index: usize) -> Option<&[u8]> {
+        let width = self.column.width;
+        let start = row_index.checked_mul(width)?;
+        let end = start + width;
+        self.buffer.get(start..end)
+    }
+
+    pub fn iter_numeric_bits_range(
+        &self,
+        start: usize,
+        len: usize,
+    ) -> impl Iterator<Item = Option<u64>> + '_ {
+        let end = start.saturating_add(len).min(self.row_count);
+        (start..end).map(move |idx| {
+            self.cell_slice(idx).and_then(|slice| {
+                let bits = numeric_bits(slice, self.endianness);
+                if numeric_bits_is_missing(bits) {
+                    None
+                } else {
+                    Some(bits)
+                }
+            })
+        })
+    }
+
+    pub fn iter_strings_range(
+        &self,
+        start: usize,
+        len: usize,
+    ) -> impl Iterator<Item = Option<Cow<'_, str>>> {
+        let end = start.saturating_add(len).min(self.row_count);
+        (start..end).map(move |idx| {
+            self.cell_slice(idx).and_then(|slice| {
+                if is_blank(slice) {
+                    None
+                } else {
+                    Some(decode_string(slice, self.encoding))
+                }
+            })
+        })
+    }
+}
+
+pub struct ColumnMajorBatch<'columns> {
+    pub row_count: usize,
+    columns: &'columns [ColumnMajorColumn],
+    endianness: Endianness,
+    encoding: &'static Encoding,
+}
+
+struct ColumnMajorColumn {
+    column: RuntimeColumnRef,
+    buffer: Vec<u8>,
+}
+
+pub struct ColumnMajorColumnView<'batch> {
+    column: &'batch RuntimeColumnRef,
+    buffer: &'batch [u8],
+    row_count: usize,
     endianness: Endianness,
     encoding: &'static Encoding,
 }

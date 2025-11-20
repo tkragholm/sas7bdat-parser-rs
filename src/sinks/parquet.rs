@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::io::Write;
 use std::sync::Arc;
 
+use bytes::BytesMut;
 use itoa::Buffer as ItoaBuffer;
 use parquet::basic::{LogicalType, Repetition, TimeUnit, Type as PhysicalType};
 use parquet::data_type::{ByteArray, ByteArrayType, DoubleType, Int32Type, Int64Type};
@@ -14,8 +15,8 @@ use ryu::Buffer as RyuBuffer;
 use crate::error::{Error, Result};
 use crate::metadata::Variable;
 use crate::parser::{
-    ColumnInfo, ColumnKind, ColumnarBatch, ColumnarColumn, NumericKind, sas_days_to_datetime,
-    sas_seconds_to_datetime, sas_seconds_to_time,
+    ColumnInfo, ColumnKind, ColumnMajorBatch, ColumnMajorColumnView, ColumnarBatch, ColumnarColumn,
+    NumericKind, sas_days_to_datetime, sas_seconds_to_datetime, sas_seconds_to_time,
 };
 use crate::sinks::{ColumnarSink, RowSink, SinkContext};
 use crate::value::Value;
@@ -303,14 +304,29 @@ impl<W: Write + Send> ColumnarSink for ParquetSink<W> {
         }
         Ok(())
     }
-}
 
-impl<W: Write + Send> ParquetSink<W> {
-    fn write_columnar_batch_streaming(
+    fn write_column_major_batch(
         &mut self,
-        batch: &ColumnarBatch<'_>,
+        batch: &ColumnMajorBatch<'_>,
         selection: &[usize],
     ) -> Result<()> {
+        if self.writer.is_none() {
+            return Err(Error::Unsupported {
+                feature: Cow::from("rows written before Parquet sink initialised"),
+            });
+        }
+        if !self.streaming_columnar {
+            return Err(Error::Unsupported {
+                feature: Cow::from("column-major batches require streaming mode"),
+            });
+        }
+        if selection.len() != self.columns.len() {
+            return Err(Error::InvalidMetadata {
+                details: Cow::from("column selection length does not match sink columns"),
+            });
+        }
+
+        let chunk_rows = self.streaming_chunk_rows().max(1);
         let writer = self.writer.as_mut().ok_or_else(|| Error::InvalidMetadata {
             details: Cow::from("Parquet sink has not been initialised"),
         })?;
@@ -327,7 +343,54 @@ impl<W: Write + Send> ParquetSink<W> {
             let column_writer = row_group.next_column()?.ok_or_else(|| Error::Parquet {
                 details: Cow::from("writer returned fewer columns than metadata described"),
             })?;
-            plan.stream_columnar(column_writer, &column, STREAMING_CHUNK_ROWS)?;
+            plan.stream_column_major(&column, chunk_rows, column_writer)?;
+        }
+
+        if row_group.next_column()?.is_some() {
+            return Err(Error::Parquet {
+                details: Cow::from("writer returned more columns than metadata described"),
+            });
+        }
+
+        row_group.close()?;
+        self.rows_buffered = 0;
+        Ok(())
+    }
+}
+
+impl<W: Write + Send> ParquetSink<W> {
+    #[inline]
+    fn streaming_chunk_rows(&self) -> usize {
+        if self.row_group_size > 0 {
+            self.row_group_size
+        } else {
+            STREAMING_CHUNK_ROWS
+        }
+    }
+
+    fn write_columnar_batch_streaming(
+        &mut self,
+        batch: &ColumnarBatch<'_>,
+        selection: &[usize],
+    ) -> Result<()> {
+        let chunk_rows = self.streaming_chunk_rows().max(1);
+        let writer = self.writer.as_mut().ok_or_else(|| Error::InvalidMetadata {
+            details: Cow::from("Parquet sink has not been initialised"),
+        })?;
+
+        let mut row_group = writer.next_row_group()?;
+        for (plan, &source_idx) in self.columns.iter_mut().zip(selection.iter()) {
+            let column = batch
+                .column(source_idx)
+                .ok_or_else(|| Error::InvalidMetadata {
+                    details: Cow::Owned(format!(
+                        "column selection index {source_idx} exceeds available columns"
+                    )),
+                })?;
+            let column_writer = row_group.next_column()?.ok_or_else(|| Error::Parquet {
+                details: Cow::from("writer returned fewer columns than metadata described"),
+            })?;
+            plan.stream_columnar(column_writer, &column, chunk_rows)?;
         }
 
         if row_group.next_column()?.is_some() {
@@ -369,6 +432,8 @@ struct ColumnPlan {
 struct Utf8Scratch {
     ryu: RyuBuffer,
     itoa: ItoaBuffer,
+    buffer: BytesMut,
+    value_offsets: Vec<(usize, usize)>,
 }
 
 impl Utf8Scratch {
@@ -376,6 +441,8 @@ impl Utf8Scratch {
         Self {
             ryu: RyuBuffer::new(),
             itoa: ItoaBuffer::new(),
+            buffer: BytesMut::new(),
+            value_offsets: Vec::new(),
         }
     }
 }
@@ -628,7 +695,8 @@ impl ColumnPlan {
                 let writer = column_writer.typed::<DoubleType>();
                 stream_numeric(
                     &mut self.def_levels,
-                    column,
+                    column.len(),
+                    |start, len| column.iter_numeric_bits_range(start, len),
                     chunk,
                     values,
                     |bits| Ok(f64::from_bits(bits)),
@@ -640,7 +708,8 @@ impl ColumnPlan {
                 let column_name = self.name.clone();
                 stream_numeric(
                     &mut self.def_levels,
-                    column,
+                    column.len(),
+                    |start, len| column.iter_numeric_bits_range(start, len),
                     chunk,
                     values,
                     |bits| {
@@ -668,7 +737,8 @@ impl ColumnPlan {
                 let column_name = self.name.clone();
                 stream_numeric(
                     &mut self.def_levels,
-                    column,
+                    column.len(),
+                    |start, len| column.iter_numeric_bits_range(start, len),
                     chunk,
                     values,
                     |bits| {
@@ -696,7 +766,154 @@ impl ColumnPlan {
                 let column_name = self.name.clone();
                 stream_numeric(
                     &mut self.def_levels,
-                    column,
+                    column.len(),
+                    |start, len| column.iter_numeric_bits_range(start, len),
+                    chunk,
+                    values,
+                    |bits| {
+                        let seconds = f64::from_bits(bits);
+                        let duration =
+                            sas_seconds_to_time(seconds).ok_or_else(|| Error::InvalidMetadata {
+                                details: Cow::Owned(format!(
+                                    "column '{column_name}' contains time outside supported range"
+                                )),
+                            })?;
+                        let micros = duration.whole_microseconds();
+                        let micros = i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
+                            details: Cow::Owned(format!(
+                                "column '{column_name}' contains time outside Parquet range"
+                            )),
+                        })?;
+                        Ok(micros)
+                    },
+                    |vals, defs| writer.write_batch(vals, Some(defs), None),
+                )?;
+            }
+            (ColumnValues::ByteArray(values), ColumnValueEncoder::Utf8) => {
+                let writer = column_writer.typed::<ByteArrayType>();
+                let total = column.len();
+                let mut processed = 0;
+                while processed < total {
+                    let take = (total - processed).min(chunk);
+                    self.def_levels.clear();
+                    values.clear();
+                    let scratch = self
+                        .utf8_scratch
+                        .as_mut()
+                        .expect("utf8 scratch missing for UTF-8 encoder");
+                    scratch.buffer.clear();
+                    scratch.value_offsets.clear();
+                    for maybe_text in column.iter_strings_range(processed, take) {
+                        if let Some(text) = maybe_text {
+                            self.def_levels.push(1);
+                            let start = scratch.buffer.len();
+                            scratch.buffer.extend_from_slice(text.as_ref().as_bytes());
+                            let end = scratch.buffer.len();
+                            scratch.value_offsets.push((start, end));
+                        } else {
+                            self.def_levels.push(0);
+                        }
+                    }
+                    let chunk_bytes = scratch.buffer.split().freeze();
+                    values.reserve(scratch.value_offsets.len());
+                    for &(start, end) in &scratch.value_offsets {
+                        let slice = chunk_bytes.slice(start..end);
+                        values.push(ByteArray::from(slice));
+                    }
+                    writer.write_batch(values, Some(&self.def_levels), None)?;
+                    processed += take;
+                }
+            }
+            _ => {
+                return Err(Error::Parquet {
+                    details: Cow::from("unsupported column encoding during streaming"),
+                });
+            }
+        }
+        column_writer.close()?;
+        Ok(())
+    }
+    fn stream_column_major(
+        &mut self,
+        column: &ColumnMajorColumnView<'_>,
+        chunk_rows: usize,
+        mut column_writer: SerializedColumnWriter<'_>,
+    ) -> Result<()> {
+        let chunk = chunk_rows.max(1);
+        match (&mut self.values, self.encoder) {
+            (ColumnValues::Double(values), ColumnValueEncoder::Double) => {
+                let writer = column_writer.typed::<DoubleType>();
+                stream_numeric(
+                    &mut self.def_levels,
+                    column.len(),
+                    |start, len| column.iter_numeric_bits_range(start, len),
+                    chunk,
+                    values,
+                    |bits| Ok(f64::from_bits(bits)),
+                    |vals, defs| writer.write_batch(vals, Some(defs), None),
+                )?;
+            }
+            (ColumnValues::Int32(values), ColumnValueEncoder::Date) => {
+                let writer = column_writer.typed::<Int32Type>();
+                let column_name = self.name.clone();
+                stream_numeric(
+                    &mut self.def_levels,
+                    column.len(),
+                    |start, len| column.iter_numeric_bits_range(start, len),
+                    chunk,
+                    values,
+                    |bits| {
+                        let days = f64::from_bits(bits);
+                        let datetime =
+                            sas_days_to_datetime(days).ok_or_else(|| Error::InvalidMetadata {
+                                details: Cow::Owned(format!(
+                                    "column '{column_name}' contains date outside supported range"
+                                )),
+                            })?;
+                        let seconds = datetime.unix_timestamp();
+                        let day = seconds.div_euclid(SECONDS_PER_DAY);
+                        let day = i32::try_from(day).map_err(|_| Error::InvalidMetadata {
+                            details: Cow::Owned(format!(
+                                "column '{column_name}' contains date outside Parquet range"
+                            )),
+                        })?;
+                        Ok(day)
+                    },
+                    |vals, defs| writer.write_batch(vals, Some(defs), None),
+                )?;
+            }
+            (ColumnValues::Int64(values), ColumnValueEncoder::DateTime) => {
+                let writer = column_writer.typed::<Int64Type>();
+                let column_name = self.name.clone();
+                stream_numeric(
+                    &mut self.def_levels,
+                    column.len(),
+                    |start, len| column.iter_numeric_bits_range(start, len),
+                    chunk,
+                    values,
+                    |bits| {
+                        let seconds = f64::from_bits(bits);
+                        let datetime = sas_seconds_to_datetime(seconds).ok_or_else(|| Error::InvalidMetadata {
+                            details: Cow::Owned(format!("column '{column_name}' contains timestamp outside supported range")),
+                        })?;
+                        let micros = datetime.unix_timestamp_nanos().div_euclid(1_000);
+                        let micros = i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
+                            details: Cow::Owned(format!(
+                                "column '{column_name}' contains timestamp outside Parquet range"
+                            )),
+                        })?;
+                        Ok(micros)
+                    },
+                    |vals, defs| writer.write_batch(vals, Some(defs), None),
+                )?;
+            }
+            (ColumnValues::Int64(values), ColumnValueEncoder::Time) => {
+                let writer = column_writer.typed::<Int64Type>();
+                let column_name = self.name.clone();
+                stream_numeric(
+                    &mut self.def_levels,
+                    column.len(),
+                    |start, len| column.iter_numeric_bits_range(start, len),
                     chunk,
                     values,
                     |bits| {
@@ -730,7 +947,7 @@ impl ColumnPlan {
                     for maybe_text in column.iter_strings_range(processed, take) {
                         if let Some(text) = maybe_text {
                             self.def_levels.push(1);
-                            values.push(ByteArray::from(text.as_ref()));
+                            values.push(ByteArray::from(text.as_ref().as_bytes()));
                         } else {
                             self.def_levels.push(0);
                         }
@@ -961,26 +1178,29 @@ impl ColumnPlan {
     }
 }
 
-fn stream_numeric<T, F, W>(
+fn stream_numeric<T, F, W, P, I>(
     def_levels: &mut Vec<i16>,
-    column: &ColumnarColumn<'_, '_>,
+    total_len: usize,
+    mut iter_provider: P,
     chunk: usize,
     values: &mut Vec<T>,
     mut map_value: F,
     mut write_chunk: W,
 ) -> Result<()>
 where
+    P: FnMut(usize, usize) -> I,
+    I: Iterator<Item = Option<u64>>,
     F: FnMut(u64) -> Result<T>,
     W: FnMut(&[T], &[i16]) -> std::result::Result<usize, ParquetError>,
 {
-    let total = column.len();
+    let total = total_len;
     let mut processed = 0;
     while processed < total {
         let take = (total - processed).min(chunk);
         def_levels.clear();
         values.clear();
         values.reserve(take);
-        for maybe_bits in column.iter_numeric_bits_range(processed, take) {
+        for maybe_bits in iter_provider(processed, take) {
             if let Some(bits) = maybe_bits {
                 def_levels.push(1);
                 let value = map_value(bits)?;

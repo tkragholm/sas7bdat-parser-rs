@@ -21,6 +21,7 @@ encoding_rs = "0.8"
 simdutf8 = "0.1.5"
 smallvec = "1.15.1"
 parquet = "57"
+bytes = "1"
 hotpath = { version = "0.6", optional = true }
 ryu = "1"
 itoa = "1"
