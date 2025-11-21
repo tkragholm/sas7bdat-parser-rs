@@ -68,7 +68,9 @@ pub fn write_time(dur: &Duration, out: &mut Vec<u8>) -> Result<()> {
     if millis != 0 {
         out.push(b'.');
         let millis_u16 = u16::try_from(millis).map_err(|_| Error::InvalidMetadata {
-            details: std::borrow::Cow::from("time milliseconds component out of range for CSV formatting"),
+            details: std::borrow::Cow::from(
+                "time milliseconds component out of range for CSV formatting",
+            ),
         })?;
         write_three(millis_u16, out);
     }

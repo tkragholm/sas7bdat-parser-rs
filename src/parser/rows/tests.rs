@@ -3,9 +3,7 @@ use std::io::Cursor;
 
 use encoding_rs::Encoding;
 
-use crate::metadata::{
-    Alignment, Compression, DatasetMetadata, Endianness, Measure, Vendor,
-};
+use crate::metadata::{Alignment, Compression, DatasetMetadata, Endianness, Measure, Vendor};
 use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::header::SasHeader;
 use crate::parser::metadata::{
@@ -210,7 +208,10 @@ fn columnar_batch_uses_borrowed_rows() {
     assert_eq!(batch.row_count, 2);
 
     let col = batch.column(0).expect("column present");
-    let texts: Vec<_> = col.iter_strings().map(|opt| opt.map(|s| s.into_owned())).collect();
+    let texts: Vec<_> = col
+        .iter_strings()
+        .map(|opt| opt.map(|s| s.into_owned()))
+        .collect();
     assert_eq!(texts, vec![Some("A".to_string()), Some("B".to_string())]);
 }
 
@@ -219,14 +220,7 @@ fn decompresses_row_compression_page_rle() {
     // Control 0xC1 + 'A' inserts 4 bytes of 'A' (row length 4).
     let compressed = [0xC1u8, b'A'];
     let page = make_compressed_page(&compressed, 4, 96, super::constants::SAS_COMPRESSION_ROW);
-    let parsed = make_parsed_metadata(
-        Vendor::Sas,
-        Compression::Row,
-        4,
-        1,
-        1,
-        96,
-    );
+    let parsed = make_parsed_metadata(Vendor::Sas, Compression::Row, 4, 1, 1, 96);
     let mut cursor = Cursor::new(page);
     let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
 
@@ -242,14 +236,7 @@ fn decompresses_binary_compression_page_rdc() {
     compressed.extend_from_slice(&0u16.to_be_bytes());
     compressed.extend_from_slice(b"BCDE");
     let page = make_compressed_page(&compressed, 4, 96, super::constants::SAS_COMPRESSION_ROW);
-    let parsed = make_parsed_metadata(
-        Vendor::Sas,
-        Compression::Binary,
-        4,
-        1,
-        1,
-        96,
-    );
+    let parsed = make_parsed_metadata(Vendor::Sas, Compression::Binary, 4, 1, 1, 96);
     let mut cursor = Cursor::new(page);
     let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
 

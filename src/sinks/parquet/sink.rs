@@ -120,28 +120,10 @@ impl<W: Write + Send> ParquetSink<W> {
             return Ok(());
         }
 
-        let writer = self.writer.as_mut().ok_or_else(|| Error::InvalidMetadata {
-            details: Cow::from("Parquet sink has not been initialised"),
-        })?;
-        let mut row_group = writer.next_row_group()?;
-
-        for plan in &mut self.columns {
-            let column_writer = row_group.next_column()?.ok_or_else(|| Error::Parquet {
-                details: Cow::from("writer returned fewer columns than metadata described"),
-            })?;
-            plan.flush(column_writer)?;
-        }
-
-        // Ensure the row group writer has no dangling columns.
-        if row_group.next_column()?.is_some() {
-            return Err(Error::Parquet {
-                details: Cow::from("writer returned more columns than metadata described"),
-            });
-        }
-
-        row_group.close()?;
-        self.rows_buffered = 0;
-        Ok(())
+        let selection: Vec<usize> = (0..self.columns.len()).collect();
+        self.with_selection_row_group(&selection, |plan, column_writer, _| {
+            plan.flush(column_writer)
+        })
     }
 }
 
@@ -292,29 +274,13 @@ impl<W: Write + Send> ColumnarSink for ParquetSink<W> {
         batch: &ColumnMajorBatch<'_>,
         selection: &[usize],
     ) -> Result<()> {
-        if self.writer.is_none() {
-            return Err(Error::Unsupported {
-                feature: Cow::from("rows written before Parquet sink initialised"),
-            });
-        }
         if !self.streaming_columnar {
             return Err(Error::Unsupported {
                 feature: Cow::from("column-major batches require streaming mode"),
             });
         }
-        if selection.len() != self.columns.len() {
-            return Err(Error::InvalidMetadata {
-                details: Cow::from("column selection length does not match sink columns"),
-            });
-        }
-
         let chunk_rows = self.streaming_chunk_rows().max(1);
-        let writer = self.writer.as_mut().ok_or_else(|| Error::InvalidMetadata {
-            details: Cow::from("Parquet sink has not been initialised"),
-        })?;
-
-        let mut row_group = writer.next_row_group()?;
-        for (plan, &source_idx) in self.columns.iter_mut().zip(selection.iter()) {
+        self.with_selection_row_group(selection, |plan, column_writer, source_idx| {
             let column = batch
                 .column(source_idx)
                 .ok_or_else(|| Error::InvalidMetadata {
@@ -322,21 +288,8 @@ impl<W: Write + Send> ColumnarSink for ParquetSink<W> {
                         "column selection index {source_idx} exceeds available columns"
                     )),
                 })?;
-            let column_writer = row_group.next_column()?.ok_or_else(|| Error::Parquet {
-                details: Cow::from("writer returned fewer columns than metadata described"),
-            })?;
-            plan.stream_column_major(&column, chunk_rows, column_writer)?;
-        }
-
-        if row_group.next_column()?.is_some() {
-            return Err(Error::Parquet {
-                details: Cow::from("writer returned more columns than metadata described"),
-            });
-        }
-
-        row_group.close()?;
-        self.rows_buffered = 0;
-        Ok(())
+            plan.stream_column_major(&column, chunk_rows, column_writer)
+        })
     }
 }
 
@@ -354,12 +307,7 @@ impl<W: Write + Send> ParquetSink<W> {
         selection: &[usize],
     ) -> Result<()> {
         let chunk_rows = self.streaming_chunk_rows().max(1);
-        let writer = self.writer.as_mut().ok_or_else(|| Error::InvalidMetadata {
-            details: Cow::from("Parquet sink has not been initialised"),
-        })?;
-
-        let mut row_group = writer.next_row_group()?;
-        for (plan, &source_idx) in self.columns.iter_mut().zip(selection.iter()) {
+        self.with_selection_row_group(selection, |plan, column_writer, source_idx| {
             let column = batch
                 .column(source_idx)
                 .ok_or_else(|| Error::InvalidMetadata {
@@ -367,9 +315,6 @@ impl<W: Write + Send> ParquetSink<W> {
                         "column selection index {source_idx} exceeds available columns"
                     )),
                 })?;
-            let column_writer = row_group.next_column()?.ok_or_else(|| Error::Parquet {
-                details: Cow::from("writer returned fewer columns than metadata described"),
-            })?;
             match plan.encoder {
                 super::plan::ColumnValueEncoder::Utf8 => {
                     if let Some(materialized) = batch.materialize_utf8(source_idx)? {
@@ -382,6 +327,49 @@ impl<W: Write + Send> ParquetSink<W> {
                     plan.stream_columnar(column_writer, &column, chunk_rows)?;
                 }
             }
+            Ok(())
+        })
+    }
+
+    fn ensure_writer_initialised(&self) -> Result<()> {
+        if self.writer.is_none() {
+            return Err(Error::Unsupported {
+                feature: Cow::from("rows written before Parquet sink initialised"),
+            });
+        }
+        Ok(())
+    }
+
+    fn ensure_selection_valid(&self, len: usize) -> Result<()> {
+        if len != self.columns.len() {
+            return Err(Error::InvalidMetadata {
+                details: Cow::from("column selection length does not match sink columns"),
+            });
+        }
+        Ok(())
+    }
+
+    fn with_selection_row_group<F>(&mut self, selection: &[usize], mut f: F) -> Result<()>
+    where
+        F: FnMut(
+            &mut super::plan::ColumnPlan,
+            parquet::file::writer::SerializedColumnWriter<'_>,
+            usize,
+        ) -> Result<()>,
+    {
+        self.ensure_writer_initialised()?;
+        self.ensure_selection_valid(selection.len())?;
+
+        let writer = self.writer.as_mut().ok_or_else(|| Error::InvalidMetadata {
+            details: Cow::from("Parquet sink has not been initialised"),
+        })?;
+        let mut row_group = writer.next_row_group()?;
+
+        for (plan, &source_idx) in self.columns.iter_mut().zip(selection.iter()) {
+            let column_writer = row_group.next_column()?.ok_or_else(|| Error::Parquet {
+                details: Cow::from("writer returned fewer columns than metadata described"),
+            })?;
+            f(plan, column_writer, source_idx)?;
         }
 
         if row_group.next_column()?.is_some() {
@@ -389,7 +377,6 @@ impl<W: Write + Send> ParquetSink<W> {
                 details: Cow::from("writer returned more columns than metadata described"),
             });
         }
-
         row_group.close()?;
         self.rows_buffered = 0;
         Ok(())

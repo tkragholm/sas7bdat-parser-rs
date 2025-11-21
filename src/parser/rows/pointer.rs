@@ -18,11 +18,7 @@ pub struct PointerInfo {
     pub is_compressed_data: bool,
 }
 
-pub fn parse_pointer(
-    pointer: &[u8],
-    uses_u64: bool,
-    endian: Endianness,
-) -> Result<PointerInfo> {
+pub fn parse_pointer(pointer: &[u8], uses_u64: bool, endian: Endianness) -> Result<PointerInfo> {
     if uses_u64 {
         if pointer.len() < 18 {
             return Err(Error::Corrupted {

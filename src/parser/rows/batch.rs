@@ -5,9 +5,7 @@ use smallvec::SmallVec;
 
 use crate::error::Result;
 
-use super::columnar::{
-    ColumnMajorBatch, ColumnarBatch, COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS,
-};
+use super::columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnMajorBatch, ColumnarBatch};
 use super::iterator::RowIterator;
 
 pub fn next_columnar_batch<'iter, R: Read + Seek>(
@@ -48,8 +46,7 @@ pub fn next_columnar_batch<'iter, R: Read + Seek>(
             iter.exhausted.set(true);
         }
 
-        let mut row_slices =
-            SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(chunk_len);
+        let mut row_slices = SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(chunk_len);
         for (offset, row_data) in iter.current_rows[start..row_end].iter().enumerate() {
             let row_index = start + offset;
             let slice = row_data.as_slice(iter.row_length, &iter.page_buffer, row_index as u64)?;
@@ -101,7 +98,8 @@ pub fn next_column_major_batch<'iter, R: Read + Seek>(
         }
 
         for (offset, row_data) in iter.current_rows[start..row_end].iter().enumerate() {
-            let row_slice = row_data.as_slice(iter.row_length, &iter.page_buffer, (start + offset) as u64)?;
+            let row_slice =
+                row_data.as_slice(iter.row_length, &iter.page_buffer, (start + offset) as u64)?;
             for column in &mut iter.column_major_columns {
                 let runtime = &column.column;
                 let cell = row_slice

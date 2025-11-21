@@ -1,6 +1,6 @@
 ---
 source: tests/fixtures_snapshot.rs
-assertion_line: 20
+assertion_line: 21
 expression: snapshot
 ---
 {

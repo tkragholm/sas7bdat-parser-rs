@@ -11,9 +11,7 @@ use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::metadata::ParsedMetadata;
 use crate::value::Value;
 
-use super::batch::{
-    next_column_major_batch, next_columnar_batch, next_columnar_batch_contiguous,
-};
+use super::batch::{next_column_major_batch, next_columnar_batch, next_columnar_batch_contiguous};
 use super::buffer::RowData;
 use super::columnar::ColumnMajorColumn;
 use super::runtime_column::{RuntimeColumn, RuntimeColumnRef};
@@ -257,7 +255,10 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     /// # Errors
     ///
     /// Returns an error when decoding fails.
-    pub fn next_columnar_batch(&mut self, max_rows: usize) -> Result<Option<super::ColumnarBatch<'_>>> {
+    pub fn next_columnar_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> Result<Option<super::ColumnarBatch<'_>>> {
         next_columnar_batch(self, max_rows)
     }
 
