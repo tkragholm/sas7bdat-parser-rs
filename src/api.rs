@@ -266,7 +266,6 @@ impl<I> WindowedInner<I> {
 }
 
 impl<I: WindowSource> WindowedInner<I> {
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn try_next(&mut self) -> Result<Option<I::Row<'_>>> {
         self.state.try_next()
     }
@@ -451,7 +450,6 @@ impl<R: Read + Seek> SasFile<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration fails.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn populate_missing_policies(&mut self) -> Result<()> {
         let variable_count = self.metadata.header.metadata.variables.len();
         if variable_count == 0 {
@@ -503,7 +501,6 @@ impl<R: Read + Seek> SasFile<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn rows(&mut self) -> Result<RowIterator<'_, R>> {
         self.reader.seek(SeekFrom::Start(0))?;
         self.metadata.row_iterator(&mut self.reader)
@@ -518,7 +515,6 @@ impl<R: Read + Seek> SasFile<R> {
     ///
     /// Returns an error if the options specify a projection, if the reader
     /// cannot be positioned, or if row iteration cannot be initialised.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn rows_with_options(&mut self, options: &ReadOptions) -> Result<WindowedRows<'_, R>> {
         if options.has_projection() {
             return Err(Error::InvalidMetadata {
@@ -540,7 +536,6 @@ impl<R: Read + Seek> SasFile<R> {
     ///
     /// Returns an error if any requested column index is invalid or if row
     /// decoding fails.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn project_rows(&mut self, indices: &[usize]) -> Result<ProjectedRows<'_, R>> {
         let column_count = self.metadata.header.metadata.column_count as usize;
         if indices.is_empty() {
@@ -588,7 +583,6 @@ impl<R: Read + Seek> SasFile<R> {
     /// # Errors
     ///
     /// Returns an error when projection cannot be resolved or row decoding fails.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn project_rows_with_options(
         &mut self,
         options: &ReadOptions,
@@ -613,7 +607,6 @@ impl<R: Read + Seek> SasFile<R> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails or if the sink reports a failure.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn write_into_sink<S: RowSink>(&mut self, sink: &mut S) -> Result<()> {
         self.reader.seek(SeekFrom::Start(0))?;
         let context = SinkContext::new(&self.metadata);
@@ -637,7 +630,6 @@ impl<R: Read + Seek> ProjectedRows<'_, R> {
     ///
     /// Returns an error if row decoding fails or if a requested column is
     /// missing from the row data.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn try_next(&mut self) -> Result<Option<Vec<Value<'static>>>> {
         if self.exhausted {
             return Ok(None);

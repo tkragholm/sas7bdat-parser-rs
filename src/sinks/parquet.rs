@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 use crate::metadata::Variable;
 use crate::parser::{
     ColumnInfo, ColumnKind, ColumnMajorBatch, ColumnMajorColumnView, ColumnarBatch, ColumnarColumn,
-    MaterializedUtf8Column, NumericKind, StagedUtf8Value, TypedNumericColumn, sas_days_to_datetime,
+    MaterializedUtf8Column, NumericKind, StagedUtf8Value, sas_days_to_datetime,
     sas_seconds_to_datetime, sas_seconds_to_time,
 };
 use crate::sinks::{ColumnarSink, RowSink, SinkContext};
@@ -31,15 +31,6 @@ const MIN_AUTO_ROW_GROUP_ROWS: usize = 1_024;
 const MAX_AUTO_ROW_GROUP_ROWS: usize = 262_144;
 const UTF8_DICTIONARY_LIMIT: usize = 4_096;
 
-#[cfg(feature = "hotpath")]
-macro_rules! measure_encoder {
-    ($name:expr, $block:block) => {{
-        let result: Result<()> = hotpath::measure_block!($name, $block);
-        result
-    }};
-}
-
-#[cfg(not(feature = "hotpath"))]
 macro_rules! measure_encoder {
     ($name:expr, $block:block) => {{
         let result: Result<()> = $block;
@@ -134,7 +125,6 @@ impl<W: Write + Send> ParquetSink<W> {
     ///
     /// Returns an error if the writer has not been finished or if the
     /// internal output has already been taken.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn into_inner(mut self) -> Result<W> {
         if self.writer.is_some() {
             return Err(Error::Unsupported {
@@ -146,7 +136,6 @@ impl<W: Write + Send> ParquetSink<W> {
         })
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn flush(&mut self) -> Result<()> {
         if self.rows_buffered == 0 {
             return Ok(());
@@ -178,7 +167,6 @@ impl<W: Write + Send> ParquetSink<W> {
 }
 
 impl<W: Write + Send> RowSink for ParquetSink<W> {
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn begin(&mut self, context: SinkContext<'_>) -> Result<()> {
         if self.writer.is_some() {
             return Err(Error::Unsupported {
@@ -231,7 +219,6 @@ impl<W: Write + Send> RowSink for ParquetSink<W> {
         Ok(())
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn write_row(&mut self, row: &[Value<'_>]) -> Result<()> {
         if self.writer.is_none() {
             return Err(Error::Unsupported {
@@ -262,7 +249,6 @@ impl<W: Write + Send> RowSink for ParquetSink<W> {
         Ok(())
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn finish(&mut self) -> Result<()> {
         if self.writer.is_none() {
             return Ok(());
@@ -283,7 +269,6 @@ impl<W: Write + Send> RowSink for ParquetSink<W> {
 }
 
 impl<W: Write + Send> ColumnarSink for ParquetSink<W> {
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn write_columnar_batch(
         &mut self,
         batch: &ColumnarBatch<'_>,
@@ -498,7 +483,6 @@ impl Utf8Scratch {
 }
 
 impl ColumnPlan {
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn new(variable: &Variable, column: &ColumnInfo) -> Result<(Self, TypePtr)> {
         let (encoder, physical_type, logical_type) = match column.kind {
             ColumnKind::Character => (
@@ -568,7 +552,6 @@ impl ColumnPlan {
         }
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn push(&mut self, value: &Value<'_>) -> Result<()> {
         match self.encoder {
             ColumnValueEncoder::Double => {
@@ -620,7 +603,6 @@ impl ColumnPlan {
         Ok(())
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     #[allow(clippy::too_many_lines)]
     fn extend_columnar(&mut self, column: &ColumnarColumn<'_, '_>) -> Result<()> {
         self.def_levels.reserve(column.len());
@@ -732,7 +714,6 @@ impl ColumnPlan {
         Ok(())
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     #[allow(clippy::too_many_lines)]
     fn stream_columnar(
         &mut self,
@@ -891,45 +872,6 @@ impl ColumnPlan {
         Ok(())
     }
 
-    fn stream_columnar_materialized(
-        &self,
-        mut column_writer: SerializedColumnWriter<'_>,
-        materialized: &TypedNumericColumn,
-    ) -> Result<()> {
-        match (materialized, &self.values, self.encoder) {
-            (
-                TypedNumericColumn::Double(data),
-                ColumnValues::Double(_),
-                ColumnValueEncoder::Double,
-            ) => {
-                let writer = column_writer.typed::<DoubleType>();
-                let (values, defs) = data.as_slices();
-                writer.write_batch(values, Some(defs), None)?;
-            }
-            (TypedNumericColumn::Date(data), ColumnValues::Int32(_), ColumnValueEncoder::Date) => {
-                let writer = column_writer.typed::<Int32Type>();
-                let (values, defs) = data.as_slices();
-                writer.write_batch(values, Some(defs), None)?;
-            }
-            (
-                TypedNumericColumn::DateTime(data) | TypedNumericColumn::Time(data),
-                ColumnValues::Int64(_),
-                ColumnValueEncoder::DateTime | ColumnValueEncoder::Time,
-            ) => {
-                let writer = column_writer.typed::<Int64Type>();
-                let (values, defs) = data.as_slices();
-                writer.write_batch(values, Some(defs), None)?;
-            }
-            _ => {
-                return Err(Error::InvalidMetadata {
-                    details: Cow::from("materialized numeric column type mismatch"),
-                });
-            }
-        }
-        column_writer.close()?;
-        Ok(())
-    }
-
     #[allow(clippy::too_many_lines)]
     fn stream_columnar_materialized_utf8(
         &mut self,
@@ -989,7 +931,7 @@ impl ColumnPlan {
             }),
         }
     }
-    #[allow(clippy::too_many_lines)]
+
     fn stream_column_major(
         &mut self,
         column: &ColumnMajorColumnView<'_>,
@@ -1134,7 +1076,6 @@ impl ColumnPlan {
         }
     }
 
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn flush(&mut self, mut column_writer: SerializedColumnWriter<'_>) -> Result<()> {
         match (&mut self.values, self.encoder) {
             (ColumnValues::Double(values), ColumnValueEncoder::Double) => {
