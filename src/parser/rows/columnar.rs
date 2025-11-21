@@ -35,12 +35,14 @@ pub struct ColumnarBatch<'rows> {
     stage_utf8: bool,
 }
 
+#[allow(dead_code)]
 pub struct MaterializedColumn<T> {
     values: Vec<T>,
     def_levels: Vec<i16>,
 }
 
 impl<T> MaterializedColumn<T> {
+    #[allow(dead_code)]
     pub(crate) fn as_slices(&self) -> (&[T], &[i16]) {
         (&self.values, &self.def_levels)
     }
@@ -159,6 +161,15 @@ impl<'rows> ColumnarBatch<'rows> {
         self.encoding
     }
 
+    /// Materialises a numeric column into a typed buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when decoding numeric values fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cache slot is unexpectedly empty after insertion.
     pub fn materialize_numeric(&self, index: usize) -> Result<Option<Ref<'_, TypedNumericColumn>>> {
         let Some(column) = self.columns.get(index) else {
             return Ok(None);
@@ -184,6 +195,15 @@ impl<'rows> ColumnarBatch<'rows> {
         })))
     }
 
+    /// Materialises a character column into staged UTF-8 buffers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when decoding string values fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cache slot is unexpectedly empty after insertion.
     pub fn materialize_utf8(
         &self,
         index: usize,

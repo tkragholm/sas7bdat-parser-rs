@@ -69,6 +69,11 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
         self.cell_from_column(column)
     }
 
+    /// Returns the streaming cell for a specific column reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the column slice exceeds the row buffer.
     pub fn cell_from_column(
         &self,
         column: &'meta RuntimeColumn,

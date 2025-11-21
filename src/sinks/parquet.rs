@@ -932,6 +932,7 @@ impl ColumnPlan {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn stream_column_major(
         &mut self,
         column: &ColumnMajorColumnView<'_>,

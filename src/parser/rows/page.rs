@@ -1,0 +1,277 @@
+use std::borrow::Cow;
+use std::convert::TryInto;
+use std::io::{Read, Seek, SeekFrom};
+
+use crate::error::{Error, Result, Section};
+use crate::metadata::{Compression, Vendor};
+use crate::parser::core::byteorder::read_u16;
+
+use super::buffer::RowData;
+use super::compression::{decompress_rdc, decompress_rle};
+use super::constants::{
+    SAS_COMPRESSION_NONE, SAS_COMPRESSION_ROW, SAS_COMPRESSION_TRUNC, SAS_PAGE_TYPE_COMP,
+    SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MASK, SAS_PAGE_TYPE_MIX, SUBHEADER_POINTER_OFFSET,
+};
+use super::iterator::RowIterator;
+use super::pointer::{parse_pointer, read_signature, signature_is_recognized};
+
+impl<R: Read + Seek> RowIterator<'_, R> {
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn fetch_next_page(&mut self) -> Result<()> {
+        let header = &self.parsed.header;
+        let row_length = self.row_length;
+
+        while self.next_page_index < header.page_count {
+            let offset = header.data_offset + self.next_page_index * u64::from(header.page_size);
+            self.reader
+                .seek(SeekFrom::Start(offset))
+                .map_err(Error::from)?;
+            self.reader
+                .read_exact(&mut self.page_buffer)
+                .map_err(Error::from)?;
+            let page_index = self.next_page_index;
+            self.next_page_index += 1;
+
+            let page_type = read_u16(
+                header.endianness,
+                &self.page_buffer[(header.page_header_size as usize) - 8..],
+            );
+            if (page_type & SAS_PAGE_TYPE_COMP) == SAS_PAGE_TYPE_COMP {
+                continue;
+            }
+
+            let base_page_type = page_type & SAS_PAGE_TYPE_MASK;
+
+            let page_row_count = read_u16(
+                header.endianness,
+                &self.page_buffer[(header.page_header_size as usize) - 6..],
+            );
+            let target_rows = if page_row_count == 0 {
+                None
+            } else {
+                Some(page_row_count as usize)
+            };
+
+            self.recycle_current_rows();
+
+            let subheader_count_pos = header.page_header_size as usize - 4;
+            let subheader_count =
+                read_u16(header.endianness, &self.page_buffer[subheader_count_pos..]);
+
+            let pointer_size = header.subheader_pointer_size as usize;
+            let mut ptr_cursor = header.page_header_size as usize;
+
+            for _ in 0..subheader_count {
+                if ptr_cursor + pointer_size > self.page_buffer.len() {
+                    return Err(Error::Corrupted {
+                        section: Section::Page { index: page_index },
+                        details: Cow::from("subheader pointer exceeds page bounds"),
+                    });
+                }
+
+                let pointer = &self.page_buffer[ptr_cursor..ptr_cursor + pointer_size];
+                ptr_cursor += pointer_size;
+
+                let info = parse_pointer(pointer, header.uses_u64, header.endianness)?;
+                if info.length == 0 {
+                    continue;
+                }
+                if info.offset + info.length > self.page_buffer.len() {
+                    return Err(Error::Corrupted {
+                        section: Section::Page { index: page_index },
+                        details: Cow::from("subheader pointer references data beyond page bounds"),
+                    });
+                }
+
+                let data_start = info.offset;
+                let data_end = info.offset + info.length;
+                match info.compression {
+                    SAS_COMPRESSION_NONE => {
+                        let data = &self.page_buffer[data_start..data_end];
+                        let signature = read_signature(data, header.endianness, header.uses_u64);
+                        if info.is_compressed_data && !signature_is_recognized(signature) {
+                            let mut local_offset = info.offset;
+                            let mut remaining = info.length;
+                            while remaining >= row_length {
+                                self.current_rows.push(RowData::Borrowed(local_offset));
+                                remaining -= row_length;
+                                local_offset += row_length;
+                                if let Some(target) = target_rows
+                                    && self.current_rows.len() >= target
+                                {
+                                    break;
+                                }
+                            }
+                            if let Some(target) = target_rows
+                                && self.current_rows.len() >= target
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    SAS_COMPRESSION_TRUNC => {
+                        // Truncated rows are continuations that reappear in the
+                        // next page; skip them to avoid emitting partial data.
+                        continue;
+                    }
+                    SAS_COMPRESSION_ROW => {
+                        let mut buffer = self.take_row_buffer();
+                        let data = &self.page_buffer[data_start..data_end];
+                        match self.parsed.row_info.compression {
+                            Compression::Row => decompress_rle(data, row_length, &mut buffer),
+                            Compression::Binary => decompress_rdc(data, row_length, &mut buffer),
+                            Compression::None => {
+                                return Err(Error::Unsupported {
+                                    feature: Cow::from(
+                                        "row compression pointer seen in uncompressed dataset",
+                                    ),
+                                });
+                            }
+                            Compression::Unknown(code) => {
+                                return Err(Error::Unsupported {
+                                    feature: Cow::from(format!(
+                                        "row compression pointer for unsupported mode {code}",
+                                    )),
+                                });
+                            }
+                        }
+                        .map_err(|msg| Error::Corrupted {
+                            section: Section::Page { index: page_index },
+                            details: Cow::from(msg),
+                        })?;
+                        self.current_rows.push(RowData::Owned(buffer));
+                        if let Some(target) = target_rows
+                            && self.current_rows.len() >= target
+                        {
+                            break;
+                        }
+                    }
+                    other => {
+                        return Err(Error::Unsupported {
+                            feature: Cow::from(format!(
+                                "unsupported subheader compression mode {other}",
+                            )),
+                        });
+                    }
+                }
+                if let Some(target) = target_rows
+                    && self.current_rows.len() >= target
+                {
+                    break;
+                }
+            }
+
+            if self.current_rows.is_empty() {
+                if base_page_type != SAS_PAGE_TYPE_DATA && base_page_type != SAS_PAGE_TYPE_MIX {
+                    continue;
+                }
+
+                let bit_offset = if header.uses_u64 { 32usize } else { 16usize };
+                let pointer_section_len = (subheader_count as usize) * pointer_size;
+                let base_offset = header.page_header_size as usize + pointer_section_len;
+                let alignment_base = bit_offset + SUBHEADER_POINTER_OFFSET + pointer_section_len;
+                let align_adjust = if alignment_base.is_multiple_of(8) {
+                    0
+                } else {
+                    8 - (alignment_base % 8)
+                };
+                let mut data_start = base_offset.saturating_add(align_adjust);
+
+                if base_page_type == SAS_PAGE_TYPE_MIX
+                    && (data_start % 8) == 4
+                    && data_start + 4 <= self.page_buffer.len()
+                {
+                    let word = u32::from_le_bytes(
+                        self.page_buffer[data_start..data_start + 4]
+                            .try_into()
+                            .unwrap(),
+                    );
+                    if word == 0
+                        || word == 0x2020_2020
+                        || header.metadata.vendor != Vendor::StatTransfer
+                    {
+                        data_start = data_start.saturating_add(4);
+                    }
+                }
+
+                if data_start >= self.page_buffer.len() {
+                    continue;
+                }
+
+                let available = self.page_buffer.len().saturating_sub(data_start);
+                let possible_rows = available / row_length;
+                if possible_rows == 0 {
+                    continue;
+                }
+
+                let remaining_rows_u64 = self.total_rows.saturating_sub(self.emitted_rows.get());
+                let remaining_rows =
+                    usize::try_from(remaining_rows_u64).map_or(usize::MAX, |value| value);
+
+                let mut rows_to_take = if base_page_type == SAS_PAGE_TYPE_MIX {
+                    let mix_limit = usize::try_from(self.parsed.row_info.rows_per_page)
+                        .map_or(usize::MAX, |value| value);
+                    let mix_limit = if mix_limit == 0 {
+                        possible_rows
+                    } else {
+                        mix_limit
+                    };
+                    mix_limit.min(possible_rows)
+                } else {
+                    let header_limit = usize::from(page_row_count);
+                    let header_limit = if header_limit == 0 {
+                        possible_rows
+                    } else {
+                        header_limit
+                    };
+                    header_limit.min(possible_rows)
+                };
+
+                rows_to_take = rows_to_take.min(remaining_rows);
+                rows_to_take = rows_to_take.min(possible_rows);
+
+                if rows_to_take == 0 {
+                    continue;
+                }
+
+                for idx in 0..rows_to_take {
+                    let offset = data_start + idx * row_length;
+                    if offset + row_length > self.page_buffer.len() {
+                        return Err(Error::Corrupted {
+                            section: Section::Page { index: page_index },
+                            details: Cow::from("row slice exceeds page bounds"),
+                        });
+                    }
+                    self.current_rows.push(RowData::Borrowed(offset));
+                }
+            }
+
+            self.page_row_count
+                .set(self.current_rows.len().try_into().unwrap_or(u16::MAX));
+            self.row_in_page.set(0);
+            if self.page_row_count.get() > 0 {
+                return Ok(());
+            }
+        }
+
+        self.page_row_count.set(0);
+        Ok(())
+    }
+
+    pub(crate) fn recycle_current_rows(&mut self) {
+        for entry in self.current_rows.drain(..) {
+            if let RowData::Owned(mut buffer) = entry {
+                buffer.clear();
+                self.reusable_row_buffers.push(buffer);
+            }
+        }
+    }
+
+    pub(crate) fn recycle_owned_rows(&mut self) {
+        self.columnar_owned_buffer.clear();
+    }
+
+    pub(crate) fn take_row_buffer(&mut self) -> Vec<u8> {
+        self.reusable_row_buffers.pop().unwrap_or_default()
+    }
+}
