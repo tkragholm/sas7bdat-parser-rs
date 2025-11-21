@@ -114,10 +114,6 @@ struct ConvertArgs {
     /// Deprecated: columnar mode always uses contiguous staging now.
     #[arg(long, requires = "columnar", hide = true)]
     columnar_staging: bool,
-
-    /// Experimental: decode SAS pages into column-major buffers directly.
-    #[arg(long, requires = "columnar")]
-    columnar_column_major: bool,
 }
 
 const DEFAULT_COLUMNAR_BATCH_ROWS: usize = 4096;
@@ -326,22 +322,14 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
                 sink = sink.with_streaming_columnar(true);
             }
             if args.columnar {
-                let mode = if args.columnar_column_major {
-                    ColumnarStreamMode::ColumnMajor {
-                        batch_rows: columnar_row_group_rows.unwrap_or(columnar_batch_rows),
-                    }
-                } else {
-                    ColumnarStreamMode::Contiguous {
-                        batch_rows: columnar_row_group_rows.unwrap_or(columnar_batch_rows),
-                    }
-                };
+                let batch_rows = columnar_row_group_rows.unwrap_or(columnar_batch_rows);
                 stream_columnar_into_sink(
                     &mut reader,
                     &parsed,
                     &meta_filtered,
                     &cols_filtered,
                     &selection,
-                    &mode,
+                    batch_rows,
                     &mut sink,
                 )?;
             } else {
@@ -451,7 +439,7 @@ fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
     meta_filtered: &DatasetMetadata,
     cols_filtered: &[ColumnInfo],
     selection: &[usize],
-    mode: &ColumnarStreamMode,
+    batch_rows: usize,
     sink: &mut S,
 ) -> Result<(), AnyError> {
     if selection.len() != cols_filtered.len() {
@@ -465,17 +453,8 @@ fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
     sink.begin(context)?;
 
     let mut it = parsed.row_iterator(reader)?;
-    match mode {
-        ColumnarStreamMode::Contiguous { batch_rows } => {
-            while let Some(batch) = it.next_columnar_batch_contiguous(*batch_rows)? {
-                sink.write_columnar_batch(&batch, selection)?;
-            }
-        }
-        ColumnarStreamMode::ColumnMajor { batch_rows } => {
-            while let Some(batch) = it.next_column_major_batch(*batch_rows)? {
-                sink.write_column_major_batch(&batch, selection)?;
-            }
-        }
+    while let Some(batch) = it.next_columnar_batch_contiguous(batch_rows)? {
+        sink.write_columnar_batch(&batch, selection)?;
     }
 
     sink.finish()?;
@@ -601,8 +580,4 @@ fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
             dir.join(renamed)
         },
     )
-}
-enum ColumnarStreamMode {
-    Contiguous { batch_rows: usize },
-    ColumnMajor { batch_rows: usize },
 }

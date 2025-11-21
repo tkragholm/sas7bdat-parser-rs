@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 
 use crate::error::Result;
 
-use super::columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnMajorBatch, ColumnarBatch};
+use super::columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnarBatch};
 use super::iterator::RowIterator;
 
 pub fn next_columnar_batch<'iter, R: Read + Seek>(
@@ -59,75 +59,6 @@ pub fn next_columnar_batch<'iter, R: Read + Seek>(
             iter.parsed.header.endianness,
             iter.encoding,
             false,
-        );
-        return Ok(Some(batch));
-    }
-}
-
-pub fn next_column_major_batch<'iter, R: Read + Seek>(
-    iter: &'iter mut RowIterator<'_, R>,
-    max_rows: usize,
-) -> Result<Option<ColumnMajorBatch<'iter>>> {
-    if iter.exhausted.get() {
-        return Ok(None);
-    }
-
-    let target = if max_rows == 0 {
-        COLUMNAR_BATCH_ROWS
-    } else {
-        max_rows
-    };
-
-    loop {
-        if !iter.ensure_page_ready()? {
-            return Ok(None);
-        }
-
-        let page_total = usize::from(iter.page_row_count.get());
-        let start = usize::from(iter.row_in_page.get());
-        if start >= page_total {
-            continue;
-        }
-
-        let available = page_total - start;
-        let chunk_len = available.min(target);
-        let row_end = start + chunk_len;
-
-        for column in &mut iter.column_major_columns {
-            column.prepare_rows(chunk_len);
-        }
-
-        for (offset, row_data) in iter.current_rows[start..row_end].iter().enumerate() {
-            let row_slice =
-                row_data.as_slice(iter.row_length, &iter.page_buffer, (start + offset) as u64)?;
-            for column in &mut iter.column_major_columns {
-                let runtime = &column.column;
-                let cell = row_slice
-                    .get(runtime.offset..runtime.offset + runtime.width)
-                    .ok_or_else(|| crate::error::Error::Corrupted {
-                        section: crate::error::Section::Column {
-                            index: runtime.index,
-                        },
-                        details: std::borrow::Cow::from("column slice out of bounds"),
-                    })?;
-                column.write_cell(offset, cell);
-            }
-        }
-
-        iter.row_in_page
-            .set(u16::try_from(row_end).unwrap_or(u16::MAX));
-        iter.emitted_rows
-            .set(iter.emitted_rows.get().saturating_add(chunk_len as u64));
-
-        if iter.emitted_rows.get() >= iter.total_rows {
-            iter.exhausted.set(true);
-        }
-
-        let batch = ColumnMajorBatch::new(
-            &iter.column_major_columns,
-            chunk_len,
-            iter.parsed.header.endianness,
-            iter.encoding,
         );
         return Ok(Some(batch));
     }

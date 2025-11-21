@@ -7,7 +7,7 @@ use parquet::file::writer::SerializedFileWriter;
 use parquet::schema::types::{Type, TypePtr};
 
 use crate::error::{Error, Result};
-use crate::parser::{ColumnMajorBatch, ColumnarBatch};
+use crate::parser::ColumnarBatch;
 use crate::sinks::{ColumnarSink, RowSink, SinkContext};
 use crate::value::Value;
 
@@ -267,29 +267,6 @@ impl<W: Write + Send> ColumnarSink for ParquetSink<W> {
             self.flush()?;
         }
         Ok(())
-    }
-
-    fn write_column_major_batch(
-        &mut self,
-        batch: &ColumnMajorBatch<'_>,
-        selection: &[usize],
-    ) -> Result<()> {
-        if !self.streaming_columnar {
-            return Err(Error::Unsupported {
-                feature: Cow::from("column-major batches require streaming mode"),
-            });
-        }
-        let chunk_rows = self.streaming_chunk_rows().max(1);
-        self.with_selection_row_group(selection, |plan, column_writer, source_idx| {
-            let column = batch
-                .column(source_idx)
-                .ok_or_else(|| Error::InvalidMetadata {
-                    details: Cow::Owned(format!(
-                        "column selection index {source_idx} exceeds available columns"
-                    )),
-                })?;
-            plan.stream_column_major(&column, chunk_rows, column_writer)
-        })
     }
 }
 

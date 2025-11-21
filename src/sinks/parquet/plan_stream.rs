@@ -5,8 +5,8 @@ use parquet::file::writer::SerializedColumnWriter;
 
 use crate::error::{Error, Result};
 use crate::parser::{
-    ColumnMajorColumnView, ColumnarColumn, MaterializedUtf8Column, StagedUtf8Value,
-    sas_days_to_datetime, sas_seconds_to_datetime, sas_seconds_to_time,
+    ColumnarColumn, MaterializedUtf8Column, StagedUtf8Value, sas_days_to_datetime,
+    sas_seconds_to_datetime, sas_seconds_to_time,
 };
 
 use super::constants::SECONDS_PER_DAY;
@@ -78,20 +78,6 @@ trait NumericColumnSource {
 }
 
 impl NumericColumnSource for ColumnarColumn<'_, '_> {
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn iter_numeric_bits_range(
-        &self,
-        start: usize,
-        len: usize,
-    ) -> Box<dyn Iterator<Item = Option<u64>> + '_> {
-        Box::new(self.iter_numeric_bits_range(start, len))
-    }
-}
-
-impl NumericColumnSource for ColumnMajorColumnView<'_> {
     fn len(&self) -> usize {
         self.len()
     }
@@ -361,51 +347,5 @@ impl ColumnPlan {
                 details: Cow::from("materialized UTF-8 column type mismatch"),
             }),
         }
-    }
-
-    pub(super) fn stream_column_major(
-        &mut self,
-        column: &ColumnMajorColumnView<'_>,
-        chunk_rows: usize,
-        mut column_writer: SerializedColumnWriter<'_>,
-    ) -> Result<()> {
-        let chunk = chunk_rows.max(1);
-
-        // Handle UTF-8 separately as it has different logic
-        if matches!(
-            (&self.values, self.encoder),
-            (ColumnValues::ByteArray(_), ColumnValueEncoder::Utf8)
-        ) {
-            let writer = column_writer.typed::<ByteArrayType>();
-            let total = column.len();
-            let mut processed = 0;
-
-            if let ColumnValues::ByteArray(values) = &mut self.values {
-                while processed < total {
-                    let take = (total - processed).min(chunk);
-                    self.def_levels.clear();
-                    values.clear();
-                    values.reserve(take);
-                    for maybe_text in column.iter_strings_range(processed, take) {
-                        if let Some(text) = maybe_text {
-                            self.def_levels.push(1);
-                            values.push(parquet::data_type::ByteArray::from(
-                                text.as_ref().as_bytes(),
-                            ));
-                        } else {
-                            self.def_levels.push(0);
-                        }
-                    }
-                    writer.write_batch(values, Some(&self.def_levels), None)?;
-                    processed += take;
-                }
-            }
-            column_writer.close()?;
-            return Ok(());
-        }
-
-        // Handle numeric types using generic function
-        self.stream_numeric_column(column_writer, column, chunk, "parquet::stream_column_major")?;
-        Ok(())
     }
 }

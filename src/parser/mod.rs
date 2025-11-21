@@ -12,8 +12,7 @@ pub use metadata::{
     RowInfo, TextRef, TextStore, parse_metadata,
 };
 pub use rows::{
-    ColumnMajorBatch, ColumnMajorColumnView, ColumnarBatch, ColumnarColumn, MaterializedUtf8Column,
-    RowIterator, RuntimeColumnRef, StagedUtf8Value, StreamingCell, StreamingRow,
-    TypedNumericColumn, row_iterator,
+    ColumnarBatch, ColumnarColumn, MaterializedUtf8Column, RowIterator, RuntimeColumnRef,
+    StagedUtf8Value, StreamingCell, StreamingRow, TypedNumericColumn, row_iterator,
 };
 pub(crate) use rows::{sas_days_to_datetime, sas_seconds_to_datetime, sas_seconds_to_time};

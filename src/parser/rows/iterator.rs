@@ -11,9 +11,8 @@ use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::metadata::ParsedMetadata;
 use crate::value::Value;
 
-use super::batch::{next_column_major_batch, next_columnar_batch, next_columnar_batch_contiguous};
+use super::batch::{next_columnar_batch, next_columnar_batch_contiguous};
 use super::buffer::RowData;
-use super::columnar::ColumnMajorColumn;
 use super::runtime_column::{RuntimeColumn, RuntimeColumnRef};
 use super::streaming::StreamingRow;
 
@@ -29,7 +28,6 @@ pub struct RowIterator<'a, R: Read + Seek> {
     pub(crate) parsed: &'a ParsedMetadata,
     pub(crate) runtime_columns: Vec<RuntimeColumn>,
     pub(crate) columnar_columns: Vec<RuntimeColumnRef>,
-    pub(crate) column_major_columns: Vec<ColumnMajorColumn>,
     pub(crate) page_buffer: Vec<u8>,
     pub(crate) current_rows: Vec<RowData>,
     pub(crate) reusable_row_buffers: Vec<Vec<u8>>,
@@ -109,18 +107,12 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
 
         let columnar_columns: Vec<RuntimeColumnRef> =
             runtime_columns.iter().map(RuntimeColumn::as_ref).collect();
-        let column_major_columns = columnar_columns
-            .iter()
-            .copied()
-            .map(ColumnMajorColumn::new)
-            .collect();
 
         Ok(Self {
             reader,
             parsed,
             runtime_columns,
             columnar_columns,
-            column_major_columns,
             page_buffer: vec![0u8; page_size],
             current_rows: Vec::new(),
             reusable_row_buffers: Vec::new(),
@@ -272,18 +264,6 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         max_rows: usize,
     ) -> Result<Option<super::ColumnarBatch<'_>>> {
         next_columnar_batch_contiguous(self, max_rows)
-    }
-
-    /// Decodes the next chunk of rows into a column-major batch.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when decoding fails.
-    pub fn next_column_major_batch(
-        &mut self,
-        max_rows: usize,
-    ) -> Result<Option<super::ColumnMajorBatch<'_>>> {
-        next_column_major_batch(self, max_rows)
     }
 
     pub(crate) fn streaming_row(&self, row_index: u16) -> Result<StreamingRow<'_, '_>> {

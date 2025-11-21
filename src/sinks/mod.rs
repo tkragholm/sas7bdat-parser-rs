@@ -1,11 +1,9 @@
 mod csv;
 mod parquet;
 
-use std::borrow::Cow;
-
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::metadata::DatasetMetadata;
-use crate::parser::{ColumnInfo, ColumnMajorBatch, ColumnarBatch, ParsedMetadata, StreamingRow};
+use crate::parser::{ColumnInfo, ColumnarBatch, ParsedMetadata, StreamingRow};
 use crate::value::Value;
 
 pub use csv::CsvSink;
@@ -77,19 +75,4 @@ pub trait ColumnarSink: RowSink {
         batch: &ColumnarBatch<'_>,
         selection: &[usize],
     ) -> Result<()>;
-
-    /// Optional hook for column-major batches.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the sink does not support column-major batches.
-    fn write_column_major_batch(
-        &mut self,
-        _batch: &ColumnMajorBatch<'_>,
-        _selection: &[usize],
-    ) -> Result<()> {
-        Err(Error::Unsupported {
-            feature: Cow::from("column-major batches not supported"),
-        })
-    }
 }
