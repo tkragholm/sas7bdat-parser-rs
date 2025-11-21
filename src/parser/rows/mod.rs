@@ -10,7 +10,9 @@ mod pointer;
 mod runtime_column;
 mod streaming;
 
-pub use columnar::{ColumnarBatch, ColumnarColumn, MaterializedUtf8Column, StagedUtf8Value, TypedNumericColumn};
+pub use columnar::{
+    ColumnarBatch, ColumnarColumn, MaterializedUtf8Column, StagedUtf8Value, TypedNumericColumn,
+};
 pub use decode::{sas_days_to_datetime, sas_seconds_to_datetime, sas_seconds_to_time};
 pub use iterator::{RowIterator, row_iterator};
 pub use runtime_column::RuntimeColumnRef;

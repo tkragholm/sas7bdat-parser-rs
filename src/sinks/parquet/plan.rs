@@ -33,6 +33,7 @@ pub(super) struct ColumnPlan {
     pub name: String,
     pub encoder: ColumnValueEncoder,
     pub def_levels: Vec<i16>,
+    pub def_bitmap: Vec<u8>,
     pub values: ColumnValues,
     pub utf8_scratch: Option<Utf8Scratch>,
     pub utf8_inlines: Vec<ByteArray>,
@@ -81,6 +82,7 @@ impl ColumnPlan {
             name: variable.name.clone(),
             encoder,
             def_levels: Vec::new(),
+            def_bitmap: Vec::new(),
             values: match encoder {
                 ColumnValueEncoder::Double => ColumnValues::Double(Vec::new()),
                 ColumnValueEncoder::Date => ColumnValues::Int32(Vec::new()),

@@ -11,7 +11,9 @@ use crate::parser::{
 
 use super::constants::SECONDS_PER_DAY;
 use super::plan::{ColumnPlan, ColumnValueEncoder, ColumnValues};
-use super::stream::stream_numeric;
+use super::stream::{
+    StreamNumericCtx, expand_bitmap_to_def_levels, prepare_def_bitmap, stream_numeric,
+};
 
 fn measure_encoder<F>(_: &str, block: F) -> Result<()>
 where
@@ -106,12 +108,16 @@ impl ColumnPlan {
             (ColumnValues::Double(values), ColumnValueEncoder::Double) => {
                 measure_encoder(encoder_name, || {
                     let writer = column_writer.typed::<DoubleType>();
+                    let mut ctx = StreamNumericCtx {
+                        def_levels: &mut self.def_levels,
+                        def_bitmap: &mut self.def_bitmap,
+                        values,
+                        chunk,
+                    };
                     stream_numeric(
-                        &mut self.def_levels,
+                        &mut ctx,
                         column.len(),
                         |start, len| column.iter_numeric_bits_range(start, len),
-                        chunk,
-                        values,
                         |bits| Ok(f64::from_bits(bits)),
                         |vals, defs| writer.write_batch(vals, Some(defs), None),
                     )?;
@@ -121,12 +127,16 @@ impl ColumnPlan {
             (ColumnValues::Int32(values), ColumnValueEncoder::Date) => {
                 measure_encoder(encoder_name, || {
                     let writer = column_writer.typed::<Int32Type>();
+                    let mut ctx = StreamNumericCtx {
+                        def_levels: &mut self.def_levels,
+                        def_bitmap: &mut self.def_bitmap,
+                        values,
+                        chunk,
+                    };
                     stream_numeric(
-                        &mut self.def_levels,
+                        &mut ctx,
                         column.len(),
                         |start, len| column.iter_numeric_bits_range(start, len),
-                        chunk,
-                        values,
                         |bits| convert_date(bits, &column_name),
                         |vals, defs| writer.write_batch(vals, Some(defs), None),
                     )?;
@@ -136,12 +146,16 @@ impl ColumnPlan {
             (ColumnValues::Int64(values), ColumnValueEncoder::DateTime) => {
                 measure_encoder(encoder_name, || {
                     let writer = column_writer.typed::<Int64Type>();
+                    let mut ctx = StreamNumericCtx {
+                        def_levels: &mut self.def_levels,
+                        def_bitmap: &mut self.def_bitmap,
+                        values,
+                        chunk,
+                    };
                     stream_numeric(
-                        &mut self.def_levels,
+                        &mut ctx,
                         column.len(),
                         |start, len| column.iter_numeric_bits_range(start, len),
-                        chunk,
-                        values,
                         |bits| convert_datetime(bits, &column_name),
                         |vals, defs| writer.write_batch(vals, Some(defs), None),
                     )?;
@@ -151,12 +165,16 @@ impl ColumnPlan {
             (ColumnValues::Int64(values), ColumnValueEncoder::Time) => {
                 measure_encoder(encoder_name, || {
                     let writer = column_writer.typed::<Int64Type>();
+                    let mut ctx = StreamNumericCtx {
+                        def_levels: &mut self.def_levels,
+                        def_bitmap: &mut self.def_bitmap,
+                        values,
+                        chunk,
+                    };
                     stream_numeric(
-                        &mut self.def_levels,
+                        &mut ctx,
                         column.len(),
                         |start, len| column.iter_numeric_bits_range(start, len),
-                        chunk,
-                        values,
                         |bits| convert_time(bits, &column_name),
                         |vals, defs| writer.write_batch(vals, Some(defs), None),
                     )?;
@@ -264,16 +282,19 @@ impl ColumnPlan {
                 if let ColumnValues::ByteArray(values) = &mut self.values {
                     while processed < total {
                         let take = (total - processed).min(chunk);
-                        self.def_levels.clear();
+                        prepare_def_bitmap(&mut self.def_bitmap, take);
                         values.clear();
-                        for maybe_text in column.iter_strings_range(processed, take) {
+                        for (idx, maybe_text) in
+                            column.iter_strings_range(processed, take).enumerate()
+                        {
                             if let Some(text) = maybe_text {
-                                self.def_levels.push(1);
+                                let byte = idx >> 3;
+                                let bit = idx & 7;
+                                self.def_bitmap[byte] |= 1 << bit;
                                 values.push(scratch.intern_str(text.as_ref()));
-                            } else {
-                                self.def_levels.push(0);
                             }
                         }
+                        expand_bitmap_to_def_levels(&mut self.def_levels, &self.def_bitmap, take);
                         writer.write_batch(values, Some(&self.def_levels), None)?;
                         processed += take;
                     }

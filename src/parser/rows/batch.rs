@@ -8,18 +8,24 @@ use crate::error::Result;
 use super::columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnarBatch};
 use super::iterator::RowIterator;
 
+#[inline]
+const fn resolve_target(iter_exhausted: &std::cell::Cell<bool>, max_rows: usize) -> Option<usize> {
+    if iter_exhausted.get() {
+        return None;
+    }
+    Some(if max_rows == 0 {
+        COLUMNAR_BATCH_ROWS
+    } else {
+        max_rows
+    })
+}
+
 pub fn next_columnar_batch<'iter, R: Read + Seek>(
     iter: &'iter mut RowIterator<'_, R>,
     max_rows: usize,
 ) -> Result<Option<ColumnarBatch<'iter>>> {
-    if iter.exhausted.get() {
+    let Some(target) = resolve_target(&iter.exhausted, max_rows) else {
         return Ok(None);
-    }
-
-    let target = if max_rows == 0 {
-        COLUMNAR_BATCH_ROWS
-    } else {
-        max_rows
     };
 
     loop {
@@ -68,14 +74,8 @@ pub fn next_columnar_batch_contiguous<'iter, R: Read + Seek>(
     iter: &'iter mut RowIterator<'_, R>,
     max_rows: usize,
 ) -> Result<Option<ColumnarBatch<'iter>>> {
-    if iter.exhausted.get() {
+    let Some(target) = resolve_target(&iter.exhausted, max_rows) else {
         return Ok(None);
-    }
-
-    let target = if max_rows == 0 {
-        COLUMNAR_BATCH_ROWS
-    } else {
-        max_rows
     };
 
     iter.recycle_owned_rows();

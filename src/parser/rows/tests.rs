@@ -85,14 +85,7 @@ fn make_data_page(rows: &[&[u8]], row_length: usize, page_size: usize) -> Vec<u8
     page[(24 - 6)..(24 - 4)].copy_from_slice(&row_count.to_le_bytes());
     page[(24 - 4)..(24 - 2)].copy_from_slice(&0u16.to_le_bytes()); // subheader count
 
-    let mut offset = 24usize;
-    for row in rows {
-        let mut buf = vec![0u8; row_length];
-        let len = row.len().min(row_length);
-        buf[..len].copy_from_slice(&row[..len]);
-        page[offset..offset + row_length].copy_from_slice(&buf);
-        offset += row_length;
-    }
+    write_rows_to_page(&mut page, rows, row_length);
     page
 }
 
@@ -103,14 +96,7 @@ fn make_mix_page(rows: &[&[u8]], row_length: usize, page_size: usize) -> Vec<u8>
     page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type);
     page[(24 - 4)..(24 - 2)].copy_from_slice(&0u16.to_le_bytes());
 
-    let mut offset = 24usize;
-    for row in rows {
-        let mut buf = vec![0u8; row_length];
-        let len = row.len().min(row_length);
-        buf[..len].copy_from_slice(&row[..len]);
-        page[offset..offset + row_length].copy_from_slice(&buf);
-        offset += row_length;
-    }
+    write_rows_to_page(&mut page, rows, row_length);
     page
 }
 
@@ -142,6 +128,30 @@ fn make_compressed_page(
     page
 }
 
+fn write_rows_to_page(page: &mut [u8], rows: &[&[u8]], row_length: usize) {
+    let mut offset = 24usize;
+    for row in rows {
+        let mut buf = vec![0u8; row_length];
+        let len = row.len().min(row_length);
+        buf[..len].copy_from_slice(&row[..len]);
+        page[offset..offset + row_length].copy_from_slice(&buf);
+        offset += row_length;
+    }
+}
+
+fn setup_data_iter(rows: &[&[u8]], row_length: usize) -> (Cursor<Vec<u8>>, ParsedMetadata) {
+    let page = make_data_page(rows, row_length, 64);
+    let parsed = make_parsed_metadata(
+        Vendor::Sas,
+        Compression::None,
+        row_length as u32,
+        rows.len() as u64,
+        rows.len() as u64,
+        64,
+    );
+    (Cursor::new(page), parsed)
+}
+
 #[test]
 fn decompresses_rle_single_run() {
     let input = [0x80u8, b'A']; // command 8, length nibble 0 => copy 1 byte
@@ -164,16 +174,7 @@ fn decompresses_rdc_literals() {
 fn fetches_rows_from_data_page() {
     let row_length = 4usize;
     let rows = [b"AAAA".as_slice(), b"BBBB".as_slice()];
-    let page = make_data_page(&rows, row_length, 64);
-    let parsed = make_parsed_metadata(
-        Vendor::Sas,
-        Compression::None,
-        row_length as u32,
-        rows.len() as u64,
-        rows.len() as u64,
-        64,
-    );
-    let mut cursor = Cursor::new(page);
+    let (mut cursor, parsed) = setup_data_iter(&rows, row_length);
     let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
 
     let first = iter.try_next().expect("row 1 result").expect("row 1");
@@ -189,16 +190,7 @@ fn fetches_rows_from_data_page() {
 fn columnar_batch_uses_borrowed_rows() {
     let row_length = 4usize;
     let rows = [b"A   ".as_slice(), b"B   ".as_slice()];
-    let page = make_data_page(&rows, row_length, 64);
-    let parsed = make_parsed_metadata(
-        Vendor::Sas,
-        Compression::None,
-        row_length as u32,
-        rows.len() as u64,
-        rows.len() as u64,
-        64,
-    );
-    let mut cursor = Cursor::new(page);
+    let (mut cursor, parsed) = setup_data_iter(&rows, row_length);
     let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
 
     let batch = iter
@@ -210,7 +202,7 @@ fn columnar_batch_uses_borrowed_rows() {
     let col = batch.column(0).expect("column present");
     let texts: Vec<_> = col
         .iter_strings()
-        .map(|opt| opt.map(|s| s.into_owned()))
+        .map(|opt| opt.map(std::borrow::Cow::into_owned))
         .collect();
     assert_eq!(texts, vec![Some("A".to_string()), Some("B".to_string())]);
 }

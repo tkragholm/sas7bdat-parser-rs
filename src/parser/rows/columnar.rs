@@ -296,26 +296,16 @@ impl<'rows> ColumnarBatch<'rows> {
         Ok(MaterializedColumn { values, def_levels })
     }
 
-    fn materialize_datetime(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {
+    fn materialize_i64_mapped(
+        column: &ColumnarColumn<'_, '_>,
+        mut map: impl FnMut(f64) -> Result<i64>,
+    ) -> Result<MaterializedColumn<i64>> {
         let mut values = Vec::with_capacity(column.len());
         let mut def_levels = Vec::with_capacity(column.len());
         for maybe_bits in column.iter_numeric_bits() {
             if let Some(bits) = maybe_bits {
                 let seconds = f64::from_bits(bits);
-                let datetime =
-                    sas_seconds_to_datetime(seconds).ok_or_else(|| Error::InvalidMetadata {
-                        details: Cow::Owned(format!(
-                            "column '{}' contains timestamp outside supported range",
-                            column.index()
-                        )),
-                    })?;
-                let micros = datetime.unix_timestamp_nanos().div_euclid(1_000);
-                let micros = i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
-                    details: Cow::Owned(format!(
-                        "column '{}' contains timestamp outside Parquet range",
-                        column.index()
-                    )),
-                })?;
+                let micros = map(seconds)?;
                 def_levels.push(1);
                 values.push(micros);
             } else {
@@ -325,33 +315,41 @@ impl<'rows> ColumnarBatch<'rows> {
         Ok(MaterializedColumn { values, def_levels })
     }
 
-    fn materialize_time(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {
-        let mut values = Vec::with_capacity(column.len());
-        let mut def_levels = Vec::with_capacity(column.len());
-        for maybe_bits in column.iter_numeric_bits() {
-            if let Some(bits) = maybe_bits {
-                let seconds = f64::from_bits(bits);
-                let duration =
-                    sas_seconds_to_time(seconds).ok_or_else(|| Error::InvalidMetadata {
-                        details: Cow::Owned(format!(
-                            "column '{}' contains time outside supported range",
-                            column.index()
-                        )),
-                    })?;
-                let micros = duration.whole_microseconds();
-                let micros = i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
+    fn materialize_datetime(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {
+        Self::materialize_i64_mapped(column, |seconds| {
+            let datetime =
+                sas_seconds_to_datetime(seconds).ok_or_else(|| Error::InvalidMetadata {
                     details: Cow::Owned(format!(
-                        "column '{}' contains time outside Parquet range",
+                        "column '{}' contains timestamp outside supported range",
                         column.index()
                     )),
                 })?;
-                def_levels.push(1);
-                values.push(micros);
-            } else {
-                def_levels.push(0);
-            }
-        }
-        Ok(MaterializedColumn { values, def_levels })
+            let micros = datetime.unix_timestamp_nanos().div_euclid(1_000);
+            i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "column '{}' contains timestamp outside Parquet range",
+                    column.index()
+                )),
+            })
+        })
+    }
+
+    fn materialize_time(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {
+        Self::materialize_i64_mapped(column, |seconds| {
+            let duration = sas_seconds_to_time(seconds).ok_or_else(|| Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "column '{}' contains time outside supported range",
+                    column.index()
+                )),
+            })?;
+            let micros = duration.whole_microseconds();
+            i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "column '{}' contains time outside Parquet range",
+                    column.index()
+                )),
+            })
+        })
     }
 
     #[allow(clippy::too_many_lines)]
@@ -509,17 +507,7 @@ impl ColumnarColumn<'_, '_> {
     }
 
     pub fn iter_strings(&self) -> impl Iterator<Item = Option<Cow<'_, str>>> {
-        (0..self.rows.len()).map(move |idx| {
-            self.row_slice(idx).and_then(|row| {
-                self.column_slice(row).and_then(|slice| {
-                    if is_blank(slice) {
-                        None
-                    } else {
-                        Some(decode_string(slice, self.encoding))
-                    }
-                })
-            })
-        })
+        self.iter_strings_range(0, self.rows.len())
     }
 
     pub fn iter_strings_range(
@@ -528,7 +516,14 @@ impl ColumnarColumn<'_, '_> {
         len: usize,
     ) -> impl Iterator<Item = Option<Cow<'_, str>>> {
         let end = start.saturating_add(len).min(self.rows.len());
-        (start..end).map(move |idx| {
+        self.iter_string_indices(start..end)
+    }
+
+    fn iter_string_indices(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> impl Iterator<Item = Option<Cow<'_, str>>> + '_ {
+        range.map(move |idx| {
             self.row_slice(idx).and_then(|row| {
                 self.column_slice(row).and_then(|slice| {
                     if is_blank(slice) {
@@ -542,18 +537,7 @@ impl ColumnarColumn<'_, '_> {
     }
 
     pub fn iter_numeric_bits(&self) -> impl Iterator<Item = Option<u64>> + '_ {
-        (0..self.rows.len()).map(move |idx| {
-            self.row_slice(idx)
-                .and_then(|row| self.column_slice(row))
-                .map(|slice| numeric_bits(slice, self.endianness))
-                .and_then(|bits| {
-                    if numeric_bits_is_missing(bits) {
-                        None
-                    } else {
-                        Some(bits)
-                    }
-                })
-        })
+        self.iter_numeric_bits_range(0, self.rows.len())
     }
 
     pub fn iter_numeric_bits_range(
