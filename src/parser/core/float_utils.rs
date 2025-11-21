@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
 #[inline]
-pub(super) fn exact_integer_from_f64(value: f64) -> Option<i128> {
+pub(crate) fn exact_integer_from_f64(value: f64) -> Option<i128> {
     if !value.is_finite() {
         return None;
     }
@@ -42,7 +42,7 @@ pub(super) fn exact_integer_from_f64(value: f64) -> Option<i128> {
 }
 
 #[inline]
-pub(super) fn try_int_from_f64<T>(value: f64) -> Option<T>
+pub(crate) fn try_int_from_f64<T>(value: f64) -> Option<T>
 where
     T: TryFrom<i128>,
 {

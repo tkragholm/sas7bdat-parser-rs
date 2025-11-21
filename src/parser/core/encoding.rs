@@ -4,6 +4,7 @@ pub fn resolve_encoding(label: Option<&str>) -> &'static Encoding {
     label.and_then(resolve_label).unwrap_or(UTF_8)
 }
 
+#[must_use]
 pub fn trim_trailing(bytes: &[u8]) -> &[u8] {
     match bytes.iter().rposition(|b| *b != 0 && *b != b' ') {
         Some(last) => &bytes[..=last],
