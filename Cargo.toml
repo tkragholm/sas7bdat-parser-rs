@@ -24,7 +24,7 @@ hashbrown = "0.16"
 ahash = "0.8"
 rustc-hash = "2"
 bytes = "1"
-hotpath = { version = "0.6", optional = true }
+hotpath = { version = "0.7", optional = true }
 ryu = "1"
 itoa = "1"
 csv = "1"
