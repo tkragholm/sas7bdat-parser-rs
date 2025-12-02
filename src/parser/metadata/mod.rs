@@ -5,6 +5,7 @@ use std::io::{Read, Seek, SeekFrom};
 use crate::error::{Error, Result, Section};
 use crate::metadata::{Compression, Variable};
 use crate::parser::core::byteorder::{read_u16, read_u32, read_u64};
+use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::header::{SasHeader, parse_header};
 use subheaders::{
     parse_column_attrs_subheader, parse_column_format_subheader, parse_column_list_subheader,
@@ -70,7 +71,8 @@ const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
 /// Returns an error if the metadata pages cannot be decoded.
 pub fn parse_metadata<R: Read + Seek>(reader: &mut R) -> Result<ParsedMetadata> {
     let mut header = parse_header(reader)?;
-    let mut builder = ColumnMetadataBuilder::new();
+    let encoding = resolve_encoding(header.metadata.file_encoding.as_deref());
+    let mut builder = ColumnMetadataBuilder::new(encoding);
 
     collect_column_text(reader, &header, &mut builder)?;
 

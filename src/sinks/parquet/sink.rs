@@ -27,6 +27,7 @@ pub struct ParquetSink<W: Write + Send> {
     auto_row_group_size: bool,
     target_row_group_bytes: usize,
     streaming_columnar: bool,
+    lenient_dates: bool,
 }
 
 impl<W: Write + Send> ParquetSink<W> {
@@ -42,6 +43,7 @@ impl<W: Write + Send> ParquetSink<W> {
             auto_row_group_size: true,
             target_row_group_bytes: DEFAULT_TARGET_ROW_GROUP_BYTES,
             streaming_columnar: false,
+            lenient_dates: true,
         }
     }
 
@@ -65,6 +67,13 @@ impl<W: Write + Send> ParquetSink<W> {
     #[must_use]
     pub const fn with_streaming_columnar(mut self, enabled: bool) -> Self {
         self.streaming_columnar = enabled;
+        self
+    }
+
+    /// Controls whether date/time columns are downgraded to numeric on invalid data.
+    #[must_use]
+    pub const fn with_lenient_dates(mut self, enabled: bool) -> Self {
+        self.lenient_dates = enabled;
         self
     }
 
@@ -155,7 +164,12 @@ impl<W: Write + Send> RowSink for ParquetSink<W> {
             .iter()
             .zip(context.columns.iter())
         {
-            let (plan, field) = ColumnPlan::new(variable, column)?;
+            let (plan, field) = ColumnPlan::new(
+                variable,
+                column,
+                self.lenient_dates,
+                context.source_path.as_deref(),
+            )?;
             fields.push(field);
             plans.push(plan);
         }

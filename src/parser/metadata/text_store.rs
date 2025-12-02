@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use encoding_rs::Encoding;
+
 use crate::error::{Error, Result, Section};
 
 /// Reference into the text blob storage used by SAS column metadata.
@@ -24,15 +26,19 @@ impl TextRef {
 }
 
 /// Stores decoded text blobs referenced by column metadata subheaders.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TextStore {
     blobs: Vec<Vec<u8>>,
+    encoding: &'static Encoding,
 }
 
 impl TextStore {
     #[must_use]
-    pub const fn new() -> Self {
-        Self { blobs: Vec::new() }
+    pub const fn new(encoding: &'static Encoding) -> Self {
+        Self {
+            blobs: Vec::new(),
+            encoding,
+        }
     }
 
     /// Adds a text blob extracted from a column text subheader.
@@ -93,10 +99,11 @@ impl TextStore {
             });
         }
         let bytes = &blob[offset..end];
-        let decoded = String::from_utf8(bytes.to_vec()).map_err(|_| Error::Encoding {
-            encoding: Cow::from("unknown"),
-            details: Cow::from("failed to decode column text blob as UTF-8"),
-        })?;
-        Ok(Some(Cow::Owned(decoded)))
+        let (decoded, had_errors) = self.encoding.decode_without_bom_handling(bytes);
+        if had_errors && decoded.is_empty() {
+            let fallback = String::from_utf8_lossy(bytes).into_owned();
+            return Ok(Some(Cow::Owned(fallback)));
+        }
+        Ok(Some(decoded))
     }
 }

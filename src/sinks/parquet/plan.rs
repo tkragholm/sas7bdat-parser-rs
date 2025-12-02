@@ -4,14 +4,17 @@ use std::sync::Arc;
 use parquet::basic::{LogicalType, Repetition, TimeUnit, Type as PhysicalType};
 use parquet::data_type::ByteArray;
 use parquet::schema::types::{Type, TypePtr};
+use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 use crate::error::{Error, Result};
+use crate::logger::log_warn;
 use crate::metadata::Variable;
 use crate::parser::{ColumnInfo, ColumnKind, NumericKind};
 use crate::value::Value;
 
 use super::constants::SECONDS_PER_DAY;
 use super::utf8::Utf8Scratch;
+use crate::parser::{sas_days_to_datetime, sas_seconds_to_datetime};
 
 #[derive(Clone, Copy)]
 pub(super) enum ColumnValueEncoder {
@@ -37,11 +40,21 @@ pub(super) struct ColumnPlan {
     pub values: ColumnValues,
     pub utf8_scratch: Option<Utf8Scratch>,
     pub utf8_inlines: Vec<ByteArray>,
+    lenient_dates: bool,
+    warned_invalid_value: bool,
+    source_path: Option<String>,
 }
 
 impl ColumnPlan {
-    pub(super) fn new(variable: &Variable, column: &ColumnInfo) -> Result<(Self, TypePtr)> {
-        let (encoder, physical_type, logical_type) = match column.kind {
+    pub(super) fn new(
+        variable: &Variable,
+        column: &ColumnInfo,
+        lenient_dates: bool,
+        source_path: Option<&str>,
+    ) -> Result<(Self, TypePtr)> {
+        let effective_kind = column.kind;
+
+        let (encoder, physical_type, logical_type) = match effective_kind {
             ColumnKind::Character => (
                 ColumnValueEncoder::Utf8,
                 PhysicalType::BYTE_ARRAY,
@@ -96,6 +109,9 @@ impl ColumnPlan {
                 _ => None,
             },
             utf8_inlines: Vec::new(),
+            lenient_dates,
+            warned_invalid_value: false,
+            source_path: source_path.map(str::to_owned),
         };
         Ok((plan, Arc::new(field)))
     }
@@ -121,33 +137,9 @@ impl ColumnPlan {
                     _ => unreachable!("column value encoder mismatch"),
                 }
             }
-            ColumnValueEncoder::Date => {
-                let coerced = self.coerce_date(value)?;
-                match &mut self.values {
-                    ColumnValues::Int32(values) => {
-                        Self::push_optional(&mut self.def_levels, values, coerced);
-                    }
-                    _ => unreachable!("column value encoder mismatch"),
-                }
-            }
-            ColumnValueEncoder::DateTime => {
-                let coerced = self.coerce_timestamp(value)?;
-                match &mut self.values {
-                    ColumnValues::Int64(values) => {
-                        Self::push_optional(&mut self.def_levels, values, coerced);
-                    }
-                    _ => unreachable!("column value encoder mismatch"),
-                }
-            }
-            ColumnValueEncoder::Time => {
-                let coerced = self.coerce_time(value)?;
-                match &mut self.values {
-                    ColumnValues::Int64(values) => {
-                        Self::push_optional(&mut self.def_levels, values, coerced);
-                    }
-                    _ => unreachable!("column value encoder mismatch"),
-                }
-            }
+            ColumnValueEncoder::Date => self.push_date(value)?,
+            ColumnValueEncoder::DateTime => self.push_datetime(value)?,
+            ColumnValueEncoder::Time => self.push_time(value)?,
             ColumnValueEncoder::Utf8 => {
                 let coerced = self.coerce_utf8(value);
                 match &mut self.values {
@@ -159,6 +151,79 @@ impl ColumnPlan {
             }
         }
         Ok(())
+    }
+
+    fn push_date(&mut self, value: &Value<'_>) -> Result<()> {
+        match self.coerce_date(value) {
+            Ok(coerced) => match &mut self.values {
+                ColumnValues::Int32(values) => {
+                    Self::push_optional(&mut self.def_levels, values, coerced);
+                }
+                _ => unreachable!("column value encoder mismatch"),
+            },
+            Err(err) if self.lenient_dates => {
+                if let ColumnValues::Int32(values) = &mut self.values {
+                    Self::push_optional(&mut self.def_levels, values, None);
+                }
+                self.warn_invalid("date");
+            }
+            Err(err) => return Err(err),
+        }
+        Ok(())
+    }
+
+    fn push_datetime(&mut self, value: &Value<'_>) -> Result<()> {
+        match self.coerce_timestamp(value) {
+            Ok(coerced) => match &mut self.values {
+                ColumnValues::Int64(values) => {
+                    Self::push_optional(&mut self.def_levels, values, coerced);
+                }
+                _ => unreachable!("column value encoder mismatch"),
+            },
+            Err(err) if self.lenient_dates => {
+                if let ColumnValues::Int64(values) = &mut self.values {
+                    Self::push_optional(&mut self.def_levels, values, None);
+                }
+                self.warn_invalid("datetime");
+            }
+            Err(err) => return Err(err),
+        }
+        Ok(())
+    }
+
+    fn push_time(&mut self, value: &Value<'_>) -> Result<()> {
+        match self.coerce_time(value) {
+            Ok(coerced) => match &mut self.values {
+                ColumnValues::Int64(values) => {
+                    Self::push_optional(&mut self.def_levels, values, coerced);
+                }
+                _ => unreachable!("column value encoder mismatch"),
+            },
+            Err(err) if self.lenient_dates => {
+                if let ColumnValues::Int64(values) = &mut self.values {
+                    Self::push_optional(&mut self.def_levels, values, None);
+                }
+                self.warn_invalid("time");
+            }
+            Err(err) => return Err(err),
+        }
+        Ok(())
+    }
+
+    fn warn_invalid(&mut self, kind: &str) {
+        if self.warned_invalid_value {
+            return;
+        }
+        let prefix = self
+            .source_path
+            .as_deref()
+            .map(|p| format!("{p}: "))
+            .unwrap_or_default();
+        log_warn(&format!(
+            "{prefix}column '{}' contains non-{kind} value; written as null (use --strict-dates to fail)",
+            self.name
+        ));
+        self.warned_invalid_value = true;
     }
 
     pub(super) fn flush(
@@ -235,6 +300,9 @@ impl ColumnPlan {
                 })?;
                 Ok(Some(parsed))
             }
+            Value::DateTime(dt) => Ok(Some(datetime_to_sas_seconds(dt))),
+            Value::Date(dt) => Ok(Some(datetime_to_sas_days(dt))),
+            Value::Time(duration) => Ok(Some(time_to_sas_seconds(duration))),
             Value::NumericString(text) | Value::Str(text) => self.parse_f64(text.as_ref()),
             Value::Bytes(bytes) => {
                 let text =
@@ -246,7 +314,6 @@ impl ColumnPlan {
                     })?;
                 self.parse_f64(text)
             }
-            other => Err(self.type_mismatch_error("numeric", other)),
         }
     }
 
@@ -264,6 +331,11 @@ impl ColumnPlan {
                 })?;
                 Ok(Some(days))
             }
+            Value::Float(days) => Self::float_days_to_i32(self.name.as_str(), *days),
+            Value::Int32(days) => Ok(Some(*days)),
+            Value::Int64(days) => i32::try_from(*days)
+                .map(Some)
+                .map_err(|_| self.type_mismatch_error("date", value)),
             other => Err(self.type_mismatch_error("date", other)),
         }
     }
@@ -282,6 +354,9 @@ impl ColumnPlan {
                 })?;
                 Ok(Some(micros))
             }
+            Value::Float(seconds) => Self::float_seconds_to_micros(self.name.as_str(), *seconds),
+            Value::Int32(seconds) => Ok(Some(i64::from(*seconds) * 1_000_000)),
+            Value::Int64(seconds) => Ok(Some(*seconds * 1_000_000)),
             other => Err(self.type_mismatch_error("timestamp", other)),
         }
     }
@@ -299,6 +374,9 @@ impl ColumnPlan {
                 })?;
                 Ok(Some(micros))
             }
+            Value::Float(seconds) => Self::float_seconds_to_micros(self.name.as_str(), *seconds),
+            Value::Int32(seconds) => Ok(Some(i64::from(*seconds) * 1_000_000)),
+            Value::Int64(seconds) => Ok(Some(*seconds * 1_000_000)),
             other => Err(self.type_mismatch_error("time", other)),
         }
     }
@@ -395,4 +473,66 @@ impl ColumnPlan {
             )),
         }
     }
+
+    fn float_days_to_i32(column_name: &str, days: f64) -> Result<Option<i32>> {
+        if !days.is_finite() {
+            return Ok(None);
+        }
+        let rounded = days.trunc();
+        let dt = sas_days_to_datetime(rounded).ok_or_else(|| Error::InvalidMetadata {
+            details: Cow::Owned(format!(
+                "column '{column_name}' contains date outside supported range"
+            )),
+        })?;
+        let seconds = dt.unix_timestamp();
+        let day = seconds.div_euclid(SECONDS_PER_DAY);
+        i32::try_from(day)
+            .map(Some)
+            .map_err(|_| Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "column '{column_name}' contains date outside Parquet range"
+                )),
+            })
+    }
+
+    fn float_seconds_to_micros(column_name: &str, seconds: f64) -> Result<Option<i64>> {
+        if !seconds.is_finite() {
+            return Ok(None);
+        }
+        let dt = sas_seconds_to_datetime(seconds).ok_or_else(|| Error::InvalidMetadata {
+            details: Cow::Owned(format!(
+                "column '{column_name}' contains timestamp outside supported range"
+            )),
+        })?;
+        let micros = dt.unix_timestamp_nanos().div_euclid(1_000);
+        i64::try_from(micros)
+            .map(Some)
+            .map_err(|_| Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "column '{column_name}' contains timestamp outside Parquet range"
+                )),
+            })
+    }
+}
+
+fn sas_epoch() -> OffsetDateTime {
+    PrimitiveDateTime::new(
+        Date::from_calendar_date(1960, Month::January, 1).expect("valid SAS epoch"),
+        Time::MIDNIGHT,
+    )
+    .assume_utc()
+}
+
+fn datetime_to_sas_seconds(datetime: &OffsetDateTime) -> f64 {
+    (*datetime - sas_epoch()).as_seconds_f64()
+}
+
+fn datetime_to_sas_days(datetime: &OffsetDateTime) -> f64 {
+    const SECONDS_PER_DAY_F64: f64 = 86_400.0;
+    datetime_to_sas_seconds(datetime) / SECONDS_PER_DAY_F64
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn time_to_sas_seconds(duration: &Duration) -> f64 {
+    duration.as_seconds_f64()
 }

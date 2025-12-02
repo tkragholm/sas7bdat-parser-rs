@@ -4,6 +4,7 @@ pub mod metadata;
 pub mod parser;
 pub mod sinks;
 pub mod value;
+pub mod logger;
 pub use crate::error::{Error, Result};
 pub use api::{ReadOptions, SasFile};
 pub use sinks::{ColumnarSink, CsvSink, ParquetSink, RowSink, SinkContext};

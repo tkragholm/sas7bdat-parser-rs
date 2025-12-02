@@ -71,7 +71,7 @@ fn make_parsed_metadata(
 
     ParsedMetadata {
         header,
-        text_store: TextStore::new(),
+        text_store: TextStore::new(resolve_encoding(None)),
         columns: vec![column],
         row_info,
         column_list: None,

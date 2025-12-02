@@ -3,8 +3,9 @@ use std::borrow::Cow;
 
 use super::column_info::{ColumnInfo, ColumnKind, ColumnOffsets, NumericKind, infer_numeric_kind};
 use super::text_store::TextStore;
+use encoding_rs::Encoding;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ColumnMetadataBuilder {
     text_store: TextStore,
     columns: Vec<ColumnInfo>,
@@ -18,9 +19,9 @@ pub struct ColumnMetadataBuilder {
 
 impl ColumnMetadataBuilder {
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(encoding: &'static Encoding) -> Self {
         Self {
-            text_store: TextStore::new(),
+            text_store: TextStore::new(encoding),
             columns: Vec::new(),
             column_count: None,
             names_seen: 0,

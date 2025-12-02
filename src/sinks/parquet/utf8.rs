@@ -1,5 +1,5 @@
-use bytes::Bytes;
 use ahash::RandomState;
+use bytes::Bytes;
 use hashbrown::{HashMap, hash_map::RawEntryMut};
 use parquet::data_type::ByteArray;
 
@@ -30,9 +30,10 @@ impl Utf8Scratch {
     pub(crate) fn intern_slice(&mut self, data: &[u8]) -> ByteArray {
         if data.len() <= 32
             && let Some((ref previous, ref handle)) = self.last_short
-                && previous.as_slice() == data {
-                    return handle.clone();
-                }
+            && previous.as_slice() == data
+        {
+            return handle.clone();
+        }
         if self.dictionary_enabled && self.dictionary.len() >= UTF8_DICTIONARY_LIMIT {
             self.dictionary.clear();
             self.dictionary_enabled = false;

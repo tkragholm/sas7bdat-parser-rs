@@ -7,10 +7,11 @@ use super::subheaders::{
     parse_column_name_subheader, parse_column_text_subheader,
 };
 use crate::metadata::{Alignment, Endianness, Measure};
+use encoding_rs::UTF_8;
 
 #[test]
 fn column_text_subheader_pushes_blob() {
-    let mut builder = ColumnMetadataBuilder::new();
+    let mut builder = ColumnMetadataBuilder::new(UTF_8);
     let signature_len = 4;
     let mut bytes = vec![0u8; signature_len + 2];
     bytes[..4].copy_from_slice(&[0xFD, 0xFF, 0xFF, 0xFF]);
@@ -28,7 +29,7 @@ fn column_text_subheader_pushes_blob() {
 
 #[test]
 fn column_name_subheader_sets_text_refs() {
-    let mut builder = ColumnMetadataBuilder::new();
+    let mut builder = ColumnMetadataBuilder::new(UTF_8);
     builder
         .text_store_mut()
         .push_blob(&[0, 0, b'C', b'O', b'L', b'1', 0, 0]);
@@ -54,7 +55,7 @@ fn column_name_subheader_sets_text_refs() {
 
 #[test]
 fn column_attrs_subheader_updates_offsets() {
-    let mut builder = ColumnMetadataBuilder::new();
+    let mut builder = ColumnMetadataBuilder::new(UTF_8);
     let signature_len = 4;
     let mut bytes = vec![0u8; signature_len + 8];
     bytes[..4].copy_from_slice(&[0xF6, 0xF6, 0xF6, 0xF6]);
@@ -81,7 +82,7 @@ fn column_attrs_subheader_updates_offsets() {
 
 #[test]
 fn column_attrs_subheader_sets_measure_alignment() {
-    let mut builder = ColumnMetadataBuilder::new();
+    let mut builder = ColumnMetadataBuilder::new(UTF_8);
     let signature_len = 4;
     let mut bytes = vec![0u8; signature_len + 8];
     bytes[..4].copy_from_slice(&[0xF6, 0xF6, 0xF6, 0xF6]);
@@ -113,7 +114,7 @@ fn column_attrs_subheader_sets_measure_alignment() {
 
 #[test]
 fn column_list_subheader_collects_values() {
-    let mut builder = ColumnMetadataBuilder::new();
+    let mut builder = ColumnMetadataBuilder::new(UTF_8);
     let bytes: Vec<u8> = vec![
         0xfe, 0xff, 0xff, 0xff, 0x3c, 0x00, 0xdc, 0x7f, 0x00, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00,
         0x00, 0x0d, 0x00, 0x11, 0x00, 0x01, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -133,7 +134,7 @@ fn column_list_subheader_collects_values() {
 
 #[test]
 fn column_format_subheader_sets_refs() {
-    let mut builder = ColumnMetadataBuilder::new();
+    let mut builder = ColumnMetadataBuilder::new(UTF_8);
     builder
         .text_store_mut()
         .push_blob(&[0, 0, 0, 0, 0, 0, b'F', b'M', b'T', 0, b'L', b'B', 0, 0]);

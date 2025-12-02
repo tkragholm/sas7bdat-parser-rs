@@ -83,6 +83,11 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             usize::try_from(parsed.row_info.row_length).map_err(|_| Error::Unsupported {
                 feature: Cow::from("row length exceeds platform pointer width"),
             })?;
+        if parsed.columns.is_empty() || row_length == 0 {
+            return Err(Error::InvalidMetadata {
+                details: Cow::from("dataset defines zero columns or row length is zero"),
+            });
+        }
         let runtime_columns = parsed
             .columns
             .iter()

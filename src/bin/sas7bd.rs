@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 use sas7bdat_parser_rs::metadata::DatasetMetadata;
 use sas7bdat_parser_rs::parser::ColumnInfo;
 use sas7bdat_parser_rs::value::Value;
+use sas7bdat_parser_rs::logger::{log_error, set_log_file};
 use sas7bdat_parser_rs::{ColumnarSink, CsvSink, ParquetSink, RowSink, SasFile};
 
 #[derive(Parser)]
@@ -114,6 +115,18 @@ struct ConvertArgs {
     /// Deprecated: columnar mode always uses contiguous staging now.
     #[arg(long, requires = "columnar", hide = true)]
     columnar_staging: bool,
+
+    /// Enforce strict date/time conversion (fail on out-of-range or malformed values).
+    #[arg(long)]
+    strict_dates: bool,
+
+    /// Write warnings and errors to a log file in addition to stderr.
+    #[arg(long)]
+    log_file: Option<PathBuf>,
+
+    /// Flatten outputs into a single directory instead of mirroring input tree.
+    #[arg(long)]
+    flatten: bool,
 }
 
 const DEFAULT_COLUMNAR_BATCH_ROWS: usize = 4096;
@@ -145,6 +158,9 @@ fn main() -> Result<(), AnyError> {
 }
 
 fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
+    if let Some(path) = &args.log_file {
+        set_log_file(path)?;
+    }
     if let Some(jobs) = args.jobs {
         // Best-effort: configure global rayon pool once. Ignore error if already set.
         let _ = rayon::ThreadPoolBuilder::new()
@@ -165,39 +181,38 @@ fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
         return Err("--out requires a single input".into());
     }
 
-    let mut tasks: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(files.len());
+    let mut tasks: Vec<(PathBuf, PathBuf, PathBuf)> = Vec::with_capacity(files.len());
     if let Some(ref out) = args.out {
-        tasks.push((files[0].clone(), out.clone()));
+        let (root, file) = &files[0];
+        tasks.push((root.clone(), file.clone(), out.clone()));
     } else {
-        for input in files {
-            let output = compute_output_path_unchecked(&input, args);
-            tasks.push((input, output));
+        for (root, input) in files {
+            let output = compute_output_path_unchecked(&root, &input, args);
+            tasks.push((root, input, output));
         }
     }
-
-    // If single input with explicit --out, keep the order (just one task).
-    // Otherwise, process in parallel.
-    let process = |(input, output): (PathBuf, PathBuf)| -> Result<(), AnyError> {
-        convert_one(&input, &output, args)
-    };
 
     if args.fail_fast {
         tasks
             .into_par_iter()
-            .map(process)
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|(_root, input, output)| {
+                convert_one(&input, &output, args)
+                    .map_err(|e| format!("{}: {e}", input.display()).into())
+            })
+            .collect::<Result<Vec<()>, AnyError>>()?;
     } else {
         let results = tasks
             .into_par_iter()
-            .map(|t| {
-                let res = process(t);
+            .map(|(_root, input, output)| {
+                let res: Result<(), AnyError> = convert_one(&input, &output, args)
+                    .map_err(|e| format!("{}: {e}", input.display()).into());
                 if let Err(ref e) = res {
-                    eprintln!("error: {e}");
+                    log_error(&e.to_string());
                 }
                 res
             })
             .collect::<Vec<_>>();
-        let failures = results.iter().filter(|r| r.is_err()).count();
+        let failures = results.iter().filter(|r: &&Result<_, _>| r.is_err()).count();
         if failures > 0 {
             eprintln!("completed with {failures} failures");
         }
@@ -291,6 +306,9 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
 
     // Build sink
     let sink_kind = args.sink;
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let columnar_batch_rows = args
         .columnar_batch_rows
         .unwrap_or(DEFAULT_COLUMNAR_BATCH_ROWS)
@@ -306,7 +324,7 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
     match sink_kind {
         SinkKind::Parquet => {
             let file = File::create(output)?;
-            let mut sink = ParquetSink::new(file);
+            let mut sink = ParquetSink::new(file).with_lenient_dates(!args.strict_dates);
             let mut columnar_row_group_rows = None;
             if let Some(rows) = args.parquet_row_group_size {
                 sink = sink.with_row_group_size(rows);
@@ -323,13 +341,17 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
             }
             if args.columnar {
                 let batch_rows = columnar_row_group_rows.unwrap_or(columnar_batch_rows);
+                let col_opts = ColumnarOptions {
+                    selection: &selection,
+                    batch_rows,
+                    source_path: Some(input.to_string_lossy().to_string()),
+                };
                 stream_columnar_into_sink(
                     &mut reader,
                     &parsed,
                     &meta_filtered,
                     &cols_filtered,
-                    &selection,
-                    batch_rows,
+                    &col_opts,
                     &mut sink,
                 )?;
             } else {
@@ -339,6 +361,7 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
                     &meta_filtered,
                     &cols_filtered,
                     &options,
+                    Some(input.to_string_lossy().to_string()),
                     &mut sink,
                 )?;
             }
@@ -356,15 +379,16 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
             if args.columnar {
                 return Err("columnar mode is only supported for Parquet sinks".into());
             }
-            stream_into_sink(
-                &mut reader,
-                &parsed,
-                &meta_filtered,
-                &cols_filtered,
-                &options,
-                &mut sink,
-            )?;
-        }
+                stream_into_sink(
+                    &mut reader,
+                    &parsed,
+                    &meta_filtered,
+                    &cols_filtered,
+                    &options,
+                    Some(input.to_string_lossy().to_string()),
+                    &mut sink,
+                )?;
+            }
     }
 
     println!("{} -> {}", input.display(), output.display());
@@ -378,18 +402,27 @@ struct StreamOptions<'a> {
     max_rows: Option<u64>,
 }
 
+#[derive(Clone)]
+struct ColumnarOptions<'a> {
+    selection: &'a [usize],
+    batch_rows: usize,
+    source_path: Option<String>,
+}
+
 fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
     reader: &mut W,
     parsed: &sas7bdat_parser_rs::parser::ParsedMetadata,
     meta_filtered: &DatasetMetadata,
     cols_filtered: &[ColumnInfo],
     options: &StreamOptions<'_>,
+    source_path: Option<String>,
     sink: &mut S,
 ) -> Result<(), AnyError> {
     // Begin sink with filtered context
     let context = sas7bdat_parser_rs::sinks::SinkContext {
         metadata: meta_filtered,
         columns: cols_filtered,
+        source_path,
     };
     sink.begin(context)?;
 
@@ -438,23 +471,23 @@ fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
     parsed: &sas7bdat_parser_rs::parser::ParsedMetadata,
     meta_filtered: &DatasetMetadata,
     cols_filtered: &[ColumnInfo],
-    selection: &[usize],
-    batch_rows: usize,
+    options: &ColumnarOptions<'_>,
     sink: &mut S,
 ) -> Result<(), AnyError> {
-    if selection.len() != cols_filtered.len() {
+    if options.selection.len() != cols_filtered.len() {
         return Err("column selection length mismatch".into());
     }
 
     let context = sas7bdat_parser_rs::sinks::SinkContext {
         metadata: meta_filtered,
         columns: cols_filtered,
+        source_path: options.source_path.clone(),
     };
     sink.begin(context)?;
 
     let mut it = parsed.row_iterator(reader)?;
-    while let Some(batch) = it.next_columnar_batch_contiguous(batch_rows)? {
-        sink.write_columnar_batch(&batch, selection)?;
+    while let Some(batch) = it.next_columnar_batch_contiguous(options.batch_rows)? {
+        sink.write_columnar_batch(&batch, options.selection)?;
     }
 
     sink.finish()?;
@@ -533,7 +566,7 @@ fn resolve_projection(
     Ok((indices, selected, filtered, filtered_cols))
 }
 
-fn discover_inputs(inputs: &[PathBuf]) -> Vec<PathBuf> {
+fn discover_inputs(inputs: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
     let mut files = Vec::new();
     for input in inputs {
         if input.is_dir() {
@@ -544,13 +577,16 @@ fn discover_inputs(inputs: &[PathBuf]) -> Vec<PathBuf> {
             {
                 let path = entry.path();
                 if path.is_file() && is_sas7bdat(path) {
-                    files.push(path.to_path_buf());
+                    files.push((input.clone(), path.to_path_buf()));
                 }
             }
         } else if input.is_file() {
             if is_sas7bdat(input) {
-                files.push(input.clone());
-            }
+            let root = input
+                .parent()
+                .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+            files.push((root, input.clone()));
+        }
         } else {
             // Non-existent paths are ignored; shell globbing typically expands patterns.
         }
@@ -565,7 +601,7 @@ fn is_sas7bdat(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("sas7bdat"))
 }
 
-fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
+fn compute_output_path_unchecked(root: &Path, input: &Path, args: &ConvertArgs) -> PathBuf {
     use std::ffi::OsStr;
     let new_ext = match args.sink {
         SinkKind::Parquet => "parquet",
@@ -575,8 +611,18 @@ fn compute_output_path_unchecked(input: &Path, args: &ConvertArgs) -> PathBuf {
     args.out_dir.as_ref().map_or_else(
         || input.with_extension(new_ext),
         |dir| {
-            let fname = input.file_name().unwrap_or_else(|| OsStr::new("output"));
-            let renamed = PathBuf::from(fname).with_extension(new_ext);
+            if args.flatten {
+                let fname = input.file_name().unwrap_or_else(|| OsStr::new("output"));
+                let renamed = PathBuf::from(fname).with_extension(new_ext);
+                return dir.join(renamed);
+            }
+
+            let rel = input.strip_prefix(root).unwrap_or(input);
+            let mut renamed = rel.to_path_buf();
+            let file = renamed
+                .file_name()
+                .map_or_else(|| PathBuf::from("output"), PathBuf::from);
+            renamed.set_file_name(file.with_extension(new_ext));
             dir.join(renamed)
         },
     )

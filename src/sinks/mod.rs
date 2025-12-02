@@ -13,6 +13,7 @@ pub use parquet::ParquetSink;
 pub struct SinkContext<'a> {
     pub metadata: &'a DatasetMetadata,
     pub columns: &'a [ColumnInfo],
+    pub source_path: Option<String>,
 }
 
 impl<'a> SinkContext<'a> {
@@ -21,6 +22,7 @@ impl<'a> SinkContext<'a> {
         Self {
             metadata: &parsed.header.metadata,
             columns: &parsed.columns,
+            source_path: None,
         }
     }
 }
