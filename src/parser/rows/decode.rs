@@ -199,10 +199,32 @@ const fn repeat_byte_usize(byte: u8) -> usize {
 
 const USIZE_BYTES: usize = size_of::<usize>();
 const SPACE_MASK_USIZE: usize = repeat_byte_usize(b' ');
+const SPACE_MASK_U128: u128 = repeat_byte_u128(b' ');
+
+const fn repeat_byte_u128(byte: u8) -> u128 {
+    let mut value = 0u128;
+    let mut i = 0;
+    while i < 16 {
+        value |= (byte as u128) << (i * 8);
+        i += 1;
+    }
+    value
+}
 
 #[inline]
 pub fn is_blank(slice: &[u8]) -> bool {
-    let mut chunks = slice.chunks_exact(USIZE_BYTES);
+    let mut offset = slice.len();
+    while offset >= 16 {
+        let chunk = &slice[offset - 16..offset];
+        let word = u128::from_ne_bytes(chunk.try_into().unwrap());
+        if word & !SPACE_MASK_U128 != 0 {
+            // Non-space/NUL encountered; fall back to slower path below.
+            break;
+        }
+        offset -= 16;
+    }
+
+    let mut chunks = slice[..offset].chunks_exact(USIZE_BYTES);
     for chunk in chunks.by_ref() {
         let word = usize::from_ne_bytes(chunk.try_into().unwrap());
         if word & !SPACE_MASK_USIZE != 0 {
@@ -215,6 +237,14 @@ pub fn is_blank(slice: &[u8]) -> bool {
 #[inline]
 pub fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
     let mut end = slice.len();
+    while end >= 16 {
+        let chunk = &slice[end - 16..end];
+        let word = u128::from_ne_bytes(chunk.try_into().unwrap());
+        if word & !SPACE_MASK_U128 != 0 {
+            break;
+        }
+        end -= 16;
+    }
     while end >= USIZE_BYTES {
         let chunk = &slice[end - USIZE_BYTES..end];
         let word = usize::from_ne_bytes(chunk.try_into().unwrap());
