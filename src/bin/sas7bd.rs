@@ -2,14 +2,14 @@ use std::fs::File;
 
 use std::path::{Path, PathBuf};
 
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, ValueEnum};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
+use sas7bdat_parser_rs::logger::{log_error, set_log_file, set_log_prefix};
 use sas7bdat_parser_rs::metadata::DatasetMetadata;
 use sas7bdat_parser_rs::parser::ColumnInfo;
 use sas7bdat_parser_rs::value::Value;
-use sas7bdat_parser_rs::logger::{log_error, set_log_file};
 use sas7bdat_parser_rs::{ColumnarSink, CsvSink, ParquetSink, RowSink, SasFile};
 
 #[derive(Parser)]
@@ -19,16 +19,17 @@ use sas7bdat_parser_rs::{ColumnarSink, CsvSink, ParquetSink, RowSink, SasFile};
     about = "Batch convert SAS7BDAT to Parquet/CSV/TSV"
 )]
 struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
+    /// Conversion options (default mode).
+    #[command(flatten)]
+    convert: ConvertArgs,
 
-#[derive(Subcommand)]
-enum Command {
-    /// Convert one or more inputs to a chosen sink format.
-    Convert(Box<ConvertArgs>),
     /// Inspect dataset metadata and print a summary.
-    Inspect(InspectArgs),
+    #[arg(long, value_name = "FILE", help_heading = "Inspect")]
+    inspect: Option<PathBuf>,
+
+    /// Emit JSON instead of human readable output (inspect only).
+    #[arg(long, requires = "inspect", help_heading = "Inspect")]
+    inspect_json: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -42,90 +43,112 @@ enum SinkKind {
 #[allow(clippy::struct_excessive_bools)]
 struct ConvertArgs {
     /// Input files or directories (recurses directories).
-    #[arg(required = true)]
+    #[arg(
+        required_unless_present = "inspect",
+        value_name = "PATH",
+        help_heading = "Input"
+    )]
     inputs: Vec<PathBuf>,
 
     /// Output directory (computed file names).
-    #[arg(long, conflicts_with = "out")]
+    #[arg(
+        long,
+        conflicts_with = "out",
+        value_name = "DIR",
+        help_heading = "Output"
+    )]
     out_dir: Option<PathBuf>,
 
     /// Output file (only valid with a single input).
-    #[arg(long, conflicts_with = "out_dir")]
+    #[arg(
+        long,
+        conflicts_with = "out_dir",
+        value_name = "FILE",
+        help_heading = "Output"
+    )]
     out: Option<PathBuf>,
 
     /// Sink kind: parquet, csv, or tsv.
-    #[arg(long, value_enum, default_value_t = SinkKind::Parquet)]
+    #[arg(long, value_enum, default_value_t = SinkKind::Parquet, help_heading = "Output")]
     sink: SinkKind,
 
     /// CSV/TSV delimiter. Defaults to ',' for csv and '\t' for tsv.
-    #[arg(long)]
+    #[arg(long, help_heading = "Output")]
     delimiter: Option<char>,
 
     /// Write header row (CSV/TSV only).
-    #[arg(long = "headers", action = ArgAction::SetTrue, default_value_t = true)]
+    #[arg(
+        long = "headers",
+        action = ArgAction::SetTrue,
+        default_value_t = true,
+        help_heading = "Output"
+    )]
     headers: bool,
     /// Disable header row (CSV/TSV only).
-    #[arg(long = "no-headers", action = ArgAction::SetFalse, overrides_with = "headers")]
+    #[arg(
+        long = "no-headers",
+        action = ArgAction::SetFalse,
+        overrides_with = "headers",
+        help_heading = "Output"
+    )]
     _no_headers: bool,
 
     /// Skip leading N rows.
-    #[arg(long)]
+    #[arg(long, help_heading = "Row Limits")]
     skip: Option<u64>,
 
     /// Limit to at most N rows.
-    #[arg(long = "max-rows")]
+    #[arg(long = "max-rows", help_heading = "Row Limits")]
     max_rows: Option<u64>,
 
     /// Project a subset of columns by name (comma-separated).
-    #[arg(long = "columns", value_delimiter = ',')]
+    #[arg(
+        long = "columns",
+        value_delimiter = ',',
+        help_heading = "Projection",
+        value_name = "NAME[,NAME]"
+    )]
     columns: Option<Vec<String>>,
 
     /// Project a subset of columns by zero-based indices (comma-separated).
-    #[arg(long = "column-indices", value_delimiter = ',')]
+    #[arg(
+        long = "column-indices",
+        value_delimiter = ',',
+        help_heading = "Projection",
+        value_name = "IDX[,IDX]"
+    )]
     column_indices: Option<Vec<usize>>,
 
     /// Optional value-label catalog (.sas7bcat) to load.
-    #[arg(long)]
+    #[arg(long, value_name = "FILE", help_heading = "Input")]
     catalog: Option<PathBuf>,
 
     /// Parquet row group size (rows). If unset, uses the library's heuristic.
-    #[arg(long)]
+    #[arg(long, value_name = "ROWS", help_heading = "Parquet")]
     parquet_row_group_size: Option<usize>,
 
     /// Parquet target row group size (bytes) for automatic estimation.
-    #[arg(long)]
+    #[arg(long, value_name = "BYTES", help_heading = "Parquet")]
     parquet_target_bytes: Option<usize>,
 
-    /// Number of concurrent worker threads.
-    #[arg(long)]
+    /// Number of concurrent worker threads (default: Rayon global pool, usually logical CPUs unless `RAYON_NUM_THREADS` is set).
+    #[arg(long, help_heading = "Execution")]
     jobs: Option<usize>,
 
     /// Stop on first error.
-    #[arg(long)]
+    #[arg(long, help_heading = "Execution")]
     fail_fast: bool,
 
-    /// Use the columnar decoding pipeline (Parquet sink only).
-    #[arg(long)]
-    columnar: bool,
-
-    /// Override the columnar batch size (rows) when `--columnar` is set.
-    #[arg(long, requires = "columnar")]
-    columnar_batch_rows: Option<usize>,
-
-    /// Deprecated: columnar mode always uses contiguous staging now.
-    #[arg(long, requires = "columnar", hide = true)]
-    columnar_staging: bool,
-
     /// Enforce strict date/time conversion (fail on out-of-range or malformed values).
-    #[arg(long)]
+    #[arg(long, help_heading = "Validation")]
     strict_dates: bool,
 
     /// Write warnings and errors to a log file in addition to stderr.
-    #[arg(long)]
+    #[arg(long, value_name = "FILE", help_heading = "Logging")]
     log_file: Option<PathBuf>,
 
     /// Flatten outputs into a single directory instead of mirroring input tree.
-    #[arg(long)]
+    #[arg(long, help_heading = "Output")]
     flatten: bool,
 }
 
@@ -136,7 +159,7 @@ const COLUMNAR_ROW_GROUP_MULTIPLIER: usize = 16;
 struct InspectArgs {
     input: PathBuf,
     /// Emit JSON instead of human readable output.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     json: bool,
 }
 
@@ -151,9 +174,17 @@ type ProjectionResult = (
 fn main() -> Result<(), AnyError> {
     let cli = Cli::parse();
 
-    match cli.command {
-        Command::Convert(args) => run_convert(&args),
-        Command::Inspect(args) => run_inspect(&args),
+    if let Some(path) = cli.inspect {
+        if !cli.convert.inputs.is_empty() {
+            return Err("`--inspect` cannot be combined with conversion inputs".into());
+        }
+        let args = InspectArgs {
+            input: path,
+            json: cli.inspect_json,
+        };
+        run_inspect(&args)
+    } else {
+        run_convert(&cli.convert)
     }
 }
 
@@ -166,13 +197,6 @@ fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
         let _ = rayon::ThreadPoolBuilder::new()
             .num_threads(jobs)
             .build_global();
-    }
-
-    if args.columnar && args.sink != SinkKind::Parquet {
-        return Err("--columnar is only supported for Parquet conversions".into());
-    }
-    if args.columnar && (args.skip.is_some() || args.max_rows.is_some()) {
-        return Err("--columnar cannot be combined with --skip or --max-rows".into());
     }
 
     let files = discover_inputs(&args.inputs);
@@ -212,7 +236,10 @@ fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
                 res
             })
             .collect::<Vec<_>>();
-        let failures = results.iter().filter(|r: &&Result<_, _>| r.is_err()).count();
+        let failures = results
+            .iter()
+            .filter(|r: &&Result<_, _>| r.is_err())
+            .count();
         if failures > 0 {
             eprintln!("completed with {failures} failures");
         }
@@ -293,6 +320,7 @@ fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
 }
 
 fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), AnyError> {
+    let _log_prefix = set_log_prefix(input.to_string_lossy());
     // Prepare reader and metadata
     let mut sas = SasFile::open(input)?;
     if let Some(cat) = &args.catalog {
@@ -309,10 +337,7 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let columnar_batch_rows = args
-        .columnar_batch_rows
-        .unwrap_or(DEFAULT_COLUMNAR_BATCH_ROWS)
-        .max(1);
+    let columnar_batch_rows = DEFAULT_COLUMNAR_BATCH_ROWS.max(1);
     let derived_row_group_rows = columnar_batch_rows
         .saturating_mul(COLUMNAR_ROW_GROUP_MULTIPLIER)
         .max(columnar_batch_rows);
@@ -325,46 +350,34 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
         SinkKind::Parquet => {
             let file = File::create(output)?;
             let mut sink = ParquetSink::new(file).with_lenient_dates(!args.strict_dates);
-            let mut columnar_row_group_rows = None;
-            if let Some(rows) = args.parquet_row_group_size {
+            let columnar_row_group_rows = if let Some(rows) = args.parquet_row_group_size {
                 sink = sink.with_row_group_size(rows);
-                columnar_row_group_rows = Some(rows);
-            } else if args.columnar {
+                Some(rows)
+            } else {
                 sink = sink.with_row_group_size(derived_row_group_rows);
-                columnar_row_group_rows = Some(derived_row_group_rows);
-            }
+                Some(derived_row_group_rows)
+            };
             if let Some(bytes) = args.parquet_target_bytes {
                 sink = sink.with_target_row_group_bytes(bytes);
             }
-            if args.columnar {
-                sink = sink.with_streaming_columnar(true);
-            }
-            if args.columnar {
-                let batch_rows = columnar_row_group_rows.unwrap_or(columnar_batch_rows);
-                let col_opts = ColumnarOptions {
-                    selection: &selection,
-                    batch_rows,
-                    source_path: Some(input.to_string_lossy().to_string()),
-                };
-                stream_columnar_into_sink(
-                    &mut reader,
-                    &parsed,
-                    &meta_filtered,
-                    &cols_filtered,
-                    &col_opts,
-                    &mut sink,
-                )?;
-            } else {
-                stream_into_sink(
-                    &mut reader,
-                    &parsed,
-                    &meta_filtered,
-                    &cols_filtered,
-                    &options,
-                    Some(input.to_string_lossy().to_string()),
-                    &mut sink,
-                )?;
-            }
+            sink = sink.with_streaming_columnar(true);
+
+            let batch_rows = columnar_row_group_rows.unwrap_or(columnar_batch_rows);
+            let col_opts = ColumnarOptions {
+                selection: &selection,
+                batch_rows,
+                source_path: Some(input.to_string_lossy().to_string()),
+                skip: args.skip,
+                max_rows: args.max_rows,
+            };
+            stream_columnar_into_sink(
+                &mut reader,
+                &parsed,
+                &meta_filtered,
+                &cols_filtered,
+                &col_opts,
+                &mut sink,
+            )?;
             let _ = sink.into_inner()?;
         }
         SinkKind::Csv | SinkKind::Tsv => {
@@ -376,19 +389,16 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
                     (_, Some(ch)) => ch as u8,
                     _ => b',',
                 });
-            if args.columnar {
-                return Err("columnar mode is only supported for Parquet sinks".into());
-            }
-                stream_into_sink(
-                    &mut reader,
-                    &parsed,
-                    &meta_filtered,
-                    &cols_filtered,
-                    &options,
-                    Some(input.to_string_lossy().to_string()),
-                    &mut sink,
-                )?;
-            }
+            stream_into_sink(
+                &mut reader,
+                &parsed,
+                &meta_filtered,
+                &cols_filtered,
+                &options,
+                Some(input.to_string_lossy().to_string()),
+                &mut sink,
+            )?;
+        }
     }
 
     println!("{} -> {}", input.display(), output.display());
@@ -407,6 +417,8 @@ struct ColumnarOptions<'a> {
     selection: &'a [usize],
     batch_rows: usize,
     source_path: Option<String>,
+    skip: Option<u64>,
+    max_rows: Option<u64>,
 }
 
 fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
@@ -486,7 +498,34 @@ fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
     sink.begin(context)?;
 
     let mut it = parsed.row_iterator(reader)?;
-    while let Some(batch) = it.next_columnar_batch_contiguous(options.batch_rows)? {
+    let mut skipped = 0u64;
+    let mut remaining = options.max_rows;
+    while let Some(mut batch) = it.next_columnar_batch_contiguous(options.batch_rows)? {
+        // Apply skip/max_rows on top of the batch.
+        if let Some(skip) = options.skip
+            && skipped < skip
+        {
+            let to_drop = usize::try_from(skip.saturating_sub(skipped)).unwrap_or(usize::MAX);
+            if to_drop >= batch.row_count {
+                skipped = skipped.saturating_add(batch.row_count as u64);
+                continue;
+            }
+            batch.truncate_front(to_drop);
+            skipped = skip;
+        }
+        if let Some(rem) = remaining.as_mut() {
+            if *rem == 0 {
+                break;
+            }
+            if batch.row_count as u64 > *rem {
+                let limit = usize::try_from(*rem).unwrap_or(usize::MAX);
+                batch.truncate(limit);
+            }
+            *rem = rem.saturating_sub(batch.row_count as u64);
+        }
+        if batch.row_count == 0 {
+            break;
+        }
         sink.write_columnar_batch(&batch, options.selection)?;
     }
 
@@ -582,11 +621,11 @@ fn discover_inputs(inputs: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
             }
         } else if input.is_file() {
             if is_sas7bdat(input) {
-            let root = input
-                .parent()
-                .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-            files.push((root, input.clone()));
-        }
+                let root = input
+                    .parent()
+                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+                files.push((root, input.clone()));
+            }
         } else {
             // Non-existent paths are ignored; shell globbing typically expands patterns.
         }

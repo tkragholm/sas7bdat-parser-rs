@@ -3,8 +3,10 @@ use std::convert::TryInto;
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::error::{Error, Result, Section};
+use crate::logger::log_warn;
 use crate::metadata::{Compression, Vendor};
 use crate::parser::core::byteorder::read_u16;
+use crate::parser::metadata::{PageKind, classify_page};
 
 use super::buffer::RowData;
 use super::compression::{decompress_rdc, decompress_rle};
@@ -26,21 +28,25 @@ impl<R: Read + Seek> RowIterator<'_, R> {
             self.reader
                 .seek(SeekFrom::Start(offset))
                 .map_err(Error::from)?;
-            self.reader
-                .read_exact(&mut self.page_buffer)
-                .map_err(Error::from)?;
-            let page_index = self.next_page_index;
-            self.next_page_index += 1;
+        self.reader
+            .read_exact(&mut self.page_buffer)
+            .map_err(Error::from)?;
+        let page_index = self.next_page_index;
+        self.next_page_index += 1;
 
-            let page_type = read_u16(
-                header.endianness,
-                &self.page_buffer[(header.page_header_size as usize) - 8..],
-            );
-            if (page_type & SAS_PAGE_TYPE_COMP) == SAS_PAGE_TYPE_COMP {
-                continue;
-            }
+        let page_type = read_u16(
+            header.endianness,
+            &self.page_buffer[(header.page_header_size as usize) - 8..],
+        );
+        if (page_type & SAS_PAGE_TYPE_COMP) != 0 {
+            continue;
+        }
 
-            let base_page_type = page_type & SAS_PAGE_TYPE_MASK;
+        let page_kind = classify_page(page_type);
+        if matches!(page_kind, PageKind::Comp | PageKind::CompTable | PageKind::Unknown) {
+            continue;
+        }
+        let base_page_type = page_type & SAS_PAGE_TYPE_MASK;
 
             let page_row_count = read_u16(
                 header.endianness,
@@ -55,32 +61,85 @@ impl<R: Read + Seek> RowIterator<'_, R> {
             self.recycle_current_rows();
 
             let subheader_count_pos = header.page_header_size as usize - 4;
-            let subheader_count =
-                read_u16(header.endianness, &self.page_buffer[subheader_count_pos..]);
+            let Some(count_bytes) = self
+                .page_buffer
+                .get(subheader_count_pos..subheader_count_pos + 2) else {
+                log_warn(&format!(
+                    "Skipping page {page_index} (type=0x{page_type:04X}): subheader count exceeds page bounds [page_size={}, page_header_size={}]",
+                    header.page_size, header.page_header_size
+                ));
+                continue;
+            };
+            let subheader_count_raw = read_u16(header.endianness, count_bytes);
 
             let pointer_size = header.subheader_pointer_size as usize;
             let mut ptr_cursor = header.page_header_size as usize;
+            let max_subheaders = self
+                .page_buffer
+                .len()
+                .saturating_sub(header.page_header_size as usize)
+                / pointer_size;
+            let (subheader_count, truncated) = if usize::from(subheader_count_raw) > max_subheaders
+            {
+                (u16::try_from(max_subheaders).unwrap_or(0), true)
+            } else {
+                (subheader_count_raw, false)
+            };
+            if truncated {
+                log_warn(&format!(
+                    "Clamping subheader count on page {page_index} (type=0x{page_type:04X}) from {} to {} to fit page bounds [page_size={}, header_size={}, pointer_size={}]",
+                    subheader_count_raw,
+                    max_subheaders,
+                    header.page_size,
+                    header.page_header_size,
+                    header.subheader_pointer_size
+                ));
+            }
 
             for _ in 0..subheader_count {
-                if ptr_cursor + pointer_size > self.page_buffer.len() {
-                    return Err(Error::Corrupted {
-                        section: Section::Page { index: page_index },
-                        details: Cow::from("subheader pointer exceeds page bounds"),
-                    });
-                }
-
-                let pointer = &self.page_buffer[ptr_cursor..ptr_cursor + pointer_size];
-                ptr_cursor += pointer_size;
+                let pointer_end = ptr_cursor.saturating_add(pointer_size);
+                let Some(pointer) = self.page_buffer.get(ptr_cursor..pointer_end) else {
+                    log_warn(&format!(
+                        "Skipping page {page_index} (type=0x{page_type:04X}): subheader pointer exceeds page bounds [cursor={}, pointer_size={}, page_len={}]",
+                        ptr_cursor,
+                        pointer_size,
+                        self.page_buffer.len()
+                    ));
+                    continue;
+                };
+                ptr_cursor = pointer_end;
 
                 let info = parse_pointer(pointer, header.uses_u64, header.endianness)?;
+                let min_data_offset =
+                    header.page_header_size as usize + usize::from(subheader_count) * pointer_size;
+                if info.offset < min_data_offset {
+                    log_warn(&format!(
+                        "Skipping page {page_index} (type=0x{page_type:04X}): subheader pointer starts before data section [offset={}, min_offset={}, pointer_size={}, subheaders={}]",
+                        info.offset, min_data_offset, pointer_size, subheader_count
+                    ));
+                    continue;
+                }
                 if info.length == 0 {
                     continue;
                 }
                 if info.offset + info.length > self.page_buffer.len() {
-                    return Err(Error::Corrupted {
-                        section: Section::Page { index: page_index },
-                        details: Cow::from("subheader pointer references data beyond page bounds"),
-                    });
+                    log_warn(&format!(
+                        "Skipping page {page_index} (type=0x{page_type:04X}): subheader pointer references data beyond page bounds [offset={}, length={}, page_len={}]",
+                        info.offset,
+                        info.length,
+                        self.page_buffer.len()
+                    ));
+                    continue;
+                }
+                if info.compression == SAS_COMPRESSION_NONE {
+                    let sig_len = header.subheader_signature_size;
+                    if info.length < sig_len || info.offset + sig_len > self.page_buffer.len() {
+                        log_warn(&format!(
+                            "Skipping page {page_index} (type=0x{page_type:04X}): subheader pointer too small for signature [offset={}, length={}, required={}, page_len={}]",
+                            info.offset, info.length, sig_len, self.page_buffer.len()
+                        ));
+                        continue;
+                    }
                 }
 
                 let data_start = info.offset;
@@ -117,7 +176,8 @@ impl<R: Read + Seek> RowIterator<'_, R> {
                     SAS_COMPRESSION_ROW => {
                         let mut buffer = self.take_row_buffer();
                         let data = &self.page_buffer[data_start..data_end];
-                        match self.parsed.row_info.compression {
+                        let compression_mode = self.parsed.row_info.compression;
+                        match compression_mode {
                             Compression::Row => decompress_rle(data, row_length, &mut buffer),
                             Compression::Binary => decompress_rdc(data, row_length, &mut buffer),
                             Compression::None => {
@@ -137,7 +197,10 @@ impl<R: Read + Seek> RowIterator<'_, R> {
                         }
                         .map_err(|msg| Error::Corrupted {
                             section: Section::Page { index: page_index },
-                            details: Cow::from(msg),
+                            details: Cow::Owned(format!(
+                                "{msg} (compression={compression_mode:?}, page_type=0x{page_type:04X}, subheader_count={subheader_count}, pointer_range={data_start}..{data_end}, pointer_length={pointer_length}, row_length={row_length})",
+                                pointer_length = info.length
+                            )),
                         })?;
                         self.current_rows.push(RowData::Owned(buffer));
                         if let Some(target) = target_rows

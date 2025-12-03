@@ -26,6 +26,4 @@ EOF
 hyperfine \
   --prepare "${prepare_cmd}" \
   "${HYPERFINE_ARGS[@]}" \
-  "benchmarks/run_rust.sh \"${INPUT}\"" \
-  "benchmarks/run_rust.sh \"${INPUT}\" --columnar" \
-  "benchmarks/run_rust.sh \"${INPUT}\" --columnar --columnar-batch-rows 512"
+  "benchmarks/run_rust.sh \"${INPUT}\""

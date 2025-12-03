@@ -140,6 +140,24 @@ impl<'rows> ColumnarBatch<'rows> {
         }
     }
 
+    pub fn truncate_front(&mut self, rows: usize) {
+        if rows >= self.row_count {
+            self.row_slices.clear();
+            self.row_count = 0;
+            return;
+        }
+        self.row_slices.drain(0..rows);
+        self.row_count -= rows;
+    }
+
+    pub fn truncate(&mut self, rows: usize) {
+        if rows >= self.row_count {
+            return;
+        }
+        self.row_slices.truncate(rows);
+        self.row_count = rows;
+    }
+
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.row_count == 0

@@ -5,3 +5,7 @@
 [submodule "benchmarks/lib/csharp"]
 	path = benchmarks/lib/csharp
 	url = https://github.com/richokelly/sas7bdat.git
+
+[submodule "benchmarks/lib/pandas"]
+	path = benchmarks/lib/pandas
+	url = https://github.com/pandas-dev/pandas.git

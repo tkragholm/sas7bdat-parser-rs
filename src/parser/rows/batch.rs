@@ -8,6 +8,9 @@ use crate::error::Result;
 use super::columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnarBatch};
 use super::iterator::RowIterator;
 
+// Cap columnar staging to avoid enormous allocations when row_length is very large.
+const MAX_COLUMNAR_BUFFER_BYTES: usize = 512 * 1024 * 1024;
+
 #[inline]
 const fn resolve_target(iter_exhausted: &std::cell::Cell<bool>, max_rows: usize) -> Option<usize> {
     if iter_exhausted.get() {
@@ -78,17 +81,32 @@ pub fn next_columnar_batch_contiguous<'iter, R: Read + Seek>(
         return Ok(None);
     };
 
+    let remaining_rows = usize::try_from(
+        iter.total_rows
+            .saturating_sub(iter.emitted_rows.get())
+            .min(usize::MAX as u64),
+    )
+    .unwrap_or(usize::MAX);
+    let mut effective_target = target.min(remaining_rows);
+    if effective_target == 0 {
+        return Ok(None);
+    }
+
+    // Avoid preallocating more than the cap; clamp rows to fit within the budget.
+    if iter.row_length > 0 && effective_target.saturating_mul(iter.row_length) > MAX_COLUMNAR_BUFFER_BYTES {
+        effective_target = MAX_COLUMNAR_BUFFER_BYTES.max(iter.row_length) / iter.row_length;
+        effective_target = effective_target.max(1);
+    }
+
     iter.recycle_owned_rows();
-    if target > 0 {
-        let target_bytes = target.saturating_mul(iter.row_length);
-        if iter.columnar_owned_buffer.capacity() < target_bytes {
-            iter.columnar_owned_buffer
-                .reserve(target_bytes - iter.columnar_owned_buffer.capacity());
-        }
+    let target_bytes = effective_target.saturating_mul(iter.row_length);
+    if iter.columnar_owned_buffer.capacity() < target_bytes {
+        iter.columnar_owned_buffer
+            .reserve(target_bytes - iter.columnar_owned_buffer.capacity());
     }
 
     let mut copied_rows = 0usize;
-    while copied_rows < target {
+    while copied_rows < effective_target {
         if !iter.ensure_page_ready()? {
             break;
         }

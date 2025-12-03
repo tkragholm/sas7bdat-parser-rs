@@ -42,7 +42,7 @@ build_command() {
     if [ -n "$CURRENT_FEATURE_FLAG" ]; then
         cargo_cmd+=(--features "$CURRENT_FEATURE_FLAG")
     fi
-    cargo_cmd+=(--bin sas7bd -- convert --out "$output" "$DATASET" --parquet-row-group-size "$ROW_GROUP_SIZE" --columnar)
+    cargo_cmd+=(--bin sas7bd -- convert --out "$output" "$DATASET" --parquet-row-group-size "$ROW_GROUP_SIZE")
     if [ -n "$JOBS" ]; then
         cargo_cmd+=(--jobs "$JOBS")
     fi
@@ -77,5 +77,5 @@ bench_suite() {
     cleanup_outputs "$out_columnar"
 }
 
-bench_suite "baseline" "" "Columnar contiguous"
-bench_suite "hotpath" "hotpath" "Columnar contiguous (hotpath instrumented)"
+bench_suite "baseline" "" "Parquet columnar (default)"
+bench_suite "hotpath" "hotpath" "Parquet columnar (hotpath instrumented)"

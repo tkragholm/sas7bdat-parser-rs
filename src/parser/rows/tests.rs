@@ -222,6 +222,21 @@ fn decompresses_row_compression_page_rle() {
 }
 
 #[test]
+fn comp_table_pages_are_skipped() {
+    let mut page = vec![0u8; 64];
+    // High-bit comp-table page type (0x8000).
+    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x8000u16.to_le_bytes());
+    // Force a nonzero subheader count to catch accidental parsing.
+    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+
+    let parsed = make_parsed_metadata(Vendor::Sas, Compression::None, 4, 1, 1, 64);
+    let mut cursor = Cursor::new(page);
+    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
+
+    assert!(iter.try_next().expect("skip comp-table").is_none());
+}
+
+#[test]
 fn decompresses_binary_compression_page_rdc() {
     // Prefix of 0x0000 followed by 4 literals "BCDE".
     let mut compressed = Vec::new();
@@ -234,6 +249,43 @@ fn decompresses_binary_compression_page_rdc() {
 
     let first = iter.try_next().expect("row 1 result").expect("row 1");
     assert_eq!(first, vec![Value::Str(Cow::Borrowed("BCDE"))]);
+    assert!(iter.try_next().expect("end").is_none());
+}
+
+#[test]
+fn invalid_pointer_before_data_section_is_ignored() {
+    // A DATA page declaring a pointer that starts inside the pointer table; it should be skipped
+    // and rows should be read from the regular data region.
+    let row_length = 4usize;
+    let mut page = vec![0u8; 96];
+    page[(24 - 8)..(24 - 6)]
+        .copy_from_slice(&super::constants::SAS_PAGE_TYPE_DATA.to_le_bytes());
+    page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes()); // one row
+    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes()); // one pointer
+
+    // Pointer claims data at offset 0 (inside header), length 8.
+    let mut pointer = [0u8; 12];
+    pointer[0..4].copy_from_slice(&0u32.to_le_bytes());
+    pointer[4..8].copy_from_slice(&8u32.to_le_bytes());
+    page[24..36].copy_from_slice(&pointer);
+
+    let pointer_section_len = 12usize;
+    let bit_offset = 16usize;
+    let alignment_base = bit_offset + super::constants::SUBHEADER_POINTER_OFFSET + pointer_section_len;
+    let align_adjust = if alignment_base.is_multiple_of(8) {
+        0
+    } else {
+        8 - (alignment_base % 8)
+    };
+    let data_start = (24 + pointer_section_len).saturating_add(align_adjust);
+    page[data_start..data_start + 4].copy_from_slice(b"GOOD");
+
+    let parsed = make_parsed_metadata(Vendor::Sas, Compression::None, row_length as u32, 1, 1, 96);
+    let mut cursor = Cursor::new(page);
+    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
+
+    let first = iter.try_next().expect("row 1 result").expect("row 1");
+    assert_eq!(first, vec![Value::Str(Cow::Borrowed("GOOD"))]);
     assert!(iter.try_next().expect("end").is_none());
 }
 
