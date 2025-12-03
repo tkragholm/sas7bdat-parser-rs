@@ -24,6 +24,7 @@ const SAS_HEADER_END_SIZE: usize = 120;
 const SAS_HEADER_MIN_SIZE: u32 = 1024;
 const SAS_PAGE_MIN_SIZE: u32 = 1024;
 const SAS_MAX_SIZE: u32 = 1 << 24;
+const SAS_PAGE_COUNT_MAX: u64 = 1 << 24;
 
 const SAS_EPOCH_OFFSET_SECONDS: i64 = -3653 * 86_400;
 
@@ -104,33 +105,58 @@ pub fn parse_header<R: Read + Seek>(reader: &mut R) -> Result<SasHeader> {
     }
 
     let timestamps = read_timestamps(reader, endianness)?;
-    let header_size = read_u32(reader, endianness)?;
-    let page_size = read_u32(reader, endianness)?;
-
+    let header_size_raw = read_u32(reader, endianness)?;
+    let mut header_size = header_size_raw;
     if !(SAS_HEADER_MIN_SIZE..=SAS_MAX_SIZE).contains(&header_size) {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("header size outside expected range"),
-        });
-    }
-    if !(SAS_PAGE_MIN_SIZE..=SAS_MAX_SIZE).contains(&page_size) {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("page size outside expected range"),
-        });
+        let swapped = header_size_raw.swap_bytes();
+        if (SAS_HEADER_MIN_SIZE..=SAS_MAX_SIZE).contains(&swapped) {
+            header_size = swapped;
+        } else {
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::from("header size outside expected range"),
+            });
+        }
     }
 
-    let page_count = if uses_u64 {
+    let page_size_raw = read_u32(reader, endianness)?;
+    let mut page_size = page_size_raw;
+    if !(SAS_PAGE_MIN_SIZE..=SAS_MAX_SIZE).contains(&page_size) {
+        let swapped = page_size_raw.swap_bytes();
+        if (SAS_PAGE_MIN_SIZE..=SAS_MAX_SIZE).contains(&swapped) {
+            page_size = swapped;
+        } else {
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::from("page size outside expected range"),
+            });
+        }
+    }
+
+    let page_count_raw = if uses_u64 {
         read_u64(reader, endianness)?
     } else {
         u64::from(read_u32(reader, endianness)?)
     };
 
-    if page_count > (1 << 24) {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("page count outside expected range"),
-        });
+    let mut page_count = page_count_raw;
+    if page_count > SAS_PAGE_COUNT_MAX {
+        let lower32 = u64::from(page_count_raw as u32);
+        let swapped = if uses_u64 {
+            page_count_raw.swap_bytes()
+        } else {
+            u64::from((page_count_raw as u32).swap_bytes())
+        };
+        if (1..=SAS_PAGE_COUNT_MAX).contains(&lower32) {
+            page_count = lower32;
+        } else if (1..=SAS_PAGE_COUNT_MAX).contains(&swapped) {
+            page_count = swapped;
+        } else {
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::from("page count outside expected range"),
+            });
+        }
     }
 
     reader.seek(SeekFrom::Current(8)).map_err(Error::from)?;

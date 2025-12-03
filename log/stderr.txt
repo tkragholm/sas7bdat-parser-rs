@@ -1,0 +1,75 @@
+<(SAS-PARSER) (ETL) PS E:\workdata\708245\CDEF\Personer\tkra0028\SAS_TEST> sas7bd.exe convert "E:\rawdata\708245\202402\" --out-dir . --log-file error.log
+
+thread '<unnamed>' (126876) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread '<unnamed>' (68996) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (88544) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (99180) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+E:\rawdata\708245\202402\bef202303.sas7bdat: corrupted SAS file while processing file header: subheader pointer exceeds page bounds
+E:\rawdata\708245\202402\lmdb201612.sas7bdat: corrupted SAS file while processing file header: subheader pointer exceeds page bounds
+
+thread '<unnamed>' (80028) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (118360) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (92928) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (106984) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (22660) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+E:\rawdata\708245\202402\lmdb201312.sas7bdat: corrupted SAS file while processing file header: subheader pointer exceeds page bounds
+
+thread '<unnamed>' (107856) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (109688) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (126904) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (113584) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (129412) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (97184) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (92528) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (120944) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (116448) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+E:\rawdata\708245\202402\lmdb201812.sas7bdat: corrupted SAS file while processing file header: subheader pointer exceeds page bounds
+E:\rawdata\708245\202402\bef202306.sas7bdat: corrupted SAS file while processing file header: subheader pointer exceeds page bounds
+E:\rawdata\708245\202402\bef202309.sas7bdat: corrupted SAS file while processing file header: subheader pointer exceeds page bounds
+
+thread '<unnamed>' (88708) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (90332) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+E:\rawdata\708245\202402\akm2022.sas7bdat: corrupted SAS file while processing file header: subheader pointer exceeds page bounds
+
+thread '<unnamed>' (114432) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768
+
+thread '<unnamed>' (121980) panicked at src/parser/metadata/mod.rs:271:28:
+range end index 32772 out of range for slice of length 32768

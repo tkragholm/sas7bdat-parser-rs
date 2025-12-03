@@ -268,6 +268,12 @@ fn parse_subheaders<'a>(page: &'a [u8], header: &SasHeader) -> Result<Vec<Parsed
     let pointer_size = header.subheader_pointer_size as usize;
     let mut ptr_cursor = header.page_header_size as usize;
     for _ in 0..subheader_count {
+        if ptr_cursor.checked_add(pointer_size).is_none_or(|end| end > page.len()) {
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::from("subheader pointer table exceeds page bounds"),
+            });
+        }
         let pointer = &page[ptr_cursor..ptr_cursor + pointer_size];
         ptr_cursor += pointer_size;
 
