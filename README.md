@@ -1,6 +1,16 @@
-# sas7bdat-parser-rs
+# sas7bdat
 
-`sas7bdat-parser-rs` is a Rust library for decoding SAS7BDAT datasets with a focus on reproducible research workflows. It exposes a safe API for inspecting metadata, streaming rows, and writing Parquet output so that legacy SAS exports can participate in modern data engineering pipelines.
+`sas7bdat` is a Rust library for decoding SAS7BDAT datasets with a focus on reproducible research workflows. It exposes a safe API for inspecting metadata, streaming rows, and writing Parquet output so that legacy SAS exports can participate in modern data engineering pipelines. The project is Rust-first (library + CLI); the PyPI package redistributes the Rust binary, and native Python/R bindings are planned but not yet shipped. It was originally built for heavy, secure processing on Statistics Denmark’s servers over large national registers.
+
+This project aims to bridge a legacy, closed-source data format into modern, open-source workflows. Today many stacks lean on the venerable C-based ReadStat (e.g., haven, pyreadstat); implementing the reader in Rust should make contributions more approachable and redistribution (cross-compilation, shipping wheels/binaries) simpler while preserving performance.
+
+## Related work
+
+- **ReadStat (C)** — battle-tested reference library used by haven and pyreadstat ([WizardMac/ReadStat](https://github.com/WizardMac/ReadStat)).
+- **cppsas7bdat (C++)** — C++ reader used for comparison ([olivia76/cpp-sas7bdat](https://github.com/olivia76/cpp-sas7bdat)).
+- **Sas7Bdat.Core (C#)** — .NET reader ([richokelly/Sas7Bdat](https://github.com/richokelly/Sas7Bdat)).
+- **pandas (Python)** — pandas’ built-in SAS reader (Python implementation, independent of ReadStat) ([pandas-dev/pandas](https://github.com/pandas-dev/pandas/blob/main/pandas/io/sas/sas7bdat.py)).
+- **Reverse-engineered SAS7BDAT docs** — historical compatibility study and binary format notes ([BioStatMatt/sas7bdat](https://github.com/BioStatMatt/sas7bdat)).
 
 The crate powers a test suite that cross-checks parsed output against community fixtures and other statistical packages (pandas, PyReadStat, Haven). It also ships an example that downloads the U.S. Census American Housing Survey (AHS) public-use file, converts it to Parquet, and demonstrates end-to-end integration.
 
@@ -17,7 +27,7 @@ The crate powers a test suite that cross-checks parsed output against community 
 Add the library to an existing Cargo project:
 
 ```bash
-cargo add sas7bdat-parser-rs
+cargo add sas7bdat
 ```
 
 Or build the repository directly:
@@ -34,9 +44,9 @@ cargo build
 This repo also ships a small CLI to batch‑convert SAS7BDAT files to Parquet/CSV/TSV using streaming sinks. It supports directory recursion, simple projection, and pagination.
 
 ```
-cargo run --bin sas7bd -- convert path/to/dir --sink parquet --jobs 4
-cargo run --bin sas7bd -- convert file.sas7bdat --sink csv --out file.csv --columns COL1,COL2 --skip 100 --max-rows 1000
-cargo run --bin sas7bd -- inspect file.sas7bdat --json
+cargo run --bin sas7 -- convert path/to/dir --sink parquet --jobs 4
+cargo run --bin sas7 -- convert file.sas7bdat --sink csv --out file.csv --columns COL1,COL2 --skip 100 --max-rows 1000
+cargo run --bin sas7 -- inspect file.sas7bdat --json
 ```
 
 Options include `--out-dir`, `--out`, `--sink {parquet|csv|tsv}`, CSV/TSV `--headers/--no-headers` and `--delimiter`, projection via `--columns` or `--column-indices`, pagination with `--skip` and `--max-rows`, and Parquet tuning flags `--parquet-row-group-size` and `--parquet-target-bytes`.
@@ -51,14 +61,23 @@ cargo run --example sas_to_parquet -- data/ahs.parquet
 ```
 
 The example requires network access to `https://www2.census.gov/` during the download step.
+If the download is slow or blocked, point at a local or alternate ZIP:
+
+```bash
+curl -L -o /tmp/ahs2013.zip "https://www2.census.gov/programs-surveys/ahs/2013/AHS%202013%20National%20PUF%20v2.0%20Flat%20SAS.zip"
+AHS_ZIP_PATH=/tmp/ahs2013.zip cargo run --example sas_to_parquet
+
+# or use a mirror
+AHS_ZIP_URL=https://your.mirror/AHS2013.zip cargo run --example sas_to_parquet
+```
 
 ### Using the library
 
 ```rust
 use std::fs::File;
-use sas7bdat_parser_rs::SasFile;
+use sas7bdat::SasFile;
 
-fn main() -> sas7bdat_parser_rs::Result<()> {
+fn main() -> sas7bdat::Result<()> {
     let mut sas = SasFile::open("dataset.sas7bdat")?;
     let metadata = sas.metadata().clone();
     println!("Columns: {}", metadata.variables.len());
@@ -85,9 +104,6 @@ cargo test
 
 Snapshot fixtures rely on datasets under `fixtures/raw_data/`. Large archives are ignored by `.gitignore` but are required for the full regression suite.
 
-## Citation
-
-If you use `sas7bdat-parser-rs` in academic work, please cite the JOSS paper once published. A `CITATION.cff` file will be added alongside the paper metadata.
 
 ## License
 

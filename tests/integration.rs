@@ -1,7 +1,7 @@
 #![allow(clippy::pedantic)]
 use csv::ReaderBuilder;
-use sas7bdat_parser_rs::SasFile;
-use sas7bdat_parser_rs::value::Value;
+use sas7bdat::SasFile;
+use sas7bdat::value::Value;
 use std::path::Path;
 use std::sync::OnceLock;
 use time::format_description::{self, FormatItem};

@@ -1,9 +1,9 @@
 #![allow(clippy::pedantic)]
 use std::path::Path;
 
-use sas7bdat_parser_rs::SasFile;
+use sas7bdat::SasFile;
 
-fn tagged_tags(policy: &sas7bdat_parser_rs::metadata::MissingValuePolicy) -> Vec<char> {
+fn tagged_tags(policy: &sas7bdat::metadata::MissingValuePolicy) -> Vec<char> {
     policy
         .tagged_missing
         .iter()

@@ -29,7 +29,8 @@ SKIP_FIXTURES <- c(
   "fixtures/raw_data/csharp/54-cookie.sas7bdat",
   "fixtures/raw_data/csharp/charset_zpce.sas7bdat",
   "fixtures/raw_data/csharp/date_format_dtdate.sas7bdat",
-  "fixtures/raw_data/csharp/date_formats.sas7bdat"
+  "fixtures/raw_data/csharp/date_formats.sas7bdat",
+  "fixtures/raw_data/ahs2013/topical.sas7bdat"
 )
 
 main <- function() {

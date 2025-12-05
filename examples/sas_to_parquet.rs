@@ -3,9 +3,10 @@ use std::fs::{self, File};
 use std::io::copy;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::time::Duration;
 
-use reqwest::blocking::get;
-use sas7bdat_parser_rs::{ParquetSink, SasFile};
+use reqwest::blocking::{Client, ClientBuilder};
+use sas7bdat::{ParquetSink, SasFile};
 use tempfile::tempdir;
 use zip::ZipArchive;
 
@@ -14,6 +15,9 @@ use hotpath::{Format, GuardBuilder};
 
 const ZIP_URL: &str = "https://www2.census.gov/programs-surveys/ahs/2013/AHS%202013%20National%20PUF%20v2.0%20Flat%20SAS.zip";
 const DEFAULT_OUTPUT: &str = "ahs2013n.parquet";
+const ZIP_URL_ENV: &str = "AHS_ZIP_URL";
+const ZIP_PATH_ENV: &str = "AHS_ZIP_PATH";
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "hotpath")]
@@ -26,9 +30,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output_path = parse_args();
     let temp_dir = tempdir()?;
 
-    let zip_path = temp_dir.path().join("ahs2013.zip");
-    println!("Downloading dataset from {ZIP_URL}...");
-    download_zip(ZIP_URL, &zip_path)?;
+    let zip_path = match env::var_os(ZIP_PATH_ENV) {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            println!("Using local ZIP from {ZIP_PATH_ENV}={}", path.display());
+            if !path.is_file() {
+                return Err(format!("ZIP not found at {}", path.display()).into());
+            }
+            path
+        }
+        None => {
+            let url = env::var(ZIP_URL_ENV).unwrap_or_else(|_| ZIP_URL.to_owned());
+            let path = temp_dir.path().join("ahs2013.zip");
+            println!("Downloading dataset from {url}...");
+            download_zip(&url, &path)?;
+            path
+        }
+    };
 
     println!("Extracting SAS dataset...");
     let sas_path = extract_sas7bdat(&zip_path, temp_dir.path())?;
@@ -63,7 +81,10 @@ fn parse_args() -> PathBuf {
 }
 
 fn download_zip(url: &str, destination: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let mut response = get(url)?;
+    let client: Client = ClientBuilder::new()
+        .timeout(DOWNLOAD_TIMEOUT)
+        .build()?;
+    let mut response = client.get(url).send()?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("failed to download dataset: {status}").into());

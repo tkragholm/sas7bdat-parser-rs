@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use sas7bdat_parser_rs::SasFile;
+use sas7bdat::SasFile;
 
 #[test]
 fn load_catalog_assigns_value_labels() {

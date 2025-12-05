@@ -21,7 +21,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FILE="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1")"
 shift
 CLI_ARGS=("$@")
-BIN="${ROOT}/target/release/sas7bd"
+BIN="${ROOT}/target/release/sas7"
 FEATURE_FLAGS=()
 needs_build=false
 STAMP_FILE="${ROOT}/target/benchmark_features.txt"
@@ -38,7 +38,7 @@ fi
 
 if [[ ! -x "${BIN}" ]]; then
   needs_build=true
-elif [[ "${ROOT}/src/bin/sas7bd.rs" -nt "${BIN}" ]]; then
+elif [[ "${ROOT}/src/bin/sas7.rs" -nt "${BIN}" ]]; then
   needs_build=true
 elif find "${ROOT}/src" -name '*.rs' -newer "${BIN}" -print -quit | grep -q .; then
   needs_build=true
@@ -61,9 +61,9 @@ fi
 
 if [[ "${needs_build}" == true ]]; then
   if (( ${#FEATURE_FLAGS[@]} > 0 )); then
-    cargo build --quiet --release --bin sas7bd "${FEATURE_FLAGS[@]}" >/dev/null
+    cargo build --quiet --release --bin sas7 "${FEATURE_FLAGS[@]}" >/dev/null
   else
-    cargo build --quiet --release --bin sas7bd >/dev/null
+    cargo build --quiet --release --bin sas7 >/dev/null
   fi
   printf '%s' "${current_features}" > "${STAMP_FILE}"
 fi

@@ -15,7 +15,7 @@ fi
 RUNS=${RUNS:-3}
 WARMUP=${WARMUP:-1}
 ROW_GROUP_SIZE=${ROW_GROUP_SIZE:-65536}
-BENCH_OUT_DIR=${BENCH_OUT_DIR:-/tmp/sas7bd-columnar-bench}
+BENCH_OUT_DIR=${BENCH_OUT_DIR:-/tmp/sas7-columnar-bench}
 KEEP_OUTPUTS=${KEEP_OUTPUTS:-0}
 JOBS=${JOBS:-}
 mkdir -p "$BENCH_OUT_DIR"
@@ -42,7 +42,7 @@ build_command() {
     if [ -n "$CURRENT_FEATURE_FLAG" ]; then
         cargo_cmd+=(--features "$CURRENT_FEATURE_FLAG")
     fi
-    cargo_cmd+=(--bin sas7bd -- convert --out "$output" "$DATASET" --parquet-row-group-size "$ROW_GROUP_SIZE")
+    cargo_cmd+=(--bin sas7 -- convert --out "$output" "$DATASET" --parquet-row-group-size "$ROW_GROUP_SIZE")
     if [ -n "$JOBS" ]; then
         cargo_cmd+=(--jobs "$JOBS")
     fi

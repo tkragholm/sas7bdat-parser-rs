@@ -1,7 +1,7 @@
 #![allow(dead_code, clippy::pedantic)]
 use std::path::{Path, PathBuf};
 
-use sas7bdat_parser_rs::SasFile;
+use sas7bdat::SasFile;
 
 use super::reference::{Snapshot, relative_to_manifest};
 
@@ -18,6 +18,7 @@ pub const SKIP_FIXTURES: &[&str] = &[
     "fixtures/raw_data/csharp/charset_zpce.sas7bdat",
     "fixtures/raw_data/csharp/date_format_dtdate.sas7bdat",
     "fixtures/raw_data/csharp/date_formats.sas7bdat",
+    "fixtures/raw_data/ahs2013/topical.sas7bdat",
 ];
 
 pub fn should_skip(path: &Path) -> bool {

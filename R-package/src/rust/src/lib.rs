@@ -10,10 +10,10 @@ use std::fs::File;
 use std::io::BufWriter;
 
 // Bring in the core crate
-use sas7bdat_parser_rs::SasFile;
-use sas7bdat_parser_rs::metadata::{VariableKind, Vendor};
-use sas7bdat_parser_rs::sinks::{CsvSink, ParquetSink};
-use sas7bdat_parser_rs::value::Value;
+use sas7bdat::SasFile;
+use sas7bdat::metadata::{VariableKind, Vendor};
+use sas7bdat::sinks::{CsvSink, ParquetSink};
+use sas7bdat::value::Value;
 
 /// Convert Input To Upper-Case
 ///
@@ -203,14 +203,14 @@ fn sas_metadata_json(path: &str) -> savvy::Result<savvy::Sexp> {
         Vendor::Other(_) => "Other",
     };
     let compression = match md.compression {
-        sas7bdat_parser_rs::metadata::Compression::None => "none",
-        sas7bdat_parser_rs::metadata::Compression::Row => "row",
-        sas7bdat_parser_rs::metadata::Compression::Binary => "binary",
-        sas7bdat_parser_rs::metadata::Compression::Unknown(_) => "unknown",
+        sas7bdat::metadata::Compression::None => "none",
+        sas7bdat::metadata::Compression::Row => "row",
+        sas7bdat::metadata::Compression::Binary => "binary",
+        sas7bdat::metadata::Compression::Unknown(_) => "unknown",
     };
     let endianness = match md.endianness {
-        sas7bdat_parser_rs::metadata::Endianness::Little => "little",
-        sas7bdat_parser_rs::metadata::Endianness::Big => "big",
+        sas7bdat::metadata::Endianness::Little => "little",
+        sas7bdat::metadata::Endianness::Big => "big",
     };
 
     let column_names: Vec<&str> = md.variables.iter().map(|v| v.name.as_str()).collect();

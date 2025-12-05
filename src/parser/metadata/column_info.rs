@@ -109,7 +109,11 @@ pub fn infer_numeric_kind(format_name: &str) -> Option<NumericKind> {
     {
         return Some(NumericKind::DateTime);
     }
-    if cleaned.contains("TIME") || cleaned.ends_with("TM") || cleaned.starts_with("E8601TM") {
+    if cleaned.contains("TIME")
+        || cleaned.ends_with("TM")
+        || cleaned.starts_with("E8601TM")
+        || cleaned.starts_with("HHMM")
+    {
         return Some(NumericKind::Time);
     }
     if cleaned.contains("DATE")

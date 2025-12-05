@@ -1,6 +1,6 @@
 ---
 source: tests/fixtures_snapshot.rs
-expression: snapshot.clone()
+expression: snapshot
 ---
 {
   "columns": [
@@ -24,7 +24,7 @@ expression: snapshot.clone()
         "value": 36610.0
       },
       {
-        "kind": "number",
+        "kind": "time",
         "value": 36610.0
       },
       {

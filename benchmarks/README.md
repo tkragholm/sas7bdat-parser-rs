@@ -32,18 +32,18 @@ count, and elapsed time in milliseconds.
 Place other benchmark harnesses (Rust, ReadStat CLI wrappers, etc.) in this
 directory alongside `SasBenchmarks` for easy comparison.
 
-### Rust CLI (`sas7bd convert`)
+### Rust CLI (`sas7 convert`)
 
 Use the primary CLI to exercise the same pipelines exposed to end users. The
 `convert` subcommand writes Parquet/CSV/TSV files. Parquet always uses the
 streaming columnar decoder by default:
 
 ```bash
-cargo run --release --bin sas7bd -- convert tests/data_AHS2013/omov.sas7bdat \
+cargo run --release --bin sas7 -- convert tests/data_AHS2013/omov.sas7bdat \
   --out /tmp/out.parquet
 ```
 
-The `benchmarks/run_rust.sh` helper wraps `sas7bd convert`, rebuilds incrementally,
+The `benchmarks/run_rust.sh` helper wraps `sas7 convert`, rebuilds incrementally,
 and writes to a temporary output:
 
 ```bash

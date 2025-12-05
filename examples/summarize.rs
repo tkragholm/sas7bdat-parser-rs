@@ -3,9 +3,9 @@ use std::env;
 use std::error::Error;
 use std::path::Path;
 
-use sas7bdat_parser_rs::SasFile;
-use sas7bdat_parser_rs::metadata::{Format, VariableKind};
-use sas7bdat_parser_rs::value::Value;
+use sas7bdat::SasFile;
+use sas7bdat::metadata::{Format, VariableKind};
+use sas7bdat::value::Value;
 use serde::Serialize;
 
 #[derive(Debug, Default, Serialize)]

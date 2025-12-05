@@ -1,3 +1,32 @@
+[project]
+name = "sas7bdat-rs"
+dynamic = ["version"]
+requires-python = ">=3.8"
+description = "Rust SAS7BDAT reader CLI and Python bindings"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Topic :: Software Development :: Libraries",
+]
+readme = "README.md"
+dependencies = [
+    "numpy>=1.24.4",
+    "pandas>=2.0.3",
+    "pyreadstat>=1.3.0",
+]
+
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"

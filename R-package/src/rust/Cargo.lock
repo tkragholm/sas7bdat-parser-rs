@@ -876,7 +876,7 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 name = "s_a_sreader_r_u_s_t"
 version = "0.1.0"
 dependencies = [
- "sas7bdat-parser-rs",
+ "sas7bdat",
  "savvy",
  "serde_json",
 ]
@@ -891,7 +891,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sas7bdat-parser-rs"
+name = "sas7bdat"
 version = "0.1.0"
 dependencies = [
  "byteorder",

@@ -246,7 +246,11 @@ where
     let mut buffer = vec![0u8; header.page_size as usize];
     let mut visited = std::collections::HashSet::new();
     let last_examined = scan_forward(reader, header, &mut buffer, &mut visited, &mut f)?;
-    scan_backward(reader, header, &mut buffer, &visited, last_examined, &mut f)
+    if last_examined + 1 < header.page_count {
+        // Only run the backward scan if the forward pass bailed early.
+        scan_backward(reader, header, &mut buffer, &visited, last_examined, &mut f)?;
+    }
+    Ok(())
 }
 
 fn scan_forward<R, F>(
@@ -276,7 +280,7 @@ where
             continue;
         }
         if matches!(kind, PageKind::Data) {
-            break;
+            continue;
         }
         if !matches!(
             kind,

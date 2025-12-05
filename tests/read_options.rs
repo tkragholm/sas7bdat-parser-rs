@@ -1,8 +1,8 @@
 #![allow(clippy::pedantic)]
 use std::path::Path;
 
-use sas7bdat_parser_rs::value::Value;
-use sas7bdat_parser_rs::{Error, ReadOptions, SasFile};
+use sas7bdat::value::Value;
+use sas7bdat::{Error, ReadOptions, SasFile};
 
 #[test]
 fn rows_with_options_respects_skip_and_limit() {

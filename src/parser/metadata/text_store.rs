@@ -100,7 +100,7 @@ impl TextStore {
         }
         let bytes = &blob[offset..end];
         let (decoded, had_errors) = self.encoding.decode_without_bom_handling(bytes);
-        if had_errors && decoded.is_empty() {
+        if had_errors {
             let fallback = String::from_utf8_lossy(bytes).into_owned();
             return Ok(Some(Cow::Owned(fallback)));
         }

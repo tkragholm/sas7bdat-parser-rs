@@ -1,6 +1,7 @@
 ---
 source: tests/fixtures_snapshot.rs
-expression: snapshot.clone()
+assertion_line: 21
+expression: snapshot
 ---
 {
   "columns": [

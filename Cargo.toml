@@ -1,13 +1,13 @@
 [package]
-name = "sas7bdat-parser-rs"
+name = "sas7bdat"
 authors = ["Tobias Kragholm"]
-version = "1.1.0"
+version = "0.1.0"
 publish = false
 edition = "2024"
 license = "MIT"
 
 [lib]
-name = "sas7bdat_parser_rs"
+name = "sas7bdat"
 path = "src/lib.rs"
 crate-type = ["staticlib", "rlib"]
 
@@ -29,7 +29,7 @@ hashbrown = "0.16"
 ahash = "0.8"
 rustc-hash = "2"
 bytes = "1"
-hotpath = { version = "0.7", optional = true }
+hotpath = { version = "0.8", optional = true }
 ryu = "1"
 itoa = "1"
 csv = "1"
@@ -68,8 +68,8 @@ name = "fixtures_snapshot_haven"
 harness = false
 
 [[bin]]
-name = "sas7bd"
-path = "src/bin/sas7bd.rs"
+name = "sas7"
+path = "src/bin/sas7.rs"
 
 [lints.clippy]
 pedantic = "warn"

@@ -1,7 +1,7 @@
 #![allow(clippy::pedantic)]
 use std::io::Cursor;
 
-use sas7bdat_parser_rs::{Error, parse_layout};
+use sas7bdat::{Error, parse_layout};
 
 #[test]
 fn rejects_non_sas_streams() {
