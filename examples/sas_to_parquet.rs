@@ -30,22 +30,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output_path = parse_args();
     let temp_dir = tempdir()?;
 
-    let zip_path = match env::var_os(ZIP_PATH_ENV) {
-        Some(path) => {
-            let path = PathBuf::from(path);
-            println!("Using local ZIP from {ZIP_PATH_ENV}={}", path.display());
-            if !path.is_file() {
-                return Err(format!("ZIP not found at {}", path.display()).into());
-            }
-            path
+    let zip_path = if let Some(path) = env::var_os(ZIP_PATH_ENV) {
+        let path = PathBuf::from(path);
+        println!("Using local ZIP from {ZIP_PATH_ENV}={}", path.display());
+        if !path.is_file() {
+            return Err(format!("ZIP not found at {}", path.display()).into());
         }
-        None => {
-            let url = env::var(ZIP_URL_ENV).unwrap_or_else(|_| ZIP_URL.to_owned());
-            let path = temp_dir.path().join("ahs2013.zip");
-            println!("Downloading dataset from {url}...");
-            download_zip(&url, &path)?;
-            path
-        }
+        path
+    } else {
+        let url = env::var(ZIP_URL_ENV).unwrap_or_else(|_| ZIP_URL.to_owned());
+        let path = temp_dir.path().join("ahs2013.zip");
+        println!("Downloading dataset from {url}...");
+        download_zip(&url, &path)?;
+        path
     };
 
     println!("Extracting SAS dataset...");

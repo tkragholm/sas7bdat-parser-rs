@@ -1,0 +1,15 @@
+[package]
+name = "bef-scd"
+version = "0.1.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+ahash = "0.8"
+clap = { version = "4.5.51", features = ["derive", "env"] }
+parquet = "57"
+sas7bdat = { path = ".." }
+serde_json = "1"
+time = { version = "0.3", features = ["std", "formatting", "parsing", "macros"] }
+walkdir = "2"

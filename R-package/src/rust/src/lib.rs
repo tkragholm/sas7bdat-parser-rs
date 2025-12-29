@@ -70,7 +70,7 @@ struct Person {
 impl Person {
     fn new() -> Self {
         Self {
-            name: "".to_string(),
+            name: String::new(),
         }
     }
 
@@ -141,7 +141,7 @@ where
     savvy::Error::new(format!("sas7bdat error: {e}"))
 }
 
-fn map_io_err(action: &str, path: &str, err: std::io::Error) -> savvy::Error {
+fn map_io_err(action: &str, path: &str, err: &std::io::Error) -> savvy::Error {
     savvy::Error::new(format!("failed to {action} '{path}': {err}"))
 }
 
@@ -157,11 +157,7 @@ fn sas_row_count(path: &str) -> savvy::Result<savvy::Sexp> {
     let rc = file.metadata().row_count;
     let mut out = OwnedIntegerSexp::new(1)?;
     // R integers are 32-bit; cap if exceeded
-    let val = if rc > i32::MAX as u64 {
-        i32::MAX
-    } else {
-        rc as i32
-    };
+    let val = i32::try_from(rc).unwrap_or(i32::MAX);
     out[0] = val;
     Ok(out.into())
 }
@@ -286,6 +282,7 @@ impl NumericColumn {
         }
     }
 
+    #[allow(clippy::cast_precision_loss)]
     fn push(&mut self, value: &Value<'_>, column_name: &str) -> savvy::Result<()> {
         match value {
             Value::Missing(_) => self.values.push(f64::NAN),
@@ -311,16 +308,16 @@ impl NumericColumn {
             }
             Value::Date(datetime) => {
                 self.role.update(NumericRole::Date);
-                let seconds = datetime.unix_timestamp() as f64
-                    + f64::from(datetime.nanosecond()) / 1_000_000_000.0;
-                self.values.push(seconds / 86_400.0);
-            }
-            Value::DateTime(datetime) => {
-                self.role.update(NumericRole::DateTime);
-                let seconds = datetime.unix_timestamp() as f64
-                    + f64::from(datetime.nanosecond()) / 1_000_000_000.0;
-                self.values.push(seconds);
-            }
+            let seconds = datetime.unix_timestamp() as f64
+                + f64::from(datetime.nanosecond()) / 1_000_000_000.0;
+            self.values.push(seconds / 86_400.0);
+        }
+        Value::DateTime(datetime) => {
+            self.role.update(NumericRole::DateTime);
+            let seconds = datetime.unix_timestamp() as f64
+                + f64::from(datetime.nanosecond()) / 1_000_000_000.0;
+            self.values.push(seconds);
+        }
             Value::Time(duration) => {
                 self.role.update(NumericRole::Time);
                 self.values.push(duration.as_seconds_f64());
@@ -509,13 +506,13 @@ fn write_sas(path: &str, sink: &str, output: &str) -> savvy::Result<()> {
     match sink_kind.as_str() {
         "parquet" => {
             let file =
-                File::create(output).map_err(|e| map_io_err("create parquet file", output, e))?;
+                File::create(output).map_err(|e| map_io_err("create parquet file", output, &e))?;
             let mut writer = ParquetSink::new(file);
             sas.write_into_sink(&mut writer).map_err(map_core_err)?;
         }
         "csv" => {
             let file =
-                File::create(output).map_err(|e| map_io_err("create csv file", output, e))?;
+                File::create(output).map_err(|e| map_io_err("create csv file", output, &e))?;
             let buf = BufWriter::new(file);
             let mut writer = CsvSink::new(buf);
             sas.write_into_sink(&mut writer).map_err(map_core_err)?;

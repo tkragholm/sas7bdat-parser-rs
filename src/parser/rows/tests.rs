@@ -144,7 +144,7 @@ fn setup_data_iter(rows: &[&[u8]], row_length: usize) -> (Cursor<Vec<u8>>, Parse
     let parsed = make_parsed_metadata(
         Vendor::Sas,
         Compression::None,
-        row_length as u32,
+        u32::try_from(row_length).expect("row length fits u32"),
         rows.len() as u64,
         rows.len() as u64,
         64,
@@ -280,7 +280,14 @@ fn invalid_pointer_before_data_section_is_ignored() {
     let data_start = (24 + pointer_section_len).saturating_add(align_adjust);
     page[data_start..data_start + 4].copy_from_slice(b"GOOD");
 
-    let parsed = make_parsed_metadata(Vendor::Sas, Compression::None, row_length as u32, 1, 1, 96);
+    let parsed = make_parsed_metadata(
+        Vendor::Sas,
+        Compression::None,
+        u32::try_from(row_length).expect("row length fits u32"),
+        1,
+        1,
+        96,
+    );
     let mut cursor = Cursor::new(page);
     let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
 
@@ -298,7 +305,7 @@ fn mix_pages_honor_rows_per_page_limit() {
     let parsed = make_parsed_metadata(
         Vendor::StatTransfer,
         Compression::None,
-        row_length as u32,
+        u32::try_from(row_length).expect("row length fits u32"),
         1,
         1,
         64,

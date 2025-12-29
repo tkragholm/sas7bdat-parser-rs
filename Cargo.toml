@@ -29,7 +29,7 @@ hashbrown = "0.16"
 ahash = "0.8"
 rustc-hash = "2"
 bytes = "1"
-hotpath = { version = "0.8", optional = true }
+hotpath = { version = "0.9", optional = true }
 ryu = "1"
 itoa = "1"
 csv = "1"
@@ -49,7 +49,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
 ] }
 tempfile = "3.10"
-zip = { version = "6", default-features = false, features = ["deflate"] }
+zip = { version = "7", default-features = false, features = ["deflate"] }
 
 [[test]]
 name = "fixtures_snapshot"
@@ -78,3 +78,6 @@ nursery = "warn"
 [profile.release]
 codegen-units = 1
 lto = "fat"
+
+[workspace]
+members = [".", "bef-scd"]

@@ -228,7 +228,7 @@ fn compare_cell(
         if actual_kind == "date" && expected_kind == "datetime" {
             let days = numeric_value(actual, row_index, column_index, relative_key, parser);
             let secs = numeric_value(expected, row_index, column_index, relative_key, parser);
-            if ((days * 86_400.0) - secs).abs() <= SNAPSHOT_DATETIME_TOLERANCE
+            if days.mul_add(86_400.0, -secs).abs() <= SNAPSHOT_DATETIME_TOLERANCE
                 || (days - (secs / 86_400.0)).abs() <= SNAPSHOT_DATE_TOLERANCE
                 || (secs - days).abs() <= SNAPSHOT_DATETIME_TOLERANCE
             {
@@ -240,7 +240,7 @@ fn compare_cell(
             let secs = numeric_value(actual, row_index, column_index, relative_key, parser);
             let days = numeric_value(expected, row_index, column_index, relative_key, parser);
             if ((secs / 86_400.0) - days).abs() <= SNAPSHOT_DATE_TOLERANCE
-                || (secs - (days * 86_400.0)).abs() <= SNAPSHOT_DATETIME_TOLERANCE
+                || days.mul_add(-86_400.0, secs).abs() <= SNAPSHOT_DATETIME_TOLERANCE
                 || (secs - days).abs() <= SNAPSHOT_DATETIME_TOLERANCE
             {
                 RELAX_STATS.bump_date_datetime_bridge();
@@ -252,7 +252,7 @@ fn compare_cell(
         if actual_kind == "number" && expected_kind == "datetime" {
             let days = numeric_value(actual, row_index, column_index, relative_key, parser);
             let secs = numeric_value(expected, row_index, column_index, relative_key, parser);
-            if ((days * 86_400.0) - secs).abs() <= SNAPSHOT_DATETIME_TOLERANCE
+            if days.mul_add(86_400.0, -secs).abs() <= SNAPSHOT_DATETIME_TOLERANCE
                 || (days - (secs / 86_400.0)).abs() <= SNAPSHOT_DATE_TOLERANCE
                 || (days - secs).abs() <= SNAPSHOT_DATETIME_TOLERANCE
             {
@@ -264,7 +264,7 @@ fn compare_cell(
             let secs = numeric_value(actual, row_index, column_index, relative_key, parser);
             let days = numeric_value(expected, row_index, column_index, relative_key, parser);
             if ((secs / 86_400.0) - days).abs() <= SNAPSHOT_DATE_TOLERANCE
-                || (secs - (days * 86_400.0)).abs() <= SNAPSHOT_DATETIME_TOLERANCE
+                || days.mul_add(-86_400.0, secs).abs() <= SNAPSHOT_DATETIME_TOLERANCE
                 || (secs - days).abs() <= SNAPSHOT_DATETIME_TOLERANCE
             {
                 RELAX_STATS.bump_date_datetime_bridge();
@@ -277,12 +277,11 @@ fn compare_cell(
             let actual_value = string_value(actual, row_index, column_index, relative_key, parser);
             let expected_value =
                 string_value(expected, row_index, column_index, relative_key, parser);
-            if let Some(redecoded) = reinterpret_latin1_as_utf8(expected_value) {
-                if redecoded == actual_value {
+            if let Some(redecoded) = reinterpret_latin1_as_utf8(expected_value)
+                && redecoded == actual_value {
                     RELAX_STATS.bump_string_decode();
                     return;
                 }
-            }
             panic!(
                 "string mismatch at row {} column {} for {} (parser {}): actual {:?} expected {:?}",
                 row_index, column_index, relative_key, parser, actual_value, expected_value
@@ -331,11 +330,10 @@ fn compare_cell(
             let expected_value =
                 string_value(expected, row_index, column_index, relative_key, parser);
             if actual_value != expected_value {
-                if let Some(redecoded) = reinterpret_latin1_as_utf8(expected_value) {
-                    if redecoded == actual_value {
+                if let Some(redecoded) = reinterpret_latin1_as_utf8(expected_value)
+                    && redecoded == actual_value {
                         return;
                     }
-                }
                 panic!(
                     "string mismatch at row {} column {} for {} (parser {}): actual {:?} expected {:?}",
                     row_index, column_index, relative_key, parser, actual_value, expected_value
