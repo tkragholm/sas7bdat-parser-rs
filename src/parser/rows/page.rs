@@ -28,25 +28,28 @@ impl<R: Read + Seek> RowIterator<'_, R> {
             self.reader
                 .seek(SeekFrom::Start(offset))
                 .map_err(Error::from)?;
-        self.reader
-            .read_exact(&mut self.page_buffer)
-            .map_err(Error::from)?;
-        let page_index = self.next_page_index;
-        self.next_page_index += 1;
+            self.reader
+                .read_exact(&mut self.page_buffer)
+                .map_err(Error::from)?;
+            let page_index = self.next_page_index;
+            self.next_page_index += 1;
 
-        let page_type = read_u16(
-            header.endianness,
-            &self.page_buffer[(header.page_header_size as usize) - 8..],
-        );
-        if (page_type & SAS_PAGE_TYPE_COMP) != 0 {
-            continue;
-        }
+            let page_type = read_u16(
+                header.endianness,
+                &self.page_buffer[(header.page_header_size as usize) - 8..],
+            );
+            if (page_type & SAS_PAGE_TYPE_COMP) != 0 {
+                continue;
+            }
 
-        let page_kind = classify_page(page_type);
-        if matches!(page_kind, PageKind::Comp | PageKind::CompTable | PageKind::Unknown) {
-            continue;
-        }
-        let base_page_type = page_type & SAS_PAGE_TYPE_MASK;
+            let page_kind = classify_page(page_type);
+            if matches!(
+                page_kind,
+                PageKind::Comp | PageKind::CompTable | PageKind::Unknown
+            ) {
+                continue;
+            }
+            let base_page_type = page_type & SAS_PAGE_TYPE_MASK;
 
             let page_row_count = read_u16(
                 header.endianness,
@@ -63,7 +66,8 @@ impl<R: Read + Seek> RowIterator<'_, R> {
             let subheader_count_pos = header.page_header_size as usize - 4;
             let Some(count_bytes) = self
                 .page_buffer
-                .get(subheader_count_pos..subheader_count_pos + 2) else {
+                .get(subheader_count_pos..subheader_count_pos + 2)
+            else {
                 log_warn(&format!(
                     "Skipping page {page_index} (type=0x{page_type:04X}): subheader count exceeds page bounds [page_size={}, page_header_size={}]",
                     header.page_size, header.page_header_size
@@ -136,7 +140,10 @@ impl<R: Read + Seek> RowIterator<'_, R> {
                     if info.length < sig_len || info.offset + sig_len > self.page_buffer.len() {
                         log_warn(&format!(
                             "Skipping page {page_index} (type=0x{page_type:04X}): subheader pointer too small for signature [offset={}, length={}, required={}, page_len={}]",
-                            info.offset, info.length, sig_len, self.page_buffer.len()
+                            info.offset,
+                            info.length,
+                            sig_len,
+                            self.page_buffer.len()
                         ));
                         continue;
                     }

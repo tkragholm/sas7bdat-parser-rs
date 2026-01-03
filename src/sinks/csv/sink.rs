@@ -175,11 +175,14 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
     }
 
     fn write_streaming_row(&mut self, row: StreamingRow<'_, '_>) -> Result<()> {
-        self.write_row_values(row.len(), row.iter().map(|cell_result| {
-            let cell = cell_result?;
-            let value = cell.decode_value()?;
-            Ok(RowValue::Owned(value))
-        }))
+        self.write_row_values(
+            row.len(),
+            row.iter().map(|cell_result| {
+                let cell = cell_result?;
+                let value = cell.decode_value()?;
+                Ok(RowValue::Owned(value))
+            }),
+        )
     }
 
     fn finish(&mut self) -> Result<()> {

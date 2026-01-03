@@ -86,14 +86,7 @@ fn column_attrs_subheader_sets_measure_alignment() {
         entry[10] = 0x01;
     });
 
-    parse_column_attrs_subheader(
-        &mut builder,
-        &bytes,
-        4,
-        Endianness::Little,
-        false,
-    )
-    .unwrap();
+    parse_column_attrs_subheader(&mut builder, &bytes, 4, Endianness::Little, false).unwrap();
 
     let column = builder.column_mut(0);
     assert_eq!(column.measure, Measure::Ordinal);

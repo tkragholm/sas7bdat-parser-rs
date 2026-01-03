@@ -224,7 +224,9 @@ fn read_block<R: Read + Seek>(reader: &mut R, header: &SasHeader, pointer: u64) 
         }
         if offset + segment.len as usize > buffer.len() {
             return Err(Error::Corrupted {
-                section: Section::Page { index: segment.page },
+                section: Section::Page {
+                    index: segment.page,
+                },
                 details: Cow::from("catalog chain exceeds allocated buffer"),
             });
         }

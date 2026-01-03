@@ -107,7 +107,12 @@ pub fn compare_snapshots(parser: &str, sas_path: &Path, actual: &Snapshot, expec
             relative_key, parser
         );
     }
-    for (idx, (a, e)) in actual.columns.iter().zip(expected.columns.iter()).enumerate() {
+    for (idx, (a, e)) in actual
+        .columns
+        .iter()
+        .zip(expected.columns.iter())
+        .enumerate()
+    {
         if a == e {
             continue;
         }
@@ -127,11 +132,9 @@ pub fn compare_snapshots(parser: &str, sas_path: &Path, actual: &Snapshot, expec
     }
 
     assert_eq!(
-        actual.row_count,
-        expected.row_count,
+        actual.row_count, expected.row_count,
         "row count mismatch for {} (parser {})",
-        relative_key,
-        parser
+        relative_key, parser
     );
     assert_eq!(
         actual.rows.len(),
@@ -278,10 +281,11 @@ fn compare_cell(
             let expected_value =
                 string_value(expected, row_index, column_index, relative_key, parser);
             if let Some(redecoded) = reinterpret_latin1_as_utf8(expected_value)
-                && redecoded == actual_value {
-                    RELAX_STATS.bump_string_decode();
-                    return;
-                }
+                && redecoded == actual_value
+            {
+                RELAX_STATS.bump_string_decode();
+                return;
+            }
             panic!(
                 "string mismatch at row {} column {} for {} (parser {}): actual {:?} expected {:?}",
                 row_index, column_index, relative_key, parser, actual_value, expected_value
@@ -331,9 +335,10 @@ fn compare_cell(
                 string_value(expected, row_index, column_index, relative_key, parser);
             if actual_value != expected_value {
                 if let Some(redecoded) = reinterpret_latin1_as_utf8(expected_value)
-                    && redecoded == actual_value {
-                        return;
-                    }
+                    && redecoded == actual_value
+                {
+                    return;
+                }
                 panic!(
                     "string mismatch at row {} column {} for {} (parser {}): actual {:?} expected {:?}",
                     row_index, column_index, relative_key, parser, actual_value, expected_value

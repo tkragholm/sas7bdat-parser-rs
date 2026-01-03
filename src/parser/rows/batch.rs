@@ -125,7 +125,9 @@ pub fn next_columnar_batch_contiguous<'iter, R: Read + Seek>(
     }
 
     // Avoid preallocating more than the cap; clamp rows to fit within the budget.
-    if iter.row_length > 0 && effective_target.saturating_mul(iter.row_length) > MAX_COLUMNAR_BUFFER_BYTES {
+    if iter.row_length > 0
+        && effective_target.saturating_mul(iter.row_length) > MAX_COLUMNAR_BUFFER_BYTES
+    {
         effective_target = MAX_COLUMNAR_BUFFER_BYTES.max(iter.row_length) / iter.row_length;
         effective_target = effective_target.max(1);
     }

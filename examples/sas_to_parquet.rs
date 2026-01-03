@@ -78,9 +78,7 @@ fn parse_args() -> PathBuf {
 }
 
 fn download_zip(url: &str, destination: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let client: Client = ClientBuilder::new()
-        .timeout(DOWNLOAD_TIMEOUT)
-        .build()?;
+    let client: Client = ClientBuilder::new().timeout(DOWNLOAD_TIMEOUT).build()?;
     let mut response = client.get(url).send()?;
     let status = response.status();
     if !status.is_success() {

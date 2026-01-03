@@ -152,10 +152,7 @@ fn setup_data_iter(rows: &[&[u8]], row_length: usize) -> (Cursor<Vec<u8>>, Parse
 
 fn assert_rows_from_iter<R: Read + Seek>(iter: &mut RowIterator<'_, R>, expected: &[&str]) {
     for (index, expected_row) in expected.iter().enumerate() {
-        let row = iter
-            .try_next()
-            .expect("row result")
-            .expect("row present");
+        let row = iter.try_next().expect("row result").expect("row present");
         assert_eq!(
             row,
             vec![Value::Str(Cow::Borrowed(*expected_row))],
@@ -271,7 +268,8 @@ fn invalid_pointer_before_data_section_is_ignored() {
 
     let pointer_section_len = 12usize;
     let bit_offset = 16usize;
-    let alignment_base = bit_offset + super::constants::SUBHEADER_POINTER_OFFSET + pointer_section_len;
+    let alignment_base =
+        bit_offset + super::constants::SUBHEADER_POINTER_OFFSET + pointer_section_len;
     let align_adjust = if alignment_base.is_multiple_of(8) {
         0
     } else {

@@ -171,11 +171,13 @@ impl ColumnPlan {
         kind: &str,
         coerce: fn(&Self, &Value<'_>) -> Result<Option<i32>>,
     ) -> Result<()> {
-        self.push_temporal(value, kind, coerce, |this, coerced| match &mut this.values {
-            ColumnValues::Int32(values) => {
-                Self::push_optional(&mut this.def_levels, values, coerced);
+        self.push_temporal(value, kind, coerce, |this, coerced| {
+            match &mut this.values {
+                ColumnValues::Int32(values) => {
+                    Self::push_optional(&mut this.def_levels, values, coerced);
+                }
+                _ => unreachable!("column value encoder mismatch"),
             }
-            _ => unreachable!("column value encoder mismatch"),
         })
     }
 
@@ -185,11 +187,13 @@ impl ColumnPlan {
         kind: &str,
         coerce: fn(&Self, &Value<'_>) -> Result<Option<i64>>,
     ) -> Result<()> {
-        self.push_temporal(value, kind, coerce, |this, coerced| match &mut this.values {
-            ColumnValues::Int64(values) => {
-                Self::push_optional(&mut this.def_levels, values, coerced);
+        self.push_temporal(value, kind, coerce, |this, coerced| {
+            match &mut this.values {
+                ColumnValues::Int64(values) => {
+                    Self::push_optional(&mut this.def_levels, values, coerced);
+                }
+                _ => unreachable!("column value encoder mismatch"),
             }
-            _ => unreachable!("column value encoder mismatch"),
         })
     }
 
@@ -378,11 +382,7 @@ impl ColumnPlan {
         }
     }
 
-    fn coerce_seconds_to_micros(
-        &self,
-        value: &Value<'_>,
-        kind: &str,
-    ) -> Result<Option<i64>> {
+    fn coerce_seconds_to_micros(&self, value: &Value<'_>, kind: &str) -> Result<Option<i64>> {
         match value {
             Value::Float(seconds) => Self::float_seconds_to_micros(self.name.as_str(), *seconds),
             Value::Int32(seconds) => Ok(Some(i64::from(*seconds) * 1_000_000)),

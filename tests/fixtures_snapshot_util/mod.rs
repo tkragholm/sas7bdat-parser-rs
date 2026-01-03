@@ -117,9 +117,7 @@ pub fn collect_readstat_snapshot(path: &Path) -> Snapshot {
 
     let csv_file = fs::File::open(&temp_path)
         .unwrap_or_else(|err| panic!("failed to read readstat output {}: {}", display, err));
-    let mut reader = ReaderBuilder::new()
-        .has_headers(true)
-        .from_reader(csv_file);
+    let mut reader = ReaderBuilder::new().has_headers(true).from_reader(csv_file);
     let headers = reader
         .headers()
         .unwrap_or_else(|err| panic!("failed to read headers for {}: {}", display, err))
@@ -136,12 +134,7 @@ pub fn collect_readstat_snapshot(path: &Path) -> Snapshot {
             let kind = column_kinds
                 .get(idx)
                 .unwrap_or_else(|| panic!("missing column kind {} for {}", idx, display));
-            row.push(readstat_field_to_json(
-                field,
-                *kind,
-                &display_str,
-                idx,
-            ));
+            row.push(readstat_field_to_json(field, *kind, &display_str, idx));
         }
         rows.push(row);
     }
@@ -166,7 +159,12 @@ fn readstat_temp_path() -> PathBuf {
     path
 }
 
-fn readstat_field_to_json(field: &str, kind: ColumnKind, display: &str, index: usize) -> serde_json::Value {
+fn readstat_field_to_json(
+    field: &str,
+    kind: ColumnKind,
+    display: &str,
+    index: usize,
+) -> serde_json::Value {
     if field.is_empty() || field == "." {
         return match kind {
             ColumnKind::Character => json!({ "kind": "string", "value": "" }),

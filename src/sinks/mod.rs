@@ -88,7 +88,9 @@ pub(crate) fn validate_sink_begin(
 ) -> Result<()> {
     if writer_present {
         return Err(Error::Unsupported {
-            feature: Cow::Owned(format!("{sink_name} sink cannot be reused without finishing")),
+            feature: Cow::Owned(format!(
+                "{sink_name} sink cannot be reused without finishing"
+            )),
         });
     }
     if context.metadata.variables.len() != context.columns.len() {

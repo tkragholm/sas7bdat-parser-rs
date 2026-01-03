@@ -700,9 +700,13 @@ impl<R: Read + Seek> Iterator for ProjectedRows<'_, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let result = self.try_next();
-        next_from_result(result, |row| row, || {
-            self.exhausted = true;
-        })
+        next_from_result(
+            result,
+            |row| row,
+            || {
+                self.exhausted = true;
+            },
+        )
     }
 }
 

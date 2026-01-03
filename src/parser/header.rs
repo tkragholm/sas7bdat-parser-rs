@@ -168,10 +168,12 @@ fn read_sizes<R: Read + Seek>(reader: &mut R, endianness: Endianness) -> Result<
         })?;
 
     let page_size_raw = read_u32(reader, endianness)?;
-    let page_size = normalize_size(page_size_raw, SAS_PAGE_MIN_SIZE, SAS_MAX_SIZE)
-        .ok_or_else(|| Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("page size outside expected range"),
+    let page_size =
+        normalize_size(page_size_raw, SAS_PAGE_MIN_SIZE, SAS_MAX_SIZE).ok_or_else(|| {
+            Error::Corrupted {
+                section: Section::Header,
+                details: Cow::from("page size outside expected range"),
+            }
         })?;
 
     Ok((header_size, page_size))
