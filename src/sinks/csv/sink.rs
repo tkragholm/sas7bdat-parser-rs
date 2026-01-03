@@ -7,7 +7,7 @@ use ryu::Buffer as RyuBuffer;
 
 use crate::error::{Error, Result};
 use crate::parser::{ColumnKind, NumericKind, StreamingRow};
-use crate::sinks::{RowSink, SinkContext};
+use crate::sinks::{RowSink, SinkContext, validate_sink_begin};
 use crate::value::Value;
 
 use super::constants::{DEFAULT_DELIMITER, DEFAULT_SCRATCH_CAPACITY, DEFAULT_WRITE_HEADERS};
@@ -22,6 +22,20 @@ pub struct CsvSink<W: Write + Send> {
     column_count: usize,
     record: ByteRecord,
     scratch: Vec<Vec<u8>>, // one scratch buffer per column
+}
+
+enum RowValue<'a> {
+    Borrowed(&'a Value<'a>),
+    Owned(Value<'a>),
+}
+
+impl<'a> RowValue<'a> {
+    const fn as_ref(&self) -> &Value<'a> {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Owned(value) => value,
+        }
+    }
 }
 
 impl<W: Write + Send> CsvSink<W> {
@@ -100,20 +114,28 @@ impl<W: Write + Send> CsvSink<W> {
         self.record.clear();
         Ok((RyuBuffer::new(), ItoaBuffer::new()))
     }
+
+    fn write_row_values<'a, I>(&mut self, len: usize, values: I) -> Result<()>
+    where
+        I: IntoIterator<Item = Result<RowValue<'a>>>,
+    {
+        let (mut ryu, mut itoa) = self.prepare_row_buffers(len)?;
+
+        for (idx, value_result) in values.into_iter().enumerate() {
+            let value = value_result?;
+            let buf = &mut self.scratch[idx];
+            encode_value(value.as_ref(), buf, &mut ryu, &mut itoa)?;
+            self.record.push_field(buf);
+        }
+
+        let writer = self.writer.as_mut().expect("csv writer must be present");
+        flush_record(writer, &self.record)
+    }
 }
 
 impl<W: Write + Send> RowSink for CsvSink<W> {
     fn begin(&mut self, context: SinkContext<'_>) -> Result<()> {
-        if self.writer.is_some() {
-            return Err(Error::Unsupported {
-                feature: Cow::from("CSV sink cannot be reused without finishing"),
-            });
-        }
-        if context.metadata.variables.len() != context.columns.len() {
-            return Err(Error::InvalidMetadata {
-                details: Cow::from("column metadata length mismatch"),
-            });
-        }
+        validate_sink_begin(&context, self.writer.is_some(), "CSV")?;
 
         for (var, col) in context
             .metadata
@@ -146,30 +168,18 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
     }
 
     fn write_row(&mut self, row: &[Value<'_>]) -> Result<()> {
-        let (mut ryu, mut itoa) = self.prepare_row_buffers(row.len())?;
-
-        for (idx, val) in row.iter().enumerate() {
-            let buf = &mut self.scratch[idx];
-            encode_value(val, buf, &mut ryu, &mut itoa)?;
-            self.record.push_field(buf);
-        }
-        let writer = self.writer.as_mut().expect("csv writer must be present");
-        flush_record(writer, &self.record)
+        self.write_row_values(
+            row.len(),
+            row.iter().map(|value| Ok(RowValue::Borrowed(value))),
+        )
     }
 
     fn write_streaming_row(&mut self, row: StreamingRow<'_, '_>) -> Result<()> {
-        let (mut ryu, mut itoa) = self.prepare_row_buffers(row.len())?;
-
-        for (idx, cell_result) in row.iter().enumerate() {
+        self.write_row_values(row.len(), row.iter().map(|cell_result| {
             let cell = cell_result?;
             let value = cell.decode_value()?;
-            let buf = &mut self.scratch[idx];
-            encode_value(&value, buf, &mut ryu, &mut itoa)?;
-            self.record.push_field(buf);
-        }
-
-        let writer = self.writer.as_mut().expect("csv writer must be present");
-        flush_record(writer, &self.record)
+            Ok(RowValue::Owned(value))
+        }))
     }
 
     fn finish(&mut self) -> Result<()> {

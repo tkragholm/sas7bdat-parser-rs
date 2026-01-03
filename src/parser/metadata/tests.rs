@@ -9,6 +9,12 @@ use super::subheaders::{
 use crate::metadata::{Alignment, Endianness, Measure};
 use encoding_rs::UTF_8;
 
+fn set_subheader_remainder(bytes: &mut [u8], signature_len: usize) {
+    let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
+        .expect("remainder fits in u16 for test data");
+    bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
+}
+
 #[test]
 fn column_text_subheader_pushes_blob() {
     let mut builder = ColumnMetadataBuilder::new(UTF_8);
@@ -16,9 +22,7 @@ fn column_text_subheader_pushes_blob() {
     let mut bytes = vec![0u8; signature_len + 2];
     bytes[..4].copy_from_slice(&[0xFD, 0xFF, 0xFF, 0xFF]);
     bytes.extend_from_slice(b"Name\0\0");
-    let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
-        .expect("remainder fits in u16 for test data");
-    bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
+    set_subheader_remainder(&mut bytes, signature_len);
 
     parse_column_text_subheader(&mut builder, &bytes, 4, Endianness::Little).unwrap();
 
@@ -39,9 +43,7 @@ fn column_name_subheader_sets_text_refs() {
     bytes[..4].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
     bytes.extend_from_slice(&[0x00, 0x00, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00]);
     bytes.extend_from_slice(&[0u8; 8]);
-    let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
-        .expect("remainder fits in u16 for test data");
-    bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
+    set_subheader_remainder(&mut bytes, signature_len);
     assert_eq!(bytes.len(), 28);
 
     parse_column_name_subheader(&mut builder, &bytes, 4, Endianness::Little, false).unwrap();
@@ -56,18 +58,11 @@ fn column_name_subheader_sets_text_refs() {
 #[test]
 fn column_attrs_subheader_updates_offsets() {
     let mut builder = ColumnMetadataBuilder::new(UTF_8);
-    let signature_len = 4;
-    let mut bytes = vec![0u8; signature_len + 8];
-    bytes[..4].copy_from_slice(&[0xF6, 0xF6, 0xF6, 0xF6]);
-    let mut entry = [0u8; 12];
-    entry[0..4].copy_from_slice(&4u32.to_le_bytes());
-    entry[4..8].copy_from_slice(&8u32.to_le_bytes());
-    entry[10] = 0x02;
-    bytes.extend_from_slice(&entry);
-    bytes.extend_from_slice(&[0u8; 8]);
-    let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
-        .expect("remainder fits in u16 for test data");
-    bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
+    let bytes = build_column_attrs_subheader(4, |entry| {
+        entry[0..4].copy_from_slice(&4u32.to_le_bytes());
+        entry[4..8].copy_from_slice(&8u32.to_le_bytes());
+        entry[10] = 0x02;
+    });
     assert_eq!(bytes.len(), 32);
 
     parse_column_attrs_subheader(&mut builder, &bytes, 4, Endianness::Little, false).unwrap();
@@ -83,25 +78,18 @@ fn column_attrs_subheader_updates_offsets() {
 #[test]
 fn column_attrs_subheader_sets_measure_alignment() {
     let mut builder = ColumnMetadataBuilder::new(UTF_8);
-    let signature_len = 4;
-    let mut bytes = vec![0u8; signature_len + 8];
-    bytes[..4].copy_from_slice(&[0xF6, 0xF6, 0xF6, 0xF6]);
-    let mut entry = [0u8; 12];
-    entry[0..4].copy_from_slice(&16u32.to_le_bytes());
-    entry[4..8].copy_from_slice(&32u32.to_le_bytes());
-    entry[8] = 0x00;
-    entry[9] = 0x32;
-    entry[10] = 0x01;
-    bytes.extend_from_slice(&entry);
-    bytes.extend_from_slice(&[0u8; 8]);
-    let remainder = u16::try_from(bytes.len() - (4 + 2 * signature_len))
-        .expect("remainder fits in u16 for test data");
-    bytes[signature_len..signature_len + 2].copy_from_slice(&remainder.to_le_bytes());
+    let bytes = build_column_attrs_subheader(4, |entry| {
+        entry[0..4].copy_from_slice(&16u32.to_le_bytes());
+        entry[4..8].copy_from_slice(&32u32.to_le_bytes());
+        entry[8] = 0x00;
+        entry[9] = 0x32;
+        entry[10] = 0x01;
+    });
 
     parse_column_attrs_subheader(
         &mut builder,
         &bytes,
-        signature_len,
+        4,
         Endianness::Little,
         false,
     )
@@ -152,4 +140,18 @@ fn column_format_subheader_sets_refs() {
     assert_eq!(column.format_ref.length, 4);
     assert_eq!(column.label_ref.offset, 10);
     assert_eq!(column.label_ref.length, 2);
+}
+
+fn build_column_attrs_subheader(
+    signature_len: usize,
+    mut fill_entry: impl FnMut(&mut [u8; 12]),
+) -> Vec<u8> {
+    let mut bytes = vec![0u8; signature_len + 8];
+    bytes[..4].copy_from_slice(&[0xF6, 0xF6, 0xF6, 0xF6]);
+    let mut entry = [0u8; 12];
+    fill_entry(&mut entry);
+    bytes.extend_from_slice(&entry);
+    bytes.extend_from_slice(&[0u8; 8]);
+    set_subheader_remainder(&mut bytes, signature_len);
+    bytes
 }

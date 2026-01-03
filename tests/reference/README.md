@@ -6,6 +6,13 @@ implementation can be compared against independent baselines.
 - `haven/` is created by `scripts/generate_haven_dumps.R`
 - `pandas/` and `pyreadstat/` are created by `scripts/generate_pandas_dumps.py`
 
+If `readstat` is installed locally, the test suite can also compare fixtures
+against its CSV output dynamically (no stored snapshots required). The
+`fixtures_snapshot_readstat` test runs by default when the binary is available.
+
+To enable the stored pyreadstat snapshots, set
+`SAS7BDAT_PYREADSTAT_SNAPSHOTS=1` before running the tests.
+
 Each subdirectory mirrors the SAS fixture tree and replaces the `.sas7bdat`
 suffix with `.json`.  Run the generators after adding or updating fixtures,
 then review the resulting changes before committing.

@@ -1,0 +1,1726 @@
+---
+source: tests/fixtures_snapshot.rs
+assertion_line: 21
+expression: snapshot
+---
+{
+  "columns": [
+    "DTYEAR",
+    "DTYEAR2",
+    "DTYEAR3",
+    "DTYEAR4"
+  ],
+  "row_count": 95,
+  "rows": [
+    [
+      {
+        "kind": "datetime",
+        "value": -11928470399.999
+      },
+      {
+        "kind": "datetime",
+        "value": -11928470399.999
+      },
+      {
+        "kind": "datetime",
+        "value": -11928470399.999
+      },
+      {
+        "kind": "datetime",
+        "value": -11928470399.999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": -11896934400.001
+      },
+      {
+        "kind": "datetime",
+        "value": -11896934400.001
+      },
+      {
+        "kind": "datetime",
+        "value": -11896934400.001
+      },
+      {
+        "kind": "datetime",
+        "value": -11896934400.001
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": -0.001
+      },
+      {
+        "kind": "datetime",
+        "value": -0.001
+      },
+      {
+        "kind": "datetime",
+        "value": -0.001
+      },
+      {
+        "kind": "datetime",
+        "value": -0.001
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 0.001
+      },
+      {
+        "kind": "datetime",
+        "value": 0.001
+      },
+      {
+        "kind": "datetime",
+        "value": 0.001
+      },
+      {
+        "kind": "datetime",
+        "value": 0.001
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 315619199.999
+      },
+      {
+        "kind": "datetime",
+        "value": 315619199.999
+      },
+      {
+        "kind": "datetime",
+        "value": 315619199.999
+      },
+      {
+        "kind": "datetime",
+        "value": 315619199.999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 315619200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 315619200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 315619200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 315619200.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 253686211200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253686211200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253686211200.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253686211200.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 253717660800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253717660800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253717660800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 253717660800.0
+      }
+    ],
+    [
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1890691201.122999
+      },
+      {
+        "kind": "datetime",
+        "value": 1890691201.122999
+      },
+      {
+        "kind": "datetime",
+        "value": 1890691201.122999
+      },
+      {
+        "kind": "datetime",
+        "value": 1890691201.122999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1887580810.233999
+      },
+      {
+        "kind": "datetime",
+        "value": 1887580810.233999
+      },
+      {
+        "kind": "datetime",
+        "value": 1887580810.233999
+      },
+      {
+        "kind": "datetime",
+        "value": 1887580810.233999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1884729660.456
+      },
+      {
+        "kind": "datetime",
+        "value": 1884729660.456
+      },
+      {
+        "kind": "datetime",
+        "value": 1884729660.456
+      },
+      {
+        "kind": "datetime",
+        "value": 1884729660.456
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1881792600.566999
+      },
+      {
+        "kind": "datetime",
+        "value": 1881792600.566999
+      },
+      {
+        "kind": "datetime",
+        "value": 1881792600.566999
+      },
+      {
+        "kind": "datetime",
+        "value": 1881792600.566999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1878771600.677999
+      },
+      {
+        "kind": "datetime",
+        "value": 1878771600.677999
+      },
+      {
+        "kind": "datetime",
+        "value": 1878771600.677999
+      },
+      {
+        "kind": "datetime",
+        "value": 1878771600.677999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1876039200.789
+      },
+      {
+        "kind": "datetime",
+        "value": 1876039200.789
+      },
+      {
+        "kind": "datetime",
+        "value": 1876039200.789
+      },
+      {
+        "kind": "datetime",
+        "value": 1876039200.789
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1873110896.89
+      },
+      {
+        "kind": "datetime",
+        "value": 1873110896.89
+      },
+      {
+        "kind": "datetime",
+        "value": 1873110896.89
+      },
+      {
+        "kind": "datetime",
+        "value": 1873110896.89
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1870432496.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1870432496.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1870432496.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1870432496.986999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1867149296.654
+      },
+      {
+        "kind": "datetime",
+        "value": 1867149296.654
+      },
+      {
+        "kind": "datetime",
+        "value": 1867149296.654
+      },
+      {
+        "kind": "datetime",
+        "value": 1867149296.654
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1864643696.321
+      },
+      {
+        "kind": "datetime",
+        "value": 1864643696.321
+      },
+      {
+        "kind": "datetime",
+        "value": 1864643696.321
+      },
+      {
+        "kind": "datetime",
+        "value": 1864643696.321
+      }
+    ],
+    [
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      },
+      {
+        "kind": "missing",
+        "value": null
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679097600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679097600.000999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.000999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.000999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.000999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679097600.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097600.049999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679097601.019999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097601.019999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097601.019999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097601.019999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679097659.5
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097659.5
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097659.5
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097659.5
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679097661.299999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097661.299999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097661.299999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679097661.299999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679099100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099100.45
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679099375.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099375.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099375.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099375.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679099475.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099475.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099475.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679099475.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679100100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679100100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679100100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679100100.45
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679101199.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.931999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679101199.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.986999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679101199.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.997999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679101199.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679101199.999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679102625.677999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679102625.677999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679102625.677999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679102625.677999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679105100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679105100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679105100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679105100.45
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679106100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679106100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679106100.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679106100.45
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679131799.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679131799.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679131799.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679131799.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679131861.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679131861.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679131861.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679131861.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679133599.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.931999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679133599.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.986999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679133599.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.997999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679133599.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133599.999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679133603.599999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133603.599999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133603.599999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679133603.599999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679134103.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679134103.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679134103.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679134103.65
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679136103.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679136103.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679136103.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679136103.849999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679138999.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679138999.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679138999.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679138999.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679139061.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679139061.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679139061.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679139061.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140798.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.953999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140798.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.964999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140798.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.953
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140798.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140798.963999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140799.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.931999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140799.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.986999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140799.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.997999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140799.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140799.999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140800.009999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.009999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.009999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.009999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140800.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.953999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140800.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140800.964999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140801.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140801.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140801.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140801.953
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679140801.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140801.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140801.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679140801.963999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679142104.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679142104.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679142104.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679142104.45
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679142104.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679142104.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679142104.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679142104.45
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.049999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.15
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.15
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.15
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.15
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.25
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.25
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.25
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.25
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.349999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.349999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.349999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.349999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.45
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.549999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.549999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.549999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.549999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.65
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.75
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.75
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.75
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.75
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.849999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167106.95
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.95
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.95
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167106.95
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.049999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.049999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.15
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.15
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.15
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.15
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.25
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.25
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.25
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.25
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.349999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.349999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.349999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.349999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.45
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.45
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.549999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.549999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.549999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.549999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.65
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.65
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.75
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.75
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.75
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.75
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.849999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.849999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679167107.95
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.95
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.95
+      },
+      {
+        "kind": "datetime",
+        "value": 1679167107.95
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679169272.099999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679169272.099999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679169272.099999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679169272.099999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679182199.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679182199.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679182199.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679182199.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679182261.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679182261.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679182261.0
+      },
+      {
+        "kind": "datetime",
+        "value": 1679182261.0
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679183998.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.953999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.953999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679183998.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.964999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.964999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679183998.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.953
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.953
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679183998.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.963999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183998.963999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679183999.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.931999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.931999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679183999.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.986999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.986999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679183999.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.997999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.997999
+      }
+    ],
+    [
+      {
+        "kind": "datetime",
+        "value": 1679183999.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.999
+      },
+      {
+        "kind": "datetime",
+        "value": 1679183999.999
+      }
+    ]
+  ]
+}

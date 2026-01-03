@@ -1,5 +1,6 @@
 pub mod api;
 pub mod error;
+mod iter_utils;
 pub mod logger;
 pub mod metadata;
 pub mod parser;

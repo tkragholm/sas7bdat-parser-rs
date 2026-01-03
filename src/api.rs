@@ -4,6 +4,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::error::{Error, Result};
+use crate::iter_utils::next_from_result;
 use crate::metadata::{
     DatasetMetadata, LabelSet, MissingLiteral, MissingRange, MissingValuePolicy, TaggedMissing,
     ValueKey, ValueType,
@@ -698,14 +699,10 @@ impl<R: Read + Seek> Iterator for ProjectedRows<'_, R> {
     type Item = Result<Vec<Value<'static>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.try_next() {
-            Ok(Some(row)) => Some(Ok(row)),
-            Ok(None) => None,
-            Err(err) => {
-                self.exhausted = true;
-                Some(Err(err))
-            }
-        }
+        let result = self.try_next();
+        next_from_result(result, |row| row, || {
+            self.exhausted = true;
+        })
     }
 }
 

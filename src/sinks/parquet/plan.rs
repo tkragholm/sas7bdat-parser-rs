@@ -154,56 +154,59 @@ impl ColumnPlan {
     }
 
     fn push_date(&mut self, value: &Value<'_>) -> Result<()> {
-        match self.coerce_date(value) {
-            Ok(coerced) => match &mut self.values {
-                ColumnValues::Int32(values) => {
-                    Self::push_optional(&mut self.def_levels, values, coerced);
-                }
-                _ => unreachable!("column value encoder mismatch"),
-            },
-            Err(err) if self.lenient_dates => {
-                if let ColumnValues::Int32(values) = &mut self.values {
-                    Self::push_optional(&mut self.def_levels, values, None);
-                }
-                self.warn_invalid("date");
-            }
-            Err(err) => return Err(err),
-        }
-        Ok(())
+        self.push_temporal_i32(value, "date", Self::coerce_date)
     }
 
     fn push_datetime(&mut self, value: &Value<'_>) -> Result<()> {
-        match self.coerce_timestamp(value) {
-            Ok(coerced) => match &mut self.values {
-                ColumnValues::Int64(values) => {
-                    Self::push_optional(&mut self.def_levels, values, coerced);
-                }
-                _ => unreachable!("column value encoder mismatch"),
-            },
-            Err(err) if self.lenient_dates => {
-                if let ColumnValues::Int64(values) = &mut self.values {
-                    Self::push_optional(&mut self.def_levels, values, None);
-                }
-                self.warn_invalid("datetime");
-            }
-            Err(err) => return Err(err),
-        }
-        Ok(())
+        self.push_temporal_i64(value, "datetime", Self::coerce_timestamp)
     }
 
     fn push_time(&mut self, value: &Value<'_>) -> Result<()> {
-        match self.coerce_time(value) {
-            Ok(coerced) => match &mut self.values {
-                ColumnValues::Int64(values) => {
-                    Self::push_optional(&mut self.def_levels, values, coerced);
-                }
-                _ => unreachable!("column value encoder mismatch"),
-            },
-            Err(err) if self.lenient_dates => {
-                if let ColumnValues::Int64(values) = &mut self.values {
-                    Self::push_optional(&mut self.def_levels, values, None);
-                }
-                self.warn_invalid("time");
+        self.push_temporal_i64(value, "time", Self::coerce_time)
+    }
+
+    fn push_temporal_i32(
+        &mut self,
+        value: &Value<'_>,
+        kind: &str,
+        coerce: fn(&Self, &Value<'_>) -> Result<Option<i32>>,
+    ) -> Result<()> {
+        self.push_temporal(value, kind, coerce, |this, coerced| match &mut this.values {
+            ColumnValues::Int32(values) => {
+                Self::push_optional(&mut this.def_levels, values, coerced);
+            }
+            _ => unreachable!("column value encoder mismatch"),
+        })
+    }
+
+    fn push_temporal_i64(
+        &mut self,
+        value: &Value<'_>,
+        kind: &str,
+        coerce: fn(&Self, &Value<'_>) -> Result<Option<i64>>,
+    ) -> Result<()> {
+        self.push_temporal(value, kind, coerce, |this, coerced| match &mut this.values {
+            ColumnValues::Int64(values) => {
+                Self::push_optional(&mut this.def_levels, values, coerced);
+            }
+            _ => unreachable!("column value encoder mismatch"),
+        })
+    }
+
+    fn push_temporal<T>(
+        &mut self,
+        value: &Value<'_>,
+        kind: &str,
+        coerce: fn(&Self, &Value<'_>) -> Result<Option<T>>,
+        mut push: impl FnMut(&mut Self, Option<T>),
+    ) -> Result<()> {
+        match coerce(self, value) {
+            Ok(coerced) => {
+                push(self, coerced);
+            }
+            Err(_err) if self.lenient_dates => {
+                push(self, None);
+                self.warn_invalid(kind);
             }
             Err(err) => return Err(err),
         }
@@ -354,10 +357,7 @@ impl ColumnPlan {
                 })?;
                 Ok(Some(micros))
             }
-            Value::Float(seconds) => Self::float_seconds_to_micros(self.name.as_str(), *seconds),
-            Value::Int32(seconds) => Ok(Some(i64::from(*seconds) * 1_000_000)),
-            Value::Int64(seconds) => Ok(Some(*seconds * 1_000_000)),
-            other => Err(self.type_mismatch_error("timestamp", other)),
+            other => self.coerce_seconds_to_micros(other, "timestamp"),
         }
     }
 
@@ -374,10 +374,20 @@ impl ColumnPlan {
                 })?;
                 Ok(Some(micros))
             }
+            other => self.coerce_seconds_to_micros(other, "time"),
+        }
+    }
+
+    fn coerce_seconds_to_micros(
+        &self,
+        value: &Value<'_>,
+        kind: &str,
+    ) -> Result<Option<i64>> {
+        match value {
             Value::Float(seconds) => Self::float_seconds_to_micros(self.name.as_str(), *seconds),
             Value::Int32(seconds) => Ok(Some(i64::from(*seconds) * 1_000_000)),
             Value::Int64(seconds) => Ok(Some(*seconds * 1_000_000)),
-            other => Err(self.type_mismatch_error("time", other)),
+            other => Err(self.type_mismatch_error(kind, other)),
         }
     }
 
@@ -406,22 +416,8 @@ impl ColumnPlan {
                 let owned = scratch.ryu.format(*v).to_owned();
                 Some(scratch.intern_slice(owned.as_bytes()))
             }
-            Value::Int32(v) => {
-                let scratch = self
-                    .utf8_scratch
-                    .as_mut()
-                    .expect("utf8 scratch missing for UTF-8 encoder");
-                let owned = scratch.itoa.format(*v).to_owned();
-                Some(scratch.intern_slice(owned.as_bytes()))
-            }
-            Value::Int64(v) => {
-                let scratch = self
-                    .utf8_scratch
-                    .as_mut()
-                    .expect("utf8 scratch missing for UTF-8 encoder");
-                let owned = scratch.itoa.format(*v).to_owned();
-                Some(scratch.intern_slice(owned.as_bytes()))
-            }
+            Value::Int32(v) => Some(self.format_int_to_utf8(i64::from(*v))),
+            Value::Int64(v) => Some(self.format_int_to_utf8(*v)),
             Value::DateTime(datetime) => {
                 let scratch = self
                     .utf8_scratch
@@ -447,6 +443,15 @@ impl ColumnPlan {
                 Some(scratch.intern_str(&text))
             }
         }
+    }
+
+    fn format_int_to_utf8(&mut self, value: i64) -> ByteArray {
+        let scratch = self
+            .utf8_scratch
+            .as_mut()
+            .expect("utf8 scratch missing for UTF-8 encoder");
+        let owned = scratch.itoa.format(value).to_owned();
+        scratch.intern_slice(owned.as_bytes())
     }
 
     fn parse_f64(&self, text: &str) -> Result<Option<f64>> {

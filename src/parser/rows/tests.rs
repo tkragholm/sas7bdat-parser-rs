@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::io::Cursor;
+use std::io::{Cursor, Read, Seek};
 
 use encoding_rs::Encoding;
 
@@ -14,6 +14,7 @@ use crate::parser::rows::compression::{decompress_rdc, decompress_rle};
 use crate::parser::rows::constants::SAS_PAGE_TYPE_DATA;
 use crate::value::Value;
 
+use super::iterator::RowIterator;
 use super::row_iterator;
 
 fn make_parsed_metadata(
@@ -107,10 +108,7 @@ fn make_compressed_page(
     compression_flag: u8,
 ) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_DATA.to_le_bytes());
-    // row count set to 1 for target rows.
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes()); // one subheader pointer
+    init_data_page_header(&mut page, 1, 1);
 
     // pointer starts at byte 24.
     let data_offset = 64u32;
@@ -152,6 +150,28 @@ fn setup_data_iter(rows: &[&[u8]], row_length: usize) -> (Cursor<Vec<u8>>, Parse
     (Cursor::new(page), parsed)
 }
 
+fn assert_rows_from_iter<R: Read + Seek>(iter: &mut RowIterator<'_, R>, expected: &[&str]) {
+    for (index, expected_row) in expected.iter().enumerate() {
+        let row = iter
+            .try_next()
+            .expect("row result")
+            .expect("row present");
+        assert_eq!(
+            row,
+            vec![Value::Str(Cow::Borrowed(*expected_row))],
+            "row {}",
+            index + 1
+        );
+    }
+    assert!(iter.try_next().expect("end result").is_none());
+}
+
+fn assert_rows_from_page(page: Vec<u8>, parsed: &ParsedMetadata, expected: &[&str]) {
+    let mut cursor = Cursor::new(page);
+    let mut iter = row_iterator(&mut cursor, parsed).expect("construct row iterator");
+    assert_rows_from_iter(&mut iter, expected);
+}
+
 #[test]
 fn decompresses_rle_single_run() {
     let input = [0x80u8, b'A']; // command 8, length nibble 0 => copy 1 byte
@@ -176,14 +196,7 @@ fn fetches_rows_from_data_page() {
     let rows = [b"AAAA".as_slice(), b"BBBB".as_slice()];
     let (mut cursor, parsed) = setup_data_iter(&rows, row_length);
     let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
-
-    let first = iter.try_next().expect("row 1 result").expect("row 1");
-    assert_eq!(first, vec![Value::Str(Cow::Borrowed("AAAA"))]);
-
-    let second = iter.try_next().expect("row 2 result").expect("row 2");
-    assert_eq!(second, vec![Value::Str(Cow::Borrowed("BBBB"))]);
-
-    assert!(iter.try_next().expect("end result").is_none());
+    assert_rows_from_iter(&mut iter, &["AAAA", "BBBB"]);
 }
 
 #[test]
@@ -213,12 +226,7 @@ fn decompresses_row_compression_page_rle() {
     let compressed = [0xC1u8, b'A'];
     let page = make_compressed_page(&compressed, 4, 96, super::constants::SAS_COMPRESSION_ROW);
     let parsed = make_parsed_metadata(Vendor::Sas, Compression::Row, 4, 1, 1, 96);
-    let mut cursor = Cursor::new(page);
-    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
-
-    let first = iter.try_next().expect("row 1 result").expect("row 1");
-    assert_eq!(first, vec![Value::Str(Cow::Borrowed("AAAA"))]);
-    assert!(iter.try_next().expect("end").is_none());
+    assert_rows_from_page(page, &parsed, &["AAAA"]);
 }
 
 #[test]
@@ -244,12 +252,7 @@ fn decompresses_binary_compression_page_rdc() {
     compressed.extend_from_slice(b"BCDE");
     let page = make_compressed_page(&compressed, 4, 96, super::constants::SAS_COMPRESSION_ROW);
     let parsed = make_parsed_metadata(Vendor::Sas, Compression::Binary, 4, 1, 1, 96);
-    let mut cursor = Cursor::new(page);
-    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
-
-    let first = iter.try_next().expect("row 1 result").expect("row 1");
-    assert_eq!(first, vec![Value::Str(Cow::Borrowed("BCDE"))]);
-    assert!(iter.try_next().expect("end").is_none());
+    assert_rows_from_page(page, &parsed, &["BCDE"]);
 }
 
 #[test]
@@ -258,10 +261,7 @@ fn invalid_pointer_before_data_section_is_ignored() {
     // and rows should be read from the regular data region.
     let row_length = 4usize;
     let mut page = vec![0u8; 96];
-    page[(24 - 8)..(24 - 6)]
-        .copy_from_slice(&super::constants::SAS_PAGE_TYPE_DATA.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes()); // one row
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes()); // one pointer
+    init_data_page_header(&mut page, 1, 1);
 
     // Pointer claims data at offset 0 (inside header), length 8.
     let mut pointer = [0u8; 12];
@@ -288,12 +288,13 @@ fn invalid_pointer_before_data_section_is_ignored() {
         1,
         96,
     );
-    let mut cursor = Cursor::new(page);
-    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
+    assert_rows_from_page(page, &parsed, &["GOOD"]);
+}
 
-    let first = iter.try_next().expect("row 1 result").expect("row 1");
-    assert_eq!(first, vec![Value::Str(Cow::Borrowed("GOOD"))]);
-    assert!(iter.try_next().expect("end").is_none());
+fn init_data_page_header(page: &mut [u8], row_count: u16, pointer_count: u16) {
+    page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_DATA.to_le_bytes());
+    page[(24 - 6)..(24 - 4)].copy_from_slice(&row_count.to_le_bytes());
+    page[(24 - 4)..(24 - 2)].copy_from_slice(&pointer_count.to_le_bytes());
 }
 
 #[test]
@@ -310,12 +311,7 @@ fn mix_pages_honor_rows_per_page_limit() {
         1,
         64,
     );
-    let mut cursor = Cursor::new(page);
-    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
-
-    let first = iter.try_next().expect("row 1 result").expect("row 1");
-    assert_eq!(first, vec![Value::Str(Cow::Borrowed("M1"))]);
-    assert!(iter.try_next().expect("end").is_none());
+    assert_rows_from_page(page, &parsed, &["M1"]);
 }
 
 #[test]

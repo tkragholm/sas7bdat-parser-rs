@@ -158,17 +158,20 @@ fn augment_index(buffer: &[u8], header: &SasHeader, layout: &IndexLayout, pointe
     }
 }
 
-fn read_block<R: Read + Seek>(reader: &mut R, header: &SasHeader, pointer: u64) -> Result<Vec<u8>> {
-    let (mut page, mut pos) = decode_pointer(pointer);
-    if page == 0 || pos == 0 {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("catalog block pointer references invalid page"),
-        });
-    }
+struct ChainSegment {
+    page: u64,
+    pos: u64,
+    len: u16,
+}
 
-    let header_len = if header.uses_u64 { 32 } else { 16 };
-    let mut total_len = 0usize;
+fn collect_chain_segments<R: Read + Seek>(
+    reader: &mut R,
+    header: &SasHeader,
+    mut page: u64,
+    mut pos: u64,
+    header_len: usize,
+) -> Result<Vec<ChainSegment>> {
+    let mut segments = Vec::new();
     let mut link_count = 0u64;
 
     loop {
@@ -179,7 +182,11 @@ fn read_block<R: Read + Seek>(reader: &mut R, header: &SasHeader, pointer: u64) 
         read_chain_segment(reader, header, page, pos, &mut link_header)?;
 
         let (next_page, next_pos, segment_len) = decode_chain_header(&link_header, header);
-        total_len += segment_len as usize;
+        segments.push(ChainSegment {
+            page,
+            pos,
+            len: segment_len,
+        });
         if next_page == 0 || next_pos == 0 {
             break;
         }
@@ -187,48 +194,49 @@ fn read_block<R: Read + Seek>(reader: &mut R, header: &SasHeader, pointer: u64) 
         pos = next_pos;
         link_count += 1;
     }
+
+    Ok(segments)
+}
+
+fn read_block<R: Read + Seek>(reader: &mut R, header: &SasHeader, pointer: u64) -> Result<Vec<u8>> {
+    let (page, pos) = decode_pointer(pointer);
+    if page == 0 || pos == 0 {
+        return Err(Error::Corrupted {
+            section: Section::Header,
+            details: Cow::from("catalog block pointer references invalid page"),
+        });
+    }
+
+    let header_len = if header.uses_u64 { 32 } else { 16 };
+    let segments = collect_chain_segments(reader, header, page, pos, header_len)?;
+    let total_len: usize = segments.iter().map(|segment| segment.len as usize).sum();
 
     if total_len == 0 {
         return Ok(Vec::new());
     }
 
     let mut buffer = vec![0u8; total_len];
-    page = decode_pointer(pointer).0;
-    pos = decode_pointer(pointer).1;
     let mut offset = 0usize;
-    link_count = 0;
 
-    loop {
-        if page == 0 || pos == 0 || page > header.page_count || link_count > header.page_count {
+    for segment in segments {
+        if segment.len == 0 {
             break;
         }
-        let mut link_header = vec![0u8; header_len];
-        read_chain_segment(reader, header, page, pos, &mut link_header)?;
-        let (next_page, next_pos, segment_len) = decode_chain_header(&link_header, header);
-        if segment_len == 0 {
-            break;
-        }
-        if offset + segment_len as usize > buffer.len() {
+        if offset + segment.len as usize > buffer.len() {
             return Err(Error::Corrupted {
-                section: Section::Page { index: page },
+                section: Section::Page { index: segment.page },
                 details: Cow::from("catalog chain exceeds allocated buffer"),
             });
         }
         read_segment_data(
             reader,
             header,
-            page,
-            pos,
+            segment.page,
+            segment.pos,
             header_len,
-            &mut buffer[offset..offset + segment_len as usize],
+            &mut buffer[offset..offset + segment.len as usize],
         )?;
-        offset += segment_len as usize;
-        if next_page == 0 || next_pos == 0 {
-            break;
-        }
-        page = next_page;
-        pos = next_pos;
-        link_count += 1;
+        offset += segment.len as usize;
     }
 
     buffer.truncate(offset);

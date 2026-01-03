@@ -266,11 +266,7 @@ where
 {
     let mut last_examined = 0u64;
     for page_index in 0..header.page_count {
-        read_page(reader, header, buffer, page_index)?;
-        let page_type = read_u16(
-            header.endianness,
-            &buffer[(header.page_header_size as usize) - 8..],
-        );
+        let page_type = load_page_type(reader, header, buffer, page_index)?;
         last_examined = page_index;
         let kind = classify_page(page_type);
         if matches!(
@@ -290,13 +286,9 @@ where
         }
 
         visited.insert(page_index);
-        let subheader_count = peek_subheader_count(buffer, header);
-        let subheaders =
-            parse_metadata_page(buffer, header, page_index, page_type, subheader_count)?;
-        if subheaders.is_empty() {
-            continue;
+        if let Some(subheaders) = collect_subheaders(buffer, header, page_index, page_type)? {
+            f(page_type, subheaders)?;
         }
-        f(page_type, subheaders)?;
     }
 
     Ok(last_examined)
@@ -320,12 +312,7 @@ where
         if visited.contains(&page_index) {
             continue;
         }
-        read_page(reader, header, buffer, page_index)?;
-
-        let page_type = read_u16(
-            header.endianness,
-            &buffer[(header.page_header_size as usize) - 8..],
-        );
+        let page_type = load_page_type(reader, header, buffer, page_index)?;
         let kind = classify_page(page_type);
         if matches!(
             kind,
@@ -344,13 +331,9 @@ where
         }
         seen_amd = true;
 
-        let subheader_count = peek_subheader_count(buffer, header);
-        let subheaders =
-            parse_metadata_page(buffer, header, page_index, page_type, subheader_count)?;
-        if subheaders.is_empty() {
-            continue;
+        if let Some(subheaders) = collect_subheaders(buffer, header, page_index, page_type)? {
+            f(page_type, subheaders)?;
         }
-        f(page_type, subheaders)?;
     }
 
     Ok(())
@@ -366,6 +349,33 @@ fn read_page<R: Read + Seek>(
     reader.seek(SeekFrom::Start(offset)).map_err(Error::from)?;
     reader.read_exact(buffer).map_err(Error::from)?;
     Ok(())
+}
+
+fn load_page_type<R: Read + Seek>(
+    reader: &mut R,
+    header: &SasHeader,
+    buffer: &mut [u8],
+    page_index: u64,
+) -> Result<u16> {
+    read_page(reader, header, buffer, page_index)?;
+    Ok(read_u16(
+        header.endianness,
+        &buffer[(header.page_header_size as usize) - 8..],
+    ))
+}
+
+fn collect_subheaders<'a>(
+    buffer: &'a [u8],
+    header: &'a SasHeader,
+    page_index: u64,
+    page_type: u16,
+) -> Result<Option<Vec<ParsedSubheader<'a>>>> {
+    let subheader_count = peek_subheader_count(buffer, header);
+    let subheaders = parse_metadata_page(buffer, header, page_index, page_type, subheader_count)?;
+    if subheaders.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(subheaders))
 }
 
 fn parse_metadata_page<'a>(

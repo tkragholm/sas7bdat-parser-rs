@@ -271,42 +271,48 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 
     fn materialize_f64(column: &ColumnarColumn<'_, '_>) -> MaterializedColumn<f64> {
-        let mut values = Vec::with_capacity(column.len());
-        let mut def_levels = Vec::with_capacity(column.len());
-        for maybe_bits in column.iter_numeric_bits() {
-            if let Some(bits) = maybe_bits {
-                def_levels.push(1);
-                values.push(f64::from_bits(bits));
-            } else {
-                def_levels.push(0);
-            }
-        }
-        MaterializedColumn { values, def_levels }
+        Self::materialize_numeric_mapped(column, |value| value)
     }
 
     fn materialize_date(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i32>> {
+        Self::materialize_numeric_result(column, |days| {
+            let datetime = sas_days_to_datetime(days).ok_or_else(|| Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "column '{}' contains date outside supported range",
+                    column.index()
+                )),
+            })?;
+            let seconds = datetime.unix_timestamp();
+            let day = seconds.div_euclid(SECONDS_PER_DAY_I64);
+            i32::try_from(day).map_err(|_| Error::InvalidMetadata {
+                details: Cow::Owned(format!(
+                    "column '{}' contains date outside Parquet range",
+                    column.index()
+                )),
+            })
+        })
+    }
+
+    fn materialize_numeric_mapped<T>(
+        column: &ColumnarColumn<'_, '_>,
+        mut map: impl FnMut(f64) -> T,
+    ) -> MaterializedColumn<T> {
+        Self::materialize_numeric_result(column, |value| Ok(map(value)))
+            .expect("infallible numeric mapping")
+    }
+
+    fn materialize_numeric_result<T>(
+        column: &ColumnarColumn<'_, '_>,
+        mut map: impl FnMut(f64) -> Result<T>,
+    ) -> Result<MaterializedColumn<T>> {
         let mut values = Vec::with_capacity(column.len());
         let mut def_levels = Vec::with_capacity(column.len());
         for maybe_bits in column.iter_numeric_bits() {
             if let Some(bits) = maybe_bits {
-                let days = f64::from_bits(bits);
-                let datetime =
-                    sas_days_to_datetime(days).ok_or_else(|| Error::InvalidMetadata {
-                        details: Cow::Owned(format!(
-                            "column '{}' contains date outside supported range",
-                            column.index()
-                        )),
-                    })?;
-                let seconds = datetime.unix_timestamp();
-                let day = seconds.div_euclid(SECONDS_PER_DAY_I64);
-                let day = i32::try_from(day).map_err(|_| Error::InvalidMetadata {
-                    details: Cow::Owned(format!(
-                        "column '{}' contains date outside Parquet range",
-                        column.index()
-                    )),
-                })?;
+                let seconds = f64::from_bits(bits);
+                let value = map(seconds)?;
                 def_levels.push(1);
-                values.push(day);
+                values.push(value);
             } else {
                 def_levels.push(0);
             }
@@ -316,21 +322,9 @@ impl<'rows> ColumnarBatch<'rows> {
 
     fn materialize_i64_mapped(
         column: &ColumnarColumn<'_, '_>,
-        mut map: impl FnMut(f64) -> Result<i64>,
+        map: impl FnMut(f64) -> Result<i64>,
     ) -> Result<MaterializedColumn<i64>> {
-        let mut values = Vec::with_capacity(column.len());
-        let mut def_levels = Vec::with_capacity(column.len());
-        for maybe_bits in column.iter_numeric_bits() {
-            if let Some(bits) = maybe_bits {
-                let seconds = f64::from_bits(bits);
-                let micros = map(seconds)?;
-                def_levels.push(1);
-                values.push(micros);
-            } else {
-                def_levels.push(0);
-            }
-        }
-        Ok(MaterializedColumn { values, def_levels })
+        Self::materialize_numeric_result(column, map)
     }
 
     fn materialize_datetime(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {

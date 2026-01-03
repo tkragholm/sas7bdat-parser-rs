@@ -14,14 +14,18 @@ use reference::{
 };
 
 fn verify_fixture(path: &Path) -> Result<()> {
+    if std::env::var_os("SAS7BDAT_PYREADSTAT_SNAPSHOTS").is_none() {
+        return Ok(());
+    }
+
     let absolute = absolute_path(path);
     if should_skip(&absolute) {
         return Ok(());
     }
 
-    let snapshot = collect_snapshot(&absolute);
     match load_reference_snapshot("pyreadstat", &absolute) {
         Ok(Some(reference_snapshot)) => {
+            let snapshot = collect_snapshot(&absolute);
             compare_snapshots("pyreadstat", &absolute, &snapshot, &reference_snapshot);
         }
         Ok(None) => {

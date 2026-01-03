@@ -41,25 +41,12 @@ pub fn parse_column_text_subheader(
     signature_len: usize,
     endian: Endianness,
 ) -> Result<()> {
-    if bytes.len() < signature_len + 2 {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column text subheader too short"),
-        });
-    }
-
-    let remainder = read_u16(endian, &bytes[signature_len..signature_len + 2]);
-    let expected =
-        expected_remainder(bytes.len(), signature_len).ok_or_else(|| Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column text subheader length invalid"),
-        })?;
-    if remainder != expected {
-        return Err(Error::Corrupted {
-            section: Section::Header,
-            details: Cow::from("column text remainder mismatch"),
-        });
-    }
+    let messages = SubheaderValidationMessages {
+        too_short: "column text subheader too short",
+        length_invalid: "column text subheader length invalid",
+        remainder_mismatch: "column text remainder mismatch",
+    };
+    validate_subheader_lengths(bytes, signature_len, endian, signature_len + 2, messages)?;
 
     let blob = &bytes[signature_len..];
     builder.text_store_mut().push_blob(blob);
@@ -101,7 +88,8 @@ impl ColumnSubheaderKind {
         endian: Endianness,
         uses_u64: bool,
     ) -> Result<()> {
-        validate_subheader_lengths(bytes, signature_len, endian, uses_u64, self.messages())
+        let base = if uses_u64 { 28 } else { 20 };
+        validate_subheader_lengths(bytes, signature_len, endian, base, self.messages())
     }
 }
 
@@ -109,11 +97,10 @@ fn validate_subheader_lengths(
     bytes: &[u8],
     signature_len: usize,
     endian: Endianness,
-    uses_u64: bool,
+    base_len: usize,
     messages: SubheaderValidationMessages,
 ) -> Result<()> {
-    let base = if uses_u64 { 28 } else { 20 };
-    if bytes.len() < base {
+    if bytes.len() < base_len {
         return Err(Error::Corrupted {
             section: Section::Header,
             details: Cow::from(messages.too_short),

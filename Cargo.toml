@@ -67,6 +67,10 @@ harness = false
 name = "fixtures_snapshot_haven"
 harness = false
 
+[[test]]
+name = "fixtures_snapshot_readstat"
+harness = false
+
 [[bin]]
 name = "sas7"
 path = "src/bin/sas7.rs"

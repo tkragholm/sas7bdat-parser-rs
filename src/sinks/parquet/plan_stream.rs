@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use parquet::data_type::{ByteArrayType, DoubleType, Int32Type, Int64Type};
+use parquet::data_type::{ByteArrayType, DataType, DoubleType, Int32Type, Int64Type};
 use parquet::file::writer::SerializedColumnWriter;
 
 use crate::error::{Error, Result};
@@ -20,6 +20,31 @@ where
     F: FnOnce() -> Result<()>,
 {
     block()
+}
+
+fn stream_numeric_typed<T: DataType, S: NumericColumnSource>(
+    def_levels: &mut Vec<i16>,
+    def_bitmap: &mut Vec<u8>,
+    column_writer: &mut SerializedColumnWriter<'_>,
+    column: &S,
+    values: &mut Vec<T::T>,
+    chunk: usize,
+    convert: impl FnMut(u64) -> Result<T::T>,
+) -> Result<()> {
+    let writer = column_writer.typed::<T>();
+    let mut ctx = StreamNumericCtx {
+        def_levels,
+        def_bitmap,
+        values,
+        chunk,
+    };
+    stream_numeric(
+        &mut ctx,
+        column.len(),
+        |start, len| column.iter_numeric_bits_range(start, len),
+        convert,
+        |vals, defs| writer.write_batch(vals, Some(defs), None),
+    )
 }
 
 // Helper functions for data type conversions
@@ -103,82 +128,60 @@ impl ColumnPlan {
         encoder_name: &str,
     ) -> Result<()> {
         let column_name = self.name.clone();
+        let def_levels = &mut self.def_levels;
+        let def_bitmap = &mut self.def_bitmap;
 
         let result = match (&mut self.values, self.encoder) {
             (ColumnValues::Double(values), ColumnValueEncoder::Double) => {
                 measure_encoder(encoder_name, || {
-                    let writer = column_writer.typed::<DoubleType>();
-                    let mut ctx = StreamNumericCtx {
-                        def_levels: &mut self.def_levels,
-                        def_bitmap: &mut self.def_bitmap,
+                    stream_numeric_typed::<DoubleType, _>(
+                        def_levels,
+                        def_bitmap,
+                        &mut column_writer,
+                        column,
                         values,
                         chunk,
-                    };
-                    stream_numeric(
-                        &mut ctx,
-                        column.len(),
-                        |start, len| column.iter_numeric_bits_range(start, len),
                         |bits| Ok(f64::from_bits(bits)),
-                        |vals, defs| writer.write_batch(vals, Some(defs), None),
-                    )?;
-                    Ok(())
+                    )
                 })
             }
             (ColumnValues::Int32(values), ColumnValueEncoder::Date) => {
                 measure_encoder(encoder_name, || {
-                    let writer = column_writer.typed::<Int32Type>();
-                    let mut ctx = StreamNumericCtx {
-                        def_levels: &mut self.def_levels,
-                        def_bitmap: &mut self.def_bitmap,
+                    stream_numeric_typed::<Int32Type, _>(
+                        def_levels,
+                        def_bitmap,
+                        &mut column_writer,
+                        column,
                         values,
                         chunk,
-                    };
-                    stream_numeric(
-                        &mut ctx,
-                        column.len(),
-                        |start, len| column.iter_numeric_bits_range(start, len),
                         |bits| convert_date(bits, &column_name),
-                        |vals, defs| writer.write_batch(vals, Some(defs), None),
-                    )?;
-                    Ok(())
+                    )
                 })
             }
             (ColumnValues::Int64(values), ColumnValueEncoder::DateTime) => {
                 measure_encoder(encoder_name, || {
-                    let writer = column_writer.typed::<Int64Type>();
-                    let mut ctx = StreamNumericCtx {
-                        def_levels: &mut self.def_levels,
-                        def_bitmap: &mut self.def_bitmap,
+                    stream_numeric_typed::<Int64Type, _>(
+                        def_levels,
+                        def_bitmap,
+                        &mut column_writer,
+                        column,
                         values,
                         chunk,
-                    };
-                    stream_numeric(
-                        &mut ctx,
-                        column.len(),
-                        |start, len| column.iter_numeric_bits_range(start, len),
                         |bits| convert_datetime(bits, &column_name),
-                        |vals, defs| writer.write_batch(vals, Some(defs), None),
-                    )?;
-                    Ok(())
+                    )
                 })
             }
             (ColumnValues::Int64(values), ColumnValueEncoder::Time) => {
                 measure_encoder(encoder_name, || {
-                    let writer = column_writer.typed::<Int64Type>();
-                    let mut ctx = StreamNumericCtx {
-                        def_levels: &mut self.def_levels,
-                        def_bitmap: &mut self.def_bitmap,
+                    stream_numeric_typed::<Int64Type, _>(
+                        def_levels,
+                        def_bitmap,
+                        &mut column_writer,
+                        column,
                         values,
                         chunk,
-                    };
-                    stream_numeric(
-                        &mut ctx,
-                        column.len(),
-                        |start, len| column.iter_numeric_bits_range(start, len),
                         |bits| convert_time(bits, &column_name),
-                        |vals, defs| writer.write_batch(vals, Some(defs), None),
-                    )?;
-                    Ok(())
+                    )
                 })
             }
             _ => Err(Error::Parquet {

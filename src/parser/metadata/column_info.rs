@@ -103,6 +103,7 @@ pub fn infer_numeric_kind(format_name: &str) -> Option<NumericKind> {
         return None;
     }
     if cleaned.contains("DATETIME")
+        || cleaned.starts_with("DT")
         || cleaned.ends_with("DT")
         || cleaned.starts_with("E8601DT")
         || cleaned.starts_with("B8601DT")

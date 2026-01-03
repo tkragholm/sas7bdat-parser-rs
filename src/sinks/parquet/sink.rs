@@ -8,7 +8,7 @@ use parquet::schema::types::{Type, TypePtr};
 
 use crate::error::{Error, Result};
 use crate::parser::ColumnarBatch;
-use crate::sinks::{ColumnarSink, RowSink, SinkContext};
+use crate::sinks::{ColumnarSink, RowSink, SinkContext, validate_sink_begin};
 use crate::value::Value;
 
 use super::constants::{
@@ -138,17 +138,7 @@ impl<W: Write + Send> ParquetSink<W> {
 
 impl<W: Write + Send> RowSink for ParquetSink<W> {
     fn begin(&mut self, context: SinkContext<'_>) -> Result<()> {
-        if self.writer.is_some() {
-            return Err(Error::Unsupported {
-                feature: Cow::from("Parquet sink cannot be reused without finishing"),
-            });
-        }
-
-        if context.metadata.variables.len() != context.columns.len() {
-            return Err(Error::InvalidMetadata {
-                details: Cow::from("column metadata length mismatch"),
-            });
-        }
+        validate_sink_begin(&context, self.writer.is_some(), "Parquet")?;
 
         let mut plans = Vec::with_capacity(context.columns.len());
         let mut fields: Vec<TypePtr> = Vec::with_capacity(context.columns.len());

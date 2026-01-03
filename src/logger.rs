@@ -60,21 +60,19 @@ impl Drop for LogPrefixGuard {
 }
 
 pub fn log_warn(message: &str) {
-    let message = format_with_prefix(message);
-    eprintln!("{message}");
-    if let Some(writer) = LOG_FILE.get()
-        && let Ok(mut file) = writer.lock()
-    {
-        let _ = writeln!(file, "warning: {message}");
-    }
+    log_with_level("warning", message);
 }
 
 pub fn log_error(message: &str) {
+    log_with_level("error", message);
+}
+
+fn log_with_level(level: &str, message: &str) {
     let message = format_with_prefix(message);
     eprintln!("{message}");
     if let Some(writer) = LOG_FILE.get()
         && let Ok(mut file) = writer.lock()
     {
-        let _ = writeln!(file, "error: {message}");
+        let _ = writeln!(file, "{level}: {message}");
     }
 }
