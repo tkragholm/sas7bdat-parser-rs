@@ -1,4 +1,4 @@
-use crate::metadata::Compression;
+use crate::dataset::Compression;
 
 #[derive(Debug, Clone)]
 pub struct RowInfo {

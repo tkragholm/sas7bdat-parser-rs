@@ -1,10 +1,10 @@
 #![allow(clippy::pedantic)]
-use sas7bdat::api::SasFile;
-use sas7bdat::value::Value;
+use sas7bdat::CellValue;
+use sas7bdat::SasReader;
 
 #[test]
 fn parse_test1_metadata_smoke() {
-    let mut sas = SasFile::open("fixtures/raw_data/pandas/test1.sas7bdat").expect("sas open");
+    let mut sas = SasReader::open("fixtures/raw_data/pandas/test1.sas7bdat").expect("sas open");
     let metadata = sas.metadata();
 
     assert_eq!(metadata.column_count, 100);
@@ -15,41 +15,41 @@ fn parse_test1_metadata_smoke() {
     let mut row_iter = sas.rows().expect("create row iterator");
     let row = row_iter.next().expect("row result").expect("row data");
     match &row[0] {
-        Value::Float(v) => assert!((v - 0.636).abs() < 1e-6),
+        CellValue::Float(v) => assert!((v - 0.636).abs() < 1e-6),
         other => panic!("unexpected value for Column1: {other:?}"),
     }
     match &row[1] {
-        Value::Str(s) => assert_eq!(s.as_ref(), "pear"),
+        CellValue::Str(s) => assert_eq!(s.as_ref(), "pear"),
         other => panic!("unexpected value for Column2: {other:?}"),
     }
     match &row[2] {
-        Value::Float(v) => assert_eq!(*v, 84.0),
-        Value::Int64(v) => assert_eq!(*v, 84),
-        Value::Int32(v) => assert_eq!(*v as i64, 84),
+        CellValue::Float(v) => assert_eq!(*v, 84.0),
+        CellValue::Int64(v) => assert_eq!(*v, 84),
+        CellValue::Int32(v) => assert_eq!(*v as i64, 84),
         other => panic!("unexpected value for Column3: {other:?}"),
     }
 }
 
 #[test]
 fn project_test1_subset() {
-    let mut sas = SasFile::open("fixtures/raw_data/pandas/test1.sas7bdat").expect("sas open");
+    let mut sas = SasReader::open("fixtures/raw_data/pandas/test1.sas7bdat").expect("sas open");
     let mut projected = sas
-        .project_rows(&[0, 2, 4])
+        .select_columns(&[0, 2, 4])
         .expect("create projected iterator");
     let row = projected.next().expect("row result").expect("row data");
     assert_eq!(row.len(), 3);
     match &row[0] {
-        Value::Float(v) => assert!((*v - 0.636).abs() < 1e-6),
+        CellValue::Float(v) => assert!((*v - 0.636).abs() < 1e-6),
         other => panic!("unexpected value in projection for Column1: {other:?}"),
     }
     match &row[1] {
-        Value::Float(v) => assert_eq!(*v, 84.0),
-        Value::Int64(v) => assert_eq!(*v, 84),
-        Value::Int32(v) => assert_eq!(*v as i64, 84),
+        CellValue::Float(v) => assert_eq!(*v, 84.0),
+        CellValue::Int64(v) => assert_eq!(*v, 84),
+        CellValue::Int32(v) => assert_eq!(*v as i64, 84),
         other => panic!("unexpected value in projection for Column3: {other:?}"),
     }
     match &row[2] {
-        Value::Float(v) => assert!((*v - 0.103).abs() < 1e-6),
+        CellValue::Float(v) => assert!((*v - 0.103).abs() < 1e-6),
         other => panic!("unexpected value in projection for Column5: {other:?}"),
     }
 }

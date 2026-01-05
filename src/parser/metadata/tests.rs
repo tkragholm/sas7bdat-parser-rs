@@ -6,7 +6,7 @@ use super::subheaders::{
     parse_column_attrs_subheader, parse_column_format_subheader, parse_column_list_subheader,
     parse_column_name_subheader, parse_column_text_subheader,
 };
-use crate::metadata::{Alignment, Endianness, Measure};
+use crate::dataset::{Alignment, Endianness, Measure};
 use encoding_rs::UTF_8;
 
 fn set_subheader_remainder(bytes: &mut [u8], signature_len: usize) {

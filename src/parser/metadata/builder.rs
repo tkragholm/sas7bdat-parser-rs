@@ -1,4 +1,4 @@
-use crate::metadata::{Alignment, Measure};
+use crate::dataset::{Alignment, Measure};
 use std::borrow::Cow;
 
 use super::column_info::{ColumnInfo, ColumnKind, ColumnOffsets, NumericKind, infer_numeric_kind};

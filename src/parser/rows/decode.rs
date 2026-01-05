@@ -6,11 +6,11 @@ use encoding_rs::{Encoding, UTF_8};
 use simdutf8::basic;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
-use crate::metadata::{Endianness, MissingLiteral, TaggedMissing};
+use crate::dataset::{Endianness, MissingLiteral, TaggedMissing};
 use crate::parser::core::encoding::trim_trailing;
 use crate::parser::core::float_utils::try_int_from_f64;
 use crate::parser::metadata::{ColumnKind, NumericKind};
-use crate::value::{MissingValue, Value};
+use crate::cell::{CellValue, MissingValue};
 
 #[derive(Clone)]
 pub enum NumericCell {
@@ -24,21 +24,21 @@ pub fn decode_value_inner<'data>(
     slice: &'data [u8],
     encoding: &'static Encoding,
     endianness: Endianness,
-) -> Value<'data> {
+) -> CellValue<'data> {
     match kind {
-        ColumnKind::Character => Value::Str(decode_string(slice, encoding)),
+        ColumnKind::Character => CellValue::Str(decode_string(slice, encoding)),
         ColumnKind::Numeric(numeric_kind) => match decode_numeric_cell(slice, endianness) {
-            NumericCell::Missing(missing) => Value::Missing(missing),
+            NumericCell::Missing(missing) => CellValue::Missing(missing),
             NumericCell::Number(number) => match numeric_kind {
                 NumericKind::Double => numeric_value_from_width(number, raw_width),
                 NumericKind::Date => sas_days_to_datetime(number)
-                    .map_or_else(|| numeric_value_from_width(number, raw_width), Value::Date),
+                    .map_or_else(|| numeric_value_from_width(number, raw_width), CellValue::Date),
                 NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
                     || numeric_value_from_width(number, raw_width),
-                    Value::DateTime,
+                    CellValue::DateTime,
                 ),
                 NumericKind::Time => sas_seconds_to_time(number)
-                    .map_or_else(|| numeric_value_from_width(number, raw_width), Value::Time),
+                    .map_or_else(|| numeric_value_from_width(number, raw_width), CellValue::Time),
             },
         },
     }
@@ -173,18 +173,18 @@ const fn decode_missing_from_bits(raw: u64) -> MissingValue {
     }
 }
 
-fn numeric_value_from_width<'a>(number: f64, width: u32) -> Value<'a> {
+fn numeric_value_from_width<'a>(number: f64, width: u32) -> CellValue<'a> {
     if let Some(int) = try_int_from_f64::<i64>(number) {
         if width <= 4 {
             if let Ok(value32) = i32::try_from(int) {
-                return Value::Int32(value32);
+                return CellValue::Int32(value32);
             }
-            return Value::Int64(int);
+            return CellValue::Int64(int);
         } else if width <= 8 {
-            return Value::Int64(int);
+            return CellValue::Int64(int);
         }
     }
-    Value::Float(number)
+    CellValue::Float(number)
 }
 
 const fn repeat_byte_usize(byte: u8) -> usize {

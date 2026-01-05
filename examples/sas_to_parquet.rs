@@ -6,7 +6,7 @@ use std::process;
 use std::time::Duration;
 
 use reqwest::blocking::{Client, ClientBuilder};
-use sas7bdat::{ParquetSink, SasFile};
+use sas7bdat::{ParquetSink, SasReader};
 use tempfile::tempdir;
 use zip::ZipArchive;
 
@@ -48,11 +48,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Extracting SAS dataset...");
     let sas_path = extract_sas7bdat(&zip_path, temp_dir.path())?;
 
-    let mut sas = SasFile::open(&sas_path)?;
+    let mut sas = SasReader::open(&sas_path)?;
     let file = File::create(&output_path)?;
     let mut sink = ParquetSink::new(file).with_row_group_size(16_384);
 
-    sas.write_into_sink(&mut sink)?;
+    sas.stream_into(&mut sink)?;
     let _ = sink.into_inner()?;
 
     println!(

@@ -3,16 +3,16 @@ use std::io::{Cursor, Read, Seek};
 
 use encoding_rs::Encoding;
 
-use crate::metadata::{Alignment, Compression, DatasetMetadata, Endianness, Measure, Vendor};
+use crate::dataset::{Alignment, Compression, DatasetMetadata, Endianness, Measure, Vendor};
 use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::header::SasHeader;
 use crate::parser::metadata::{
-    ColumnInfo, ColumnKind, ColumnOffsets, ParsedMetadata, RowInfo, TextRef, TextStore,
+    ColumnInfo, ColumnKind, ColumnOffsets, DatasetLayout, RowInfo, TextRef, TextStore,
 };
 use crate::parser::rows::columnar::COLUMNAR_BATCH_ROWS;
 use crate::parser::rows::compression::{decompress_rdc, decompress_rle};
 use crate::parser::rows::constants::SAS_PAGE_TYPE_DATA;
-use crate::value::Value;
+use crate::cell::CellValue;
 
 use super::iterator::RowIterator;
 use super::row_iterator;
@@ -24,7 +24,7 @@ fn make_parsed_metadata(
     total_rows: u64,
     rows_per_page: u64,
     page_size: u32,
-) -> ParsedMetadata {
+) -> DatasetLayout {
     let mut metadata = DatasetMetadata::new(1);
     metadata.row_count = total_rows;
     metadata.column_count = 1;
@@ -70,7 +70,7 @@ fn make_parsed_metadata(
         file_label: None,
     };
 
-    ParsedMetadata {
+    DatasetLayout {
         header,
         text_store: TextStore::new(resolve_encoding(None)),
         columns: vec![column],
@@ -137,7 +137,7 @@ fn write_rows_to_page(page: &mut [u8], rows: &[&[u8]], row_length: usize) {
     }
 }
 
-fn setup_data_iter(rows: &[&[u8]], row_length: usize) -> (Cursor<Vec<u8>>, ParsedMetadata) {
+fn setup_data_iter(rows: &[&[u8]], row_length: usize) -> (Cursor<Vec<u8>>, DatasetLayout) {
     let page = make_data_page(rows, row_length, 64);
     let parsed = make_parsed_metadata(
         Vendor::Sas,
@@ -155,7 +155,7 @@ fn assert_rows_from_iter<R: Read + Seek>(iter: &mut RowIterator<'_, R>, expected
         let row = iter.try_next().expect("row result").expect("row present");
         assert_eq!(
             row,
-            vec![Value::Str(Cow::Borrowed(*expected_row))],
+            vec![CellValue::Str(Cow::Borrowed(*expected_row))],
             "row {}",
             index + 1
         );
@@ -163,7 +163,7 @@ fn assert_rows_from_iter<R: Read + Seek>(iter: &mut RowIterator<'_, R>, expected
     assert!(iter.try_next().expect("end result").is_none());
 }
 
-fn assert_rows_from_page(page: Vec<u8>, parsed: &ParsedMetadata, expected: &[&str]) {
+fn assert_rows_from_page(page: Vec<u8>, parsed: &DatasetLayout, expected: &[&str]) {
     let mut cursor = Cursor::new(page);
     let mut iter = row_iterator(&mut cursor, parsed).expect("construct row iterator");
     assert_rows_from_iter(&mut iter, expected);

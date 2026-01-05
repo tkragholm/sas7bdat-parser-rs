@@ -104,7 +104,7 @@ pub fn next_columnar_batch<'iter, R: Read + Seek>(
     let batch = ColumnarBatch::new(
         row_slices,
         &iter.columnar_columns,
-        iter.parsed.header.endianness,
+        iter.layout.header.endianness,
         iter.encoding,
         false,
     );
@@ -179,7 +179,7 @@ pub fn next_columnar_batch_contiguous<'iter, R: Read + Seek>(
     let batch = ColumnarBatch::new(
         row_slices,
         &iter.columnar_columns,
-        iter.parsed.header.endianness,
+        iter.layout.header.endianness,
         iter.encoding,
         true,
     );

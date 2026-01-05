@@ -2,11 +2,11 @@ use std::borrow::Cow;
 
 use time::{Duration, OffsetDateTime};
 
-use crate::metadata::{MissingLiteral, TaggedMissing};
+use crate::dataset::{MissingLiteral, TaggedMissing};
 
 /// Represents a single cell value produced by the SAS reader.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value<'a> {
+pub enum CellValue<'a> {
     /// 64-bit floating point number.
     Float(f64),
     /// 32-bit signed integer.
@@ -29,20 +29,20 @@ pub enum Value<'a> {
     Missing(MissingValue),
 }
 
-impl Value<'_> {
+impl CellValue<'_> {
     #[must_use]
-    pub fn into_owned(self) -> Value<'static> {
+    pub fn into_owned(self) -> CellValue<'static> {
         match self {
-            Value::Float(v) => Value::Float(v),
-            Value::Int32(v) => Value::Int32(v),
-            Value::Int64(v) => Value::Int64(v),
-            Value::NumericString(s) => Value::NumericString(Cow::Owned(s.into_owned())),
-            Value::Str(s) => Value::Str(Cow::Owned(s.into_owned())),
-            Value::Bytes(bytes) => Value::Bytes(Cow::Owned(bytes.into_owned())),
-            Value::DateTime(dt) => Value::DateTime(dt),
-            Value::Date(dt) => Value::Date(dt),
-            Value::Time(duration) => Value::Time(duration),
-            Value::Missing(missing) => Value::Missing(missing),
+            CellValue::Float(v) => CellValue::Float(v),
+            CellValue::Int32(v) => CellValue::Int32(v),
+            CellValue::Int64(v) => CellValue::Int64(v),
+            CellValue::NumericString(s) => CellValue::NumericString(Cow::Owned(s.into_owned())),
+            CellValue::Str(s) => CellValue::Str(Cow::Owned(s.into_owned())),
+            CellValue::Bytes(bytes) => CellValue::Bytes(Cow::Owned(bytes.into_owned())),
+            CellValue::DateTime(dt) => CellValue::DateTime(dt),
+            CellValue::Date(dt) => CellValue::Date(dt),
+            CellValue::Time(duration) => CellValue::Time(duration),
+            CellValue::Missing(missing) => CellValue::Missing(missing),
         }
     }
 }

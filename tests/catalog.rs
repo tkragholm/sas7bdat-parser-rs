@@ -1,17 +1,17 @@
 use std::path::Path;
 
-use sas7bdat::SasFile;
+use sas7bdat::SasReader;
 
 #[test]
-fn load_catalog_assigns_value_labels() {
+fn attach_catalog_assigns_value_labels() {
     let data_path = Path::new("fixtures/raw_data/readstat/test_data_win.sas7bdat");
     let catalog_path = Path::new("fixtures/raw_data/readstat/test_formats_win.sas7bcat");
 
-    let mut sas = SasFile::open(data_path).expect("open dataset");
+    let mut sas = SasReader::open(data_path).expect("open dataset");
     let metadata = sas.metadata();
     assert!(metadata.label_sets.is_empty());
 
-    sas.load_catalog(catalog_path).expect("load catalog");
+    sas.attach_catalog(catalog_path).expect("load catalog");
 
     let metadata = sas.metadata();
     assert!(metadata.label_sets.contains_key("$A"));

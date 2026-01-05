@@ -1,7 +1,7 @@
 #![allow(clippy::pedantic)]
 use csv::ReaderBuilder;
-use sas7bdat::SasFile;
-use sas7bdat::value::Value;
+use sas7bdat::SasReader;
+use sas7bdat::CellValue;
 use std::path::Path;
 use std::sync::OnceLock;
 use time::format_description::{self, FormatItem};
@@ -21,7 +21,7 @@ fn fixtures_match_csv_rows() {
 
     for (sas_file, csv_path) in cases {
         let sas_path = Path::new("fixtures/raw_data/pandas").join(sas_file);
-        let mut sas = SasFile::open(&sas_path)
+        let mut sas = SasReader::open(&sas_path)
             .unwrap_or_else(|err| panic!("failed to open {}: {}", sas_path.display(), err));
         let metadata = sas.metadata().clone();
         let csv_fixture = load_csv_fixture(csv_path);
@@ -144,7 +144,7 @@ fn load_csv_fixture(path: &str) -> CsvFixture {
 }
 
 fn assert_value_matches_csv(
-    value: &Value<'_>,
+    value: &CellValue<'_>,
     expected: &str,
     column: &str,
     row_idx: usize,
@@ -152,8 +152,8 @@ fn assert_value_matches_csv(
 ) {
     if expected.is_empty() {
         match value {
-            Value::Missing(_) => return,
-            Value::Str(s) | Value::NumericString(s) => {
+            CellValue::Missing(_) => return,
+            CellValue::Str(s) | CellValue::NumericString(s) => {
                 assert!(
                     s.is_empty(),
                     "expected empty string treated as missing for {} in {} row {} but got {:?}",
@@ -163,7 +163,7 @@ fn assert_value_matches_csv(
                     value
                 );
             }
-            Value::Bytes(bytes) => {
+            CellValue::Bytes(bytes) => {
                 assert!(
                     bytes.is_empty(),
                     "expected empty bytes treated as missing for {} in {} row {} but got {:?}",
@@ -182,7 +182,7 @@ fn assert_value_matches_csv(
     }
 
     match value {
-        Value::Float(actual) => {
+        CellValue::Float(actual) => {
             let expected = expected.parse::<f64>().unwrap_or_else(|err| {
                 panic!(
                     "csv float parse failed for {} in {} row {}: {} (value {:?})",
@@ -199,7 +199,7 @@ fn assert_value_matches_csv(
                 expected
             );
         }
-        Value::Int32(actual) => {
+        CellValue::Int32(actual) => {
             let expected = parse_expected_integer(expected, column, file, row_idx);
             let expected = i32::try_from(expected).unwrap_or_else(|_| {
                 panic!(
@@ -213,7 +213,7 @@ fn assert_value_matches_csv(
                 column, file, row_idx, actual, expected
             );
         }
-        Value::Int64(actual) => {
+        CellValue::Int64(actual) => {
             let expected = parse_expected_integer(expected, column, file, row_idx);
             assert_eq!(
                 *actual, expected,
@@ -221,7 +221,7 @@ fn assert_value_matches_csv(
                 column, file, row_idx, actual, expected
             );
         }
-        Value::NumericString(actual) | Value::Str(actual) => {
+        CellValue::NumericString(actual) | CellValue::Str(actual) => {
             assert_eq!(
                 actual.as_ref(),
                 expected,
@@ -233,7 +233,7 @@ fn assert_value_matches_csv(
                 expected
             );
         }
-        Value::Bytes(actual) => {
+        CellValue::Bytes(actual) => {
             let actual_text = String::from_utf8_lossy(actual);
             assert_eq!(
                 actual_text, expected,
@@ -241,7 +241,7 @@ fn assert_value_matches_csv(
                 column, file, row_idx, actual_text, expected
             );
         }
-        Value::DateTime(actual) => {
+        CellValue::DateTime(actual) => {
             let expected_dt = parse_csv_datetime(expected).unwrap_or_else(|| {
                 panic!(
                     "failed to parse csv datetime for {} in {} row {}: {:?}",
@@ -256,7 +256,7 @@ fn assert_value_matches_csv(
                 column, file, row_idx, actual_str, expected_str
             );
         }
-        Value::Date(actual) => {
+        CellValue::Date(actual) => {
             let expected_date = parse_csv_date(expected).unwrap_or_else(|| {
                 panic!(
                     "failed to parse csv date for {} in {} row {}: {:?}",
@@ -271,7 +271,7 @@ fn assert_value_matches_csv(
                 column, file, row_idx, actual_str, expected_str
             );
         }
-        Value::Time(actual) => {
+        CellValue::Time(actual) => {
             let expected_duration = parse_csv_time(expected).unwrap_or_else(|| {
                 panic!(
                     "failed to parse csv time for {} in {} row {}: {:?}",
@@ -288,7 +288,7 @@ fn assert_value_matches_csv(
                 expected_duration
             );
         }
-        Value::Missing(_) => panic!(
+        CellValue::Missing(_) => panic!(
             "unexpected missing value for {} in {} row {} while csv had {:?}",
             column, file, row_idx, expected
         ),

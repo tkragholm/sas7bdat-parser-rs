@@ -4,9 +4,9 @@ mod parquet;
 use std::borrow::Cow;
 
 use crate::error::{Error, Result};
-use crate::metadata::DatasetMetadata;
-use crate::parser::{ColumnInfo, ColumnarBatch, ParsedMetadata, StreamingRow};
-use crate::value::Value;
+use crate::cell::CellValue;
+use crate::dataset::DatasetMetadata;
+use crate::parser::{ColumnInfo, ColumnarBatch, DatasetLayout, StreamingRow};
 
 pub use csv::CsvSink;
 pub use parquet::ParquetSink;
@@ -20,7 +20,7 @@ pub struct SinkContext<'a> {
 
 impl<'a> SinkContext<'a> {
     #[must_use]
-    pub fn new(parsed: &'a ParsedMetadata) -> Self {
+    pub fn new(parsed: &'a DatasetLayout) -> Self {
         Self {
             metadata: &parsed.header.metadata,
             columns: &parsed.columns,
@@ -43,11 +43,11 @@ pub trait RowSink {
     /// # Errors
     ///
     /// Returns an error if the row cannot be encoded or written to the underlying output.
-    fn write_row(&mut self, row: &[Value<'_>]) -> Result<()>;
+    fn write_row(&mut self, row: &[CellValue<'_>]) -> Result<()>;
 
     /// Invoked for every decoded row when using the zero-copy streaming pipeline.
     ///
-    /// The default implementation materialises the row into a temporary `Vec<Value>`
+    /// The default implementation materialises the row into a temporary `Vec<CellValue>`
     /// before delegating to [`write_row`](RowSink::write_row).
     ///
     /// # Errors

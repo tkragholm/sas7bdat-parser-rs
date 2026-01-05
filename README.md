@@ -75,10 +75,10 @@ AHS_ZIP_URL=https://your.mirror/AHS2013.zip cargo run --example sas_to_parquet
 
 ```rust
 use std::fs::File;
-use sas7bdat::SasFile;
+use sas7bdat::SasReader;
 
 fn main() -> sas7bdat::Result<()> {
-    let mut sas = SasFile::open("dataset.sas7bdat")?;
+    let mut sas = SasReader::open("dataset.sas7bdat")?;
     let metadata = sas.metadata().clone();
     println!("Columns: {}", metadata.variables.len());
 

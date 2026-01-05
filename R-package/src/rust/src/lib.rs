@@ -10,10 +10,10 @@ use std::fs::File;
 use std::io::BufWriter;
 
 // Bring in the core crate
-use sas7bdat::SasFile;
-use sas7bdat::metadata::{VariableKind, Vendor};
+use sas7bdat::SasReader;
+use sas7bdat::dataset::{VariableKind, Vendor};
 use sas7bdat::sinks::{CsvSink, ParquetSink};
-use sas7bdat::value::Value;
+use sas7bdat::CellValue;
 
 /// Convert Input To Upper-Case
 ///
@@ -152,7 +152,7 @@ fn map_io_err(action: &str, path: &str, err: &std::io::Error) -> savvy::Error {
 /// @export
 #[savvy]
 fn sas_row_count(path: &str) -> savvy::Result<savvy::Sexp> {
-    let file = SasFile::open(path).map_err(map_core_err)?;
+    let file = SasReader::open(path).map_err(map_core_err)?;
     // Prefer metadata row_count when available
     let rc = file.metadata().row_count;
     let mut out = OwnedIntegerSexp::new(1)?;
@@ -169,7 +169,7 @@ fn sas_row_count(path: &str) -> savvy::Result<savvy::Sexp> {
 /// @export
 #[savvy]
 fn sas_column_names(path: &str) -> savvy::Result<savvy::Sexp> {
-    let file = SasFile::open(path).map_err(map_core_err)?;
+    let file = SasReader::open(path).map_err(map_core_err)?;
     let names: Vec<String> = file
         .metadata()
         .variables
@@ -190,7 +190,7 @@ fn sas_column_names(path: &str) -> savvy::Result<savvy::Sexp> {
 /// @export
 #[savvy]
 fn sas_metadata_json(path: &str) -> savvy::Result<savvy::Sexp> {
-    let file = SasFile::open(path).map_err(map_core_err)?;
+    let file = SasReader::open(path).map_err(map_core_err)?;
     let md = file.metadata();
 
     let vendor = match md.vendor {
@@ -199,14 +199,14 @@ fn sas_metadata_json(path: &str) -> savvy::Result<savvy::Sexp> {
         Vendor::Other(_) => "Other",
     };
     let compression = match md.compression {
-        sas7bdat::metadata::Compression::None => "none",
-        sas7bdat::metadata::Compression::Row => "row",
-        sas7bdat::metadata::Compression::Binary => "binary",
-        sas7bdat::metadata::Compression::Unknown(_) => "unknown",
+        sas7bdat::dataset::Compression::None => "none",
+        sas7bdat::dataset::Compression::Row => "row",
+        sas7bdat::dataset::Compression::Binary => "binary",
+        sas7bdat::dataset::Compression::Unknown(_) => "unknown",
     };
     let endianness = match md.endianness {
-        sas7bdat::metadata::Endianness::Little => "little",
-        sas7bdat::metadata::Endianness::Big => "big",
+        sas7bdat::dataset::Endianness::Little => "little",
+        sas7bdat::dataset::Endianness::Big => "big",
     };
 
     let column_names: Vec<&str> = md.variables.iter().map(|v| v.name.as_str()).collect();
@@ -283,19 +283,19 @@ impl NumericColumn {
     }
 
     #[allow(clippy::cast_precision_loss)]
-    fn push(&mut self, value: &Value<'_>, column_name: &str) -> savvy::Result<()> {
+    fn push(&mut self, value: &CellValue<'_>, column_name: &str) -> savvy::Result<()> {
         match value {
-            Value::Missing(_) => self.values.push(f64::NAN),
-            Value::Float(v) => self.values.push(*v),
-            Value::Int32(v) => self.values.push(f64::from(*v)),
-            Value::Int64(v) => self.values.push(*v as f64),
-            Value::NumericString(text) | Value::Str(text) => {
+            CellValue::Missing(_) => self.values.push(f64::NAN),
+            CellValue::Float(v) => self.values.push(*v),
+            CellValue::Int32(v) => self.values.push(f64::from(*v)),
+            CellValue::Int64(v) => self.values.push(*v as f64),
+            CellValue::NumericString(text) | CellValue::Str(text) => {
                 match parse_numeric(text.as_ref(), column_name)? {
                     Some(num) => self.values.push(num),
                     None => self.values.push(f64::NAN),
                 }
             }
-            Value::Bytes(bytes) => {
+            CellValue::Bytes(bytes) => {
                 let text = std::str::from_utf8(bytes.as_ref()).map_err(|_| {
                     savvy::Error::new(format!(
                         "column '{column_name}' contains non-UTF8 bytes in numeric field"
@@ -306,19 +306,19 @@ impl NumericColumn {
                     None => self.values.push(f64::NAN),
                 }
             }
-            Value::Date(datetime) => {
+            CellValue::Date(datetime) => {
                 self.role.update(NumericRole::Date);
             let seconds = datetime.unix_timestamp() as f64
                 + f64::from(datetime.nanosecond()) / 1_000_000_000.0;
             self.values.push(seconds / 86_400.0);
         }
-        Value::DateTime(datetime) => {
+        CellValue::DateTime(datetime) => {
             self.role.update(NumericRole::DateTime);
             let seconds = datetime.unix_timestamp() as f64
                 + f64::from(datetime.nanosecond()) / 1_000_000_000.0;
             self.values.push(seconds);
         }
-            Value::Time(duration) => {
+            CellValue::Time(duration) => {
                 self.role.update(NumericRole::Time);
                 self.values.push(duration.as_seconds_f64());
             }
@@ -345,24 +345,24 @@ impl StringColumn {
         }
     }
 
-    fn push(&mut self, value: &Value<'_>) -> savvy::Result<()> {
+    fn push(&mut self, value: &CellValue<'_>) -> savvy::Result<()> {
         match value {
-            Value::Missing(_) => self.values.push(None),
-            Value::Str(text) | Value::NumericString(text) => {
+            CellValue::Missing(_) => self.values.push(None),
+            CellValue::Str(text) | CellValue::NumericString(text) => {
                 self.values.push(Some(text.as_ref().to_string()));
             }
-            Value::Bytes(bytes) => {
+            CellValue::Bytes(bytes) => {
                 let text = std::str::from_utf8(bytes.as_ref()).map_err(|_| {
                     savvy::Error::new("character column contains non-UTF8 bytes".to_string())
                 })?;
                 self.values.push(Some(text.to_string()));
             }
-            Value::Float(v) => self.values.push(Some(format!("{v}"))),
-            Value::Int32(v) => self.values.push(Some(v.to_string())),
-            Value::Int64(v) => self.values.push(Some(v.to_string())),
-            Value::DateTime(datetime) => self.values.push(Some(datetime.to_string())),
-            Value::Date(datetime) => self.values.push(Some(datetime.date().to_string())),
-            Value::Time(duration) => self.values.push(Some(duration.to_string())),
+            CellValue::Float(v) => self.values.push(Some(format!("{v}"))),
+            CellValue::Int32(v) => self.values.push(Some(v.to_string())),
+            CellValue::Int64(v) => self.values.push(Some(v.to_string())),
+            CellValue::DateTime(datetime) => self.values.push(Some(datetime.to_string())),
+            CellValue::Date(datetime) => self.values.push(Some(datetime.date().to_string())),
+            CellValue::Time(duration) => self.values.push(Some(duration.to_string())),
         }
         Ok(())
     }
@@ -386,7 +386,7 @@ enum ColumnData {
 }
 
 impl ColumnData {
-    fn push(&mut self, value: &Value<'_>, column_name: &str) -> savvy::Result<()> {
+    fn push(&mut self, value: &CellValue<'_>, column_name: &str) -> savvy::Result<()> {
         match self {
             Self::Numeric(col) => col.push(value, column_name),
             Self::Character(col) => col.push(value),
@@ -420,7 +420,7 @@ fn parse_numeric(text: &str, column_name: &str) -> savvy::Result<Option<f64>> {
 /// @export
 #[savvy]
 fn read_sas(path: &str) -> savvy::Result<savvy::Sexp> {
-    let mut file = SasFile::open(path).map_err(map_core_err)?;
+    let mut file = SasReader::open(path).map_err(map_core_err)?;
     let metadata = file.metadata().clone();
 
     let column_count = metadata.variables.len();
@@ -501,21 +501,21 @@ fn read_sas(path: &str) -> savvy::Result<savvy::Sexp> {
 /// @export
 #[savvy]
 fn write_sas(path: &str, sink: &str, output: &str) -> savvy::Result<()> {
-    let mut sas = SasFile::open(path).map_err(map_core_err)?;
+    let mut sas = SasReader::open(path).map_err(map_core_err)?;
     let sink_kind = sink.trim().to_ascii_lowercase();
     match sink_kind.as_str() {
         "parquet" => {
             let file =
                 File::create(output).map_err(|e| map_io_err("create parquet file", output, &e))?;
             let mut writer = ParquetSink::new(file);
-            sas.write_into_sink(&mut writer).map_err(map_core_err)?;
+            sas.stream_into(&mut writer).map_err(map_core_err)?;
         }
         "csv" => {
             let file =
                 File::create(output).map_err(|e| map_io_err("create csv file", output, &e))?;
             let buf = BufWriter::new(file);
             let mut writer = CsvSink::new(buf);
-            sas.write_into_sink(&mut writer).map_err(map_core_err)?;
+            sas.stream_into(&mut writer).map_err(map_core_err)?;
         }
         other => {
             return Err(savvy::Error::new(format!(

@@ -4,7 +4,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 use crate::error::{Error, Result, Section};
 use crate::logger::log_warn;
-use crate::metadata::{Compression, Vendor};
+use crate::dataset::{Compression, Vendor};
 use crate::parser::core::byteorder::read_u16;
 use crate::parser::metadata::{PageKind, classify_page};
 
@@ -20,7 +20,7 @@ use super::pointer::{parse_pointer, read_signature, signature_is_recognized};
 impl<R: Read + Seek> RowIterator<'_, R> {
     #[allow(clippy::too_many_lines)]
     pub(crate) fn fetch_next_page(&mut self) -> Result<()> {
-        let header = &self.parsed.header;
+        let header = &self.layout.header;
         let row_length = self.row_length;
 
         while self.next_page_index < header.page_count {
@@ -183,7 +183,7 @@ impl<R: Read + Seek> RowIterator<'_, R> {
                     SAS_COMPRESSION_ROW => {
                         let mut buffer = self.take_row_buffer();
                         let data = &self.page_buffer[data_start..data_end];
-                        let compression_mode = self.parsed.row_info.compression;
+                        let compression_mode = self.layout.row_info.compression;
                         match compression_mode {
                             Compression::Row => decompress_rle(data, row_length, &mut buffer),
                             Compression::Binary => decompress_rdc(data, row_length, &mut buffer),
@@ -279,7 +279,7 @@ impl<R: Read + Seek> RowIterator<'_, R> {
                     usize::try_from(remaining_rows_u64).map_or(usize::MAX, |value| value);
 
                 let mut rows_to_take = if base_page_type == SAS_PAGE_TYPE_MIX {
-                    let mix_limit = usize::try_from(self.parsed.row_info.rows_per_page)
+                    let mix_limit = usize::try_from(self.layout.row_info.rows_per_page)
                         .map_or(usize::MAX, |value| value);
                     let mix_limit = if mix_limit == 0 {
                         possible_rows

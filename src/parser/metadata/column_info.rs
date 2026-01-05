@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 
 use crate::error::{Error, Result};
-use crate::metadata::{Alignment, Format, Measure, MissingValuePolicy, Variable, VariableKind};
+use crate::dataset::{Alignment, Format, Measure, MissingValuePolicy, Variable, VariableKind};
 
 use super::text_store::{TextRef, TextStore};
 

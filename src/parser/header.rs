@@ -5,7 +5,7 @@ use std::io::{Read, Seek, SeekFrom};
 use time::{Duration, OffsetDateTime};
 
 use crate::error::{Error, Result, Section};
-use crate::metadata::{
+use crate::dataset::{
     Compression, DatasetMetadata, DatasetTimestamps, Endianness, SasVersion, Vendor,
 };
 

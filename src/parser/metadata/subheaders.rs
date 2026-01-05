@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 
 use crate::error::{Error, Result, Section};
-use crate::metadata::{Alignment, Compression, Endianness, Measure};
+use crate::dataset::{Alignment, Compression, Endianness, Measure};
 use crate::parser::core::byteorder::{read_i16, read_u16, read_u32, read_u64};
 
 use super::builder::ColumnMetadataBuilder;

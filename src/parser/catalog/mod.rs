@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 use encoding_rs::Encoding;
 
 use crate::error::{Error, Result, Section};
-use crate::metadata::{LabelSet, ValueKey, ValueLabel, ValueType};
+use crate::dataset::{LabelSet, ValueKey, ValueLabel, ValueType};
 use crate::parser::core::byteorder::{read_u16, read_u32, read_u64, read_u64_be};
 use crate::parser::core::encoding::{resolve_encoding, trim_trailing};
 use crate::parser::core::float_utils::try_int_from_f64;
@@ -15,7 +15,7 @@ use crate::parser::header::{SasHeader, parse_header};
 const SAS_CATALOG_FIRST_INDEX_PAGE: u64 = 1;
 const SAS_CATALOG_USELESS_PAGES: u64 = 3;
 
-pub struct ParsedCatalog {
+pub struct CatalogLayout {
     pub header: SasHeader,
     pub label_sets: Vec<LabelSet>,
 }
@@ -25,14 +25,14 @@ pub struct ParsedCatalog {
 /// # Errors
 ///
 /// Returns an error if the catalog metadata cannot be read or decoded.
-pub fn parse_catalog<R: Read + Seek>(reader: &mut R) -> Result<ParsedCatalog> {
+pub fn parse_catalog<R: Read + Seek>(reader: &mut R) -> Result<CatalogLayout> {
     let header = parse_header(reader)?;
     let encoding = resolve_encoding(header.metadata.file_encoding.as_deref());
 
     let index = CatalogueIndex::build(reader, &header)?;
     let label_sets = index.parse_label_sets(reader, &header, encoding)?;
 
-    Ok(ParsedCatalog { header, label_sets })
+    Ok(CatalogLayout { header, label_sets })
 }
 
 struct CatalogueIndex {

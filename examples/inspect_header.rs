@@ -28,10 +28,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cursor = header.page_header_size as usize;
     let subheader_count_pos = header.page_header_size as usize - 4;
     let subheader_count = match header.endianness {
-        sas7bdat::metadata::Endianness::Little => {
+        sas7bdat::dataset::Endianness::Little => {
             u16::from_le_bytes([page[subheader_count_pos], page[subheader_count_pos + 1]])
         }
-        sas7bdat::metadata::Endianness::Big => {
+        sas7bdat::dataset::Endianness::Big => {
             u16::from_be_bytes([page[subheader_count_pos], page[subheader_count_pos + 1]])
         }
     };
@@ -42,36 +42,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cursor += ptr_size;
         let (offset, length) = if header.uses_u64 {
             let offset = match header.endianness {
-                sas7bdat::metadata::Endianness::Little => {
+                sas7bdat::dataset::Endianness::Little => {
                     u64::from_le_bytes(pointer[0..8].try_into().unwrap())
                 }
-                sas7bdat::metadata::Endianness::Big => {
+                sas7bdat::dataset::Endianness::Big => {
                     u64::from_be_bytes(pointer[0..8].try_into().unwrap())
                 }
             };
             let length = match header.endianness {
-                sas7bdat::metadata::Endianness::Little => {
+                sas7bdat::dataset::Endianness::Little => {
                     u64::from_le_bytes(pointer[8..16].try_into().unwrap())
                 }
-                sas7bdat::metadata::Endianness::Big => {
+                sas7bdat::dataset::Endianness::Big => {
                     u64::from_be_bytes(pointer[8..16].try_into().unwrap())
                 }
             };
             (offset as u64, length as u64)
         } else {
             let offset = match header.endianness {
-                sas7bdat::metadata::Endianness::Little => {
+                sas7bdat::dataset::Endianness::Little => {
                     u32::from_le_bytes(pointer[0..4].try_into().unwrap())
                 }
-                sas7bdat::metadata::Endianness::Big => {
+                sas7bdat::dataset::Endianness::Big => {
                     u32::from_be_bytes(pointer[0..4].try_into().unwrap())
                 }
             };
             let length = match header.endianness {
-                sas7bdat::metadata::Endianness::Little => {
+                sas7bdat::dataset::Endianness::Little => {
                     u32::from_le_bytes(pointer[4..8].try_into().unwrap())
                 }
-                sas7bdat::metadata::Endianness::Big => {
+                sas7bdat::dataset::Endianness::Big => {
                     u32::from_be_bytes(pointer[4..8].try_into().unwrap())
                 }
             };

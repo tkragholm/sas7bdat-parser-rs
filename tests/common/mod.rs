@@ -1,5 +1,5 @@
 #![allow(dead_code, clippy::pedantic)]
-use sas7bdat::value::Value;
+use sas7bdat::CellValue;
 use serde_json::{Value as JsonValue, json};
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
@@ -12,30 +12,30 @@ fn sas_epoch() -> PrimitiveDateTime {
     )
 }
 
-pub fn value_to_json(value: &Value<'_>) -> JsonValue {
+pub fn value_to_json(value: &CellValue<'_>) -> JsonValue {
     match value {
-        Value::Float(v) => json!({ "kind": "number", "value": *v }),
-        Value::Int32(v) => json!({ "kind": "number", "value": *v as f64 }),
-        Value::Int64(v) => json!({ "kind": "number", "value": *v as f64 }),
-        Value::NumericString(s) => json!({ "kind": "string", "value": s }),
-        Value::Str(s) => json!({ "kind": "string", "value": s }),
-        Value::Bytes(b) => json!({
+        CellValue::Float(v) => json!({ "kind": "number", "value": *v }),
+        CellValue::Int32(v) => json!({ "kind": "number", "value": *v as f64 }),
+        CellValue::Int64(v) => json!({ "kind": "number", "value": *v as f64 }),
+        CellValue::NumericString(s) => json!({ "kind": "string", "value": s }),
+        CellValue::Str(s) => json!({ "kind": "string", "value": s }),
+        CellValue::Bytes(b) => json!({
             "kind": "bytes",
             "value": b.iter().copied().collect::<Vec<u8>>()
         }),
-        Value::DateTime(dt) => json!({
+        CellValue::DateTime(dt) => json!({
             "kind": "datetime",
             "value": datetime_to_seconds(dt)
         }),
-        Value::Date(dt) => json!({
+        CellValue::Date(dt) => json!({
             "kind": "date",
             "value": datetime_to_days(dt)
         }),
-        Value::Time(duration) => json!({
+        CellValue::Time(duration) => json!({
             "kind": "time",
             "value": duration_to_seconds(duration)
         }),
-        Value::Missing(_) => json!({ "kind": "missing", "value": null }),
+        CellValue::Missing(_) => json!({ "kind": "missing", "value": null }),
     }
 }
 

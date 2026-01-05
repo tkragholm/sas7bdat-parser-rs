@@ -9,7 +9,7 @@ use parquet::schema::types::{Type, TypePtr};
 use crate::error::{Error, Result};
 use crate::parser::ColumnarBatch;
 use crate::sinks::{ColumnarSink, RowSink, SinkContext, validate_sink_begin};
-use crate::value::Value;
+use crate::cell::CellValue;
 
 use super::constants::{
     DEFAULT_ROW_GROUP_SIZE, DEFAULT_TARGET_ROW_GROUP_BYTES, MAX_AUTO_ROW_GROUP_ROWS,
@@ -184,7 +184,7 @@ impl<W: Write + Send> RowSink for ParquetSink<W> {
         Ok(())
     }
 
-    fn write_row(&mut self, row: &[Value<'_>]) -> Result<()> {
+    fn write_row(&mut self, row: &[CellValue<'_>]) -> Result<()> {
         if self.writer.is_none() {
             return Err(Error::Unsupported {
                 feature: Cow::from("rows written before Parquet sink initialised"),

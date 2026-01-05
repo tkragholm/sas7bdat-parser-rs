@@ -6,11 +6,11 @@ use clap::{ArgAction, Parser, ValueEnum};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
+use sas7bdat::dataset::DatasetMetadata;
 use sas7bdat::logger::{log_error, set_log_file, set_log_prefix};
-use sas7bdat::metadata::DatasetMetadata;
 use sas7bdat::parser::ColumnInfo;
-use sas7bdat::value::Value;
-use sas7bdat::{ColumnarSink, CsvSink, ParquetSink, RowSink, SasFile};
+use sas7bdat::CellValue;
+use sas7bdat::{ColumnarSink, CsvSink, ParquetSink, RowSink, SasReader};
 
 #[derive(Parser)]
 #[command(
@@ -249,7 +249,7 @@ fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
 }
 
 fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
-    let sas = SasFile::open(&args.input)?;
+    let sas = SasReader::open(&args.input)?;
     let meta = sas.metadata().clone();
     if args.json {
         #[derive(serde::Serialize)]
@@ -275,8 +275,8 @@ fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
                 name: v.name.clone(),
                 label: v.label.clone(),
                 kind: match v.kind {
-                    sas7bdat::metadata::VariableKind::Numeric => "numeric",
-                    sas7bdat::metadata::VariableKind::Character => "character",
+                    sas7bdat::dataset::VariableKind::Numeric => "numeric",
+                    sas7bdat::dataset::VariableKind::Character => "character",
                 },
                 format: v.format.as_ref().map(|f| f.name.clone()),
                 width: v.storage_width,
@@ -298,8 +298,8 @@ fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
         );
         for v in &meta.variables {
             let kind = match v.kind {
-                sas7bdat::metadata::VariableKind::Numeric => "numeric",
-                sas7bdat::metadata::VariableKind::Character => "character",
+                sas7bdat::dataset::VariableKind::Numeric => "numeric",
+                sas7bdat::dataset::VariableKind::Character => "character",
             };
             let fmt = v
                 .format
@@ -322,9 +322,9 @@ fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
 fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), AnyError> {
     let _log_prefix = set_log_prefix(input.to_string_lossy());
     // Prepare reader and metadata
-    let mut sas = SasFile::open(input)?;
+    let mut sas = SasReader::open(input)?;
     if let Some(cat) = &args.catalog {
-        let _ = sas.load_catalog(cat);
+        let _ = sas.attach_catalog(cat);
     }
     let (mut reader, parsed) = sas.into_parts();
 
@@ -423,7 +423,7 @@ struct ColumnarOptions<'a> {
 
 fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
     reader: &mut W,
-    parsed: &sas7bdat::parser::ParsedMetadata,
+    parsed: &sas7bdat::parser::DatasetLayout,
     meta_filtered: &DatasetMetadata,
     cols_filtered: &[ColumnInfo],
     options: &StreamOptions<'_>,
@@ -442,7 +442,7 @@ fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
     let mut skipped = 0u64;
     let to_skip = options.skip.unwrap_or(0);
     let mut remaining = options.max_rows;
-    let mut projected: Vec<Value<'static>> = Vec::new();
+    let mut projected: Vec<CellValue<'static>> = Vec::new();
 
     loop {
         if options.indices.is_some() {
@@ -480,7 +480,7 @@ fn stream_into_sink<W: std::io::Read + std::io::Seek, S: RowSink>(
 
 fn stream_columnar_into_sink<W: std::io::Read + std::io::Seek, S: ColumnarSink>(
     reader: &mut W,
-    parsed: &sas7bdat::parser::ParsedMetadata,
+    parsed: &sas7bdat::parser::DatasetLayout,
     meta_filtered: &DatasetMetadata,
     cols_filtered: &[ColumnInfo],
     options: &ColumnarOptions<'_>,

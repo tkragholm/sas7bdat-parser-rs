@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use csv::ReaderBuilder;
-use sas7bdat::SasFile;
+use sas7bdat::SasReader;
 use sas7bdat::parser::{ColumnKind, NumericKind, parse_metadata};
 use serde_json::json;
 
@@ -57,7 +57,7 @@ pub fn snapshot_name(path: &Path) -> String {
 pub fn collect_snapshot(path: &Path) -> Snapshot {
     let display = path.display();
     let mut sas =
-        SasFile::open(path).unwrap_or_else(|err| panic!("failed to open {}: {}", display, err));
+        SasReader::open(path).unwrap_or_else(|err| panic!("failed to open {}: {}", display, err));
     let metadata = sas.metadata().clone();
     let columns = metadata
         .variables

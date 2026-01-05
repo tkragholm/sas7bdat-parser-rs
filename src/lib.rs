@@ -1,26 +1,23 @@
-pub mod api;
+pub mod cell;
+pub mod dataset;
 pub mod error;
 mod iter_utils;
 pub mod logger;
-pub mod metadata;
 pub mod parser;
+pub mod reader;
 pub mod sinks;
-pub mod value;
 pub use crate::error::{Error, Result};
-pub use api::{ReadOptions, SasFile};
+pub use cell::{CellValue, MissingValue};
+pub use reader::{RowSelection, SasReader};
 pub use sinks::{ColumnarSink, CsvSink, ParquetSink, RowSink, SinkContext};
 
-/// Parses SAS metadata and returns the decoded layout information.
-///
-/// This preserves the old API name to maintain compatibility with existing
-/// tests and callers; it simply forwards to `parser::parse_metadata`.
 /// Parses SAS metadata and returns the decoded layout information.
 ///
 /// # Errors
 ///
 /// Returns an error if the metadata pages cannot be decoded.
-pub fn parse_layout<R: std::io::Read + std::io::Seek>(
+pub fn decode_layout<R: std::io::Read + std::io::Seek>(
     reader: &mut R,
-) -> Result<parser::ParsedMetadata> {
+) -> Result<parser::DatasetLayout> {
     parser::parse_metadata(reader)
 }

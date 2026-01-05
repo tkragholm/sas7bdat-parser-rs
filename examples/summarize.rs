@@ -3,9 +3,9 @@ use std::env;
 use std::error::Error;
 use std::path::Path;
 
-use sas7bdat::SasFile;
-use sas7bdat::metadata::{Format, VariableKind};
-use sas7bdat::value::Value;
+use sas7bdat::SasReader;
+use sas7bdat::dataset::{Format, VariableKind};
+use sas7bdat::CellValue;
 use serde::Serialize;
 
 #[derive(Debug, Default, Serialize)]
@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let path = Path::new(&path);
-    let mut sas = SasFile::open(path)?;
+    let mut sas = SasReader::open(path)?;
     let metadata = sas.metadata().clone();
 
     let mut column_summaries: Vec<ColumnSummary> = metadata
@@ -119,17 +119,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .expect("column summary out of bounds");
 
             match value {
-                Value::Missing(_) => summary.missing += 1,
-                Value::Float(actual) => update_numeric(summary, actual),
-                Value::Int32(actual) => update_numeric(summary, f64::from(actual)),
-                Value::Int64(actual) => update_numeric(summary, actual as f64),
+                CellValue::Missing(_) => summary.missing += 1,
+                CellValue::Float(actual) => update_numeric(summary, actual),
+                CellValue::Int32(actual) => update_numeric(summary, f64::from(actual)),
+                CellValue::Int64(actual) => update_numeric(summary, actual as f64),
                 // Treat dates/times as non-numeric placeholders for now.
-                Value::Date(_)
-                | Value::DateTime(_)
-                | Value::Time(_)
-                | Value::NumericString(_)
-                | Value::Str(_)
-                | Value::Bytes(_) => {
+                CellValue::Date(_)
+                | CellValue::DateTime(_)
+                | CellValue::Time(_)
+                | CellValue::NumericString(_)
+                | CellValue::Str(_)
+                | CellValue::Bytes(_) => {
                     summary.non_missing += 1;
                 }
             }

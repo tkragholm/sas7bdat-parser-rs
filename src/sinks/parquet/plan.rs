@@ -8,9 +8,9 @@ use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 use crate::error::{Error, Result};
 use crate::logger::log_warn;
-use crate::metadata::Variable;
+use crate::dataset::Variable;
 use crate::parser::{ColumnInfo, ColumnKind, NumericKind};
-use crate::value::Value;
+use crate::cell::CellValue;
 
 use super::constants::SECONDS_PER_DAY;
 use super::utf8::Utf8Scratch;
@@ -126,7 +126,7 @@ impl ColumnPlan {
         }
     }
 
-    pub(super) fn push(&mut self, value: &Value<'_>) -> Result<()> {
+    pub(super) fn push(&mut self, value: &CellValue<'_>) -> Result<()> {
         match self.encoder {
             ColumnValueEncoder::Double => {
                 let coerced = self.coerce_numeric(value)?;
@@ -153,23 +153,23 @@ impl ColumnPlan {
         Ok(())
     }
 
-    fn push_date(&mut self, value: &Value<'_>) -> Result<()> {
+    fn push_date(&mut self, value: &CellValue<'_>) -> Result<()> {
         self.push_temporal_i32(value, "date", Self::coerce_date)
     }
 
-    fn push_datetime(&mut self, value: &Value<'_>) -> Result<()> {
+    fn push_datetime(&mut self, value: &CellValue<'_>) -> Result<()> {
         self.push_temporal_i64(value, "datetime", Self::coerce_timestamp)
     }
 
-    fn push_time(&mut self, value: &Value<'_>) -> Result<()> {
+    fn push_time(&mut self, value: &CellValue<'_>) -> Result<()> {
         self.push_temporal_i64(value, "time", Self::coerce_time)
     }
 
     fn push_temporal_i32(
         &mut self,
-        value: &Value<'_>,
+        value: &CellValue<'_>,
         kind: &str,
-        coerce: fn(&Self, &Value<'_>) -> Result<Option<i32>>,
+        coerce: fn(&Self, &CellValue<'_>) -> Result<Option<i32>>,
     ) -> Result<()> {
         self.push_temporal(value, kind, coerce, |this, coerced| {
             match &mut this.values {
@@ -183,9 +183,9 @@ impl ColumnPlan {
 
     fn push_temporal_i64(
         &mut self,
-        value: &Value<'_>,
+        value: &CellValue<'_>,
         kind: &str,
-        coerce: fn(&Self, &Value<'_>) -> Result<Option<i64>>,
+        coerce: fn(&Self, &CellValue<'_>) -> Result<Option<i64>>,
     ) -> Result<()> {
         self.push_temporal(value, kind, coerce, |this, coerced| {
             match &mut this.values {
@@ -199,9 +199,9 @@ impl ColumnPlan {
 
     fn push_temporal<T>(
         &mut self,
-        value: &Value<'_>,
+        value: &CellValue<'_>,
         kind: &str,
-        coerce: fn(&Self, &Value<'_>) -> Result<Option<T>>,
+        coerce: fn(&Self, &CellValue<'_>) -> Result<Option<T>>,
         mut push: impl FnMut(&mut Self, Option<T>),
     ) -> Result<()> {
         match coerce(self, value) {
@@ -282,12 +282,12 @@ impl ColumnPlan {
         }
     }
 
-    fn coerce_numeric(&self, value: &Value<'_>) -> Result<Option<f64>> {
+    fn coerce_numeric(&self, value: &CellValue<'_>) -> Result<Option<f64>> {
         match value {
-            Value::Missing(_) => Ok(None),
-            Value::Float(v) => Ok(Some(*v)),
-            Value::Int32(v) => Ok(Some(f64::from(*v))),
-            Value::Int64(v) => {
+            CellValue::Missing(_) => Ok(None),
+            CellValue::Float(v) => Ok(Some(*v)),
+            CellValue::Int32(v) => Ok(Some(f64::from(*v))),
+            CellValue::Int64(v) => {
                 const MAX_SAFE: i64 = 9_007_199_254_740_992; // 2^53
                 const MIN_SAFE: i64 = -9_007_199_254_740_992;
                 if *v < MIN_SAFE || *v > MAX_SAFE {
@@ -307,11 +307,11 @@ impl ColumnPlan {
                 })?;
                 Ok(Some(parsed))
             }
-            Value::DateTime(dt) => Ok(Some(datetime_to_sas_seconds(dt))),
-            Value::Date(dt) => Ok(Some(datetime_to_sas_days(dt))),
-            Value::Time(duration) => Ok(Some(time_to_sas_seconds(duration))),
-            Value::NumericString(text) | Value::Str(text) => self.parse_f64(text.as_ref()),
-            Value::Bytes(bytes) => {
+            CellValue::DateTime(dt) => Ok(Some(datetime_to_sas_seconds(dt))),
+            CellValue::Date(dt) => Ok(Some(datetime_to_sas_days(dt))),
+            CellValue::Time(duration) => Ok(Some(time_to_sas_seconds(duration))),
+            CellValue::NumericString(text) | CellValue::Str(text) => self.parse_f64(text.as_ref()),
+            CellValue::Bytes(bytes) => {
                 let text =
                     std::str::from_utf8(bytes.as_ref()).map_err(|_| Error::InvalidMetadata {
                         details: Cow::Owned(format!(
@@ -324,10 +324,10 @@ impl ColumnPlan {
         }
     }
 
-    fn coerce_date(&self, value: &Value<'_>) -> Result<Option<i32>> {
+    fn coerce_date(&self, value: &CellValue<'_>) -> Result<Option<i32>> {
         match value {
-            Value::Missing(_) => Ok(None),
-            Value::Date(datetime) => {
+            CellValue::Missing(_) => Ok(None),
+            CellValue::Date(datetime) => {
                 let seconds = datetime.unix_timestamp();
                 let days = seconds.div_euclid(SECONDS_PER_DAY);
                 let days = i32::try_from(days).map_err(|_| Error::InvalidMetadata {
@@ -338,19 +338,19 @@ impl ColumnPlan {
                 })?;
                 Ok(Some(days))
             }
-            Value::Float(days) => Self::float_days_to_i32(self.name.as_str(), *days),
-            Value::Int32(days) => Ok(Some(*days)),
-            Value::Int64(days) => i32::try_from(*days)
+            CellValue::Float(days) => Self::float_days_to_i32(self.name.as_str(), *days),
+            CellValue::Int32(days) => Ok(Some(*days)),
+            CellValue::Int64(days) => i32::try_from(*days)
                 .map(Some)
                 .map_err(|_| self.type_mismatch_error("date", value)),
             other => Err(self.type_mismatch_error("date", other)),
         }
     }
 
-    fn coerce_timestamp(&self, value: &Value<'_>) -> Result<Option<i64>> {
+    fn coerce_timestamp(&self, value: &CellValue<'_>) -> Result<Option<i64>> {
         match value {
-            Value::Missing(_) => Ok(None),
-            Value::DateTime(datetime) => {
+            CellValue::Missing(_) => Ok(None),
+            CellValue::DateTime(datetime) => {
                 let nanos = datetime.unix_timestamp_nanos();
                 let micros = nanos.div_euclid(1_000);
                 let micros = i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
@@ -365,10 +365,10 @@ impl ColumnPlan {
         }
     }
 
-    fn coerce_time(&self, value: &Value<'_>) -> Result<Option<i64>> {
+    fn coerce_time(&self, value: &CellValue<'_>) -> Result<Option<i64>> {
         match value {
-            Value::Missing(_) => Ok(None),
-            Value::Time(duration) => {
+            CellValue::Missing(_) => Ok(None),
+            CellValue::Time(duration) => {
                 let micros = duration.whole_microseconds();
                 let micros = i64::try_from(micros).map_err(|_| Error::InvalidMetadata {
                     details: Cow::Owned(format!(
@@ -382,33 +382,33 @@ impl ColumnPlan {
         }
     }
 
-    fn coerce_seconds_to_micros(&self, value: &Value<'_>, kind: &str) -> Result<Option<i64>> {
+    fn coerce_seconds_to_micros(&self, value: &CellValue<'_>, kind: &str) -> Result<Option<i64>> {
         match value {
-            Value::Float(seconds) => Self::float_seconds_to_micros(self.name.as_str(), *seconds),
-            Value::Int32(seconds) => Ok(Some(i64::from(*seconds) * 1_000_000)),
-            Value::Int64(seconds) => Ok(Some(*seconds * 1_000_000)),
+            CellValue::Float(seconds) => Self::float_seconds_to_micros(self.name.as_str(), *seconds),
+            CellValue::Int32(seconds) => Ok(Some(i64::from(*seconds) * 1_000_000)),
+            CellValue::Int64(seconds) => Ok(Some(*seconds * 1_000_000)),
             other => Err(self.type_mismatch_error(kind, other)),
         }
     }
 
-    fn coerce_utf8(&mut self, value: &Value<'_>) -> Option<ByteArray> {
+    fn coerce_utf8(&mut self, value: &CellValue<'_>) -> Option<ByteArray> {
         match value {
-            Value::Missing(_) => None,
-            Value::Str(text) | Value::NumericString(text) => {
+            CellValue::Missing(_) => None,
+            CellValue::Str(text) | CellValue::NumericString(text) => {
                 let scratch = self
                     .utf8_scratch
                     .as_mut()
                     .expect("utf8 scratch missing for UTF-8 encoder");
                 Some(scratch.intern_str(text.as_ref()))
             }
-            Value::Bytes(bytes) => {
+            CellValue::Bytes(bytes) => {
                 let scratch = self
                     .utf8_scratch
                     .as_mut()
                     .expect("utf8 scratch missing for UTF-8 encoder");
                 Some(scratch.intern_slice(bytes.as_ref()))
             }
-            Value::Float(v) => {
+            CellValue::Float(v) => {
                 let scratch = self
                     .utf8_scratch
                     .as_mut()
@@ -416,9 +416,9 @@ impl ColumnPlan {
                 let owned = scratch.ryu.format(*v).to_owned();
                 Some(scratch.intern_slice(owned.as_bytes()))
             }
-            Value::Int32(v) => Some(self.format_int_to_utf8(i64::from(*v))),
-            Value::Int64(v) => Some(self.format_int_to_utf8(*v)),
-            Value::DateTime(datetime) => {
+            CellValue::Int32(v) => Some(self.format_int_to_utf8(i64::from(*v))),
+            CellValue::Int64(v) => Some(self.format_int_to_utf8(*v)),
+            CellValue::DateTime(datetime) => {
                 let scratch = self
                     .utf8_scratch
                     .as_mut()
@@ -426,7 +426,7 @@ impl ColumnPlan {
                 let text = datetime.to_string();
                 Some(scratch.intern_str(&text))
             }
-            Value::Date(datetime) => {
+            CellValue::Date(datetime) => {
                 let scratch = self
                     .utf8_scratch
                     .as_mut()
@@ -434,7 +434,7 @@ impl ColumnPlan {
                 let text = datetime.date().to_string();
                 Some(scratch.intern_str(&text))
             }
-            Value::Time(duration) => {
+            CellValue::Time(duration) => {
                 let scratch = self
                     .utf8_scratch
                     .as_mut()
@@ -470,7 +470,7 @@ impl ColumnPlan {
             })
     }
 
-    fn type_mismatch_error(&self, expected: &str, value: &Value<'_>) -> Error {
+    fn type_mismatch_error(&self, expected: &str, value: &CellValue<'_>) -> Error {
         Error::InvalidMetadata {
             details: Cow::Owned(format!(
                 "column '{}' expected {expected} value but received {value:?}",

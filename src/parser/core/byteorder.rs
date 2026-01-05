@@ -1,6 +1,6 @@
 use std::convert::TryInto;
 
-use crate::metadata::Endianness;
+use crate::dataset::Endianness;
 
 #[inline]
 #[must_use]

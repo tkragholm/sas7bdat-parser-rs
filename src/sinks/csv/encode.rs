@@ -3,38 +3,38 @@ use itoa::Buffer as ItoaBuffer;
 use ryu::Buffer as RyuBuffer;
 
 use crate::error::Result;
-use crate::value::Value;
+use crate::cell::CellValue;
 
 use super::time_format::{write_date, write_datetime, write_time};
 
 pub fn encode_value(
-    value: &Value<'_>,
+    value: &CellValue<'_>,
     out: &mut Vec<u8>,
     ryu: &mut RyuBuffer,
     itoa: &mut ItoaBuffer,
 ) -> Result<()> {
     out.clear();
     match value {
-        Value::Missing(_) => {}
-        Value::Float(v) => {
+        CellValue::Missing(_) => {}
+        CellValue::Float(v) => {
             let s = ryu.format(*v);
             out.extend_from_slice(s.as_bytes());
         }
-        Value::Int32(v) => {
+        CellValue::Int32(v) => {
             let s = itoa.format(*v);
             out.extend_from_slice(s.as_bytes());
         }
-        Value::Int64(v) => {
+        CellValue::Int64(v) => {
             let s = itoa.format(*v);
             out.extend_from_slice(s.as_bytes());
         }
-        Value::NumericString(s) | Value::Str(s) => {
+        CellValue::NumericString(s) | CellValue::Str(s) => {
             out.extend_from_slice(s.as_bytes());
         }
-        Value::Bytes(bytes) => out.extend_from_slice(bytes),
-        Value::DateTime(dt) => write_datetime(dt, out),
-        Value::Date(dt) => write_date(dt, out),
-        Value::Time(dur) => write_time(dur, out)?,
+        CellValue::Bytes(bytes) => out.extend_from_slice(bytes),
+        CellValue::DateTime(dt) => write_datetime(dt, out),
+        CellValue::Date(dt) => write_date(dt, out),
+        CellValue::Time(dur) => write_time(dur, out)?,
     }
     Ok(())
 }

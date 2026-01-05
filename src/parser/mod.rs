@@ -4,11 +4,11 @@ mod header;
 pub mod metadata;
 mod rows;
 
-pub use catalog::{ParsedCatalog, parse_catalog};
+pub use catalog::{CatalogLayout, parse_catalog};
 pub use core::byteorder::{read_i16, read_u16, read_u32, read_u64, read_u64_be};
 pub use header::{SasHeader, parse_header};
 pub use metadata::{
-    ColumnInfo, ColumnKind, ColumnMetadataBuilder, ColumnOffsets, NumericKind, ParsedMetadata,
+    ColumnInfo, ColumnKind, ColumnMetadataBuilder, ColumnOffsets, DatasetLayout, NumericKind,
     RowInfo, TextRef, TextStore, parse_metadata,
 };
 pub use rows::{

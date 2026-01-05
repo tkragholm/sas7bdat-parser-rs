@@ -4,9 +4,9 @@ use encoding_rs::Encoding;
 use smallvec::SmallVec;
 
 use crate::error::{Error, Result};
-use crate::metadata::Endianness;
+use crate::dataset::Endianness;
 use crate::parser::metadata::ColumnKind;
-use crate::value::Value;
+use crate::cell::CellValue;
 
 use super::decode::{decode_value_inner, is_blank, numeric_bits, numeric_bits_is_missing};
 use super::runtime_column::RuntimeColumn;
@@ -107,8 +107,8 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
     /// # Errors
     ///
     /// Propagates decoding failures for individual cells.
-    pub fn materialize(&self) -> Result<Vec<Value<'data>>> {
-        let mut values = SmallVec::<[Value<'data>; 16]>::with_capacity(self.columns.len());
+    pub fn materialize(&self) -> Result<Vec<CellValue<'data>>> {
+        let mut values = SmallVec::<[CellValue<'data>; 16]>::with_capacity(self.columns.len());
         self.materialize_into(&mut values)?;
         Ok(values.into_vec())
     }
@@ -118,7 +118,7 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
     /// # Errors
     ///
     /// Propagates decoding failures for individual cells.
-    pub fn materialize_into(&self, values: &mut SmallVec<[Value<'data>; 16]>) -> Result<()> {
+    pub fn materialize_into(&self, values: &mut SmallVec<[CellValue<'data>; 16]>) -> Result<()> {
         values.clear();
         values.reserve(self.columns.len());
         for cell in self {
@@ -161,12 +161,12 @@ impl<'data> StreamingCell<'data, '_> {
         }
     }
 
-    /// Decodes the cell into a `Value`.
+    /// Decodes the cell into a `CellValue`.
     ///
     /// # Errors
     ///
     /// Returns an error when decoding fails (e.g. invalid metadata).
-    pub fn decode_value(&self) -> Result<Value<'data>> {
+    pub fn decode_value(&self) -> Result<CellValue<'data>> {
         Ok(decode_value_inner(
             self.column.kind,
             self.column.raw_width,

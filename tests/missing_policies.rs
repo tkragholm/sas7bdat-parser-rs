@@ -1,9 +1,9 @@
 #![allow(clippy::pedantic)]
 use std::path::Path;
 
-use sas7bdat::SasFile;
+use sas7bdat::SasReader;
 
-fn tagged_tags(policy: &sas7bdat::metadata::MissingValuePolicy) -> Vec<char> {
+fn tagged_tags(policy: &sas7bdat::dataset::MissingValuePolicy) -> Vec<char> {
     policy
         .tagged_missing
         .iter()
@@ -12,12 +12,12 @@ fn tagged_tags(policy: &sas7bdat::metadata::MissingValuePolicy) -> Vec<char> {
 }
 
 #[test]
-fn populate_missing_policies_records_numeric_tags() {
+fn scan_missing_policies_records_numeric_tags() {
     let data = Path::new("fixtures/raw_data/readstat/missing_test.sas7bdat");
     let catalog = Path::new("fixtures/raw_data/readstat/missing_formats.sas7bcat");
 
-    let mut sas = SasFile::open(data).expect("open dataset");
-    sas.load_catalog(catalog).expect("load catalog");
+    let mut sas = SasReader::open(data).expect("open dataset");
+    sas.attach_catalog(catalog).expect("load catalog");
 
     let metadata = sas.metadata();
     let vars = &metadata.variables;

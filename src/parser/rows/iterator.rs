@@ -6,10 +6,10 @@ use std::io::{Read, Seek};
 use encoding_rs::Encoding;
 
 use crate::error::{Error, Result, Section};
-use crate::metadata::Compression;
+use crate::dataset::Compression;
 use crate::parser::core::encoding::resolve_encoding;
-use crate::parser::metadata::ParsedMetadata;
-use crate::value::Value;
+use crate::parser::metadata::DatasetLayout;
+use crate::cell::CellValue;
 
 use super::batch::{next_columnar_batch, next_columnar_batch_contiguous};
 use super::buffer::RowData;
@@ -25,7 +25,7 @@ struct RowProgress {
 
 pub struct RowIterator<'a, R: Read + Seek> {
     pub(crate) reader: &'a mut R,
-    pub(crate) parsed: &'a ParsedMetadata,
+    pub(crate) layout: &'a DatasetLayout,
     pub(crate) runtime_columns: Vec<RuntimeColumn>,
     pub(crate) columnar_columns: Vec<RuntimeColumnRef>,
     pub(crate) page_buffer: Vec<u8>,
@@ -42,7 +42,7 @@ pub struct RowIterator<'a, R: Read + Seek> {
     pub(crate) total_rows: u64,
 }
 
-/// Creates a [`RowIterator`] for the provided reader and parsed metadata.
+/// Creates a [`RowIterator`] for the provided reader and layout metadata.
 ///
 /// # Errors
 ///
@@ -50,9 +50,9 @@ pub struct RowIterator<'a, R: Read + Seek> {
 /// the dataset uses unsupported compression.
 pub fn row_iterator<'a, R: Read + Seek>(
     reader: &'a mut R,
-    parsed: &'a ParsedMetadata,
+    layout: &'a DatasetLayout,
 ) -> Result<RowIterator<'a, R>> {
-    RowIterator::new(reader, parsed)
+    RowIterator::new(reader, layout)
 }
 
 impl<'a, R: Read + Seek> RowIterator<'a, R> {
@@ -62,8 +62,8 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     ///
     /// Returns an error when the dataset uses an unsupported compression mode
     /// or the page size cannot be represented on this platform.
-    pub fn new(reader: &'a mut R, parsed: &'a ParsedMetadata) -> Result<Self> {
-        match parsed.row_info.compression {
+    pub fn new(reader: &'a mut R, layout: &'a DatasetLayout) -> Result<Self> {
+        match layout.row_info.compression {
             Compression::None | Compression::Row | Compression::Binary => {}
             Compression::Unknown(code) => {
                 return Err(Error::Unsupported {
@@ -74,21 +74,21 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             }
         }
 
-        let encoding = resolve_encoding(parsed.header.metadata.file_encoding.as_deref());
+        let encoding = resolve_encoding(layout.header.metadata.file_encoding.as_deref());
         let page_size =
-            usize::try_from(parsed.header.page_size).map_err(|_| Error::Unsupported {
+            usize::try_from(layout.header.page_size).map_err(|_| Error::Unsupported {
                 feature: Cow::from("page size exceeds platform pointer width"),
             })?;
         let row_length =
-            usize::try_from(parsed.row_info.row_length).map_err(|_| Error::Unsupported {
+            usize::try_from(layout.row_info.row_length).map_err(|_| Error::Unsupported {
                 feature: Cow::from("row length exceeds platform pointer width"),
             })?;
-        if parsed.columns.is_empty() || row_length == 0 {
+        if layout.columns.is_empty() || row_length == 0 {
             return Err(Error::InvalidMetadata {
                 details: Cow::from("dataset defines zero columns or row length is zero"),
             });
         }
-        let runtime_columns = parsed
+        let runtime_columns = layout
             .columns
             .iter()
             .map(|column| {
@@ -115,7 +115,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
 
         Ok(Self {
             reader,
-            parsed,
+            layout,
             runtime_columns,
             columnar_columns,
             page_buffer: vec![0u8; page_size],
@@ -129,7 +129,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             encoding,
             exhausted: Cell::new(false),
             row_length,
-            total_rows: parsed.row_info.total_rows,
+            total_rows: layout.row_info.total_rows,
         })
     }
 
@@ -187,7 +187,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails.
-    pub fn try_next(&mut self) -> Result<Option<Vec<Value<'_>>>> {
+    pub fn try_next(&mut self) -> Result<Option<Vec<CellValue<'_>>>> {
         let Some(progress) = self.reserve_next_row()? else {
             return Ok(None);
         };
@@ -287,23 +287,23 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             data,
             &self.runtime_columns,
             self.encoding,
-            self.parsed.header.endianness,
+            self.layout.header.endianness,
         ))
     }
 
-    pub(crate) fn decode_row(&self, row_index: u16) -> Result<Vec<Value<'_>>> {
+    pub(crate) fn decode_row(&self, row_index: u16) -> Result<Vec<CellValue<'_>>> {
         let row = self.streaming_row(row_index)?;
         row.materialize()
     }
 }
 
 impl<R: Read + Seek> Iterator for RowIterator<'_, R> {
-    type Item = Result<Vec<Value<'static>>>;
+    type Item = Result<Vec<CellValue<'static>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.try_next() {
             Ok(Some(row)) => {
-                let owned = row.into_iter().map(Value::into_owned).collect();
+                let owned = row.into_iter().map(CellValue::into_owned).collect();
                 Some(Ok(owned))
             }
             Ok(None) => None,

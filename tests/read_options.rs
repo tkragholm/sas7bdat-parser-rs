@@ -1,19 +1,18 @@
 #![allow(clippy::pedantic)]
 use std::path::Path;
 
-use sas7bdat::value::Value;
-use sas7bdat::{Error, ReadOptions, SasFile};
+use sas7bdat::{CellValue, Error, RowSelection, SasReader};
 
 #[test]
-fn rows_with_options_respects_skip_and_limit() {
+fn rows_windowed_respects_skip_and_limit() {
     let path = Path::new("fixtures/raw_data/pandas/datetime.sas7bdat");
-    let mut sas = SasFile::open(path).expect("failed to open datetime fixture");
+    let mut sas = SasReader::open(path).expect("failed to open datetime fixture");
 
     let column_count = sas.metadata().column_count as usize;
 
-    let options = ReadOptions::new().with_skip_rows(1).with_max_rows(2);
+    let options = RowSelection::new().skip_rows(1).max_rows(2);
     let mut rows = sas
-        .rows_with_options(&options)
+        .rows_windowed(&options)
         .expect("failed to build windowed iterator");
 
     let mut seen = 0usize;
@@ -30,9 +29,9 @@ fn rows_with_options_respects_skip_and_limit() {
 }
 
 #[test]
-fn project_rows_with_options_supports_name_projection() {
+fn select_with_supports_name_projection() {
     let path = Path::new("fixtures/raw_data/pandas/datetime.sas7bdat");
-    let mut sas = SasFile::open(path).expect("failed to open datetime fixture");
+    let mut sas = SasReader::open(path).expect("failed to open datetime fixture");
 
     let metadata = sas.metadata().clone();
     let column_indices = [0usize, 2usize];
@@ -41,21 +40,21 @@ fn project_rows_with_options_supports_name_projection() {
         .map(|&idx| metadata.variables[idx].name.trim_end().to_string())
         .collect();
 
-    let first_full_row: Vec<Value<'static>> = {
+    let first_full_row: Vec<CellValue<'static>> = {
         let mut iter = sas.rows().expect("failed to build full iterator");
         iter.try_next()
             .expect("row iteration failed")
             .expect("expected at least one row")
             .into_iter()
-            .map(Value::into_owned)
+            .map(CellValue::into_owned)
             .collect()
     };
 
-    let options = ReadOptions::new()
-        .with_column_names(column_names.clone())
-        .with_max_rows(1);
+    let options = RowSelection::new()
+        .column_names(column_names.clone())
+        .max_rows(1);
     let mut rows = sas
-        .project_rows_with_options(&options)
+        .select_with(&options)
         .expect("failed to build projected iterator");
 
     let first = rows
@@ -79,12 +78,12 @@ fn project_rows_with_options_supports_name_projection() {
 }
 
 #[test]
-fn project_rows_with_options_rejects_duplicate_names() {
+fn select_with_rejects_duplicate_names() {
     let path = Path::new("fixtures/raw_data/pandas/datetime.sas7bdat");
-    let mut sas = SasFile::open(path).expect("failed to open datetime fixture");
+    let mut sas = SasReader::open(path).expect("failed to open datetime fixture");
 
-    let options = ReadOptions::new().with_column_names(["DATE1", "DATE1"]);
-    let err = match sas.project_rows_with_options(&options) {
+    let options = RowSelection::new().column_names(["DATE1", "DATE1"]);
+    let err = match sas.select_with(&options) {
         Ok(_) => panic!("expected duplicate projection to fail"),
         Err(err) => err,
     };

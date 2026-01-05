@@ -4,7 +4,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 use crate::error::{Error, Result, Section};
 use crate::logger::log_warn;
-use crate::metadata::{Compression, Variable};
+use crate::dataset::{Compression, Variable};
 use crate::parser::core::byteorder::{read_u16, read_u32, read_u64};
 use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::header::{SasHeader, parse_header};
@@ -28,7 +28,7 @@ pub use row_info::RowInfo;
 pub use text_store::{TextRef, TextStore};
 
 #[derive(Debug)]
-pub struct ParsedMetadata {
+pub struct DatasetLayout {
     pub header: SasHeader,
     pub text_store: TextStore,
     pub columns: Vec<ColumnInfo>,
@@ -36,7 +36,7 @@ pub struct ParsedMetadata {
     pub column_list: Option<Vec<i16>>,
 }
 
-impl ParsedMetadata {
+impl DatasetLayout {
     /// Creates a row iterator for the stored metadata and supplied reader.
     ///
     /// # Errors
@@ -72,7 +72,7 @@ const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
 /// # Errors
 ///
 /// Returns an error if the metadata pages cannot be decoded.
-pub fn parse_metadata<R: Read + Seek>(reader: &mut R) -> Result<ParsedMetadata> {
+pub fn parse_metadata<R: Read + Seek>(reader: &mut R) -> Result<DatasetLayout> {
     let mut header = parse_header(reader)?;
     let encoding = resolve_encoding(header.metadata.file_encoding.as_deref());
     let mut builder = ColumnMetadataBuilder::new(encoding);
@@ -105,7 +105,7 @@ pub fn parse_metadata<R: Read + Seek>(reader: &mut R) -> Result<ParsedMetadata> 
 
     header.metadata = metadata;
 
-    Ok(ParsedMetadata {
+    Ok(DatasetLayout {
         header,
         text_store,
         columns,
@@ -543,7 +543,7 @@ fn parse_subheaders<'a>(page: &'a [u8], header: &SasHeader) -> Result<Vec<Parsed
         }
 
         let mut signature = read_u32(header.endianness, &data[0..4]);
-        if !matches!(header.endianness, crate::metadata::Endianness::Little)
+        if !matches!(header.endianness, crate::dataset::Endianness::Little)
             && header.uses_u64
             && signature == u32::MAX
             && data.len() >= 8

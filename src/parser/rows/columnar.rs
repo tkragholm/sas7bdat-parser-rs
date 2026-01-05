@@ -10,7 +10,7 @@ use simdutf8::basic;
 use smallvec::SmallVec;
 
 use crate::error::{Error, Result};
-use crate::metadata::Endianness;
+use crate::dataset::Endianness;
 use crate::parser::metadata::{ColumnKind, NumericKind};
 
 use super::decode::{

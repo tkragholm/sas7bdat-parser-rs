@@ -8,7 +8,7 @@ use ryu::Buffer as RyuBuffer;
 use crate::error::{Error, Result};
 use crate::parser::{ColumnKind, NumericKind, StreamingRow};
 use crate::sinks::{RowSink, SinkContext, validate_sink_begin};
-use crate::value::Value;
+use crate::cell::CellValue;
 
 use super::constants::{DEFAULT_DELIMITER, DEFAULT_SCRATCH_CAPACITY, DEFAULT_WRITE_HEADERS};
 use super::encode::{encode_value, flush_record};
@@ -25,12 +25,12 @@ pub struct CsvSink<W: Write + Send> {
 }
 
 enum RowValue<'a> {
-    Borrowed(&'a Value<'a>),
-    Owned(Value<'a>),
+    Borrowed(&'a CellValue<'a>),
+    Owned(CellValue<'a>),
 }
 
 impl<'a> RowValue<'a> {
-    const fn as_ref(&self) -> &Value<'a> {
+    const fn as_ref(&self) -> &CellValue<'a> {
         match self {
             Self::Borrowed(value) => value,
             Self::Owned(value) => value,
@@ -167,7 +167,7 @@ impl<W: Write + Send> RowSink for CsvSink<W> {
         Ok(())
     }
 
-    fn write_row(&mut self, row: &[Value<'_>]) -> Result<()> {
+    fn write_row(&mut self, row: &[CellValue<'_>]) -> Result<()> {
         self.write_row_values(
             row.len(),
             row.iter().map(|value| Ok(RowValue::Borrowed(value))),
