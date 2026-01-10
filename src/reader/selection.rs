@@ -65,7 +65,7 @@ impl RowSelection {
         self
     }
 
-    pub(crate) fn skip_count(&self) -> u64 {
+    pub(crate) const fn skip_count(&self) -> u64 {
         self.skip_rows
     }
 
