@@ -9,8 +9,8 @@ use rustc_hash::FxHasher;
 use simdutf8::basic;
 use smallvec::SmallVec;
 
-use crate::error::{Error, Result};
 use crate::dataset::Endianness;
+use crate::error::{Error, Result};
 use crate::parser::metadata::{ColumnKind, NumericKind};
 
 use super::decode::{
@@ -35,17 +35,9 @@ pub struct ColumnarBatch<'rows> {
     stage_utf8: bool,
 }
 
-#[allow(dead_code)]
 pub struct MaterializedColumn<T> {
     values: Vec<T>,
     def_levels: Vec<i16>,
-}
-
-impl<T> MaterializedColumn<T> {
-    #[allow(dead_code)]
-    pub(crate) fn as_slices(&self) -> (&[T], &[i16]) {
-        (&self.values, &self.def_levels)
-    }
 }
 
 pub enum TypedNumericColumn {
@@ -317,7 +309,9 @@ impl<'rows> ColumnarBatch<'rows> {
                 def_levels.push(0);
             }
         }
-        Ok(MaterializedColumn { values, def_levels })
+        let materialized = MaterializedColumn { values, def_levels };
+        debug_assert!(materialized.values.len() <= materialized.def_levels.len());
+        Ok(materialized)
     }
 
     fn materialize_i64_mapped(
@@ -364,7 +358,6 @@ impl<'rows> ColumnarBatch<'rows> {
         })
     }
 
-    #[allow(clippy::too_many_lines)]
     fn materialize_utf8_column(&self, index: usize) -> MaterializedUtf8Column {
         let column = self.column(index).expect("column index out of bounds");
         let row_count = column.len();

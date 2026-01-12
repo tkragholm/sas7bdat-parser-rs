@@ -4,10 +4,10 @@ use std::io::{Read, Seek, SeekFrom};
 
 use time::{Duration, OffsetDateTime};
 
-use crate::error::{Error, Result, Section};
 use crate::dataset::{
     Compression, DatasetMetadata, DatasetTimestamps, Endianness, SasVersion, Vendor,
 };
+use crate::error::{Error, Result, Section};
 
 const SAS_ALIGNMENT_OFFSET_4: u8 = 0x33;
 const SAS_ENDIAN_BIG: u8 = 0x00;

@@ -5,11 +5,11 @@ use std::io::{Read, Seek};
 
 use encoding_rs::Encoding;
 
-use crate::error::{Error, Result, Section};
+use crate::cell::CellValue;
 use crate::dataset::Compression;
+use crate::error::{Error, Result, Section};
 use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::metadata::DatasetLayout;
-use crate::cell::CellValue;
 
 use super::batch::{next_columnar_batch, next_columnar_batch_contiguous};
 use super::buffer::RowData;

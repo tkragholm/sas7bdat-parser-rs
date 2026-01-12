@@ -3,6 +3,7 @@ use std::io::{Cursor, Read, Seek};
 
 use encoding_rs::Encoding;
 
+use crate::cell::CellValue;
 use crate::dataset::{Alignment, Compression, DatasetMetadata, Endianness, Measure, Vendor};
 use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::header::SasHeader;
@@ -12,7 +13,6 @@ use crate::parser::metadata::{
 use crate::parser::rows::columnar::COLUMNAR_BATCH_ROWS;
 use crate::parser::rows::compression::{decompress_rdc, decompress_rle};
 use crate::parser::rows::constants::SAS_PAGE_TYPE_DATA;
-use crate::cell::CellValue;
 
 use super::iterator::RowIterator;
 use super::row_iterator;

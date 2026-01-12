@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use crate::dataset::LabelSet;
 
-pub(super) fn build_label_lookup(label_sets: &HashMap<String, LabelSet>) -> HashMap<String, String> {
+pub(super) fn build_label_lookup(
+    label_sets: &HashMap<String, LabelSet>,
+) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for name in label_sets.keys() {
         let normalized = normalize_label_name(name);

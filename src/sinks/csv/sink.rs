@@ -5,10 +5,10 @@ use csv::{ByteRecord, Writer, WriterBuilder};
 use itoa::Buffer as ItoaBuffer;
 use ryu::Buffer as RyuBuffer;
 
+use crate::cell::CellValue;
 use crate::error::{Error, Result};
 use crate::parser::{ColumnKind, NumericKind, StreamingRow};
 use crate::sinks::{RowSink, SinkContext, validate_sink_begin};
-use crate::cell::CellValue;
 
 use super::constants::{DEFAULT_DELIMITER, DEFAULT_SCRATCH_CAPACITY, DEFAULT_WRITE_HEADERS};
 use super::encode::{encode_value, flush_record};

@@ -2,8 +2,8 @@ use csv::ByteRecord;
 use itoa::Buffer as ItoaBuffer;
 use ryu::Buffer as RyuBuffer;
 
-use crate::error::Result;
 use crate::cell::CellValue;
+use crate::error::Result;
 
 use super::time_format::{write_date, write_datetime, write_time};
 

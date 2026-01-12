@@ -2,9 +2,9 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::io::{Read, Seek, SeekFrom};
 
+use crate::dataset::{Compression, Variable};
 use crate::error::{Error, Result, Section};
 use crate::logger::log_warn;
-use crate::dataset::{Compression, Variable};
 use crate::parser::core::byteorder::{read_u16, read_u32, read_u64};
 use crate::parser::core::encoding::resolve_encoding;
 use crate::parser::header::{SasHeader, parse_header};

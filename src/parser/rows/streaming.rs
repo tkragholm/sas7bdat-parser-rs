@@ -3,10 +3,10 @@ use std::borrow::Cow;
 use encoding_rs::Encoding;
 use smallvec::SmallVec;
 
-use crate::error::{Error, Result};
-use crate::dataset::Endianness;
-use crate::parser::metadata::ColumnKind;
 use crate::cell::CellValue;
+use crate::dataset::Endianness;
+use crate::error::{Error, Result};
+use crate::parser::metadata::ColumnKind;
 
 use super::decode::{decode_value_inner, is_blank, numeric_bits, numeric_bits_is_missing};
 use super::runtime_column::RuntimeColumn;

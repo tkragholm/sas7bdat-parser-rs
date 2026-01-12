@@ -6,10 +6,10 @@ use clap::{ArgAction, Parser, ValueEnum};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
+use sas7bdat::CellValue;
 use sas7bdat::dataset::DatasetMetadata;
 use sas7bdat::logger::{log_error, set_log_file, set_log_prefix};
 use sas7bdat::parser::ColumnInfo;
-use sas7bdat::CellValue;
 use sas7bdat::{ColumnarSink, CsvSink, ParquetSink, RowSink, SasReader};
 
 #[derive(Parser)]
@@ -40,7 +40,6 @@ enum SinkKind {
 }
 
 #[derive(Parser, Clone)]
-#[allow(clippy::struct_excessive_bools)]
 struct ConvertArgs {
     /// Input files or directories (recurses directories).
     #[arg(
@@ -50,6 +49,51 @@ struct ConvertArgs {
     )]
     inputs: Vec<PathBuf>,
 
+    #[command(flatten)]
+    output: OutputOptions,
+
+    #[command(flatten)]
+    execution: ExecutionOptions,
+
+    #[command(flatten)]
+    validation: ValidationOptions,
+
+    #[command(flatten)]
+    logging: LoggingOptions,
+
+    /// Skip leading N rows.
+    #[arg(long, help_heading = "Row Limits")]
+    skip: Option<u64>,
+
+    /// Limit to at most N rows.
+    #[arg(long = "max-rows", help_heading = "Row Limits")]
+    max_rows: Option<u64>,
+
+    /// Project a subset of columns by name (comma-separated).
+    #[arg(
+        long = "columns",
+        value_delimiter = ',',
+        help_heading = "Projection",
+        value_name = "NAME[,NAME]"
+    )]
+    columns: Option<Vec<String>>,
+
+    /// Project a subset of columns by zero-based indices (comma-separated).
+    #[arg(
+        long = "column-indices",
+        value_delimiter = ',',
+        help_heading = "Projection",
+        value_name = "IDX[,IDX]"
+    )]
+    column_indices: Option<Vec<usize>>,
+
+    /// Optional value-label catalog (.sas7bcat) to load.
+    #[arg(long, value_name = "FILE", help_heading = "Input")]
+    catalog: Option<PathBuf>,
+}
+
+#[derive(Parser, Clone)]
+struct OutputOptions {
     /// Output directory (computed file names).
     #[arg(
         long,
@@ -93,36 +137,6 @@ struct ConvertArgs {
     )]
     _no_headers: bool,
 
-    /// Skip leading N rows.
-    #[arg(long, help_heading = "Row Limits")]
-    skip: Option<u64>,
-
-    /// Limit to at most N rows.
-    #[arg(long = "max-rows", help_heading = "Row Limits")]
-    max_rows: Option<u64>,
-
-    /// Project a subset of columns by name (comma-separated).
-    #[arg(
-        long = "columns",
-        value_delimiter = ',',
-        help_heading = "Projection",
-        value_name = "NAME[,NAME]"
-    )]
-    columns: Option<Vec<String>>,
-
-    /// Project a subset of columns by zero-based indices (comma-separated).
-    #[arg(
-        long = "column-indices",
-        value_delimiter = ',',
-        help_heading = "Projection",
-        value_name = "IDX[,IDX]"
-    )]
-    column_indices: Option<Vec<usize>>,
-
-    /// Optional value-label catalog (.sas7bcat) to load.
-    #[arg(long, value_name = "FILE", help_heading = "Input")]
-    catalog: Option<PathBuf>,
-
     /// Parquet row group size (rows). If unset, uses the library's heuristic.
     #[arg(long, value_name = "ROWS", help_heading = "Parquet")]
     parquet_row_group_size: Option<usize>,
@@ -131,6 +145,13 @@ struct ConvertArgs {
     #[arg(long, value_name = "BYTES", help_heading = "Parquet")]
     parquet_target_bytes: Option<usize>,
 
+    /// Flatten outputs into a single directory instead of mirroring input tree.
+    #[arg(long, help_heading = "Output")]
+    flatten: bool,
+}
+
+#[derive(Parser, Clone)]
+struct ExecutionOptions {
     /// Number of concurrent worker threads (default: Rayon global pool, usually logical CPUs unless `RAYON_NUM_THREADS` is set).
     #[arg(long, help_heading = "Execution")]
     jobs: Option<usize>,
@@ -138,18 +159,20 @@ struct ConvertArgs {
     /// Stop on first error.
     #[arg(long, help_heading = "Execution")]
     fail_fast: bool,
+}
 
+#[derive(Parser, Clone)]
+struct ValidationOptions {
     /// Enforce strict date/time conversion (fail on out-of-range or malformed values).
     #[arg(long, help_heading = "Validation")]
     strict_dates: bool,
+}
 
+#[derive(Parser, Clone)]
+struct LoggingOptions {
     /// Write warnings and errors to a log file in addition to stderr.
     #[arg(long, value_name = "FILE", help_heading = "Logging")]
     log_file: Option<PathBuf>,
-
-    /// Flatten outputs into a single directory instead of mirroring input tree.
-    #[arg(long, help_heading = "Output")]
-    flatten: bool,
 }
 
 const DEFAULT_COLUMNAR_BATCH_ROWS: usize = 4096;
@@ -189,10 +212,10 @@ fn main() -> Result<(), AnyError> {
 }
 
 fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
-    if let Some(path) = &args.log_file {
+    if let Some(path) = &args.logging.log_file {
         set_log_file(path)?;
     }
-    if let Some(jobs) = args.jobs {
+    if let Some(jobs) = args.execution.jobs {
         // Best-effort: configure global rayon pool once. Ignore error if already set.
         let _ = rayon::ThreadPoolBuilder::new()
             .num_threads(jobs)
@@ -201,12 +224,12 @@ fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
 
     let files = discover_inputs(&args.inputs);
 
-    if args.out.is_some() && files.len() != 1 {
+    if args.output.out.is_some() && files.len() != 1 {
         return Err("--out requires a single input".into());
     }
 
     let mut tasks: Vec<(PathBuf, PathBuf, PathBuf)> = Vec::with_capacity(files.len());
-    if let Some(ref out) = args.out {
+    if let Some(ref out) = args.output.out {
         let (root, file) = &files[0];
         tasks.push((root.clone(), file.clone(), out.clone()));
     } else {
@@ -216,7 +239,7 @@ fn run_convert(args: &ConvertArgs) -> Result<(), AnyError> {
         }
     }
 
-    if args.fail_fast {
+    if args.execution.fail_fast {
         tasks
             .into_par_iter()
             .map(|(_root, input, output)| {
@@ -333,7 +356,7 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
         resolve_projection(&parsed.header.metadata, &parsed.columns, args)?;
 
     // Build sink
-    let sink_kind = args.sink;
+    let sink_kind = args.output.sink;
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -349,15 +372,15 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
     match sink_kind {
         SinkKind::Parquet => {
             let file = File::create(output)?;
-            let mut sink = ParquetSink::new(file).with_lenient_dates(!args.strict_dates);
-            let columnar_row_group_rows = if let Some(rows) = args.parquet_row_group_size {
+            let mut sink = ParquetSink::new(file).with_lenient_dates(!args.validation.strict_dates);
+            let columnar_row_group_rows = if let Some(rows) = args.output.parquet_row_group_size {
                 sink = sink.with_row_group_size(rows);
                 Some(rows)
             } else {
                 sink = sink.with_row_group_size(derived_row_group_rows);
                 Some(derived_row_group_rows)
             };
-            if let Some(bytes) = args.parquet_target_bytes {
+            if let Some(bytes) = args.output.parquet_target_bytes {
                 sink = sink.with_target_row_group_bytes(bytes);
             }
             sink = sink.with_streaming_columnar(true);
@@ -383,8 +406,8 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
         SinkKind::Csv | SinkKind::Tsv => {
             let file = File::create(output)?;
             let mut sink = CsvSink::new(file)
-                .with_headers(args.headers)
-                .with_delimiter(match (sink_kind, args.delimiter) {
+                .with_headers(args.output.headers)
+                .with_delimiter(match (sink_kind, args.output.delimiter) {
                     (SinkKind::Tsv, None) => b'\t',
                     (_, Some(ch)) => ch as u8,
                     _ => b',',
@@ -642,15 +665,15 @@ fn is_sas7bdat(path: &Path) -> bool {
 
 fn compute_output_path_unchecked(root: &Path, input: &Path, args: &ConvertArgs) -> PathBuf {
     use std::ffi::OsStr;
-    let new_ext = match args.sink {
+    let new_ext = match args.output.sink {
         SinkKind::Parquet => "parquet",
         SinkKind::Csv => "csv",
         SinkKind::Tsv => "tsv",
     };
-    args.out_dir.as_ref().map_or_else(
+    args.output.out_dir.as_ref().map_or_else(
         || input.with_extension(new_ext),
         |dir| {
-            if args.flatten {
+            if args.output.flatten {
                 let fname = input.file_name().unwrap_or_else(|| OsStr::new("output"));
                 let renamed = PathBuf::from(fname).with_extension(new_ext);
                 return dir.join(renamed);

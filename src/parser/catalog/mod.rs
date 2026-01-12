@@ -5,8 +5,8 @@ use std::io::{Read, Seek, SeekFrom};
 
 use encoding_rs::Encoding;
 
-use crate::error::{Error, Result, Section};
 use crate::dataset::{LabelSet, ValueKey, ValueLabel, ValueType};
+use crate::error::{Error, Result, Section};
 use crate::parser::core::byteorder::{read_u16, read_u32, read_u64, read_u64_be};
 use crate::parser::core::encoding::{resolve_encoding, trim_trailing};
 use crate::parser::core::float_utils::try_int_from_f64;
@@ -327,7 +327,6 @@ fn parse_block(
     Ok(Some(label_set))
 }
 
-#[allow(clippy::too_many_lines)]
 fn parse_value_labels(
     bytes: &[u8],
     header: &SasHeader,
@@ -346,18 +345,39 @@ fn parse_value_labels(
         feature: Cow::from("catalog label padding exceeds platform pointer width"),
     })?;
 
+    let (offsets, label_blob_offset) =
+        parse_value_label_offsets(bytes, header, pad, label_count, capacity)?;
+    parse_value_label_entries(
+        bytes,
+        label_blob_offset,
+        &offsets,
+        header,
+        encoding,
+        value_type,
+    )
+}
+
+fn parse_value_label_offsets(
+    bytes: &[u8],
+    header: &SasHeader,
+    pad: usize,
+    label_count: usize,
+    capacity: usize,
+) -> Result<(Vec<usize>, usize)> {
     let mut offsets = vec![0usize; label_count];
-    let mut lbp1 = bytes;
+    let mut cursor = 0usize;
 
     for i in 0..capacity {
-        if lbp1.len() < 6 {
+        let remaining = bytes.len().saturating_sub(cursor);
+        if remaining < 6 {
             return Err(Error::Corrupted {
                 section: Section::Header,
                 details: Cow::from("catalog value entry truncated"),
             });
         }
-        let entry_len = usize::from(read_u16(header.endianness, &lbp1[2..4]));
-        if 6 + entry_len > lbp1.len() {
+        let entry = &bytes[cursor..];
+        let entry_len = usize::from(read_u16(header.endianness, &entry[2..4]));
+        if 6 + entry_len > entry.len() {
             return Err(Error::Corrupted {
                 section: Section::Header,
                 details: Cow::from("catalog value entry exceeds block"),
@@ -365,7 +385,7 @@ fn parse_value_labels(
         }
         if i < label_count {
             let label_pos_offset = 10 + pad;
-            if label_pos_offset + 4 > lbp1.len() {
+            if label_pos_offset + 4 > entry.len() {
                 return Err(Error::Corrupted {
                     section: Section::Header,
                     details: Cow::from("catalog value entry missing label index"),
@@ -373,7 +393,7 @@ fn parse_value_labels(
             }
             let label_pos = read_u32(
                 header.endianness,
-                &lbp1[label_pos_offset..label_pos_offset + 4],
+                &entry[label_pos_offset..label_pos_offset + 4],
             );
             let label_pos = usize::try_from(label_pos).map_err(|_| Error::Corrupted {
                 section: Section::Header,
@@ -385,23 +405,33 @@ fn parse_value_labels(
                     details: Cow::from("catalog label index out of range"),
                 });
             }
-            offsets[label_pos] = bytes.len() - lbp1.len();
+            offsets[label_pos] = cursor;
         }
         let consumed = 6 + entry_len;
-        if consumed > lbp1.len() {
-            lbp1 = &[];
+        if consumed > remaining {
+            cursor = bytes.len();
             break;
         }
-        lbp1 = &lbp1[consumed..];
-        if lbp1.is_empty() {
+        cursor += consumed;
+        if cursor >= bytes.len() {
             break;
         }
     }
 
-    let mut lbp2 = lbp1;
-    let mut labels = Vec::with_capacity(label_count);
+    Ok((offsets, cursor))
+}
 
-    for &entry_offset in offsets.iter().take(label_count) {
+fn parse_value_label_entries(
+    bytes: &[u8],
+    mut label_cursor: usize,
+    offsets: &[usize],
+    header: &SasHeader,
+    encoding: &'static Encoding,
+    value_type: ValueType,
+) -> Result<Vec<ValueLabel>> {
+    let mut labels = Vec::with_capacity(offsets.len());
+
+    for &entry_offset in offsets {
         if entry_offset + 6 > bytes.len() {
             return Err(Error::Corrupted {
                 section: Section::Header,
@@ -417,49 +447,59 @@ fn parse_value_labels(
             });
         }
 
-        let key = match value_type {
-            ValueType::String => {
-                if entry_len < 16 {
-                    return Err(Error::Corrupted {
-                        section: Section::Header,
-                        details: Cow::from("catalog string value entry too short"),
-                    });
-                }
-                let value_bytes = &entry[entry_len - 16..entry_len];
-                ValueKey::String(decode_text(value_bytes, encoding)?)
-            }
-            ValueType::Numeric => {
-                if entry_len < 30 {
-                    return Err(Error::Corrupted {
-                        section: Section::Header,
-                        details: Cow::from("catalog numeric value entry too short"),
-                    });
-                }
-                let raw = read_u64_be(&entry[22..30]);
-                decode_numeric_key(raw)
-            }
-        };
+        let key = parse_value_label_key(entry, entry_len, header, encoding, value_type)?;
 
-        if lbp2.len() < 10 {
+        if label_cursor + 10 > bytes.len() {
             return Err(Error::Corrupted {
                 section: Section::Header,
                 details: Cow::from("catalog label entry truncated"),
             });
         }
+        let lbp2 = &bytes[label_cursor..];
         let mut label_len = usize::from(read_u16(header.endianness, &lbp2[8..10]));
         let available = lbp2.len().saturating_sub(10);
         label_len = min(label_len, available);
         let label = decode_text(&lbp2[10..10 + label_len], encoding)?;
         labels.push(ValueLabel { key, label });
         let skip = 8 + 2 + label_len + 1;
-        if skip > lbp2.len() {
-            lbp2 = &[];
-        } else {
-            lbp2 = &lbp2[skip..];
+        label_cursor = label_cursor.saturating_add(skip);
+        if label_cursor >= bytes.len() {
+            label_cursor = bytes.len();
         }
     }
 
     Ok(labels)
+}
+
+fn parse_value_label_key(
+    entry: &[u8],
+    entry_len: usize,
+    _header: &SasHeader,
+    encoding: &'static Encoding,
+    value_type: ValueType,
+) -> Result<ValueKey> {
+    match value_type {
+        ValueType::String => {
+            if entry_len < 16 {
+                return Err(Error::Corrupted {
+                    section: Section::Header,
+                    details: Cow::from("catalog string value entry too short"),
+                });
+            }
+            let value_bytes = &entry[entry_len - 16..entry_len];
+            Ok(ValueKey::String(decode_text(value_bytes, encoding)?))
+        }
+        ValueType::Numeric => {
+            if entry_len < 30 {
+                return Err(Error::Corrupted {
+                    section: Section::Header,
+                    details: Cow::from("catalog numeric value entry too short"),
+                });
+            }
+            let raw = read_u64_be(&entry[22..30]);
+            Ok(decode_numeric_key(raw))
+        }
+    }
 }
 
 fn read_chain_segment<R: Read + Seek>(

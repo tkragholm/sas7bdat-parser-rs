@@ -6,11 +6,11 @@ use encoding_rs::{Encoding, UTF_8};
 use simdutf8::basic;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
+use crate::cell::{CellValue, MissingValue};
 use crate::dataset::{Endianness, MissingLiteral, TaggedMissing};
 use crate::parser::core::encoding::trim_trailing;
 use crate::parser::core::float_utils::try_int_from_f64;
 use crate::parser::metadata::{ColumnKind, NumericKind};
-use crate::cell::{CellValue, MissingValue};
 
 #[derive(Clone)]
 pub enum NumericCell {
@@ -31,14 +31,18 @@ pub fn decode_value_inner<'data>(
             NumericCell::Missing(missing) => CellValue::Missing(missing),
             NumericCell::Number(number) => match numeric_kind {
                 NumericKind::Double => numeric_value_from_width(number, raw_width),
-                NumericKind::Date => sas_days_to_datetime(number)
-                    .map_or_else(|| numeric_value_from_width(number, raw_width), CellValue::Date),
+                NumericKind::Date => sas_days_to_datetime(number).map_or_else(
+                    || numeric_value_from_width(number, raw_width),
+                    CellValue::Date,
+                ),
                 NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
                     || numeric_value_from_width(number, raw_width),
                     CellValue::DateTime,
                 ),
-                NumericKind::Time => sas_seconds_to_time(number)
-                    .map_or_else(|| numeric_value_from_width(number, raw_width), CellValue::Time),
+                NumericKind::Time => sas_seconds_to_time(number).map_or_else(
+                    || numeric_value_from_width(number, raw_width),
+                    CellValue::Time,
+                ),
             },
         },
     }

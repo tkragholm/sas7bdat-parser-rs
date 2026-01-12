@@ -27,10 +27,7 @@ pub(super) fn merge_label_set_missing(policy: &mut MissingValuePolicy, set: &Lab
     }
 }
 
-pub(super) fn record_missing_observation(
-    policy: &mut MissingValuePolicy,
-    missing: &MissingValue,
-) {
+pub(super) fn record_missing_observation(policy: &mut MissingValuePolicy, missing: &MissingValue) {
     match missing {
         MissingValue::System => {
             policy.system_missing = true;

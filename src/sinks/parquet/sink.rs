@@ -6,10 +6,10 @@ use parquet::file::properties::WriterProperties;
 use parquet::file::writer::SerializedFileWriter;
 use parquet::schema::types::{Type, TypePtr};
 
+use crate::cell::CellValue;
 use crate::error::{Error, Result};
 use crate::parser::ColumnarBatch;
 use crate::sinks::{ColumnarSink, RowSink, SinkContext, validate_sink_begin};
-use crate::cell::CellValue;
 
 use super::constants::{
     DEFAULT_ROW_GROUP_SIZE, DEFAULT_TARGET_ROW_GROUP_BYTES, MAX_AUTO_ROW_GROUP_ROWS,

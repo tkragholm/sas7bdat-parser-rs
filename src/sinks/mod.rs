@@ -3,9 +3,9 @@ mod parquet;
 
 use std::borrow::Cow;
 
-use crate::error::{Error, Result};
 use crate::cell::CellValue;
 use crate::dataset::DatasetMetadata;
+use crate::error::{Error, Result};
 use crate::parser::{ColumnInfo, ColumnarBatch, DatasetLayout, StreamingRow};
 
 pub use csv::CsvSink;

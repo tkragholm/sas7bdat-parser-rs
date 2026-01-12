@@ -246,10 +246,7 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error when projection cannot be resolved or row decoding fails.
-    pub fn select_with(
-        &mut self,
-        selection: &RowSelection,
-    ) -> Result<ProjectedRowWindow<'_, R>> {
+    pub fn select_with(&mut self, selection: &RowSelection) -> Result<ProjectedRowWindow<'_, R>> {
         let metadata = &self.layout.header.metadata;
         let indices =
             selection

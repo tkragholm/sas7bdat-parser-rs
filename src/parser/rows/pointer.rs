@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use crate::error::{Error, Result, Section};
 use crate::dataset::Endianness;
+use crate::error::{Error, Result, Section};
 use crate::parser::core::byteorder::{read_u32, read_u64};
 
 use super::constants::{

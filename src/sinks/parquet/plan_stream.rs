@@ -193,7 +193,6 @@ impl ColumnPlan {
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
     pub(super) fn extend_columnar(&mut self, column: &ColumnarColumn<'_, '_>) -> Result<()> {
         self.def_levels.reserve(column.len());
         match (&mut self.values, self.encoder) {
@@ -313,7 +312,6 @@ impl ColumnPlan {
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
     pub(super) fn stream_columnar_materialized_utf8(
         &mut self,
         mut column_writer: SerializedColumnWriter<'_>,

@@ -6,11 +6,11 @@ use parquet::data_type::ByteArray;
 use parquet::schema::types::{Type, TypePtr};
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
+use crate::cell::CellValue;
+use crate::dataset::Variable;
 use crate::error::{Error, Result};
 use crate::logger::log_warn;
-use crate::dataset::Variable;
 use crate::parser::{ColumnInfo, ColumnKind, NumericKind};
-use crate::cell::CellValue;
 
 use super::constants::SECONDS_PER_DAY;
 use super::utf8::Utf8Scratch;
@@ -384,7 +384,9 @@ impl ColumnPlan {
 
     fn coerce_seconds_to_micros(&self, value: &CellValue<'_>, kind: &str) -> Result<Option<i64>> {
         match value {
-            CellValue::Float(seconds) => Self::float_seconds_to_micros(self.name.as_str(), *seconds),
+            CellValue::Float(seconds) => {
+                Self::float_seconds_to_micros(self.name.as_str(), *seconds)
+            }
             CellValue::Int32(seconds) => Ok(Some(i64::from(*seconds) * 1_000_000)),
             CellValue::Int64(seconds) => Ok(Some(*seconds * 1_000_000)),
             other => Err(self.type_mismatch_error(kind, other)),
@@ -537,7 +539,6 @@ fn datetime_to_sas_days(datetime: &OffsetDateTime) -> f64 {
     datetime_to_sas_seconds(datetime) / SECONDS_PER_DAY_F64
 }
 
-#[allow(clippy::cast_precision_loss)]
 fn time_to_sas_seconds(duration: &Duration) -> f64 {
     duration.as_seconds_f64()
 }

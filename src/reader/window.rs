@@ -109,7 +109,6 @@ impl<I: RowSource> RowWindowInner<I> {
 
 macro_rules! impl_row_window {
     ($name:ident => $inner:ty, $row:ty) => {
-        #[allow(clippy::missing_errors_doc)]
         impl<'a, R: Read + Seek> $name<'a, R> {
             pub(super) const fn new(inner: $inner, skip: u64, remaining: Option<u64>) -> Self {
                 Self(RowWindowInner::new(inner, skip, remaining))

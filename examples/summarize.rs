@@ -3,9 +3,9 @@ use std::env;
 use std::error::Error;
 use std::path::Path;
 
+use sas7bdat::CellValue;
 use sas7bdat::SasReader;
 use sas7bdat::dataset::{Format, VariableKind};
-use sas7bdat::CellValue;
 use serde::Serialize;
 
 #[derive(Debug, Default, Serialize)]

@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 use std::convert::TryFrom;
 
-use crate::error::{Error, Result};
 use crate::dataset::{Alignment, Format, Measure, MissingValuePolicy, Variable, VariableKind};
+use crate::error::{Error, Result};
 
 use super::text_store::{TextRef, TextStore};
 
