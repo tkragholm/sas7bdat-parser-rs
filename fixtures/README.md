@@ -17,6 +17,12 @@ parser are invoked directly; pandas/pyreadstat/haven snapshots are generated int
 directories via `scripts/snapshots/`. Reports are written to `target/sas7bdat-reports` when the
 corresponding `SAS7BDAT_VERIFY_*` flag is set.
 
+Large AHS 2019 datasets are not checked into git. Download the ZIPs listed in
+`ahs-links.txt`, extract them, and place the `.sas7bdat` files under:
+
+- `fixtures/raw_data/ahs2019_metro/`
+- `fixtures/raw_data/ahs2019_national/`
+
 The intentionally broken fixtures `pandas/corrupt.sas7bdat` and
 `pandas/zero_variables.sas7bdat` remain excluded from the suite because neither pyreadstat nor
 the Rust parser can decode them reliably.

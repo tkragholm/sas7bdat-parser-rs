@@ -16,6 +16,9 @@ ahs2013n.sas7bdat
 ahs2013n.parquet
 ahs2013n_new.parquet
 benchmarks.txt
+data/*.parquet
+fixtures/raw_data/ahs2019_metro/
+fixtures/raw_data/ahs2019_national/
 
 # Python environments & caches
 .venv/
