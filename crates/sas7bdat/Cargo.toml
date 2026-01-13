@@ -1,0 +1,71 @@
+[package]
+name = "sas7bdat"
+authors = ["Tobias Kragholm"]
+version = "0.1.0"
+edition = "2024"
+description = "Rust library + CLI for decoding SAS7BDAT datasets and streaming them to modern formats."
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
+homepage = "https://github.com/tkragholm/sas7bdat-parser-rs"
+documentation = "https://docs.rs/sas7bdat"
+keywords = ["sas", "sas7bdat", "parquet", "data", "statistics"]
+categories = ["command-line-utilities", "data-structures", "parsing"]
+include = ["Cargo.toml", "README.md", "LICENSE", "src/**", "examples/**", "tests/**"]
+
+[lib]
+name = "sas7bdat"
+path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+ahash = { workspace = true }
+byteorder = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true }
+csv = { workspace = true }
+encoding_rs = { workspace = true }
+hashbrown = { workspace = true }
+hotpath = { workspace = true, optional = true }
+itoa = { workspace = true }
+parquet = { workspace = true }
+rayon = { workspace = true }
+rustc-hash = { workspace = true }
+ryu = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+simdutf8 = { workspace = true }
+smallvec = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+datatest-stable = { workspace = true }
+num-traits = { workspace = true }
+reqwest = { workspace = true }
+sas7bdat-test-support = { path = "../sas7bdat-test-support" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+zip = { workspace = true }
+
+[[test]]
+name = "fixtures_snapshot_readstat"
+harness = false
+
+[[test]]
+name = "fixtures_snapshot_cpp"
+harness = false
+
+[[test]]
+name = "fixtures_snapshot_csharp"
+harness = false
+
+[[bin]]
+name = "sas7"
+path = "src/bin/sas7.rs"
+
+[lints.clippy]
+pedantic = "warn"
+nursery = "warn"

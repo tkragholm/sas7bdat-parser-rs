@@ -12,5 +12,5 @@ get_project_root <- function() {
 }
 
 get_r_package_path <- function() {
-  file.path(get_project_root(), "R-package")
+  file.path(get_project_root(), "R")
 }

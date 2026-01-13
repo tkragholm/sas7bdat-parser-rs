@@ -1,3 +1,14 @@
+## Publishing prep
+
+- [ ] Confirm crate metadata (description/keywords/categories) and repo URLs before release.
+- [ ] Add a CHANGELOG and decide versioning policy (semver).
+- [ ] Ensure `crates/sas7bdat/Cargo.toml` include/exclude reflects intended public files (exclude `docs/`, internal notes).
+- [ ] Add CI steps for `cargo check`, `cargo test`, and optional external parser reports.
+- [x] Centralize dependencies in workspace `Cargo.toml`.
+- [x] Reorganize benchmarks and scripts into grouped subdirectories.
+- [x] Update test harness paths for moved benchmark runners.
+- [x] Update fixtures README to reflect runtime snapshot generation + reports.
+
 ## Investigation notes: noisy 0x8000 pages
 
 - Real-world files emit thousands of warnings about `type=0x8000` pages with `subheaders=3272`, `page_header_size=24`, `pointer_size=12`. These pages are not data pages; base type is META (0) with a high-bit flag.

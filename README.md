@@ -1,6 +1,6 @@
 # sas7bdat
 
-`sas7bdat` is a Rust library for decoding SAS7BDAT datasets with a focus on reproducible research workflows. It exposes a safe API for inspecting metadata, streaming rows, and writing Parquet output so that legacy SAS exports can participate in modern data engineering pipelines. The project is Rust-first (library + CLI); the PyPI package redistributes the Rust binary, and native Python/R bindings are planned but not yet shipped. It was originally built for heavy, secure processing on Statistics Denmark’s servers over large national registers.
+`sas7bdat` is a Rust library for decoding SAS7BDAT datasets with a focus on reproducible research workflows. It exposes a safe API for inspecting metadata, streaming rows, and writing Parquet output so that legacy SAS exports can participate in modern data engineering pipelines. The project is Rust-first (library + CLI) with Python (PyO3) and R (extendr) bindings under active development. It was originally built for heavy, secure processing on Statistics Denmark’s servers over large national registers.
 
 This project aims to bridge a legacy, closed-source data format into modern, open-source workflows. Today many stacks lean on the venerable C-based ReadStat (e.g., haven, pyreadstat); implementing the reader in Rust should make contributions more approachable and redistribution (cross-compilation, shipping wheels/binaries) simpler while preserving performance.
 
@@ -38,6 +38,12 @@ cd sas7bdat-parser-rs
 git submodule update --init --recursive
 cargo build
 ```
+
+### Repository layout
+
+- Core Rust crate: `crates/sas7bdat/`
+- Python bindings (PyO3/maturin): `python/`
+- R bindings (extendr): `R/`
 
 ### CLI usage
 
@@ -92,7 +98,7 @@ fn main() -> sas7bdat::Result<()> {
 }
 ```
 
-See the examples in `examples/` for more complete pipelines, including Parquet export.
+See the examples in `crates/sas7bdat/examples/` for more complete pipelines, including Parquet export.
 
 ## Testing
 

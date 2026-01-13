@@ -1,84 +1,43 @@
-[package]
-name = "sas7bdat"
-authors = ["Tobias Kragholm"]
-version = "0.1.0"
-publish = false
-edition = "2024"
-license = "MIT"
+cargo-features = ["codegen-backend"]
+[workspace]
+members = [
+  "crates/sas7bdat",
+  "crates/sas7bdat-test-support",
+  "benchmarks/rust/rustbench",
+]
+resolver = "2"
 
-[lib]
-name = "sas7bdat"
-path = "src/lib.rs"
-crate-type = ["staticlib", "rlib"]
-
-[dependencies]
+[workspace.dependencies]
+ahash = "0.8"
 byteorder = "1"
-thiserror = "2"
-time = { version = "0.3", features = [
-  "std",
-  "formatting",
-  "parsing",
-  "macros",
-] }
+bytes = "1"
+clap = { version = "4.5.51", features = ["derive", "env"] }
+csv = "1"
+datatest-stable = "0.3.3"
 encoding_rs = "0.8"
-
+hashbrown = "0.16"
+hotpath = "0.9"
+itoa = "1"
+num-traits = "0.2"
+parquet = "57"
+rayon = "1.11.0"
+reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
+rustc-hash = "2"
+ryu = "1"
+sas7bdat = { path = "crates/sas7bdat" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 simdutf8 = "0.1.5"
 smallvec = "1.15.1"
-parquet = "57"
-hashbrown = "0.16"
-ahash = "0.8"
-rustc-hash = "2"
-bytes = "1"
-hotpath = { version = "0.9", optional = true }
-ryu = "1"
-itoa = "1"
-csv = "1"
-walkdir = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-rayon = "1.11.0"
-clap = { version = "4.5.51", features = ["derive", "env"] }
-
-[dev-dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-datatest-stable = "0.3.3"
-insta = { version = "1.39", features = ["json"] }
-reqwest = { version = "0.12", default-features = false, features = [
-  "blocking",
-  "rustls-tls",
-] }
 tempfile = "3.10"
+thiserror = "2"
+time = { version = "0.3", features = ["std", "formatting", "parsing", "macros"] }
+walkdir = "2"
 zip = { version = "7", default-features = false, features = ["deflate"] }
-
-[[test]]
-name = "fixtures_snapshot"
-harness = false
-
-[[test]]
-name = "fixtures_snapshot_pandas"
-harness = false
-
-[[test]]
-name = "fixtures_snapshot_pyreadstat"
-harness = false
-
-[[test]]
-name = "fixtures_snapshot_haven"
-harness = false
-
-[[test]]
-name = "fixtures_snapshot_readstat"
-harness = false
-
-[[bin]]
-name = "sas7"
-path = "src/bin/sas7.rs"
-
-[lints.clippy]
-pedantic = "warn"
-nursery = "warn"
 
 [profile.release]
 codegen-units = 1
 lto = "fat"
+
+[profile.dev]
+codegen-backend = "cranelift"

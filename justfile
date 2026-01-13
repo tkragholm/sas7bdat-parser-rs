@@ -20,11 +20,11 @@ r-install-dev:
 
 # Build and install the R package with Rust in release mode
 r-install-release:
-    MACOSX_DEPLOYMENT_TARGET="{{macosx_deployment_target}}" RUSTFLAGS="{{rust_flags}}" SAVVY_PROFILE=release {{r_bin}} CMD INSTALL --clean R-package
+    MACOSX_DEPLOYMENT_TARGET="{{macosx_deployment_target}}" RUSTFLAGS="{{rust_flags}}" SAVVY_PROFILE=release {{r_bin}} CMD INSTALL --clean R
 
 # Build and install the R package with the dist-release profile (LTO, 1 codegen unit)
 r-install-dist-release:
-    MACOSX_DEPLOYMENT_TARGET="{{macosx_deployment_target}}" RUSTFLAGS="{{rust_flags}}" SAVVY_PROFILE=dist-release {{r_bin}} CMD INSTALL --clean R-package
+    MACOSX_DEPLOYMENT_TARGET="{{macosx_deployment_target}}" RUSTFLAGS="{{rust_flags}}" SAVVY_PROFILE=dist-release {{r_bin}} CMD INSTALL --clean R
 
 # Cross-compile Windows wheel with maturin + cargo-xwin (requires target installed)
 win-wheel:

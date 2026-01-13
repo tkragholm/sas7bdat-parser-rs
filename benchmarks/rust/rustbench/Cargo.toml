@@ -1,0 +1,13 @@
+[package]
+name = "sas7bdat-rustbench"
+version = "0.1.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "sas7bdat-rustbench"
+path = "src/main.rs"
+
+[dependencies]
+sas7bdat = { workspace = true }

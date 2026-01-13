@@ -1,0 +1,15 @@
+[package]
+name = "sas7bdat-test-support"
+version = "0.1.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+csv = { workspace = true }
+datatest-stable = { workspace = true }
+sas7bdat = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+time = { workspace = true }

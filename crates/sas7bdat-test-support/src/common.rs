@@ -1,0 +1,108 @@
+#![allow(dead_code, clippy::pedantic)]
+use sas7bdat::CellValue;
+use serde_json::{Value as JsonValue, json};
+use std::path::{Path, PathBuf};
+use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
+
+const SECONDS_PER_DAY: f64 = 86_400.0;
+
+fn sas_epoch() -> PrimitiveDateTime {
+    PrimitiveDateTime::new(
+        Date::from_calendar_date(1960, Month::January, 1).expect("valid SAS epoch"),
+        Time::MIDNIGHT,
+    )
+}
+
+pub fn repo_root() -> PathBuf {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let candidate = manifest.join("..").join("..");
+    candidate.canonicalize().unwrap_or(candidate)
+}
+
+pub fn fixture_path(path: impl AsRef<Path>) -> PathBuf {
+    repo_root().join(path)
+}
+
+pub fn value_to_json(value: &CellValue<'_>) -> JsonValue {
+    match value {
+        CellValue::Float(v) => json!({ "kind": "number", "value": *v }),
+        CellValue::Int32(v) => json!({ "kind": "number", "value": *v as f64 }),
+        CellValue::Int64(v) => json!({ "kind": "number", "value": *v as f64 }),
+        CellValue::NumericString(s) => json!({ "kind": "string", "value": s }),
+        CellValue::Str(s) => json!({ "kind": "string", "value": s }),
+        CellValue::Bytes(b) => json!({
+            "kind": "bytes",
+            "value": b.iter().copied().collect::<Vec<u8>>()
+        }),
+        CellValue::DateTime(dt) => json!({
+            "kind": "datetime",
+            "value": datetime_to_seconds(dt)
+        }),
+        CellValue::Date(dt) => json!({
+            "kind": "date",
+            "value": datetime_to_days(dt)
+        }),
+        CellValue::Time(duration) => json!({
+            "kind": "time",
+            "value": duration_to_seconds(duration)
+        }),
+        CellValue::Missing(_) => json!({ "kind": "missing", "value": null }),
+    }
+}
+
+pub fn format_iso_seconds(dt: &OffsetDateTime) -> String {
+    let rounded = round_to_millisecond(dt);
+    let date = rounded.date();
+    let time = rounded.time();
+    if time.nanosecond() == 0 {
+        format!(
+            "{} {:02}:{:02}:{:02}",
+            date,
+            time.hour(),
+            time.minute(),
+            time.second()
+        )
+    } else {
+        format!(
+            "{} {:02}:{:02}:{:02}.{:03}",
+            date,
+            time.hour(),
+            time.minute(),
+            time.second(),
+            time.nanosecond() / 1_000_000
+        )
+    }
+}
+
+pub fn format_iso_date(dt: &OffsetDateTime) -> String {
+    dt.date().to_string()
+}
+
+pub fn round_to_millisecond(dt: &OffsetDateTime) -> OffsetDateTime {
+    let nanos = dt.time().nanosecond() as u64;
+    let mut millis = (nanos + 500_000) / 1_000_000;
+    let mut adjusted = *dt;
+    if millis == 1_000 {
+        millis = 0;
+        if let Some(next) = adjusted.checked_add(Duration::seconds(1)) {
+            adjusted = next;
+        } else {
+            return *dt;
+        }
+    }
+    let new_nanos = (millis * 1_000_000) as u32;
+    adjusted.replace_nanosecond(new_nanos).unwrap_or(*dt)
+}
+
+fn datetime_to_seconds(dt: &OffsetDateTime) -> f64 {
+    let epoch = sas_epoch().assume_utc();
+    (*dt - epoch).whole_microseconds() as f64 / 1_000_000.0
+}
+
+fn datetime_to_days(dt: &OffsetDateTime) -> f64 {
+    datetime_to_seconds(dt) / SECONDS_PER_DAY
+}
+
+fn duration_to_seconds(duration: &Duration) -> f64 {
+    duration.whole_microseconds() as f64 / 1_000_000.0
+}

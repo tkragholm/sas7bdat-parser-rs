@@ -35,7 +35,8 @@ htmlcov/
 
 # Benchmark build outputs
 benchmarks/.build/
-benchmarks/.dotnet-cli-cache/
-benchmarks/.nuget/
-benchmarks/SasBenchmarks/bin/
-benchmarks/SasBenchmarks/obj/
+benchmarks/csharp/.dotnet-cli-cache/
+benchmarks/csharp/.nuget/
+benchmarks/csharp/nuget-packages/
+benchmarks/csharp/SasBenchmarks/bin/
+benchmarks/csharp/SasBenchmarks/obj/

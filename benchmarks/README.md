@@ -20,7 +20,7 @@ Build prerequisites:
 Usage:
 
 ```bash
-benchmarks/run_csharp.sh tests/data_AHS2013/omov.sas7bdat
+benchmarks/runners/run_csharp.sh tests/data_AHS2013/omov.sas7bdat
 ```
 
 `run_csharp.sh` restores any framework dependencies, builds the local library if
@@ -31,6 +31,21 @@ count, and elapsed time in milliseconds.
 
 Place other benchmark harnesses (Rust, ReadStat CLI wrappers, etc.) in this
 directory alongside `SasBenchmarks` for easy comparison.
+
+### Build All Harnesses
+
+Use the build helper to compile every benchmark harness in one go:
+
+```bash
+benchmarks/suites/build_all.py
+```
+
+Pass a fixture to drive build-only scripts and `--allow-fail` to continue on
+missing toolchains:
+
+```bash
+benchmarks/suites/build_all.py --fixture fixtures/raw_data/pandas/airline.sas7bdat --allow-fail
+```
 
 ### Rust CLI (`sas7 convert`)
 
@@ -43,22 +58,38 @@ cargo run --release --bin sas7 -- convert tests/data_AHS2013/omov.sas7bdat \
   --out /tmp/out.parquet
 ```
 
-The `benchmarks/run_rust.sh` helper wraps `sas7 convert`, rebuilds incrementally,
+The `benchmarks/runners/run_rust.sh` helper wraps `sas7 convert`, rebuilds incrementally,
 and writes to a temporary output:
 
 ```bash
-benchmarks/run_rust.sh tests/data_AHS2013/omov.sas7bdat
+benchmarks/runners/run_rust.sh tests/data_AHS2013/omov.sas7bdat
+```
+
+### Rust Bench Harness (`sas7bdat-rustbench`)
+
+The Rust bench harness reads every row with no output side effects, mirroring
+the C/C++/C# benchmarks:
+
+```bash
+benchmarks/runners/run_rust_bench.sh tests/data_AHS2013/omov.sas7bdat
 ```
 
 ### ReadStat Library (C)
 
 `run_readstat.sh` compiles the vendored ReadStat sources under
-`benchmarks/lib/c/` alongside `readstat_bench.c`, producing a self-contained
+`benchmarks/lib/c/` alongside `benchmarks/readstat/readstat_bench.c`, producing a self-contained
 binary in `benchmarks/.build/`. No system-wide `libreadstat` installation is
 required. The resulting benchmark streams every value in the file:
 
 ```bash
-benchmarks/run_readstat.sh tests/data_AHS2013/omov.sas7bdat
+benchmarks/runners/run_readstat.sh tests/data_AHS2013/omov.sas7bdat
+```
+
+If you want the ReadStat CLI from the submodule for correctness tests:
+
+```bash
+benchmarks/runners/run_readstat_cli.sh --build-only
+export SAS7BDAT_READSTAT_BIN="$(benchmarks/runners/run_readstat_cli.sh --print-path)"
 ```
 
 ### C++ (`cppsas7bdat`)
@@ -74,10 +105,14 @@ Build prerequisites:
 * Development packages for `fmt`, `spdlog`, and Boost date\_time (Debian/Ubuntu:
   `libfmt-dev`, `libspdlog-dev`, `libboost-date-time-dev`)
 
+If CMake cannot locate Boost, set one of `Boost_DIR`, `BOOST_ROOT`, or
+`CMAKE_PREFIX_PATH` to the directory containing `BoostConfig.cmake` (or the
+Boost install root).
+
 Usage:
 
 ```bash
-benchmarks/run_cpp.sh tests/data_AHS2013/omov.sas7bdat
+benchmarks/runners/run_cpp.sh tests/data_AHS2013/omov.sas7bdat
 ```
 
 The script configures a local build directory under `benchmarks/.build/`,
@@ -92,10 +127,10 @@ After building the necessary binaries once (Rust `cargo run --release`,
 
 ```bash
 hyperfine \
-  'benchmarks/run_rust.sh tests/data_AHS2013/omov.sas7bdat' \
-  'benchmarks/run_csharp.sh tests/data_AHS2013/omov.sas7bdat' \
-  'benchmarks/run_readstat.sh tests/data_AHS2013/omov.sas7bdat' \
-  'benchmarks/run_cpp.sh tests/data_AHS2013/omov.sas7bdat'
+  'benchmarks/runners/run_rust_bench.sh tests/data_AHS2013/omov.sas7bdat' \
+  'benchmarks/runners/run_csharp.sh tests/data_AHS2013/omov.sas7bdat' \
+  'benchmarks/runners/run_readstat.sh tests/data_AHS2013/omov.sas7bdat' \
+  'benchmarks/runners/run_cpp.sh tests/data_AHS2013/omov.sas7bdat'
 ```
 
 Replace the input path with the dataset you want to benchmark. Each command
@@ -106,5 +141,20 @@ The `run_hyperfine.sh` helper executes the same sequence for a single dataset
 and accepts additional Hyperfine arguments:
 
 ```bash
-benchmarks/run_hyperfine.sh tests/data_AHS2013/omov.sas7bdat --warmup 1
+benchmarks/runners/run_hyperfine.sh tests/data_AHS2013/omov.sas7bdat --warmup 1
+```
+
+### Suite Runner
+
+The suite runner executes multiple parsers over all fixtures, records timings,
+and emits an optional JSON report:
+
+```bash
+benchmarks/suites/bench_suite.py --output benchmarks/report.json
+```
+
+Use `--pattern` to filter fixtures and `--parsers` to select a subset:
+
+```bash
+benchmarks/suites/bench_suite.py --pattern ahs2013 --parsers rust readstat cpp csharp
 ```
