@@ -1,7 +1,7 @@
 [package]
 name = "sas7bdat"
 authors = ["Tobias Kragholm"]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Rust library + CLI for decoding SAS7BDAT datasets and streaming them to modern formats."
 readme = "README.md"

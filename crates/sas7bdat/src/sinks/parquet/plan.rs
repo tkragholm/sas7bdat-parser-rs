@@ -537,6 +537,6 @@ fn datetime_to_sas_days(datetime: &OffsetDateTime) -> f64 {
     datetime_to_sas_seconds(datetime) / SECONDS_PER_DAY_F64
 }
 
-const fn time_to_sas_seconds(duration: &Duration) -> f64 {
+fn time_to_sas_seconds(duration: &Duration) -> f64 {
     duration.as_seconds_f64()
 }

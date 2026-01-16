@@ -1,4 +1,3 @@
-cargo-features = ["codegen-backend"]
 [workspace]
 members = [
   "crates/sas7bdat",
@@ -38,6 +37,3 @@ zip = { version = "7", default-features = false, features = ["deflate"] }
 [profile.release]
 codegen-units = 1
 lto = "fat"
-
-[profile.dev]
-codegen-backend = "cranelift"
