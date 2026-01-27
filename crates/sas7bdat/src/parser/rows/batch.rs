@@ -3,13 +3,13 @@ use super::{
     iterator::RowIteratorCore,
 };
 use crate::error::Result;
+use crate::parser::metadata::DatasetLayout;
 use smallvec::SmallVec;
 use std::{
     convert::TryFrom,
     io::{Read, Seek},
     ops::Deref,
 };
-use crate::parser::metadata::DatasetLayout;
 
 // Cap columnar staging to avoid enormous allocations when row_length is very large.
 const MAX_COLUMNAR_BUFFER_BYTES: usize = 512 * 1024 * 1024;

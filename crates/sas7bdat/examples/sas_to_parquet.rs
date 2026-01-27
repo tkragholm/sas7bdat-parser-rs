@@ -1,5 +1,5 @@
 #[cfg(feature = "hotpath")]
-use hotpath::{Format, GuardBuilder};
+use hotpath::{Format, FunctionsGuardBuilder};
 use reqwest::blocking::{Client, ClientBuilder};
 use sas7bdat::{ParquetSink, SasReader};
 use std::{
@@ -21,7 +21,7 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "hotpath")]
-    let _hotpath = GuardBuilder::new("sas_to_parquet")
+    let _hotpath = FunctionsGuardBuilder::new("sas_to_parquet")
         .percentiles(&[50, 90, 95, 99])
         .limit(15)
         .format(Format::Table)

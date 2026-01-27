@@ -50,7 +50,10 @@ pub fn python_snapshots() -> Option<&'static SnapshotDir> {
             }
 
             let python = python_bin();
-            assert!(command_available(&python, &["--version"]), "python executable not available: {python}");
+            assert!(
+                command_available(&python, &["--version"]),
+                "python executable not available: {python}"
+            );
 
             let temp = TempDir::new().expect("create temp dir for python snapshots");
             let script = common::repo_root()
@@ -81,7 +84,10 @@ pub fn haven_snapshots() -> Option<&'static SnapshotDir> {
             std::env::var_os("SAS7BDAT_VERIFY_HAVEN")?;
 
             let rscript = rscript_bin();
-            assert!(command_available(&rscript, &["--version"]), "Rscript executable not available: {rscript}");
+            assert!(
+                command_available(&rscript, &["--version"]),
+                "Rscript executable not available: {rscript}"
+            );
 
             let temp = TempDir::new().expect("create temp dir for haven snapshots");
             let script = common::repo_root()

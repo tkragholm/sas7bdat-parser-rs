@@ -3,6 +3,8 @@ mod csv;
 #[cfg(feature = "parquet")]
 mod parquet;
 
+#[cfg(any(feature = "csv", feature = "parquet"))]
+use crate::error::Error;
 use crate::{
     cell::CellValue,
     dataset::DatasetMetadata,
@@ -13,8 +15,6 @@ use crate::{
 pub use csv::CsvSink;
 #[cfg(feature = "parquet")]
 pub use parquet::ParquetSink;
-#[cfg(any(feature = "csv", feature = "parquet"))]
-use crate::error::Error;
 #[cfg(any(feature = "csv", feature = "parquet"))]
 use std::borrow::Cow;
 

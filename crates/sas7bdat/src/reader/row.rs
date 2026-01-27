@@ -3,10 +3,7 @@ use crate::{
     dataset::DatasetMetadata,
     error::{Error, Result},
 };
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug)]
 pub struct RowLookup {
@@ -14,7 +11,7 @@ pub struct RowLookup {
 }
 
 impl RowLookup {
-    #[must_use] 
+    #[must_use]
     pub fn from_metadata(metadata: &DatasetMetadata) -> Self {
         let mut name_to_index = HashMap::with_capacity(metadata.variables.len() * 2);
         for variable in &metadata.variables {
@@ -161,9 +158,7 @@ impl RowValue for String {
     fn from_cell(cell: &CellValue<'_>) -> Result<Option<Self>> {
         match cell {
             CellValue::Missing(_) => Ok(None),
-            CellValue::Str(text) | CellValue::NumericString(text) => {
-                Ok(Some(text.to_string()))
-            }
+            CellValue::Str(text) | CellValue::NumericString(text) => Ok(Some(text.to_string())),
             _ => Err(Error::InvalidMetadata {
                 details: "cell type cannot be converted to String".into(),
             }),
@@ -197,10 +192,10 @@ impl RowValue for chrono::NaiveDate {
             }
         };
         let date = dt.date();
-        chrono::NaiveDate::from_ymd_opt(
+        Self::from_ymd_opt(
             date.year(),
-            u32::from(date.month().number_from_month()),
-            date.day(),
+            u32::from(u8::from(date.month())),
+            u32::from(date.day()),
         )
         .map(Some)
         .ok_or_else(|| Error::InvalidMetadata {
@@ -221,7 +216,8 @@ impl RowValue for chrono::NaiveDateTime {
                 });
             }
         };
-        chrono::NaiveDateTime::from_timestamp_opt(dt.unix_timestamp(), dt.nanosecond())
+        chrono::DateTime::from_timestamp(dt.unix_timestamp(), dt.nanosecond())
+            .map(|value| value.naive_utc())
             .map(Some)
             .ok_or_else(|| Error::InvalidMetadata {
                 details: "datetime out of range for chrono::NaiveDateTime".into(),
@@ -282,12 +278,9 @@ mod tests {
 
     fn sample_metadata() -> DatasetMetadata {
         let mut metadata = DatasetMetadata::new(4);
-        metadata.variables.push(Variable::new(
-            0,
-            "id".to_string(),
-            VariableKind::Numeric,
-            8,
-        ));
+        metadata
+            .variables
+            .push(Variable::new(0, "id".to_string(), VariableKind::Numeric, 8));
         metadata.variables.push(Variable::new(
             1,
             "name".to_string(),
@@ -335,7 +328,10 @@ mod tests {
             CellValue::Float(1.5),
             CellValue::Missing(crate::cell::MissingValue::system()),
         ]);
-        assert_eq!(row.get_as::<String>("name").unwrap(), Some("bob".to_string()));
+        assert_eq!(
+            row.get_as::<String>("name").unwrap(),
+            Some("bob".to_string())
+        );
     }
 
     #[test]

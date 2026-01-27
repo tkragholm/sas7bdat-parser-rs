@@ -82,7 +82,7 @@ fn ensure_summary_printer() {
     let _ = &_PRINT_SUMMARY;
 }
 
-#[must_use] 
+#[must_use]
 pub fn reference_snapshot_path_in(base_dir: &Path, parser: &str, sas_path: &Path) -> PathBuf {
     let mut relative = relative_to_manifest(sas_path);
     relative.set_extension("json");
@@ -107,7 +107,8 @@ pub fn compare_snapshots(parser: &str, sas_path: &Path, actual: &Snapshot, expec
     ensure_summary_printer();
     let relative_key = normalized_relative_path(sas_path);
 
-    assert!(actual.columns.len() == expected.columns.len(), 
+    assert!(
+        actual.columns.len() == expected.columns.len(),
         "column metadata length mismatch for {relative_key} (parser {parser})"
     );
     for (idx, (a, e)) in actual
@@ -273,7 +274,8 @@ fn compare_cell(
             let actual_value = numeric_value(actual, row_index, column_index, relative_key, parser);
             let expected_value =
                 numeric_value(expected, row_index, column_index, relative_key, parser);
-            assert!((actual_value - expected_value).abs() <= tolerance, 
+            assert!(
+                (actual_value - expected_value).abs() <= tolerance,
                 "numeric mismatch at row {row_index} column {column_index} for {relative_key} (parser {parser}): actual {actual_value} expected {expected_value} (tolerance {tolerance})"
             )
         }
@@ -309,7 +311,8 @@ fn compare_cell(
                         "missing bytes value in expected row {row_index} column {column_index} for {relative_key} (parser {parser})"
                     )
                 });
-            assert!(actual_value == expected_value, 
+            assert!(
+                actual_value == expected_value,
                 "bytes mismatch at row {row_index} column {column_index} for {relative_key} (parser {parser}): actual {actual_value:?} expected {expected_value:?}"
             )
         }
@@ -359,7 +362,9 @@ fn reinterpret_latin1_as_utf8(s: &str) -> Option<String> {
         return None;
     }
     let bytes: Vec<u8> = s.chars().map(|c| c as u32 as u8).collect();
-    std::str::from_utf8(&bytes).ok().map(std::borrow::ToOwned::to_owned)
+    std::str::from_utf8(&bytes)
+        .ok()
+        .map(std::borrow::ToOwned::to_owned)
 }
 
 fn likely_mojibake(s: &str) -> bool {
@@ -368,7 +373,7 @@ fn likely_mojibake(s: &str) -> bool {
         (code <= 0x1F) || (0x7F..=0x9F).contains(&code)
     })
 }
-#[must_use] 
+#[must_use]
 pub fn relative_to_manifest(path: &Path) -> PathBuf {
     let manifest = common::repo_root();
     let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -382,7 +387,7 @@ pub fn relative_to_manifest(path: &Path) -> PathBuf {
     }
 }
 
-#[must_use] 
+#[must_use]
 pub fn normalized_relative_path(path: &Path) -> String {
     let relative = relative_to_manifest(path);
     path_components_to_string(&relative)

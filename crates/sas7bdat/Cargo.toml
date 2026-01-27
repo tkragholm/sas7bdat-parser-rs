@@ -1,6 +1,6 @@
 [package]
 name = "sas7bdat"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Tobias Kragholm"]
 categories = ["command-line-utilities", "data-structures", "parsing"]
 documentation = "https://docs.rs/sas7bdat"

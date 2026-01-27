@@ -9,11 +9,11 @@ pub mod sinks;
 pub use crate::error::{Error, Result};
 pub use cell::{CellValue, MissingValue};
 pub use reader::{Row, RowIter, RowLookup, RowSelection, RowValue, SasReader};
-pub use sinks::{ColumnarSink, RowSink, SinkContext};
 #[cfg(feature = "csv")]
 pub use sinks::CsvSink;
 #[cfg(feature = "parquet")]
 pub use sinks::ParquetSink;
+pub use sinks::{ColumnarSink, RowSink, SinkContext};
 #[cfg(feature = "time")]
 pub use time::OffsetDateTime;
 

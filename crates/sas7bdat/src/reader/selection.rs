@@ -2,9 +2,9 @@ use crate::{
     dataset::DatasetMetadata,
     error::{Error, Result},
 };
-use std::collections::{HashMap, HashSet};
 #[cfg(feature = "fast-string")]
 use smallvec::SmallVec;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "fast-string")]
 type IndexList = SmallVec<[usize; 8]>;

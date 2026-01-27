@@ -6,7 +6,7 @@
     clippy::missing_panics_doc,
     clippy::option_if_let_else,
     clippy::semicolon_if_nothing_returned,
-    clippy::too_many_lines,
+    clippy::too_many_lines
 )]
 
 pub mod common;
