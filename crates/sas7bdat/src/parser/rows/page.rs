@@ -5,7 +5,7 @@ use super::{
         SAS_COMPRESSION_NONE, SAS_COMPRESSION_ROW, SAS_COMPRESSION_TRUNC, SAS_PAGE_TYPE_COMP,
         SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MASK, SAS_PAGE_TYPE_MIX, SUBHEADER_POINTER_OFFSET,
     },
-    iterator::RowIterator,
+    iterator::RowIteratorCore,
     pointer::{PointerInfo, parse_pointer, read_signature, signature_is_recognized},
 };
 use crate::{
@@ -14,13 +14,14 @@ use crate::{
     logger::log_warn,
     parser::{
         core::byteorder::read_u16,
-        metadata::{PageKind, classify_page},
+        metadata::{DatasetLayout, PageKind, classify_page},
     },
 };
 use std::{
     borrow::Cow,
     convert::TryInto,
     io::{Read, Seek, SeekFrom},
+    ops::Deref,
 };
 
 struct PointerContext {
@@ -32,12 +33,16 @@ struct PointerContext {
     target_rows: Option<usize>,
 }
 
-impl<R: Read + Seek> RowIterator<'_, R> {
+impl<R, L> RowIteratorCore<R, L>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
     pub(crate) fn fetch_next_page(&mut self) -> Result<()> {
-        let header = &self.layout.header;
+        let page_count = self.layout.header.page_count;
         let row_length = self.row_length;
 
-        while self.next_page_index < header.page_count {
+        while self.next_page_index < page_count {
             let (page_index, page_type, page_row_count) = self.read_page_header()?;
             if (page_type & SAS_PAGE_TYPE_COMP) != 0 {
                 continue;

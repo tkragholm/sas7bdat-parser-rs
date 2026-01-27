@@ -16,6 +16,7 @@ use std::{
     cell::Cell,
     convert::TryFrom,
     io::{Read, Seek},
+    ops::Deref,
 };
 
 #[derive(Clone, Copy)]
@@ -25,9 +26,13 @@ struct RowProgress {
     prev_emitted: u64,
 }
 
-pub struct RowIterator<'a, R: Read + Seek> {
-    pub(crate) reader: &'a mut R,
-    pub(crate) layout: &'a DatasetLayout,
+pub struct RowIteratorCore<R, L>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
+    pub(crate) reader: R,
+    pub(crate) layout: L,
     pub(crate) runtime_columns: Vec<RuntimeColumn>,
     pub(crate) columnar_columns: Vec<RuntimeColumnRef>,
     pub(crate) page_buffer: Vec<u8>,
@@ -44,6 +49,9 @@ pub struct RowIterator<'a, R: Read + Seek> {
     pub(crate) total_rows: u64,
 }
 
+pub type RowIterator<'a, R> = RowIteratorCore<&'a mut R, &'a DatasetLayout>;
+pub type OwnedRowIterator<R> = RowIteratorCore<R, Box<DatasetLayout>>;
+
 /// Creates a [`RowIterator`] for the provided reader and layout metadata.
 ///
 /// # Errors
@@ -54,17 +62,21 @@ pub fn row_iterator<'a, R: Read + Seek>(
     reader: &'a mut R,
     layout: &'a DatasetLayout,
 ) -> Result<RowIterator<'a, R>> {
-    RowIterator::new(reader, layout)
+    RowIteratorCore::new(reader, layout)
 }
 
-impl<'a, R: Read + Seek> RowIterator<'a, R> {
+impl<R, L> RowIteratorCore<R, L>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
     /// Constructs a new row iterator for the provided reader and metadata.
     ///
     /// # Errors
     ///
     /// Returns an error when the dataset uses an unsupported compression mode
     /// or the page size cannot be represented on this platform.
-    pub fn new(reader: &'a mut R, layout: &'a DatasetLayout) -> Result<Self> {
+    pub fn new(reader: R, layout: L) -> Result<Self> {
         match layout.row_info.compression {
             Compression::None | Compression::Row | Compression::Binary => {}
             Compression::Unknown(code) => {
@@ -115,6 +127,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
         let columnar_columns: Vec<RuntimeColumnRef> =
             runtime_columns.iter().map(RuntimeColumn::as_ref).collect();
 
+        let total_rows = layout.row_info.total_rows;
         Ok(Self {
             reader,
             layout,
@@ -131,7 +144,7 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
             encoding,
             exhausted: Cell::new(false),
             row_length,
-            total_rows: layout.row_info.total_rows,
+            total_rows,
         })
     }
 
@@ -299,7 +312,11 @@ impl<'a, R: Read + Seek> RowIterator<'a, R> {
     }
 }
 
-impl<R: Read + Seek> Iterator for RowIterator<'_, R> {
+impl<R, L> Iterator for RowIteratorCore<R, L>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
     type Item = Result<Vec<CellValue<'static>>>;
 
     fn next(&mut self) -> Option<Self::Item> {

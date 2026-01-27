@@ -39,6 +39,17 @@ impl DatasetMetadata {
             column_list: Vec::new(),
         }
     }
+
+    #[must_use]
+    pub fn column_index(&self, name: &str) -> Option<usize> {
+        let trimmed = name.trim_end();
+        for variable in &self.variables {
+            if variable.name == name || variable.name.trim_end() == trimmed {
+                return Some(variable.index as usize);
+            }
+        }
+        None
+    }
 }
 
 /// Dataset creation and modification times.

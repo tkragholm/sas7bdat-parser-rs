@@ -1,13 +1,15 @@
 use super::{
     columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnarBatch},
-    iterator::RowIterator,
+    iterator::RowIteratorCore,
 };
 use crate::error::Result;
 use smallvec::SmallVec;
 use std::{
     convert::TryFrom,
     io::{Read, Seek},
+    ops::Deref,
 };
+use crate::parser::metadata::DatasetLayout;
 
 // Cap columnar staging to avoid enormous allocations when row_length is very large.
 const MAX_COLUMNAR_BUFFER_BYTES: usize = 512 * 1024 * 1024;
@@ -30,10 +32,14 @@ const fn resolve_target(iter_exhausted: &std::cell::Cell<bool>, max_rows: usize)
     })
 }
 
-fn resolve_target_with_remaining<R: Read + Seek>(
-    iter: &RowIterator<'_, R>,
+fn resolve_target_with_remaining<R, L>(
+    iter: &RowIteratorCore<R, L>,
     max_rows: usize,
-) -> Option<(usize, usize)> {
+) -> Option<(usize, usize)>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
     let target = resolve_target(&iter.exhausted, max_rows)?;
     let remaining_rows = usize::try_from(
         iter.total_rows
@@ -44,10 +50,14 @@ fn resolve_target_with_remaining<R: Read + Seek>(
     Some((target, remaining_rows))
 }
 
-fn next_page_chunk<R: Read + Seek>(
-    iter: &mut RowIterator<'_, R>,
+fn next_page_chunk<R, L>(
+    iter: &mut RowIteratorCore<R, L>,
     target: usize,
-) -> Result<Option<PageChunk>> {
+) -> Result<Option<PageChunk>>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
     loop {
         if !iter.ensure_page_ready()? {
             return Ok(None);
@@ -80,10 +90,14 @@ fn next_page_chunk<R: Read + Seek>(
     }
 }
 
-pub fn next_columnar_batch<'iter, R: Read + Seek>(
-    iter: &'iter mut RowIterator<'_, R>,
+pub fn next_columnar_batch<R, L>(
+    iter: &mut RowIteratorCore<R, L>,
     max_rows: usize,
-) -> Result<Option<ColumnarBatch<'iter>>> {
+) -> Result<Option<ColumnarBatch<'_>>>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
     let Some((target, _)) = resolve_target_with_remaining(iter, max_rows) else {
         return Ok(None);
     };
@@ -112,10 +126,14 @@ pub fn next_columnar_batch<'iter, R: Read + Seek>(
     Ok(Some(batch))
 }
 
-pub fn next_columnar_batch_contiguous<'iter, R: Read + Seek>(
-    iter: &'iter mut RowIterator<'_, R>,
+pub fn next_columnar_batch_contiguous<R, L>(
+    iter: &mut RowIteratorCore<R, L>,
     max_rows: usize,
-) -> Result<Option<ColumnarBatch<'iter>>> {
+) -> Result<Option<ColumnarBatch<'_>>>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
     let Some((target, remaining_rows)) = resolve_target_with_remaining(iter, max_rows) else {
         return Ok(None);
     };

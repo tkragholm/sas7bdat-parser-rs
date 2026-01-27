@@ -1,14 +1,21 @@
+#[cfg(feature = "csv")]
 mod csv;
+#[cfg(feature = "parquet")]
 mod parquet;
 
 use crate::{
     cell::CellValue,
     dataset::DatasetMetadata,
-    error::{Error, Result},
+    error::Result,
     parser::{ColumnInfo, ColumnarBatch, DatasetLayout, StreamingRow},
 };
+#[cfg(feature = "csv")]
 pub use csv::CsvSink;
+#[cfg(feature = "parquet")]
 pub use parquet::ParquetSink;
+#[cfg(any(feature = "csv", feature = "parquet"))]
+use crate::error::Error;
+#[cfg(any(feature = "csv", feature = "parquet"))]
 use std::borrow::Cow;
 
 /// Provides high-level dataset information to sinks during initialisation.
@@ -81,6 +88,7 @@ pub trait ColumnarSink: RowSink {
     ) -> Result<()>;
 }
 
+#[cfg(any(feature = "csv", feature = "parquet"))]
 pub(crate) fn validate_sink_begin(
     context: &SinkContext<'_>,
     writer_present: bool,

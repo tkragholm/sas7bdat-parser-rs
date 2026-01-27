@@ -1,8 +1,8 @@
 [workspace]
 members = [
+  "benchmarks/rust/rustbench",
   "crates/sas7bdat",
   "crates/sas7bdat-test-support",
-  "benchmarks/rust/rustbench",
 ]
 resolver = "2"
 
@@ -10,6 +10,7 @@ resolver = "2"
 ahash = "0.8"
 byteorder = "1"
 bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap = { version = "4.5.51", features = ["derive", "env"] }
 csv = "1"
 datatest-stable = "0.3.3"

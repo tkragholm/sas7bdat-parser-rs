@@ -82,10 +82,16 @@ fn main() -> sas7bdat::Result<()> {
     let metadata = sas.metadata().clone();
     println!("Columns: {}", metadata.variables.len());
 
-    let mut rows = sas.rows()?;
+    let mut rows = sas.rows_named()?;
     while let Some(row) = rows.try_next()? {
-        // Inspect row values here
-        println!("first column = {:?}", row[0]);
+        let id: Option<i64> = row.get_as("ID")?;
+        let name: Option<String> = row.get_as("NAME")?;
+        println!("ID={id:?} NAME={name:?}");
+    }
+
+    let mut projected = sas.rows_with_projection(&["ID", "NAME"])?;
+    while let Some(row) = projected.try_next()? {
+        println!("projected row = {:?}", row);
     }
 
     Ok(())
@@ -103,7 +109,6 @@ cargo test
 ```
 
 Snapshot fixtures rely on datasets under `fixtures/raw_data/`. Large archives are ignored by `.gitignore` but are required for the full regression suite.
-
 
 ## License
 

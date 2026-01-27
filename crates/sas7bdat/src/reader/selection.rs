@@ -3,14 +3,25 @@ use crate::{
     error::{Error, Result},
 };
 use std::collections::{HashMap, HashSet};
+#[cfg(feature = "fast-string")]
+use smallvec::SmallVec;
+
+#[cfg(feature = "fast-string")]
+type IndexList = SmallVec<[usize; 8]>;
+#[cfg(not(feature = "fast-string"))]
+type IndexList = Vec<usize>;
+#[cfg(feature = "fast-string")]
+type NameList = SmallVec<[String; 8]>;
+#[cfg(not(feature = "fast-string"))]
+type NameList = Vec<String>;
 
 /// Defines pagination and column projection for row reading.
 #[derive(Debug, Clone, Default)]
 pub struct RowSelection {
     skip_rows: u64,
     max_rows: Option<u64>,
-    column_indices: Option<Vec<usize>>,
-    column_names: Option<Vec<String>>,
+    column_indices: Option<IndexList>,
+    column_names: Option<NameList>,
 }
 
 impl RowSelection {
@@ -41,11 +52,30 @@ impl RowSelection {
     where
         I: IntoIterator<Item = usize>,
     {
-        let collected: Vec<usize> = indices.into_iter().collect();
+        let mut collected: IndexList = IndexList::new();
+        collected.extend(indices);
         if collected.is_empty() {
             self.column_indices = None;
         } else {
             self.column_indices = Some(collected);
+        }
+        self
+    }
+
+    /// Convenience wrapper for specifying column names from a slice.
+    #[must_use]
+    pub fn columns(mut self, names: &[&str]) -> Self {
+        if names.is_empty() {
+            self.column_names = None;
+            return self;
+        }
+        let mut collected: NameList = NameList::new();
+        collected.extend(names.iter().copied().map(std::string::ToString::to_string));
+        collected.retain(|name| !name.is_empty());
+        if collected.is_empty() {
+            self.column_names = None;
+        } else {
+            self.column_names = Some(collected);
         }
         self
     }
@@ -56,7 +86,8 @@ impl RowSelection {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let mut collected: Vec<String> = names.into_iter().map(Into::into).collect();
+        let mut collected: NameList = NameList::new();
+        collected.extend(names.into_iter().map(Into::into));
         collected.retain(|name| !name.is_empty());
         if collected.is_empty() {
             self.column_names = None;
@@ -84,6 +115,9 @@ impl RowSelection {
     ) -> Result<Option<Vec<usize>>> {
         if let Some(indices) = &self.column_indices {
             Self::ensure_unique_indices(indices)?;
+            #[cfg(feature = "fast-string")]
+            return Ok(Some(indices.iter().copied().collect()));
+            #[cfg(not(feature = "fast-string"))]
             return Ok(Some(indices.clone()));
         }
 

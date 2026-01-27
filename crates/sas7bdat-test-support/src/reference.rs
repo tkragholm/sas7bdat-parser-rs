@@ -82,6 +82,7 @@ fn ensure_summary_printer() {
     let _ = &_PRINT_SUMMARY;
 }
 
+#[must_use] 
 pub fn reference_snapshot_path_in(base_dir: &Path, parser: &str, sas_path: &Path) -> PathBuf {
     let mut relative = relative_to_manifest(sas_path);
     relative.set_extension("json");
@@ -106,12 +107,9 @@ pub fn compare_snapshots(parser: &str, sas_path: &Path, actual: &Snapshot, expec
     ensure_summary_printer();
     let relative_key = normalized_relative_path(sas_path);
 
-    if actual.columns.len() != expected.columns.len() {
-        panic!(
-            "column metadata length mismatch for {} (parser {})",
-            relative_key, parser
-        );
-    }
+    assert!(actual.columns.len() == expected.columns.len(), 
+        "column metadata length mismatch for {relative_key} (parser {parser})"
+    );
     for (idx, (a, e)) in actual
         .columns
         .iter()
@@ -131,22 +129,18 @@ pub fn compare_snapshots(parser: &str, sas_path: &Path, actual: &Snapshot, expec
             continue;
         }
         panic!(
-            "column metadata mismatch for {} (parser {}), index {}: actual {} expected {}",
-            relative_key, parser, idx, a, e
+            "column metadata mismatch for {relative_key} (parser {parser}), index {idx}: actual {a} expected {e}"
         );
     }
 
     assert_eq!(
         actual.row_count, expected.row_count,
-        "row count mismatch for {} (parser {})",
-        relative_key, parser
+        "row count mismatch for {relative_key} (parser {parser})"
     );
     assert_eq!(
         actual.rows.len(),
         expected.rows.len(),
-        "row length mismatch for {} (parser {})",
-        relative_key,
-        parser
+        "row length mismatch for {relative_key} (parser {parser})"
     );
 
     for (row_index, (actual_row, expected_row)) in
@@ -165,10 +159,7 @@ fn compare_rows(
     assert_eq!(
         actual.len(),
         expected.len(),
-        "column count mismatch for row {} in {} (parser {})",
-        row_index,
-        relative_key,
-        parser
+        "column count mismatch for row {row_index} in {relative_key} (parser {parser})"
     );
 
     for (column_index, (actual_value, expected_value)) in
@@ -198,8 +189,7 @@ fn compare_cell(
         .and_then(JsonValue::as_str)
         .unwrap_or_else(|| {
             panic!(
-                "missing kind in actual value at row {} column {} for {} (parser {})",
-                row_index, column_index, relative_key, parser
+                "missing kind in actual value at row {row_index} column {column_index} for {relative_key} (parser {parser})"
             )
         });
     let expected_kind = expected
@@ -207,8 +197,7 @@ fn compare_cell(
         .and_then(JsonValue::as_str)
         .unwrap_or_else(|| {
             panic!(
-                "missing kind in expected value at row {} column {} for {} (parser {})",
-                row_index, column_index, relative_key, parser
+                "missing kind in expected value at row {row_index} column {column_index} for {relative_key} (parser {parser})"
             )
         });
 
@@ -257,8 +246,7 @@ fn compare_cell(
                 return;
             }
             panic!(
-                "string mismatch at row {} column {} for {} (parser {}): actual {:?} expected {:?}",
-                row_index, column_index, relative_key, parser, actual_value, expected_value
+                "string mismatch at row {row_index} column {column_index} for {relative_key} (parser {parser}): actual {actual_value:?} expected {expected_value:?}"
             );
         }
 
@@ -269,8 +257,7 @@ fn compare_cell(
         }
 
         panic!(
-            "kind mismatch at row {} column {} for {} (parser {}): actual {} expected {}",
-            row_index, column_index, relative_key, parser, actual_kind, expected_kind
+            "kind mismatch at row {row_index} column {column_index} for {relative_key} (parser {parser}): actual {actual_kind} expected {expected_kind}"
         );
     }
 
@@ -286,18 +273,9 @@ fn compare_cell(
             let actual_value = numeric_value(actual, row_index, column_index, relative_key, parser);
             let expected_value =
                 numeric_value(expected, row_index, column_index, relative_key, parser);
-            if (actual_value - expected_value).abs() > tolerance {
-                panic!(
-                    "numeric mismatch at row {} column {} for {} (parser {}): actual {} expected {} (tolerance {})",
-                    row_index,
-                    column_index,
-                    relative_key,
-                    parser,
-                    actual_value,
-                    expected_value,
-                    tolerance
-                );
-            }
+            assert!((actual_value - expected_value).abs() <= tolerance, 
+                "numeric mismatch at row {row_index} column {column_index} for {relative_key} (parser {parser}): actual {actual_value} expected {expected_value} (tolerance {tolerance})"
+            )
         }
         "string" | "numeric-string" => {
             let actual_value = string_value(actual, row_index, column_index, relative_key, parser);
@@ -310,8 +288,7 @@ fn compare_cell(
                     return;
                 }
                 panic!(
-                    "string mismatch at row {} column {} for {} (parser {}): actual {:?} expected {:?}",
-                    row_index, column_index, relative_key, parser, actual_value, expected_value
+                    "string mismatch at row {row_index} column {column_index} for {relative_key} (parser {parser}): actual {actual_value:?} expected {expected_value:?}"
                 );
             }
         }
@@ -321,8 +298,7 @@ fn compare_cell(
                 .and_then(JsonValue::as_array)
                 .unwrap_or_else(|| {
                     panic!(
-                        "missing bytes value at row {} column {} for {} (parser {})",
-                        row_index, column_index, relative_key, parser
+                        "missing bytes value at row {row_index} column {column_index} for {relative_key} (parser {parser})"
                     )
                 });
             let expected_value = expected
@@ -330,21 +306,16 @@ fn compare_cell(
                 .and_then(JsonValue::as_array)
                 .unwrap_or_else(|| {
                     panic!(
-                        "missing bytes value in expected row {} column {} for {} (parser {})",
-                        row_index, column_index, relative_key, parser
+                        "missing bytes value in expected row {row_index} column {column_index} for {relative_key} (parser {parser})"
                     )
                 });
-            if actual_value != expected_value {
-                panic!(
-                    "bytes mismatch at row {} column {} for {} (parser {}): actual {:?} expected {:?}",
-                    row_index, column_index, relative_key, parser, actual_value, expected_value
-                );
-            }
+            assert!(actual_value == expected_value, 
+                "bytes mismatch at row {row_index} column {column_index} for {relative_key} (parser {parser}): actual {actual_value:?} expected {expected_value:?}"
+            )
         }
         "missing" => { /* both sides missing */ }
         other => panic!(
-            "unsupported kind {} at row {} column {} for {} (parser {})",
-            other, row_index, column_index, relative_key, parser
+            "unsupported kind {other} at row {row_index} column {column_index} for {relative_key} (parser {parser})"
         ),
     }
 }
@@ -361,8 +332,7 @@ fn numeric_value(
         .and_then(JsonValue::as_f64)
         .unwrap_or_else(|| {
             panic!(
-                "missing numeric value at row {} column {} for {} (parser {})",
-                row_index, column_index, relative_key, parser
+                "missing numeric value at row {row_index} column {column_index} for {relative_key} (parser {parser})"
             )
         })
 }
@@ -379,8 +349,7 @@ fn string_value<'a>(
         .and_then(JsonValue::as_str)
         .unwrap_or_else(|| {
             panic!(
-                "missing string value at row {} column {} for {} (parser {})",
-                row_index, column_index, relative_key, parser
+                "missing string value at row {row_index} column {column_index} for {relative_key} (parser {parser})"
             )
         })
 }
@@ -390,7 +359,7 @@ fn reinterpret_latin1_as_utf8(s: &str) -> Option<String> {
         return None;
     }
     let bytes: Vec<u8> = s.chars().map(|c| c as u32 as u8).collect();
-    std::str::from_utf8(&bytes).ok().map(|utf8| utf8.to_owned())
+    std::str::from_utf8(&bytes).ok().map(std::borrow::ToOwned::to_owned)
 }
 
 fn likely_mojibake(s: &str) -> bool {
@@ -399,19 +368,21 @@ fn likely_mojibake(s: &str) -> bool {
         (code <= 0x1F) || (0x7F..=0x9F).contains(&code)
     })
 }
+#[must_use] 
 pub fn relative_to_manifest(path: &Path) -> PathBuf {
     let manifest = common::repo_root();
     let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if normalized.is_absolute() {
-        normalized
-            .strip_prefix(manifest)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| normalized)
+        match normalized.strip_prefix(manifest) {
+            Ok(stripped) => stripped.to_path_buf(),
+            Err(_) => normalized,
+        }
     } else {
         normalized
     }
 }
 
+#[must_use] 
 pub fn normalized_relative_path(path: &Path) -> String {
     let relative = relative_to_manifest(path);
     path_components_to_string(&relative)

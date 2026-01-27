@@ -1,17 +1,17 @@
 [package]
 name = "sas7bdat"
-authors = ["Tobias Kragholm"]
 version = "0.1.1"
-edition = "2024"
-description = "Rust library + CLI for decoding SAS7BDAT datasets and streaming them to modern formats."
-readme = "README.md"
-license = "MIT"
-repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
-homepage = "https://github.com/tkragholm/sas7bdat-parser-rs"
-documentation = "https://docs.rs/sas7bdat"
-keywords = ["sas", "sas7bdat", "parquet", "data", "statistics"]
+authors = ["Tobias Kragholm"]
 categories = ["command-line-utilities", "data-structures", "parsing"]
+documentation = "https://docs.rs/sas7bdat"
+edition = "2024"
+homepage = "https://github.com/tkragholm/sas7bdat-parser-rs"
 include = ["Cargo.toml", "README.md", "LICENSE", "src/**", "examples/**", "tests/**"]
+keywords = ["sas", "sas7bdat", "parquet", "data", "statistics"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
+description = "Rust library + CLI for decoding SAS7BDAT datasets and streaming them to modern formats."
 
 [lib]
 name = "sas7bdat"
@@ -23,12 +23,13 @@ ahash = { workspace = true }
 byteorder = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true }
-csv = { workspace = true }
+chrono = { workspace = true, optional = true }
+csv = { workspace = true, optional = true }
 encoding_rs = { workspace = true }
 hashbrown = { workspace = true }
 hotpath = { workspace = true, optional = true }
 itoa = { workspace = true }
-parquet = { workspace = true }
+parquet = { workspace = true, optional = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
 ryu = { workspace = true }
@@ -42,6 +43,7 @@ walkdir = { workspace = true }
 
 [dev-dependencies]
 datatest-stable = { workspace = true }
+csv = { workspace = true }
 num-traits = { workspace = true }
 reqwest = { workspace = true }
 sas7bdat-test-support = { path = "../sas7bdat-test-support" }
@@ -65,7 +67,22 @@ harness = false
 [[bin]]
 name = "sas7"
 path = "src/bin/sas7.rs"
+required-features = ["cli"]
+
+[[example]]
+name = "sas_to_parquet"
+path = "examples/sas_to_parquet.rs"
+required-features = ["parquet"]
 
 [lints.clippy]
 pedantic = "warn"
 nursery = "warn"
+
+[features]
+default = ["time"]
+cli = ["csv", "parquet"]
+chrono = ["dep:chrono"]
+csv = ["dep:csv"]
+fast-string = []
+parquet = ["dep:parquet"]
+time = []

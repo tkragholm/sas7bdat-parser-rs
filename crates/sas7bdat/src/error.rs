@@ -1,5 +1,6 @@
-use parquet::errors::ParquetError;
 use std::{borrow::Cow, fmt, io};
+#[cfg(feature = "parquet")]
+use parquet::errors::ParquetError;
 
 /// Result type used across the high-level SAS reader implementation.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -65,6 +66,7 @@ impl Section {
     }
 }
 
+#[cfg(feature = "parquet")]
 impl From<ParquetError> for Error {
     fn from(err: ParquetError) -> Self {
         Self::Parquet {

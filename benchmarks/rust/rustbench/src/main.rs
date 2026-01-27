@@ -8,12 +8,12 @@ fn main() {
     });
 
     let file = File::open(&path).unwrap_or_else(|err| {
-        eprintln!("Input file not found: {} ({})", path, err);
+        eprintln!("Input file not found: {path} ({err})");
         std::process::exit(1);
     });
 
     let mut reader = SasReader::from_reader(file).unwrap_or_else(|err| {
-        eprintln!("sas7bdat error: {}", err);
+        eprintln!("sas7bdat error: {err}");
         std::process::exit(1);
     });
 
@@ -25,11 +25,11 @@ fn main() {
     let start = Instant::now();
     let mut row_count = 0usize;
     let mut rows = reader.rows().unwrap_or_else(|err| {
-        eprintln!("sas7bdat error: {}", err);
+        eprintln!("sas7bdat error: {err}");
         std::process::exit(1);
     });
     while let Some(row) = rows.try_next().unwrap_or_else(|err| {
-        eprintln!("sas7bdat error: {}", err);
+        eprintln!("sas7bdat error: {err}");
         std::process::exit(1);
     }) {
         let _row_len = row.len();
@@ -37,8 +37,8 @@ fn main() {
     }
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    println!("File           : {}", path);
-    println!("Rows processed : {}", row_count);
-    println!("Columns        : {}", column_count);
-    println!("Elapsed (ms)   : {:.2}", elapsed_ms);
+    println!("File           : {path}");
+    println!("Rows processed : {row_count}");
+    println!("Columns        : {column_count}");
+    println!("Elapsed (ms)   : {elapsed_ms:.2}");
 }

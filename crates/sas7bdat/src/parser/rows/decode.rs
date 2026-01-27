@@ -301,7 +301,7 @@ pub fn sas_seconds_to_datetime(seconds: f64) -> Option<OffsetDateTime> {
     sas_offset_datetime(seconds)
 }
 
-pub fn sas_seconds_to_time(seconds: f64) -> Option<Duration> {
+pub const fn sas_seconds_to_time(seconds: f64) -> Option<Duration> {
     if !seconds.is_finite() {
         return None;
     }

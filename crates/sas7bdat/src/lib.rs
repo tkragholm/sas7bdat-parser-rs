@@ -8,8 +8,14 @@ pub mod reader;
 pub mod sinks;
 pub use crate::error::{Error, Result};
 pub use cell::{CellValue, MissingValue};
-pub use reader::{RowSelection, SasReader};
-pub use sinks::{ColumnarSink, CsvSink, ParquetSink, RowSink, SinkContext};
+pub use reader::{Row, RowIter, RowLookup, RowSelection, RowValue, SasReader};
+pub use sinks::{ColumnarSink, RowSink, SinkContext};
+#[cfg(feature = "csv")]
+pub use sinks::CsvSink;
+#[cfg(feature = "parquet")]
+pub use sinks::ParquetSink;
+#[cfg(feature = "time")]
+pub use time::OffsetDateTime;
 
 /// Parses SAS metadata and returns the decoded layout information.
 ///

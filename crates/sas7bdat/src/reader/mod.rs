@@ -1,6 +1,7 @@
 mod labels;
 mod missing;
 mod projection;
+mod row;
 mod selection;
 mod window;
 
@@ -25,6 +26,7 @@ pub struct SasReader<R: Read + Seek> {
 }
 
 pub use projection::ProjectedRowIter;
+pub use row::{Row, RowIter, RowLookup, RowValue};
 pub use selection::RowSelection;
 pub use window::{ProjectedRowWindow, RowWindow};
 
@@ -170,6 +172,18 @@ impl<R: Read + Seek> SasReader<R> {
         self.layout.row_iterator(&mut self.reader)
     }
 
+    /// Creates a row iterator that yields owned rows with column-name lookup.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn rows_named(&mut self) -> Result<RowIter<'_, R>> {
+        let lookup = std::sync::Arc::new(row::RowLookup::from_metadata(self.metadata()));
+        self.reader.seek(SeekFrom::Start(0))?;
+        let iterator = self.layout.row_iterator(&mut self.reader)?;
+        Ok(RowIter::new(iterator, lookup))
+    }
+
     /// Creates a row iterator configured by the provided selection.
     ///
     /// This method is intended for pagination without column projection. Use
@@ -264,6 +278,23 @@ impl<R: Read + Seek> SasReader<R> {
         ))
     }
 
+    /// Creates an iterator that yields only the named columns.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name cannot be resolved.
+    pub fn rows_with_projection(&mut self, names: &[&str]) -> Result<ProjectedRowIter<'_, R>> {
+        let selection = RowSelection::new().columns(names);
+        let metadata = &self.layout.header.metadata;
+        let indices =
+            selection
+                .resolve_projection(metadata)?
+                .ok_or_else(|| Error::InvalidMetadata {
+                    details: "column projection not specified".into(),
+                })?;
+        self.select_columns(&indices)
+    }
+
     /// Streams the full dataset into a custom sink implementation.
     ///
     /// # Errors
@@ -278,6 +309,19 @@ impl<R: Read + Seek> SasReader<R> {
         sink.finish()?;
         self.reader.seek(SeekFrom::Start(0))?;
         Ok(())
+    }
+
+    /// Consumes the reader and returns a row iterator yielding owned rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    #[allow(clippy::should_implement_trait)]
+    pub fn into_iter(self) -> Result<crate::parser::OwnedRowIterator<R>> {
+        let layout = Box::new(self.layout);
+        let mut reader = self.reader;
+        reader.seek(SeekFrom::Start(0))?;
+        crate::parser::RowIteratorCore::new(reader, layout)
     }
 
     pub fn into_parts(self) -> (R, DatasetLayout) {

@@ -1423,6 +1423,7 @@ dependencies = [
  "ahash",
  "byteorder",
  "bytes",
+ "chrono",
  "clap",
  "csv",
  "datatest-stable",

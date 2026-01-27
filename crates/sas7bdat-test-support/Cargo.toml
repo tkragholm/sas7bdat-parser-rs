@@ -1,9 +1,9 @@
 [package]
 name = "sas7bdat-test-support"
 version = "0.1.0"
-publish = false
 edition = "2024"
 license = "MIT"
+publish = false
 
 [dependencies]
 csv = { workspace = true }

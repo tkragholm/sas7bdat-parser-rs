@@ -1,9 +1,9 @@
 [package]
 name = "sas7bdat-rustbench"
 version = "0.1.0"
-publish = false
 edition = "2024"
 license = "MIT"
+publish = false
 
 [[bin]]
 name = "sas7bdat-rustbench"
