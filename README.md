@@ -110,7 +110,6 @@ cargo test
 
 Snapshot fixtures rely on datasets under `fixtures/raw_data/`. Large archives are ignored by `.gitignore` but are required for the full regression suite.
 
-
 ## License
 
 Licensed under the [MIT License](LICENSE).

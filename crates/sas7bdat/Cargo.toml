@@ -22,8 +22,8 @@ crate-type = ["staticlib", "rlib"]
 ahash = { workspace = true }
 byteorder = { workspace = true }
 bytes = { workspace = true }
-clap = { workspace = true }
 chrono = { workspace = true, optional = true }
+clap = { workspace = true }
 csv = { workspace = true, optional = true }
 encoding_rs = { workspace = true }
 hashbrown = { workspace = true }
@@ -42,8 +42,8 @@ time = { workspace = true }
 walkdir = { workspace = true }
 
 [dev-dependencies]
-datatest-stable = { workspace = true }
 csv = { workspace = true }
+datatest-stable = { workspace = true }
 num-traits = { workspace = true }
 reqwest = { workspace = true }
 sas7bdat-test-support = { path = "../sas7bdat-test-support" }

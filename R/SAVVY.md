@@ -8,45 +8,44 @@ Press ? to show this help
 
 Press Esc to hide this help
 
-1.  Introduction
+1. Introduction
 
-3.  Get Started
-4.  **1.** Get started
+2. Get Started
+3. **1.** Get started
 
-    1.  Prerequisite
-        1.  Rust
-        2.  A helper R package
-    2.  Create a new R package
-        1.  Package structure
-    3.  Write your own function
-        1.  Write some Rust code
-        2.  Update wrapper files
+   1. Prerequisite
+      1. Rust
+      2. A helper R package
+   2. Create a new R package
+      1. Package structure
+   3. Write your own function
+      1. Write some Rust code
+      2. Update wrapper files
 
-
-6.  User Guide
-7.  **2.** Key ideas
-8.  **3.** #[savvy] macro
-9.  **4.** Handling Vector Input
-10.  **5.** Handling Vector Output
-11.  **6.** Handling Scalar
-12.  **7.** Optional Argument
-13.  **8.** Type-specific Topics
-    1.  **8.1.** Integer, Real, String, Logical, Raw, And Complex
-    2.  **8.2.** List
-    3.  **8.3.** Struct
-    4.  **8.4.** Enum
-14.  **9.** Error-handling
-15.  **10.** Handling Attributes
-    1.  **10.1.** Handling Data Frames
-    2.  **10.2.** Handling Factors
-    3.  **10.3.** Handling Matrices And Arrays
-16.  **11.** Calling R Function
-17.  **12.** Testing
-18.  **13.** Advanced Topics
-    1.  **13.1.** Initialization Routine
-    2.  **13.2.** ALTREP
-    3.  **13.3.** Linkage
-19.  **14.** Comparison with extendr
+4. User Guide
+5. **2.** Key ideas
+6. **3.** #[savvy] macro
+7. **4.** Handling Vector Input
+8. **5.** Handling Vector Output
+9. **6.** Handling Scalar
+10. **7.** Optional Argument
+11. **8.** Type-specific Topics
+    1. **8.1.** Integer, Real, String, Logical, Raw, And Complex
+    2. **8.2.** List
+    3. **8.3.** Struct
+    4. **8.4.** Enum
+12. **9.** Error-handling
+13. **10.** Handling Attributes
+    1. **10.1.** Handling Data Frames
+    2. **10.2.** Handling Factors
+    3. **10.3.** Handling Matrices And Arrays
+14. **11.** Calling R Function
+15. **12.** Testing
+16. **13.** Advanced Topics
+    1. **13.1.** Initialization Routine
+    2. **13.2.** ALTREP
+    3. **13.3.** Linkage
+17. **14.** Comparison with extendr
 
 ## Savvy - A simple R extension interface using Rust
 
@@ -133,11 +132,11 @@ After `savvy::savvy_init()`, the structure of your R package should look like be
             └── lib.rs      <-------(5)
 ```
 
-1.  `000-wrappers.R`: R functions for the corresponding Rust functions
-2.  `configure*`, `cleanup*`, `Makevars.in`, and `Makevars.win.in`: Necessary build settings for compiling Rust code
-3.  `init.c` and `api.h`: C functions for the corresponding Rust functions
-4.  `<your package>-win.def` and `.cargo/config.toml`: These are tricks to avoid a minor error on Windows. See extendr/rextendr#211 and savvy#98 for the details.
-5.  `Cargo.toml` and `lib.rs`: Rust code
+1. `000-wrappers.R`: R functions for the corresponding Rust functions
+2. `configure*`, `cleanup*`, `Makevars.in`, and `Makevars.win.in`: Necessary build settings for compiling Rust code
+3. `init.c` and `api.h`: C functions for the corresponding Rust functions
+4. `<your package>-win.def` and `.cargo/config.toml`: These are tricks to avoid a minor error on Windows. See extendr/rextendr#211 and savvy#98 for the details.
+5. `Cargo.toml` and `lib.rs`: Rust code
 
 ## Write your own function
 

@@ -15,7 +15,7 @@ The `SasBenchmarks` project wraps the vendored `Sas7Bdat.Core` sources under
 
 Build prerequisites:
 
-* .NET SDK 9.0 (or later)
+- .NET SDK 9.0 (or later)
 
 Usage:
 
@@ -100,9 +100,9 @@ that touches every cell.
 
 Build prerequisites:
 
-* CMake 3.16+
-* A C++20 compiler (e.g. `g++` 10+ or `clang++` 12+)
-* Development packages for `fmt`, `spdlog`, and Boost date\_time (Debian/Ubuntu:
+- CMake 3.16+
+- A C++20 compiler (e.g. `g++` 10+ or `clang++` 12+)
+- Development packages for `fmt`, `spdlog`, and Boost date\_time (Debian/Ubuntu:
   `libfmt-dev`, `libspdlog-dev`, `libboost-date-time-dev`)
 
 If CMake cannot locate Boost, set one of `Boost_DIR`, `BOOST_ROOT`, or
