@@ -32,7 +32,28 @@ mod text_store;
 pub use builder::ColumnMetadataBuilder;
 pub use column_info::{ColumnInfo, ColumnKind, ColumnOffsets, NumericKind};
 pub use row_info::RowInfo;
+use row_info::RowInfoRaw;
 pub use text_store::{TextRef, TextStore};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataIoMode {
+    Auto,
+    FullPage,
+    Streaming,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MetadataReadOptions {
+    pub io_mode: MetadataIoMode,
+}
+
+impl Default for MetadataReadOptions {
+    fn default() -> Self {
+        Self {
+            io_mode: MetadataIoMode::Auto,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct DatasetLayout {
@@ -80,21 +101,32 @@ const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
 ///
 /// Returns an error if the metadata pages cannot be decoded.
 pub fn parse_metadata<R: Read + Seek>(reader: &mut R) -> Result<DatasetLayout> {
+    parse_metadata_with_options(reader, MetadataReadOptions::default())
+}
+
+/// Parses dataset metadata with configurable IO behavior.
+///
+/// # Errors
+///
+/// Returns an error if the metadata pages cannot be decoded.
+pub fn parse_metadata_with_options<R: Read + Seek>(
+    reader: &mut R,
+    options: MetadataReadOptions,
+) -> Result<DatasetLayout> {
     let mut header = parse_header(reader)?;
     let encoding = resolve_encoding(header.metadata.file_encoding.as_deref());
     let mut builder = ColumnMetadataBuilder::new(encoding);
 
-    collect_column_text(reader, &header, &mut builder)?;
-
     let mut state = MetaState::default();
-    collect_column_metadata(reader, &header, &mut builder, &mut state)?;
+    collect_metadata(reader, &header, &mut builder, &mut state, options)?;
 
     let column_count = state.column_count.ok_or_else(|| Error::InvalidMetadata {
         details: "column count not found in SAS metadata".into(),
     })?;
-    let row_info = state.row_info.ok_or_else(|| Error::InvalidMetadata {
+    let row_info_raw = state.row_info.ok_or_else(|| Error::InvalidMetadata {
         details: "row size subheader missing from SAS metadata".into(),
     })?;
+    let row_info = resolve_row_info(row_info_raw, builder.text_store())?;
 
     let (text_store, mut columns, column_list) = builder.finalize();
     columns.truncate(column_count as usize);
@@ -143,65 +175,48 @@ fn build_variables(
     Ok(variables)
 }
 
-fn collect_column_text<R: Read + Seek>(
-    reader: &mut R,
-    header: &SasHeader,
-    builder: &mut ColumnMetadataBuilder,
-) -> Result<()> {
-    scan_pages(reader, header, |page_type, subheaders| {
-        if !is_meta_page(page_type) {
-            return Ok(());
-        }
-        for subheader in subheaders {
-            if subheader.signature == SIG_COLUMN_TEXT {
-                parse_column_text_subheader(
-                    builder,
-                    subheader.data,
-                    header.subheader_signature_size,
-                    header.endianness,
-                )?;
-            }
-        }
-        Ok(())
-    })
-}
-
-fn collect_column_metadata<R: Read + Seek>(
+fn collect_metadata<R: Read + Seek>(
     reader: &mut R,
     header: &SasHeader,
     builder: &mut ColumnMetadataBuilder,
     state: &mut MetaState,
+    options: MetadataReadOptions,
 ) -> Result<()> {
-    scan_pages(reader, header, |page_type, subheaders| {
+    scan_pages_with_stop(reader, header, options, |page_type, subheaders| {
         if !is_meta_page(page_type) {
-            return Ok(());
+            return Ok(false);
         }
-
         for subheader in subheaders {
             match subheader.signature {
+                SIG_COLUMN_TEXT => parse_column_text_subheader(
+                    builder,
+                    &subheader.data,
+                    header.subheader_signature_size,
+                    header.endianness,
+                )?,
                 SIG_COLUMN_NAME => parse_column_name_subheader(
                     builder,
-                    subheader.data,
+                    &subheader.data,
                     header.subheader_signature_size,
                     header.endianness,
                     header.uses_u64,
                 )?,
                 SIG_COLUMN_ATTRS => parse_column_attrs_subheader(
                     builder,
-                    subheader.data,
+                    &subheader.data,
                     header.subheader_signature_size,
                     header.endianness,
                     header.uses_u64,
                 )?,
                 SIG_COLUMN_FORMAT => parse_column_format_subheader(
                     builder,
-                    subheader.data,
+                    &subheader.data,
                     header.endianness,
                     header.uses_u64,
                 )?,
                 SIG_COLUMN_LIST => parse_column_list_subheader(
                     builder,
-                    subheader.data,
+                    &subheader.data,
                     header.subheader_signature_size,
                     header.endianness,
                     header.uses_u64,
@@ -209,7 +224,7 @@ fn collect_column_metadata<R: Read + Seek>(
                 SIG_COLUMN_SIZE => {
                     let column_count = parse_column_size_subheader(
                         builder,
-                        subheader.data,
+                        &subheader.data,
                         header.endianness,
                         header.uses_u64,
                     )?;
@@ -217,8 +232,7 @@ fn collect_column_metadata<R: Read + Seek>(
                 }
                 SIG_ROW_SIZE => {
                     let row_info = parse_row_size_subheader(
-                        builder,
-                        subheader.data,
+                        &subheader.data,
                         header.subheader_signature_size,
                         header.endianness,
                         header.uses_u64,
@@ -230,50 +244,62 @@ fn collect_column_metadata<R: Read + Seek>(
                 }
             }
         }
-        Ok(())
+        Ok(false)
     })
 }
 
 #[derive(Default)]
 struct MetaState {
     column_count: Option<u32>,
-    row_info: Option<RowInfo>,
+    row_info: Option<RowInfoRaw>,
 }
 
-struct ParsedSubheader<'a> {
+struct ParsedSubheader {
     signature: u32,
-    data: &'a [u8],
+    data: Vec<u8>,
 }
 
-fn scan_pages<R, F>(reader: &mut R, header: &SasHeader, mut f: F) -> Result<()>
-where
-    R: Read + Seek,
-    F: FnMut(u16, Vec<ParsedSubheader<'_>>) -> Result<()>,
-{
-    let mut buffer = vec![0u8; header.page_size as usize];
-    let mut visited = std::collections::HashSet::new();
-    let last_examined = scan_forward(reader, header, &mut buffer, &mut visited, &mut f)?;
-    if last_examined + 1 < header.page_count {
-        // Only run the backward scan if the forward pass bailed early.
-        scan_backward(reader, header, &mut buffer, &visited, last_examined, &mut f)?;
-    }
-    Ok(())
+fn resolve_row_info(raw: RowInfoRaw, text_store: &TextStore) -> Result<RowInfo> {
+    let file_label = text_store
+        .resolve(raw.label_ref)?
+        .map(|value| value.trim_end().to_string())
+        .filter(|value| !value.is_empty());
+
+    let compression = text_store
+        .resolve(raw.compression_ref)?
+        .map_or(Compression::None, |value| match value.trim() {
+            "SASYZCR2" => Compression::Binary,
+            "SASYZCRL" => Compression::Row,
+            _ => Compression::None,
+        });
+
+    Ok(RowInfo {
+        row_length: raw.row_length,
+        total_rows: raw.total_rows,
+        rows_per_page: raw.rows_per_page,
+        compression,
+        file_label,
+    })
 }
 
-fn scan_forward<R, F>(
+fn scan_pages_with_stop<R, F>(
     reader: &mut R,
     header: &SasHeader,
-    buffer: &mut [u8],
-    visited: &mut std::collections::HashSet<u64>,
-    f: &mut F,
-) -> Result<u64>
+    options: MetadataReadOptions,
+    mut f: F,
+) -> Result<()>
 where
     R: Read + Seek,
-    F: FnMut(u16, Vec<ParsedSubheader<'_>>) -> Result<()>,
+    F: FnMut(u16, Vec<ParsedSubheader>) -> Result<bool>,
 {
+    let mut header_buf = vec![0u8; header.page_header_size as usize];
+    let mut visited = std::collections::HashSet::new();
     let mut last_examined = 0u64;
+
     for page_index in 0..header.page_count {
-        let page_type = load_page_type(reader, header, buffer, page_index)?;
+        load_page_header(reader, header, &mut header_buf, page_index)?;
+        let page_type = page_type_from_header(header, &header_buf)?;
+        let subheader_count = subheader_count_from_header(header, &header_buf)?;
         last_examined = page_index;
         let kind = classify_page(page_type);
         if matches!(
@@ -293,25 +319,46 @@ where
         }
 
         visited.insert(page_index);
-        if let Some(subheaders) = collect_subheaders(buffer, header, page_index, page_type)? {
-            f(page_type, subheaders)?;
+        let subheaders = collect_subheaders(
+            reader,
+            header,
+            page_index,
+            page_type,
+            subheader_count,
+            options,
+        )?;
+        if !subheaders.is_empty() && f(page_type, subheaders)? {
+            return Ok(());
         }
     }
 
-    Ok(last_examined)
+    if last_examined + 1 < header.page_count {
+        scan_backward_with_stop(
+            reader,
+            header,
+            &mut header_buf,
+            &visited,
+            last_examined,
+            options,
+            &mut f,
+        )?;
+    }
+
+    Ok(())
 }
 
-fn scan_backward<R, F>(
+fn scan_backward_with_stop<R, F>(
     reader: &mut R,
     header: &SasHeader,
-    buffer: &mut [u8],
+    header_buf: &mut [u8],
     visited: &std::collections::HashSet<u64>,
     mut page_index: u64,
+    options: MetadataReadOptions,
     f: &mut F,
 ) -> Result<()>
 where
     R: Read + Seek,
-    F: FnMut(u16, Vec<ParsedSubheader<'_>>) -> Result<()>,
+    F: FnMut(u16, Vec<ParsedSubheader>) -> Result<bool>,
 {
     let mut seen_amd = false;
     while page_index > 0 {
@@ -319,7 +366,9 @@ where
         if visited.contains(&page_index) {
             continue;
         }
-        let page_type = load_page_type(reader, header, buffer, page_index)?;
+        load_page_header(reader, header, header_buf, page_index)?;
+        let page_type = page_type_from_header(header, header_buf)?;
+        let subheader_count = subheader_count_from_header(header, header_buf)?;
         let kind = classify_page(page_type);
         if matches!(
             kind,
@@ -338,15 +387,23 @@ where
         }
         seen_amd = true;
 
-        if let Some(subheaders) = collect_subheaders(buffer, header, page_index, page_type)? {
-            f(page_type, subheaders)?;
+        let subheaders = collect_subheaders(
+            reader,
+            header,
+            page_index,
+            page_type,
+            subheader_count,
+            options,
+        )?;
+        if !subheaders.is_empty() && f(page_type, subheaders)? {
+            return Ok(());
         }
     }
 
     Ok(())
 }
 
-fn read_page<R: Read + Seek>(
+fn load_page_header<R: Read + Seek>(
     reader: &mut R,
     header: &SasHeader,
     buffer: &mut [u8],
@@ -358,75 +415,288 @@ fn read_page<R: Read + Seek>(
     Ok(())
 }
 
-fn load_page_type<R: Read + Seek>(
+fn page_type_from_header(header: &SasHeader, buffer: &[u8]) -> Result<u16> {
+    let page_header_size = header.page_header_size as usize;
+    let start = page_header_size.saturating_sub(8);
+    let end = start + 2;
+    let slice = buffer.get(start..end).ok_or_else(|| Error::Corrupted {
+        section: Section::Header,
+        details: Cow::from("page header too short to read page type"),
+    })?;
+    Ok(read_u16(header.endianness, slice))
+}
+
+fn subheader_count_from_header(header: &SasHeader, buffer: &[u8]) -> Result<u16> {
+    let page_header_size = header.page_header_size as usize;
+    let start = page_header_size.saturating_sub(4);
+    let end = start + 2;
+    let slice = buffer.get(start..end).ok_or_else(|| Error::Corrupted {
+        section: Section::Header,
+        details: Cow::from("page header too short to read subheader count"),
+    })?;
+    Ok(read_u16(header.endianness, slice))
+}
+
+fn clamp_subheader_count(header: &SasHeader, subheader_count: u16) -> (u16, usize) {
+    let pointer_size = header.subheader_pointer_size as usize;
+    let max_subheaders =
+        (header.page_size as usize).saturating_sub(header.page_header_size as usize) / pointer_size;
+    if usize::from(subheader_count) > max_subheaders {
+        (
+            u16::try_from(max_subheaders).unwrap_or(0),
+            max_subheaders,
+        )
+    } else {
+        (subheader_count, max_subheaders)
+    }
+}
+
+fn load_pointer_table<R: Read + Seek>(
     reader: &mut R,
     header: &SasHeader,
-    buffer: &mut [u8],
-    page_index: u64,
-) -> Result<u16> {
-    read_page(reader, header, buffer, page_index)?;
-    Ok(read_u16(
-        header.endianness,
-        &buffer[(header.page_header_size as usize) - 8..],
-    ))
-}
-
-fn collect_subheaders<'a>(
-    buffer: &'a [u8],
-    header: &'a SasHeader,
+    page_offset: u64,
     page_index: u64,
     page_type: u16,
-) -> Result<Option<Vec<ParsedSubheader<'a>>>> {
-    let subheader_count = peek_subheader_count(buffer, header);
-    let subheaders = parse_metadata_page(buffer, header, page_index, page_type, subheader_count)?;
-    if subheaders.is_empty() {
-        return Ok(None);
+    subheader_count: u16,
+) -> Result<(u16, Vec<u8>)> {
+    if subheader_count == 0 {
+        return Ok((0, Vec::new()));
     }
-    Ok(Some(subheaders))
-}
 
-fn parse_metadata_page<'a>(
-    buffer: &'a [u8],
-    header: &'a SasHeader,
-    page_index: u64,
-    page_type: u16,
-    subheader_count: Option<u16>,
-) -> Result<Vec<ParsedSubheader<'a>>> {
-    match parse_subheaders(buffer, header) {
-        Ok(subheaders) => Ok(subheaders),
-        Err(Error::Corrupted {
-            section: Section::Header,
-            details,
-        }) => {
-            let detail_str = details.as_ref();
-            if detail_str.contains("subheader pointer table exceeds page bounds")
-                || detail_str.contains("subheader pointer exceeds page bounds")
-                || detail_str.contains("subheader count exceeds page bounds")
-            {
-                log_warn(&format!(
-                    "Skipping metadata page {page_index} (type=0x{page_type:04X}): {details} \
-                     [page_size={}, page_header_size={}, pointer_size={}, subheaders={}]",
-                    header.page_size,
-                    header.page_header_size,
-                    header.subheader_pointer_size,
-                    subheader_count
-                        .map_or_else(|| "unknown".to_string(), |count| count.to_string())
-                ));
-                return Ok(Vec::new());
-            }
-            Err(Error::Corrupted {
+    let pointer_size = header.subheader_pointer_size as usize;
+    let original_count = subheader_count;
+    let (subheader_count, max_subheaders) = clamp_subheader_count(header, subheader_count);
+    if usize::from(original_count) > max_subheaders {
+        log_warn(&format!(
+            "Clamping subheader count from {} to {} to fit page bounds [page_len={}, header_size={}, pointer_size={}]",
+            original_count,
+            subheader_count,
+            header.page_size,
+            header.page_header_size,
+            pointer_size
+        ));
+    }
+
+    let pointer_table_len = usize::from(subheader_count) * pointer_size;
+    let pointer_table_end =
+        (header.page_header_size as usize)
+            .checked_add(pointer_table_len)
+            .ok_or_else(|| Error::Corrupted {
                 section: Section::Header,
-                details,
-            })
-        }
-        Err(err) => Err(err),
+                details: Cow::from("subheader pointer table exceeds page bounds"),
+            })?;
+    if pointer_table_end > header.page_size as usize {
+        log_warn(&format!(
+            "Skipping metadata page {page_index} (type=0x{page_type:04X}): subheader pointer table exceeds page bounds \
+             [page_size={}, page_header_size={}, pointer_size={}, subheaders={}]",
+            header.page_size,
+            header.page_header_size,
+            header.subheader_pointer_size,
+            subheader_count
+        ));
+        return Ok((0, Vec::new()));
     }
+
+    let mut pointer_table = vec![0u8; pointer_table_len];
+    let pointer_offset = page_offset + u64::from(header.page_header_size);
+    reader
+        .seek(SeekFrom::Start(pointer_offset))
+        .map_err(Error::from)?;
+    reader.read_exact(&mut pointer_table).map_err(Error::from)?;
+
+    Ok((subheader_count, pointer_table))
 }
 
-fn peek_subheader_count(page: &[u8], header: &SasHeader) -> Option<u16> {
-    let subheader_count_pos = header.page_header_size as usize - 4;
-    let count_bytes = page.get(subheader_count_pos..subheader_count_pos + 2)?;
-    Some(read_u16(header.endianness, count_bytes))
+fn collect_subheaders<R: Read + Seek>(
+    reader: &mut R,
+    header: &SasHeader,
+    page_index: u64,
+    page_type: u16,
+    subheader_count: u16,
+    options: MetadataReadOptions,
+) -> Result<Vec<ParsedSubheader>> {
+    let page_offset = header.data_offset + page_index * u64::from(header.page_size);
+    let (subheader_count, pointer_table) = load_pointer_table(
+        reader,
+        header,
+        page_offset,
+        page_index,
+        page_type,
+        subheader_count,
+    )?;
+    if subheader_count == 0 {
+        return Ok(Vec::new());
+    }
+    let pointer_size = header.subheader_pointer_size as usize;
+    let pointers = parse_pointer_table(&pointer_table, pointer_size, header)?;
+
+    let total_payload: usize = pointers
+        .iter()
+        .filter(|info| info.length != 0 && info.compression == 0)
+        .map(|info| info.length)
+        .sum();
+
+    let use_full_page = match options.io_mode {
+        MetadataIoMode::FullPage => true,
+        MetadataIoMode::Streaming => false,
+        MetadataIoMode::Auto => {
+            header.page_size <= 32 * 1024
+                || total_payload >= (header.page_size as usize / 2)
+        }
+    };
+
+    if use_full_page {
+        return collect_subheaders_full_page(
+            reader,
+            header,
+            page_index,
+            page_type,
+            page_offset,
+            &pointers,
+        );
+    }
+
+    let mut subheaders = Vec::new();
+    for pointer_info in pointers {
+        if pointer_info.length == 0 {
+            continue;
+        }
+        if pointer_info.compression != 0 {
+            continue;
+        }
+        let Some(end) = pointer_info.offset.checked_add(pointer_info.length) else {
+            if pointer_info.is_compressed_data {
+                continue;
+            }
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::Owned(format!(
+                    "subheader pointer exceeds page bounds (offset={}, length={}, page_len={}, overflow)",
+                    pointer_info.offset, pointer_info.length, header.page_size
+                )),
+            });
+        };
+        if end > header.page_size as usize {
+            if pointer_info.is_compressed_data {
+                continue;
+            }
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::Owned(format!(
+                    "subheader pointer exceeds page bounds (offset={}, length={}, page_len={}, compressed_data={})",
+                    pointer_info.offset,
+                    pointer_info.length,
+                    header.page_size,
+                    pointer_info.is_compressed_data
+                )),
+            });
+        }
+
+        let mut data = vec![0u8; pointer_info.length];
+        let data_offset = page_offset + pointer_info.offset as u64;
+        reader
+            .seek(SeekFrom::Start(data_offset))
+            .map_err(Error::from)?;
+        reader.read_exact(&mut data).map_err(Error::from)?;
+
+        if data.len() < header.subheader_signature_size {
+            continue;
+        }
+
+        let mut signature = read_u32(header.endianness, &data[0..4]);
+        if !matches!(header.endianness, crate::dataset::Endianness::Little)
+            && header.uses_u64
+            && signature == u32::MAX
+            && data.len() >= 8
+        {
+            signature = read_u32(header.endianness, &data[4..8]);
+        }
+
+        subheaders.push(ParsedSubheader { signature, data });
+    }
+
+    Ok(subheaders)
+}
+
+fn parse_pointer_table(
+    pointer_table: &[u8],
+    pointer_size: usize,
+    header: &SasHeader,
+) -> Result<Vec<PointerInfo>> {
+    let mut pointers = Vec::new();
+    for chunk in pointer_table.chunks(pointer_size) {
+        pointers.push(parse_pointer(chunk, header)?);
+    }
+    Ok(pointers)
+}
+
+fn collect_subheaders_full_page<R: Read + Seek>(
+    reader: &mut R,
+    header: &SasHeader,
+    _page_index: u64,
+    _page_type: u16,
+    page_offset: u64,
+    pointers: &[PointerInfo],
+) -> Result<Vec<ParsedSubheader>> {
+    let mut page = vec![0u8; header.page_size as usize];
+    reader
+        .seek(SeekFrom::Start(page_offset))
+        .map_err(Error::from)?;
+    reader.read_exact(&mut page).map_err(Error::from)?;
+
+    let mut subheaders = Vec::new();
+    for pointer_info in pointers {
+        if pointer_info.length == 0 || pointer_info.compression != 0 {
+            continue;
+        }
+        let Some(end) = pointer_info.offset.checked_add(pointer_info.length) else {
+            if pointer_info.is_compressed_data {
+                continue;
+            }
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::Owned(format!(
+                    "subheader pointer exceeds page bounds (offset={}, length={}, page_len={}, overflow)",
+                    pointer_info.offset, pointer_info.length, header.page_size
+                )),
+            });
+        };
+        if end > page.len() {
+            if pointer_info.is_compressed_data {
+                continue;
+            }
+            return Err(Error::Corrupted {
+                section: Section::Header,
+                details: Cow::Owned(format!(
+                    "subheader pointer exceeds page bounds (offset={}, length={}, page_len={}, compressed_data={})",
+                    pointer_info.offset,
+                    pointer_info.length,
+                    header.page_size,
+                    pointer_info.is_compressed_data
+                )),
+            });
+        }
+        let data = &page[pointer_info.offset..end];
+        if data.len() < header.subheader_signature_size {
+            continue;
+        }
+
+        let mut signature = read_u32(header.endianness, &data[0..4]);
+        if !matches!(header.endianness, crate::dataset::Endianness::Little)
+            && header.uses_u64
+            && signature == u32::MAX
+            && data.len() >= 8
+        {
+            signature = read_u32(header.endianness, &data[4..8]);
+        }
+
+        subheaders.push(ParsedSubheader {
+            signature,
+            data: data.to_vec(),
+        });
+    }
+
+    Ok(subheaders)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -460,108 +730,6 @@ pub const fn classify_page(page_type: u16) -> PageKind {
         SAS_PAGE_TYPE_AMD => PageKind::Amd,
         _ => PageKind::Unknown,
     }
-}
-
-fn parse_subheaders<'a>(page: &'a [u8], header: &SasHeader) -> Result<Vec<ParsedSubheader<'a>>> {
-    let subheader_count_pos = header.page_header_size as usize - 4;
-    let count_bytes = page
-        .get(subheader_count_pos..subheader_count_pos + 2)
-        .ok_or_else(|| Error::Corrupted {
-            section: Section::Header,
-            details: Cow::Owned(format!(
-                "subheader count exceeds page bounds (pos={}, page_len={})",
-                subheader_count_pos,
-                page.len()
-            )),
-        })?;
-    let subheader_count = read_u16(header.endianness, count_bytes);
-
-    let mut subheaders = Vec::new();
-    let pointer_size = header.subheader_pointer_size as usize;
-    let max_subheaders = page.len().saturating_sub(header.page_header_size as usize) / pointer_size;
-    let (subheader_count, truncated) = if usize::from(subheader_count) > max_subheaders {
-        (u16::try_from(max_subheaders).unwrap_or(0), true)
-    } else {
-        (subheader_count, false)
-    };
-    if truncated {
-        log_warn(&format!(
-            "Clamping subheader count from {} to {} to fit page bounds [page_len={}, header_size={}, pointer_size={}]",
-            subheader_count,
-            max_subheaders,
-            page.len(),
-            header.page_header_size,
-            pointer_size
-        ));
-    }
-    let mut ptr_cursor = header.page_header_size as usize;
-    for _ in 0..subheader_count {
-        let pointer_end = ptr_cursor.saturating_add(pointer_size);
-        let Some(pointer) = page.get(ptr_cursor..pointer_end) else {
-            return Err(Error::Corrupted {
-                section: Section::Header,
-                details: Cow::Owned(format!(
-                    "subheader pointer table exceeds page bounds (cursor={}, pointer_size={}, page_len={})",
-                    ptr_cursor,
-                    pointer_size,
-                    page.len()
-                )),
-            });
-        };
-        ptr_cursor = pointer_end;
-
-        let pointer_info = parse_pointer(pointer, header)?;
-        if pointer_info.length == 0 {
-            continue;
-        }
-        if pointer_info.compression != 0 {
-            continue;
-        }
-        let Some(end) = pointer_info.offset.checked_add(pointer_info.length) else {
-            return Err(Error::Corrupted {
-                section: Section::Header,
-                details: Cow::Owned(format!(
-                    "subheader pointer exceeds page bounds (offset={}, length={}, page_len={}, overflow)",
-                    pointer_info.offset,
-                    pointer_info.length,
-                    page.len()
-                )),
-            });
-        };
-        if end > page.len() {
-            if pointer_info.is_compressed_data {
-                continue;
-            }
-            return Err(Error::Corrupted {
-                section: Section::Header,
-                details: Cow::Owned(format!(
-                    "subheader pointer exceeds page bounds (offset={}, length={}, page_len={}, compressed_data={})",
-                    pointer_info.offset,
-                    pointer_info.length,
-                    page.len(),
-                    pointer_info.is_compressed_data
-                )),
-            });
-        }
-
-        let data = &page[pointer_info.offset..end];
-        if data.len() < header.subheader_signature_size {
-            continue;
-        }
-
-        let mut signature = read_u32(header.endianness, &data[0..4]);
-        if !matches!(header.endianness, crate::dataset::Endianness::Little)
-            && header.uses_u64
-            && signature == u32::MAX
-            && data.len() >= 8
-        {
-            signature = read_u32(header.endianness, &data[4..8]);
-        }
-
-        subheaders.push(ParsedSubheader { signature, data });
-    }
-
-    Ok(subheaders)
 }
 
 struct PointerInfo {

@@ -9,6 +9,7 @@ pub mod sinks;
 pub use crate::error::{Error, Result};
 pub use cell::{CellValue, MissingValue};
 pub use reader::{Row, RowIter, RowLookup, RowSelection, RowValue, SasReader};
+pub use parser::{MetadataIoMode, MetadataReadOptions};
 #[cfg(feature = "csv")]
 pub use sinks::CsvSink;
 #[cfg(feature = "parquet")]
@@ -26,4 +27,16 @@ pub fn decode_layout<R: std::io::Read + std::io::Seek>(
     reader: &mut R,
 ) -> Result<parser::DatasetLayout> {
     parser::parse_metadata(reader)
+}
+
+/// Parses SAS metadata with custom metadata read options.
+///
+/// # Errors
+///
+/// Returns an error if the metadata pages cannot be decoded.
+pub fn decode_layout_with_options<R: std::io::Read + std::io::Seek>(
+    reader: &mut R,
+    options: MetadataReadOptions,
+) -> Result<parser::DatasetLayout> {
+    parser::parse_metadata_with_options(reader, options)
 }

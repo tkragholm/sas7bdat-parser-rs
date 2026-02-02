@@ -37,7 +37,10 @@ where
     pub(crate) columnar_columns: Vec<RuntimeColumnRef>,
     pub(crate) page_buffer: Vec<u8>,
     pub(crate) current_rows: Vec<RowData>,
+    pub(crate) contiguous_base: Option<usize>,
+    pub(crate) contiguous_rows: u16,
     pub(crate) reusable_row_buffers: Vec<Vec<u8>>,
+    pub(crate) reusable_row_buffer: Vec<u8>,
     pub(crate) columnar_owned_buffer: Vec<u8>,
     pub(crate) page_row_count: Cell<u16>,
     pub(crate) row_in_page: Cell<u16>,
@@ -114,10 +117,12 @@ where
                     usize::try_from(column.offsets.width).map_err(|_| Error::Unsupported {
                         feature: Cow::from("column width exceeds platform pointer width"),
                     })?;
+                let end = offset.saturating_add(width);
                 Ok(RuntimeColumn {
                     index: column.index,
                     offset,
                     width,
+                    end,
                     raw_width: column.offsets.width,
                     kind: column.kind,
                 })
@@ -135,7 +140,10 @@ where
             columnar_columns,
             page_buffer: vec![0u8; page_size],
             current_rows: Vec::new(),
+            contiguous_base: None,
+            contiguous_rows: 0,
             reusable_row_buffers: Vec::new(),
+            reusable_row_buffer: Vec::new(),
             columnar_owned_buffer: Vec::new(),
             page_row_count: Cell::new(0),
             row_in_page: Cell::new(0),
@@ -287,16 +295,7 @@ where
     }
 
     pub(crate) fn streaming_row(&self, row_index: u16) -> Result<StreamingRow<'_, '_>> {
-        let row = self
-            .current_rows
-            .get(row_index as usize)
-            .ok_or_else(|| Error::Corrupted {
-                section: Section::Row {
-                    index: u64::from(row_index),
-                },
-                details: Cow::from("row index out of bounds for current page"),
-            })?;
-        let data = row.as_slice(self.row_length, &self.page_buffer, u64::from(row_index))?;
+        let data = self.row_slice(row_index)?;
 
         Ok(StreamingRow::new(
             data,
@@ -309,6 +308,63 @@ where
     pub(crate) fn decode_row(&self, row_index: u16) -> Result<Vec<CellValue<'_>>> {
         let row = self.streaming_row(row_index)?;
         row.materialize()
+    }
+
+    pub(crate) fn row_slice(&self, row_index: u16) -> Result<&[u8]> {
+        if let Some(base) = self.contiguous_base {
+            let offset = base + (row_index as usize).saturating_mul(self.row_length);
+            let end = offset.saturating_add(self.row_length);
+            if end > self.page_buffer.len() {
+                return Err(Error::Corrupted {
+                    section: Section::Row {
+                        index: u64::from(row_index),
+                    },
+                    details: Cow::from("row offset exceeds page bounds"),
+                });
+            }
+            return Ok(&self.page_buffer[offset..end]);
+        }
+
+        let row = self
+            .current_rows
+            .get(row_index as usize)
+            .ok_or_else(|| Error::Corrupted {
+                section: Section::Row {
+                    index: u64::from(row_index),
+                },
+                details: Cow::from("row index out of bounds for current page"),
+            })?;
+        row.as_slice(self.row_length, &self.page_buffer, u64::from(row_index))
+    }
+
+    pub(crate) fn append_row_to_owned_buffer(&mut self, row_index: u16) -> Result<()> {
+        let slice = if let Some(base) = self.contiguous_base {
+            let offset = base + (row_index as usize).saturating_mul(self.row_length);
+            let end = offset.saturating_add(self.row_length);
+            if end > self.page_buffer.len() {
+                return Err(Error::Corrupted {
+                    section: Section::Row {
+                        index: u64::from(row_index),
+                    },
+                    details: Cow::from("row offset exceeds page bounds"),
+                });
+            }
+            &self.page_buffer[offset..end]
+        } else {
+            let row = self
+                .current_rows
+                .get(row_index as usize)
+                .ok_or_else(|| Error::Corrupted {
+                    section: Section::Row {
+                        index: u64::from(row_index),
+                    },
+                    details: Cow::from("row index out of bounds for current page"),
+                })?;
+            row.as_slice(self.row_length, &self.page_buffer, u64::from(row_index))?
+        };
+
+        self.columnar_owned_buffer.extend_from_slice(slice);
+        Ok(())
     }
 }
 

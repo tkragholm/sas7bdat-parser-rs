@@ -5,6 +5,7 @@ pub struct RuntimeColumn {
     pub index: u32,
     pub offset: usize,
     pub width: usize,
+    pub end: usize,
     pub raw_width: u32,
     pub kind: ColumnKind,
 }
@@ -16,6 +17,7 @@ impl RuntimeColumn {
             index: self.index,
             offset: self.offset,
             width: self.width,
+            end: self.end,
             raw_width: self.raw_width,
             kind: self.kind,
         }
@@ -27,6 +29,7 @@ pub struct RuntimeColumnRef {
     pub index: u32,
     pub offset: usize,
     pub width: usize,
+    pub end: usize,
     pub raw_width: u32,
     pub kind: ColumnKind,
 }

@@ -8,7 +8,10 @@ mod window;
 use crate::{
     dataset::{DatasetMetadata, MissingValuePolicy},
     error::{Error, Result},
-    parser::{DatasetLayout, RowIterator, parse_catalog, parse_metadata},
+    parser::{
+        DatasetLayout, MetadataReadOptions, RowIterator, parse_catalog, parse_metadata,
+        parse_metadata_with_options,
+    },
     sinks::{RowSink, SinkContext},
 };
 use labels::{build_label_lookup, normalize_label_name};
@@ -41,6 +44,20 @@ impl SasReader<File> {
         let file = File::open(path)?;
         Self::from_reader(file)
     }
+
+    /// Opens a SAS7BDAT file from disk with custom metadata read options.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or if the metadata
+    /// cannot be parsed.
+    pub fn open_with_options<P: AsRef<Path>>(
+        path: P,
+        options: MetadataReadOptions,
+    ) -> Result<Self> {
+        let file = File::open(path)?;
+        Self::from_reader_with_options(file, options)
+    }
 }
 
 impl<R: Read + Seek> SasReader<R> {
@@ -51,6 +68,20 @@ impl<R: Read + Seek> SasReader<R> {
     /// Returns an error if metadata parsing fails.
     pub fn from_reader(mut reader: R) -> Result<Self> {
         let layout = parse_metadata(&mut reader)?;
+        reader.seek(SeekFrom::Start(0))?;
+        Ok(Self { reader, layout })
+    }
+
+    /// Builds a reader from any `Read + Seek` implementor with custom metadata read options.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if metadata parsing fails.
+    pub fn from_reader_with_options(
+        mut reader: R,
+        options: MetadataReadOptions,
+    ) -> Result<Self> {
+        let layout = parse_metadata_with_options(&mut reader, options)?;
         reader.seek(SeekFrom::Start(0))?;
         Ok(Self { reader, layout })
     }

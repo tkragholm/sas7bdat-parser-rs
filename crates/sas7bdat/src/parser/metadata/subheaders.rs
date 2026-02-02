@@ -1,8 +1,11 @@
 use super::{
-    builder::ColumnMetadataBuilder, column_info::ColumnKind, row_info::RowInfo, text_store::TextRef,
+    builder::ColumnMetadataBuilder,
+    column_info::ColumnKind,
+    row_info::RowInfoRaw,
+    text_store::TextRef,
 };
 use crate::{
-    dataset::{Alignment, Compression, Endianness, Measure},
+    dataset::{Alignment, Endianness, Measure},
     error::{Error, Result, Section},
     parser::core::byteorder::{read_i16, read_u16, read_u32, read_u64},
 };
@@ -328,15 +331,24 @@ pub fn parse_column_format_subheader(
         })?;
     let column = builder.ensure_column(column_index);
 
+    let (format_ref, label_ref) = if uses_u64 {
+        (
+            parse_text_ref(endian, &bytes[46..52]),
+            parse_text_ref(endian, &bytes[52..58]),
+        )
+    } else {
+        (
+            parse_text_ref(endian, &bytes[34..40]),
+            parse_text_ref(endian, &bytes[40..46]),
+        )
+    };
+
     if uses_u64 {
         column.format_width = Some(read_u16(endian, &bytes[24..26]));
         column.format_decimals = Some(read_u16(endian, &bytes[26..28]));
-        column.format_ref = parse_text_ref(endian, &bytes[46..52]);
-        column.label_ref = parse_text_ref(endian, &bytes[52..58]);
-    } else {
-        column.format_ref = parse_text_ref(endian, &bytes[34..40]);
-        column.label_ref = parse_text_ref(endian, &bytes[40..46]);
     }
+    column.format_ref = format_ref;
+    column.label_ref = label_ref;
 
     builder.note_formats_processed();
     Ok(())
@@ -375,12 +387,11 @@ pub fn parse_column_size_subheader(
 }
 
 pub fn parse_row_size_subheader(
-    builder: &ColumnMetadataBuilder,
     bytes: &[u8],
     _signature_len: usize,
     endian: Endianness,
     uses_u64: bool,
-) -> Result<RowInfo> {
+) -> Result<RowInfoRaw> {
     let min_len = if uses_u64 { 250 } else { 190 };
     if bytes.len() < min_len {
         return Err(Error::Corrupted {
@@ -409,7 +420,6 @@ pub fn parse_row_size_subheader(
         details: Cow::from("row length exceeds supported range"),
     })?;
 
-    let text_store = builder.text_store();
     let label_ref_offset = bytes
         .len()
         .checked_sub(130)
@@ -425,36 +435,17 @@ pub fn parse_row_size_subheader(
             details: Cow::from("row size subheader missing compression reference"),
         })?;
 
-    let file_label = {
-        let text_ref = parse_text_ref(endian, &bytes[label_ref_offset..label_ref_offset + 6]);
-        text_store
-            .resolve(text_ref)?
-            .map(|s| s.trim_end().to_string())
-            .filter(|s| !s.is_empty())
-    };
+    let label_ref = parse_text_ref(endian, &bytes[label_ref_offset..label_ref_offset + 6]);
+    let compression_ref = parse_text_ref(
+        endian,
+        &bytes[compression_ref_offset..compression_ref_offset + 6],
+    );
 
-    let compression = {
-        let text_ref = parse_text_ref(
-            endian,
-            &bytes[compression_ref_offset..compression_ref_offset + 6],
-        );
-        text_store
-            .resolve(text_ref)?
-            .map_or(Compression::None, |value| {
-                let text = value.trim();
-                match text {
-                    "SASYZCR2" => Compression::Binary,
-                    "SASYZCRL" => Compression::Row,
-                    _ => Compression::None,
-                }
-            })
-    };
-
-    Ok(RowInfo {
+    Ok(RowInfoRaw {
         row_length,
         total_rows,
         rows_per_page,
-        compression,
-        file_label,
+        compression_ref,
+        label_ref,
     })
 }

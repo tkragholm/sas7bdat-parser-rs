@@ -86,8 +86,12 @@ where
                 )?;
             }
 
-            self.page_row_count
-                .set(self.current_rows.len().try_into().unwrap_or(u16::MAX));
+            let count = if self.contiguous_base.is_some() {
+                self.contiguous_rows
+            } else {
+                self.current_rows.len().try_into().unwrap_or(u16::MAX)
+            };
+            self.page_row_count.set(count);
             self.row_in_page.set(0);
             if self.page_row_count.get() > 0 {
                 return Ok(());
@@ -405,6 +409,12 @@ where
             return Ok(());
         }
 
+        if self.current_rows.is_empty() {
+            self.contiguous_base = Some(data_start);
+            self.contiguous_rows = u16::try_from(rows_to_take).unwrap_or(u16::MAX);
+            return Ok(());
+        }
+
         for idx in 0..rows_to_take {
             let offset = data_start + idx * row_length;
             if offset + row_length > self.page_buffer.len() {
@@ -420,11 +430,17 @@ where
     }
 
     pub(crate) fn recycle_current_rows(&mut self) {
+        self.contiguous_base = None;
+        self.contiguous_rows = 0;
+        let mut owned = Vec::new();
         for entry in self.current_rows.drain(..) {
             if let RowData::Owned(mut buffer) = entry {
                 buffer.clear();
-                self.reusable_row_buffers.push(buffer);
+                owned.push(buffer);
             }
+        }
+        for buffer in owned {
+            self.return_row_buffer(buffer);
         }
     }
 
@@ -433,6 +449,20 @@ where
     }
 
     pub(crate) fn take_row_buffer(&mut self) -> Vec<u8> {
-        self.reusable_row_buffers.pop().unwrap_or_default()
+        if let Some(buffer) = self.reusable_row_buffers.pop() {
+            return buffer;
+        }
+        if !self.reusable_row_buffer.is_empty() {
+            return std::mem::take(&mut self.reusable_row_buffer);
+        }
+        Vec::new()
+    }
+
+    pub(crate) fn return_row_buffer(&mut self, buffer: Vec<u8>) {
+        if self.reusable_row_buffer.is_empty() {
+            self.reusable_row_buffer = buffer;
+        } else {
+            self.reusable_row_buffers.push(buffer);
+        }
     }
 }

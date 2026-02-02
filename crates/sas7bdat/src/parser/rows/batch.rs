@@ -107,12 +107,9 @@ where
     };
 
     let mut row_slices = SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(chunk.chunk_len);
-    for (offset, row_data) in iter.current_rows[chunk.start..chunk.row_end]
-        .iter()
-        .enumerate()
-    {
+    for offset in 0..chunk.chunk_len {
         let row_index = chunk.start + offset;
-        let slice = row_data.as_slice(iter.row_length, &iter.page_buffer, row_index as u64)?;
+        let slice = iter.row_slice(u16::try_from(row_index).unwrap_or(u16::MAX))?;
         row_slices.push(slice);
     }
 
@@ -160,18 +157,13 @@ where
 
     let mut copied_rows = 0usize;
     while copied_rows < effective_target {
-        let remaining = target - copied_rows;
+        let remaining = effective_target - copied_rows;
         let Some(chunk) = next_page_chunk(iter, remaining)? else {
             break;
         };
 
         for row_index in chunk.start..chunk.row_end {
-            let row_data = iter.current_rows[row_index].as_slice(
-                iter.row_length,
-                &iter.page_buffer,
-                row_index as u64,
-            )?;
-            iter.columnar_owned_buffer.extend_from_slice(row_data);
+            iter.append_row_to_owned_buffer(u16::try_from(row_index).unwrap_or(u16::MAX))?;
         }
 
         copied_rows += chunk.chunk_len;

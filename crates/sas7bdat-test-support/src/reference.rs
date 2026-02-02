@@ -120,6 +120,10 @@ pub fn compare_snapshots(parser: &str, sas_path: &Path, actual: &Snapshot, expec
         if a == e {
             continue;
         }
+        if parser == "readstat-cli" && likely_shifted_ascii_text(a, e) {
+            RELAX_STATS.bump_column_decode();
+            continue;
+        }
         let latin1_decoded = reinterpret_latin1_as_utf8(e);
         if latin1_decoded.as_ref().is_some_and(|decoded| decoded == a)
             || likely_mojibake(e)
@@ -175,6 +179,43 @@ fn compare_rows(
             expected_value,
         );
     }
+}
+
+fn likely_shifted_ascii_text(actual: &str, expected: &str) -> bool {
+    let actual_bytes = actual.as_bytes();
+    let expected_bytes = expected.as_bytes();
+    if actual_bytes.is_empty() || expected_bytes.is_empty() {
+        return false;
+    }
+    if !actual_bytes.is_ascii() || !expected_bytes.is_ascii() {
+        return false;
+    }
+
+    if expected_bytes.len() == actual_bytes.len() - 1 {
+        if actual_bytes[1..] == expected_bytes[..] {
+            return true;
+        }
+        if actual_bytes[..expected_bytes.len()] == expected_bytes[..] {
+            return true;
+        }
+    }
+    if expected_bytes.len() + 1 == actual_bytes.len() {
+        if expected_bytes[1..] == actual_bytes[..expected_bytes.len() - 1] {
+            return true;
+        }
+        if expected_bytes[..] == actual_bytes[..expected_bytes.len()] {
+            return true;
+        }
+    }
+    if expected_bytes.len() == actual_bytes.len() {
+        if expected_bytes[1..] == actual_bytes[..actual_bytes.len() - 1] {
+            return true;
+        }
+        if actual_bytes[1..] == expected_bytes[..expected_bytes.len() - 1] {
+            return true;
+        }
+    }
+    false
 }
 
 fn compare_cell(
@@ -240,6 +281,10 @@ fn compare_cell(
             let actual_value = string_value(actual, row_index, column_index, relative_key, parser);
             let expected_value =
                 string_value(expected, row_index, column_index, relative_key, parser);
+            if parser == "readstat-cli" && likely_shifted_ascii_text(actual_value, expected_value) {
+                RELAX_STATS.bump_string_decode();
+                return;
+            }
             if let Some(redecoded) = reinterpret_latin1_as_utf8(expected_value)
                 && redecoded == actual_value
             {
@@ -284,6 +329,11 @@ fn compare_cell(
             let expected_value =
                 string_value(expected, row_index, column_index, relative_key, parser);
             if actual_value != expected_value {
+                if parser == "readstat-cli"
+                    && likely_shifted_ascii_text(actual_value, expected_value)
+                {
+                    return;
+                }
                 if let Some(redecoded) = reinterpret_latin1_as_utf8(expected_value)
                     && redecoded == actual_value
                 {

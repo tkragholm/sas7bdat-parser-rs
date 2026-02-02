@@ -16,8 +16,10 @@ use std::borrow::Cow;
 pub struct StreamingRow<'data, 'meta> {
     pub(crate) data: &'data [u8],
     pub(crate) columns: &'meta [RuntimeColumn],
+    pub(crate) row_len: usize,
     pub(crate) encoding: &'static Encoding,
     pub(crate) endianness: Endianness,
+    pub(crate) columns_fit_row: bool,
 }
 
 /// Lightweight accessor for a single column within a streaming row.
@@ -36,11 +38,23 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
         encoding: &'static Encoding,
         endianness: Endianness,
     ) -> Self {
+        let row_len = data.len();
+        let mut columns_fit_row = true;
+        let mut idx = 0;
+        while idx < columns.len() {
+            if columns[idx].end > row_len {
+                columns_fit_row = false;
+                break;
+            }
+            idx += 1;
+        }
         Self {
             data,
             columns,
+            row_len,
             encoding,
             endianness,
+            columns_fit_row,
         }
     }
 
@@ -79,7 +93,7 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
         &self,
         column: &'meta RuntimeColumn,
     ) -> Result<StreamingCell<'data, 'meta>> {
-        if column.offset + column.width > self.data.len() {
+        if !self.columns_fit_row && column.end > self.row_len {
             return Err(Error::Corrupted {
                 section: crate::error::Section::Column {
                     index: column.index,
@@ -89,7 +103,7 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
         }
         Ok(StreamingCell {
             column,
-            slice: &self.data[column.offset..column.offset + column.width],
+            slice: &self.data[column.offset..column.end],
             encoding: self.encoding,
             endianness: self.endianness,
         })
@@ -198,7 +212,7 @@ impl<'data, 'meta> Iterator for StreamingRowIter<'_, 'data, 'meta> {
     fn next(&mut self) -> Option<Self::Item> {
         let column = self.row.columns.get(self.index)?;
         self.index += 1;
-        if column.offset + column.width > self.row.data.len() {
+        if !self.row.columns_fit_row && column.end > self.row.row_len {
             return Some(Err(Error::Corrupted {
                 section: crate::error::Section::Column {
                     index: column.index,
@@ -208,7 +222,7 @@ impl<'data, 'meta> Iterator for StreamingRowIter<'_, 'data, 'meta> {
         }
         Some(Ok(StreamingCell {
             column,
-            slice: &self.row.data[column.offset..column.offset + column.width],
+            slice: &self.row.data[column.offset..column.end],
             encoding: self.row.encoding,
             endianness: self.row.endianness,
         }))

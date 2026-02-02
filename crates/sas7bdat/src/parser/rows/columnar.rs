@@ -397,6 +397,8 @@ impl<'rows> ColumnarBatch<'rows> {
                             .into_bytes(),
                     ),
                 }
+            } else if trimmed.is_ascii() {
+                Cow::Borrowed(trimmed)
             } else {
                 Cow::Owned(
                     decode_string(trimmed, self.encoding)
@@ -407,7 +409,7 @@ impl<'rows> ColumnarBatch<'rows> {
 
             def_levels.push(1);
             non_null_count = non_null_count.saturating_add(1);
-            let bytes = bytes.as_ref();
+            let bytes_ref = bytes.as_ref();
 
             if dictionary_enabled {
                 if non_null_count <= high_card_sample {
@@ -418,7 +420,7 @@ impl<'rows> ColumnarBatch<'rows> {
                     {
                         dictionary_lookup.clear();
                         dictionary_enabled = false;
-                        values.push(StagedUtf8Value::Inline(bytes.to_vec()));
+                        values.push(StagedUtf8Value::Inline(bytes.into_owned()));
                         continue;
                     }
                 }
@@ -426,10 +428,10 @@ impl<'rows> ColumnarBatch<'rows> {
                 if dictionary_lookup.len() >= STAGED_UTF8_DICTIONARY_LIMIT {
                     dictionary_lookup.clear();
                     dictionary_enabled = false;
-                    values.push(StagedUtf8Value::Inline(bytes.to_vec()));
+                    values.push(StagedUtf8Value::Inline(bytes.into_owned()));
                     continue;
                 }
-                match dictionary_lookup.raw_entry_mut().from_key(bytes) {
+                match dictionary_lookup.raw_entry_mut().from_key(bytes_ref) {
                     RawEntryMut::Occupied(entry) => {
                         values.push(StagedUtf8Value::Dictionary(*entry.get()));
                     }
@@ -438,17 +440,20 @@ impl<'rows> ColumnarBatch<'rows> {
                         let Ok(dict_index) = u32::try_from(dict_index) else {
                             dictionary_enabled = false;
                             dictionary_lookup.clear();
-                            values.push(StagedUtf8Value::Inline(bytes.to_vec()));
+                            values.push(StagedUtf8Value::Inline(bytes.into_owned()));
                             continue;
                         };
-                        let owned = bytes.to_vec();
+                        let owned = match bytes {
+                            Cow::Borrowed(borrowed) => borrowed.to_vec(),
+                            Cow::Owned(owned) => owned,
+                        };
                         vacant.insert(owned.clone(), dict_index);
                         dictionary.push(owned);
                         values.push(StagedUtf8Value::Dictionary(dict_index));
                     }
                 }
             } else {
-                values.push(StagedUtf8Value::Inline(bytes.to_vec()));
+                values.push(StagedUtf8Value::Inline(bytes.into_owned()));
             }
         }
 
@@ -480,7 +485,7 @@ impl ColumnarColumn<'_, '_> {
 
     #[inline]
     fn column_slice<'a>(&self, row: &'a [u8]) -> Option<&'a [u8]> {
-        row.get(self.column.offset..self.column.offset + self.column.width)
+        row.get(self.column.offset..self.column.end)
     }
 
     #[must_use]
