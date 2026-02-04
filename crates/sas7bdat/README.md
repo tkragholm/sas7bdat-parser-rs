@@ -94,11 +94,24 @@ fn main() -> sas7bdat::Result<()> {
         println!("projected row = {:?}", row);
     }
 
+    // Zero-copy streaming rows with name lookup.
+    let mut streamed = sas.stream_rows_with_projection(&["ID", "NAME"])?;
+    while let Some(row) = streamed.try_next()? {
+        let id: Option<i64> = row.get_as("ID")?;
+        let name: Option<String> = row.get_as("NAME")?;
+        println!("ID={id:?} NAME={name:?}");
+    }
+
     Ok(())
 }
 ```
 
 See the examples in `examples/` for more complete pipelines, including Parquet export.
+
+### Streaming rows (borrowed)
+
+`stream_rows` and `stream_rows_with_projection` return `RowView` values that borrow internal buffers.
+Each `RowView` is only valid until the next call to `try_next`, so do not store it outside the loop.
 
 ## Testing
 

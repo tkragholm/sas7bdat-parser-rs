@@ -2,8 +2,13 @@ use crate::{
     cell::CellValue,
     dataset::DatasetMetadata,
     error::{Error, Result},
+    parser::{RowIterator, StreamingCell, StreamingRow},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    io::{Read, Seek},
+    sync::Arc,
+};
 
 #[derive(Debug)]
 pub struct RowLookup {
@@ -225,14 +230,197 @@ impl RowValue for chrono::NaiveDateTime {
     }
 }
 
-pub struct RowIter<'a, R: std::io::Read + std::io::Seek> {
-    inner: crate::parser::RowIterator<'a, R>,
+#[derive(Clone)]
+pub(crate) struct RowProjection {
+    mask: Arc<Vec<bool>>,
+    len: usize,
+}
+
+impl RowProjection {
+    pub(crate) fn new(indices: &[usize], column_count: usize) -> Self {
+        let mut mask = vec![false; column_count];
+        for &index in indices {
+            if let Some(slot) = mask.get_mut(index) {
+                *slot = true;
+            }
+        }
+        Self {
+            mask: Arc::new(mask),
+            len: indices.len(),
+        }
+    }
+
+    fn allows(&self, index: usize) -> bool {
+        self.mask.get(index).copied().unwrap_or(false)
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+/// Borrowed row view backed by the iterator's internal buffers.
+pub struct RowView<'data, 'meta> {
+    row: StreamingRow<'data, 'meta>,
+    lookup: Arc<RowLookup>,
+    projection: Option<RowProjection>,
+}
+
+impl<'data, 'meta> RowView<'data, 'meta> {
+    pub(crate) const fn new(
+        row: StreamingRow<'data, 'meta>,
+        lookup: Arc<RowLookup>,
+        projection: Option<RowProjection>,
+    ) -> Self {
+        Self {
+            row,
+            lookup,
+            projection,
+        }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.projection
+            .as_ref()
+            .map_or_else(|| self.row.len(), RowProjection::len)
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the underlying streaming row for index-based access.
+    ///
+    /// For projected rows, this exposes all columns; use `cell`/`get_as` to
+    /// enforce projection rules.
+    #[must_use]
+    pub const fn streaming_row(&self) -> &StreamingRow<'data, 'meta> {
+        &self.row
+    }
+
+    /// Returns the streaming cell for the named column.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the column name cannot be resolved or the cell
+    /// data is invalid.
+    pub fn cell(&self, name: &str) -> Result<StreamingCell<'data, 'meta>> {
+        let index = self.resolve_index(name)?;
+        self.row.cell(index)
+    }
+
+    /// Returns the streaming cell for the column at `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the column index cannot be resolved or the cell
+    /// data is invalid.
+    pub fn cell_at(&self, index: usize) -> Result<StreamingCell<'data, 'meta>> {
+        if index >= self.row.len() {
+            return self.row.cell(index);
+        }
+        if let Some(projection) = &self.projection {
+            if !projection.allows(index) {
+                return Err(Error::InvalidMetadata {
+                    details: format!("column index {index} not found in row").into(),
+                });
+            }
+        }
+        self.row.cell(index)
+    }
+
+    /// Returns a typed value from the row by column name.
+    ///
+    /// Missing values resolve to `Ok(None)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the column name is unknown or the value cannot be converted.
+    pub fn get_as<T: RowValue>(&self, name: &str) -> Result<Option<T>> {
+        let cell = self.cell(name)?;
+        let value = cell.decode_value()?;
+        T::from_cell(&value)
+    }
+
+    fn resolve_index(&self, name: &str) -> Result<usize> {
+        let index = self.lookup.index(name).ok_or_else(|| Error::InvalidMetadata {
+            details: format!("column name '{name}' not found in row").into(),
+        })?;
+        if let Some(projection) = &self.projection {
+            if !projection.allows(index) {
+                return Err(Error::InvalidMetadata {
+                    details: format!("column name '{name}' not found in row").into(),
+                });
+            }
+        }
+        Ok(index)
+    }
+}
+
+/// Streaming iterator that yields borrowed row views.
+///
+/// Row views borrow internal buffers and are only valid until the next call to `try_next`.
+pub struct RowViewIter<'a, R: Read + Seek> {
+    inner: RowIterator<'a, R>,
+    lookup: Arc<RowLookup>,
+    projection: Option<RowProjection>,
+}
+
+impl<'a, R: Read + Seek> RowViewIter<'a, R> {
+    pub(crate) const fn new(
+        inner: RowIterator<'a, R>,
+        lookup: Arc<RowLookup>,
+        projection: Option<RowProjection>,
+    ) -> Self {
+        Self {
+            inner,
+            lookup,
+            projection,
+        }
+    }
+
+    /// Advances the iterator by one row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails.
+    pub fn try_next(&mut self) -> Result<Option<RowView<'_, '_>>> {
+        match self.inner.try_next_streaming_row()? {
+            Some(row) => Ok(Some(RowView::new(
+                row,
+                Arc::clone(&self.lookup),
+                self.projection.clone(),
+            ))),
+            None => Ok(None),
+        }
+    }
+
+    /// Streams all remaining rows into the provided visitor.
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures reported by the iterator or the visitor closure.
+    pub fn stream_all<F>(&mut self, mut f: F) -> Result<()>
+    where
+        F: for<'row> FnMut(RowView<'row, '_>) -> Result<()>,
+    {
+        while let Some(row) = self.try_next()? {
+            f(row)?;
+        }
+        Ok(())
+    }
+}
+
+pub struct RowIter<'a, R: Read + Seek> {
+    inner: RowIterator<'a, R>,
     lookup: Arc<RowLookup>,
 }
 
-impl<'a, R: std::io::Read + std::io::Seek> RowIter<'a, R> {
+impl<'a, R: Read + Seek> RowIter<'a, R> {
     pub(crate) const fn new(
-        inner: crate::parser::RowIterator<'a, R>,
+        inner: RowIterator<'a, R>,
         lookup: Arc<RowLookup>,
     ) -> Self {
         Self { inner, lookup }
@@ -254,7 +442,7 @@ impl<'a, R: std::io::Read + std::io::Seek> RowIter<'a, R> {
     }
 }
 
-impl<R: std::io::Read + std::io::Seek> Iterator for RowIter<'_, R> {
+impl<R: Read + Seek> Iterator for RowIter<'_, R> {
     type Item = Result<Row>;
 
     fn next(&mut self) -> Option<Self::Item> {

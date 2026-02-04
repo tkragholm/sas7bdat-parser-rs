@@ -16,11 +16,13 @@ use crate::{
 };
 use labels::{build_label_lookup, normalize_label_name};
 use missing::{dedup_missing_ranges, dedup_tagged_missing, merge_label_set_missing};
+use row::RowProjection;
 use std::{
     collections::HashSet,
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::Path,
+    sync::Arc,
 };
 
 pub struct SasReader<R: Read + Seek> {
@@ -29,7 +31,7 @@ pub struct SasReader<R: Read + Seek> {
 }
 
 pub use projection::ProjectedRowIter;
-pub use row::{Row, RowIter, RowLookup, RowValue};
+pub use row::{Row, RowIter, RowLookup, RowValue, RowView, RowViewIter};
 pub use selection::RowSelection;
 pub use window::{ProjectedRowWindow, RowWindow};
 
@@ -209,10 +211,48 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if row iteration cannot be initialised.
     pub fn rows_named(&mut self) -> Result<RowIter<'_, R>> {
-        let lookup = std::sync::Arc::new(row::RowLookup::from_metadata(self.metadata()));
+        let lookup = Arc::new(row::RowLookup::from_metadata(self.metadata()));
         self.reader.seek(SeekFrom::Start(0))?;
         let iterator = self.layout.row_iterator(&mut self.reader)?;
         Ok(RowIter::new(iterator, lookup))
+    }
+
+    /// Creates a streaming iterator that yields borrowed row views.
+    ///
+    /// Row views borrow internal buffers and are only valid until the next call to `try_next`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn stream_rows(&mut self) -> Result<RowViewIter<'_, R>> {
+        let lookup = Arc::new(row::RowLookup::from_metadata(self.metadata()));
+        self.reader.seek(SeekFrom::Start(0))?;
+        let iterator = self.layout.row_iterator(&mut self.reader)?;
+        Ok(RowViewIter::new(iterator, lookup, None))
+    }
+
+    /// Creates a streaming iterator that yields borrowed row views for the named columns.
+    ///
+    /// Row views borrow internal buffers and are only valid until the next call to `try_next`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name cannot be resolved.
+    pub fn stream_rows_with_projection(&mut self, names: &[&str]) -> Result<RowViewIter<'_, R>> {
+        let selection = RowSelection::new().columns(names);
+        let metadata = &self.layout.header.metadata;
+        let indices =
+            selection
+                .resolve_projection(metadata)?
+                .ok_or_else(|| Error::InvalidMetadata {
+                    details: "column projection not specified".into(),
+                })?;
+        let normalized = self.normalize_projection(&indices)?;
+        let projection = RowProjection::new(&normalized, metadata.column_count as usize);
+        let lookup = Arc::new(row::RowLookup::from_metadata(metadata));
+        self.reader.seek(SeekFrom::Start(0))?;
+        let iterator = self.layout.row_iterator(&mut self.reader)?;
+        Ok(RowViewIter::new(iterator, lookup, Some(projection)))
     }
 
     /// Creates a row iterator configured by the provided selection.
@@ -247,30 +287,7 @@ impl<R: Read + Seek> SasReader<R> {
     /// Returns an error if any requested column index is invalid or if row
     /// decoding fails.
     pub fn select_columns(&mut self, indices: &[usize]) -> Result<ProjectedRowIter<'_, R>> {
-        let column_count = self.layout.header.metadata.column_count as usize;
-        if indices.is_empty() {
-            return Err(Error::InvalidMetadata {
-                details: "projected column list may not be empty".into(),
-            });
-        }
-        let mut normalized = Vec::with_capacity(indices.len());
-        let mut seen = HashSet::with_capacity(indices.len());
-        for &idx in indices {
-            if idx >= column_count {
-                return Err(Error::InvalidMetadata {
-                    details: format!(
-                        "column projection index {idx} exceeds column count {column_count}"
-                    )
-                    .into(),
-                });
-            }
-            if !seen.insert(idx) {
-                return Err(Error::InvalidMetadata {
-                    details: format!("duplicate column projection index {idx}").into(),
-                });
-            }
-            normalized.push(idx);
-        }
+        let normalized = self.normalize_projection(indices)?;
         self.reader.seek(SeekFrom::Start(0))?;
         let inner = self.layout.row_iterator(&mut self.reader)?;
         let mut sorted_projection: Vec<(usize, usize)> = normalized
@@ -357,5 +374,33 @@ impl<R: Read + Seek> SasReader<R> {
 
     pub fn into_parts(self) -> (R, DatasetLayout) {
         (self.reader, self.layout)
+    }
+
+    fn normalize_projection(&self, indices: &[usize]) -> Result<Vec<usize>> {
+        let column_count = self.layout.header.metadata.column_count as usize;
+        if indices.is_empty() {
+            return Err(Error::InvalidMetadata {
+                details: "projected column list may not be empty".into(),
+            });
+        }
+        let mut normalized = Vec::with_capacity(indices.len());
+        let mut seen = HashSet::with_capacity(indices.len());
+        for &idx in indices {
+            if idx >= column_count {
+                return Err(Error::InvalidMetadata {
+                    details: format!(
+                        "column projection index {idx} exceeds column count {column_count}"
+                    )
+                    .into(),
+                });
+            }
+            if !seen.insert(idx) {
+                return Err(Error::InvalidMetadata {
+                    details: format!("duplicate column projection index {idx}").into(),
+                });
+            }
+            normalized.push(idx);
+        }
+        Ok(normalized)
     }
 }

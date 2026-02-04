@@ -224,6 +224,28 @@ where
         }
     }
 
+    /// Advances the iterator by one row and returns a zero-copy row view.
+    ///
+    /// The returned row borrows from internal buffers and must not be used after
+    /// the iterator advances.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails.
+    pub fn try_next_streaming_row(&mut self) -> Result<Option<StreamingRow<'_, '_>>> {
+        let Some(progress) = self.reserve_next_row()? else {
+            return Ok(None);
+        };
+
+        match self.streaming_row(progress.row_index) {
+            Ok(row) => Ok(Some(row)),
+            Err(err) => {
+                self.revert_row_progress(progress.prev_row_in_page, progress.prev_emitted);
+                Err(err)
+            }
+        }
+    }
+
     /// Advances the iterator and invokes the visitor with a zero-copy row view.
     ///
     /// Returns `Ok(None)` when no more rows remain or `Ok(Some(()))` when a row
