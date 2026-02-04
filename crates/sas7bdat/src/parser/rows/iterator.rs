@@ -373,15 +373,15 @@ where
             }
             &self.page_buffer[offset..end]
         } else {
-            let row = self
-                .current_rows
-                .get(row_index as usize)
-                .ok_or_else(|| Error::Corrupted {
-                    section: Section::Row {
-                        index: u64::from(row_index),
-                    },
-                    details: Cow::from("row index out of bounds for current page"),
-                })?;
+            let row =
+                self.current_rows
+                    .get(row_index as usize)
+                    .ok_or_else(|| Error::Corrupted {
+                        section: Section::Row {
+                            index: u64::from(row_index),
+                        },
+                        details: Cow::from("row index out of bounds for current page"),
+                    })?;
             row.as_slice(self.row_length, &self.page_buffer, u64::from(row_index))?
         };
 

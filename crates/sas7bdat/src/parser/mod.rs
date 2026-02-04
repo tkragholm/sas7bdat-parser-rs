@@ -8,8 +8,8 @@ pub use catalog::{CatalogLayout, parse_catalog};
 pub use core::byteorder::{read_i16, read_u16, read_u32, read_u64, read_u64_be};
 pub use header::{SasHeader, parse_header};
 pub use metadata::{
-    ColumnInfo, ColumnKind, ColumnMetadataBuilder, ColumnOffsets, DatasetLayout, NumericKind,
-    MetadataIoMode, MetadataReadOptions, RowInfo, TextRef, TextStore, parse_metadata,
+    ColumnInfo, ColumnKind, ColumnMetadataBuilder, ColumnOffsets, DatasetLayout, MetadataIoMode,
+    MetadataReadOptions, NumericKind, RowInfo, TextRef, TextStore, parse_metadata,
     parse_metadata_with_options,
 };
 pub use rows::{

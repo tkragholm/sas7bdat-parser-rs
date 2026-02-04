@@ -8,10 +8,10 @@ pub mod reader;
 pub mod sinks;
 pub use crate::error::{Error, Result};
 pub use cell::{CellValue, MissingValue};
+pub use parser::{MetadataIoMode, MetadataReadOptions};
 pub use reader::{
     Row, RowIter, RowLookup, RowSelection, RowValue, RowView, RowViewIter, SasReader,
 };
-pub use parser::{MetadataIoMode, MetadataReadOptions};
 #[cfg(feature = "csv")]
 pub use sinks::CsvSink;
 #[cfg(feature = "parquet")]

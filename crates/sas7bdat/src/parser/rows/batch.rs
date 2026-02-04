@@ -2,8 +2,7 @@ use super::{
     columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnarBatch},
     iterator::RowIteratorCore,
 };
-use crate::error::Result;
-use crate::parser::metadata::DatasetLayout;
+use crate::{error::Result, parser::metadata::DatasetLayout};
 use smallvec::SmallVec;
 use std::{
     convert::TryFrom,

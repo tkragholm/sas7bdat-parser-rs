@@ -231,7 +231,7 @@ impl RowValue for chrono::NaiveDateTime {
 }
 
 #[derive(Clone)]
-pub(crate) struct RowProjection {
+pub struct RowProjection {
     mask: Arc<Vec<bool>>,
     len: usize,
 }
@@ -254,7 +254,7 @@ impl RowProjection {
         self.mask.get(index).copied().unwrap_or(false)
     }
 
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.len
     }
 }
@@ -321,12 +321,12 @@ impl<'data, 'meta> RowView<'data, 'meta> {
         if index >= self.row.len() {
             return self.row.cell(index);
         }
-        if let Some(projection) = &self.projection {
-            if !projection.allows(index) {
-                return Err(Error::InvalidMetadata {
-                    details: format!("column index {index} not found in row").into(),
-                });
-            }
+        if let Some(projection) = &self.projection
+            && !projection.allows(index)
+        {
+            return Err(Error::InvalidMetadata {
+                details: format!("column index {index} not found in row").into(),
+            });
         }
         self.row.cell(index)
     }
@@ -345,15 +345,18 @@ impl<'data, 'meta> RowView<'data, 'meta> {
     }
 
     fn resolve_index(&self, name: &str) -> Result<usize> {
-        let index = self.lookup.index(name).ok_or_else(|| Error::InvalidMetadata {
-            details: format!("column name '{name}' not found in row").into(),
-        })?;
-        if let Some(projection) = &self.projection {
-            if !projection.allows(index) {
-                return Err(Error::InvalidMetadata {
-                    details: format!("column name '{name}' not found in row").into(),
-                });
-            }
+        let index = self
+            .lookup
+            .index(name)
+            .ok_or_else(|| Error::InvalidMetadata {
+                details: format!("column name '{name}' not found in row").into(),
+            })?;
+        if let Some(projection) = &self.projection
+            && !projection.allows(index)
+        {
+            return Err(Error::InvalidMetadata {
+                details: format!("column name '{name}' not found in row").into(),
+            });
         }
         Ok(index)
     }
@@ -419,10 +422,7 @@ pub struct RowIter<'a, R: Read + Seek> {
 }
 
 impl<'a, R: Read + Seek> RowIter<'a, R> {
-    pub(crate) const fn new(
-        inner: RowIterator<'a, R>,
-        lookup: Arc<RowLookup>,
-    ) -> Self {
+    pub(crate) const fn new(inner: RowIterator<'a, R>, lookup: Arc<RowLookup>) -> Self {
         Self { inner, lookup }
     }
 

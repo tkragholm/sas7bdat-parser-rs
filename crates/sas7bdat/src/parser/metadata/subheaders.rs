@@ -1,7 +1,5 @@
 use super::{
-    builder::ColumnMetadataBuilder,
-    column_info::ColumnKind,
-    row_info::RowInfoRaw,
+    builder::ColumnMetadataBuilder, column_info::ColumnKind, row_info::RowInfoRaw,
     text_store::TextRef,
 };
 use crate::{

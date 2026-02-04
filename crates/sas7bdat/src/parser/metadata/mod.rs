@@ -442,10 +442,7 @@ fn clamp_subheader_count(header: &SasHeader, subheader_count: u16) -> (u16, usiz
     let max_subheaders =
         (header.page_size as usize).saturating_sub(header.page_header_size as usize) / pointer_size;
     if usize::from(subheader_count) > max_subheaders {
-        (
-            u16::try_from(max_subheaders).unwrap_or(0),
-            max_subheaders,
-        )
+        (u16::try_from(max_subheaders).unwrap_or(0), max_subheaders)
     } else {
         (subheader_count, max_subheaders)
     }
@@ -478,13 +475,12 @@ fn load_pointer_table<R: Read + Seek>(
     }
 
     let pointer_table_len = usize::from(subheader_count) * pointer_size;
-    let pointer_table_end =
-        (header.page_header_size as usize)
-            .checked_add(pointer_table_len)
-            .ok_or_else(|| Error::Corrupted {
-                section: Section::Header,
-                details: Cow::from("subheader pointer table exceeds page bounds"),
-            })?;
+    let pointer_table_end = (header.page_header_size as usize)
+        .checked_add(pointer_table_len)
+        .ok_or_else(|| Error::Corrupted {
+            section: Section::Header,
+            details: Cow::from("subheader pointer table exceeds page bounds"),
+        })?;
     if pointer_table_end > header.page_size as usize {
         log_warn(&format!(
             "Skipping metadata page {page_index} (type=0x{page_type:04X}): subheader pointer table exceeds page bounds \
@@ -540,8 +536,7 @@ fn collect_subheaders<R: Read + Seek>(
         MetadataIoMode::FullPage => true,
         MetadataIoMode::Streaming => false,
         MetadataIoMode::Auto => {
-            header.page_size <= 32 * 1024
-                || total_payload >= (header.page_size as usize / 2)
+            header.page_size <= 32 * 1024 || total_payload >= (header.page_size as usize / 2)
         }
     };
 

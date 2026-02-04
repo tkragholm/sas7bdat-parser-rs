@@ -79,10 +79,7 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if metadata parsing fails.
-    pub fn from_reader_with_options(
-        mut reader: R,
-        options: MetadataReadOptions,
-    ) -> Result<Self> {
+    pub fn from_reader_with_options(mut reader: R, options: MetadataReadOptions) -> Result<Self> {
         let layout = parse_metadata_with_options(&mut reader, options)?;
         reader.seek(SeekFrom::Start(0))?;
         Ok(Self { reader, layout })
