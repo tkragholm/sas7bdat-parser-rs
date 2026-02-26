@@ -7,9 +7,10 @@ use parquet::data_type::ByteArray;
 pub(super) struct Utf8Scratch {
     pub ryu: ryu::Buffer,
     pub itoa: itoa::Buffer,
-    dictionary: HashMap<Vec<u8>, ByteArray, RandomState>,
+    /// Keyed by `Bytes` (Arc-backed) so all clones are cheap reference-count bumps.
+    dictionary: HashMap<Bytes, ByteArray, RandomState>,
     dictionary_enabled: bool,
-    last_short: Option<(Vec<u8>, ByteArray)>,
+    last_short: Option<(Bytes, ByteArray)>,
 }
 
 impl Utf8Scratch {
@@ -29,7 +30,7 @@ impl Utf8Scratch {
     pub(crate) fn intern_slice(&mut self, data: &[u8]) -> ByteArray {
         if data.len() <= 32
             && let Some((ref previous, ref handle)) = self.last_short
-            && previous.as_slice() == data
+            && previous.as_ref() == data
         {
             return handle.clone();
         }
@@ -40,7 +41,9 @@ impl Utf8Scratch {
         if !self.dictionary_enabled {
             let stored = ByteArray::from(Bytes::copy_from_slice(data));
             if data.len() <= 32 {
-                self.last_short = Some((data.to_vec(), stored.clone()));
+                // ByteArray wraps Bytes; extract it back for the cache key (cheap Arc clone).
+                let key = Bytes::copy_from_slice(data);
+                self.last_short = Some((key, stored.clone()));
             }
             return stored;
         }
@@ -48,15 +51,18 @@ impl Utf8Scratch {
             RawEntryMut::Occupied(entry) => {
                 let cloned = entry.get().clone();
                 if data.len() <= 32 {
-                    self.last_short = Some((data.to_vec(), cloned.clone()));
+                    // Reuse the existing Bytes key already stored in the hashmap (cheap clone).
+                    self.last_short = Some((entry.key().clone(), cloned.clone()));
                 }
                 cloned
             }
             RawEntryMut::Vacant(vacant) => {
-                let stored = ByteArray::from(Bytes::copy_from_slice(data));
-                vacant.insert(data.to_vec(), stored.clone());
+                // One allocation for the bytes; all subsequent uses are cheap Arc clones.
+                let key = Bytes::copy_from_slice(data);
+                let stored = ByteArray::from(key.clone());
+                let (inserted_key, _) = vacant.insert(key, stored.clone());
                 if data.len() <= 32 {
-                    self.last_short = Some((data.to_vec(), stored.clone()));
+                    self.last_short = Some((inserted_key.clone(), stored.clone()));
                 }
                 stored
             }

@@ -1,9 +1,30 @@
 use crate::error::{Error, Result};
-use time::{Duration, OffsetDateTime};
+use time::{Date, Duration, OffsetDateTime};
+
+/// Write a `YYYY-MM-DD` date directly into `out` without allocating a String.
+fn write_date_components(date: Date, out: &mut Vec<u8>) {
+    let year = date.year();
+    // Fast path for signed four-digit years: `-9999..=9999`.
+    // For wider years, fall back to `Date` formatting to preserve semantics.
+    if (-9999..=9999).contains(&year) {
+        if year < 0 {
+            out.push(b'-');
+        }
+        let y = year.unsigned_abs();
+        write_two((y / 100) as u8, out);
+        write_two((y % 100) as u8, out);
+    } else {
+        out.extend_from_slice(date.to_string().as_bytes());
+        return;
+    }
+    out.push(b'-');
+    write_two(u8::from(date.month()), out);
+    out.push(b'-');
+    write_two(date.day(), out);
+}
 
 pub fn write_date(dt: &OffsetDateTime, out: &mut Vec<u8>) {
-    let date = dt.date().to_string();
-    out.extend_from_slice(date.as_bytes());
+    write_date_components(dt.date(), out);
 }
 
 pub fn write_datetime(dt: &OffsetDateTime, out: &mut Vec<u8>) {
@@ -11,7 +32,7 @@ pub fn write_datetime(dt: &OffsetDateTime, out: &mut Vec<u8>) {
     let rounded = round_to_millisecond(dt);
     let date = rounded.date();
     let time = rounded.time();
-    out.extend_from_slice(date.to_string().as_bytes());
+    write_date_components(date, out);
     out.push(b' ');
     write_two(time.hour(), out);
     out.push(b':');
@@ -110,4 +131,34 @@ pub fn write_three(v: u16, out: &mut Vec<u8>) {
     out.push(b'0' + hundreds_u8);
     out.push(b'0' + tens_u8);
     out.push(b'0' + ones_u8);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_date;
+    use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time};
+
+    fn utc_date(year: i32, month: Month, day: u8) -> OffsetDateTime {
+        PrimitiveDateTime::new(
+            Date::from_calendar_date(year, month, day).expect("valid test date"),
+            Time::MIDNIGHT,
+        )
+        .assume_utc()
+    }
+
+    #[test]
+    fn write_date_preserves_sign_for_negative_years() {
+        let dt = utc_date(-1, Month::January, 2);
+        let mut out = Vec::new();
+        write_date(&dt, &mut out);
+        assert_eq!(String::from_utf8(out).expect("utf8"), "-0001-01-02");
+    }
+
+    #[test]
+    fn write_date_zero_pads_positive_years() {
+        let dt = utc_date(42, Month::March, 5);
+        let mut out = Vec::new();
+        write_date(&dt, &mut out);
+        assert_eq!(String::from_utf8(out).expect("utf8"), "0042-03-05");
+    }
 }

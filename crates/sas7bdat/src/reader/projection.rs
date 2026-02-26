@@ -11,6 +11,8 @@ pub struct ProjectedRowIter<'a, R: Read + Seek> {
     pub(crate) selected_indices: Vec<usize>,
     pub(crate) sorted_projection: Vec<(usize, usize)>,
     pub(crate) exhausted: bool,
+    /// Reusable staging buffer — one slot per projected column, cleared before each row.
+    pub(crate) slots: Vec<Option<CellValue<'static>>>,
 }
 
 impl<R: Read + Seek> ProjectedRowIter<'_, R> {
@@ -32,8 +34,10 @@ impl<R: Read + Seek> ProjectedRowIter<'_, R> {
             }
         };
         if let Some(row) = maybe_row {
-            let mut slots: Vec<Option<CellValue<'static>>> =
-                vec![None; self.selected_indices.len()];
+            // Clear the reusable slot buffer without reallocating.
+            for s in &mut self.slots {
+                *s = None;
+            }
             let mut sorted_pos = 0usize;
             let sorted_len = self.sorted_projection.len();
             let mut filled = 0usize;
@@ -49,7 +53,7 @@ impl<R: Read + Seek> ProjectedRowIter<'_, R> {
                         });
                     }
                     if target_index == column_index {
-                        slots[result_position] = Some(value.into_owned());
+                        self.slots[result_position] = Some(value.into_owned());
                         sorted_pos += 1;
                         filled += 1;
                         if filled == sorted_len {
@@ -68,8 +72,8 @@ impl<R: Read + Seek> ProjectedRowIter<'_, R> {
                 });
             }
             let mut projected = Vec::with_capacity(self.selected_indices.len());
-            for slot in slots {
-                if let Some(value) = slot {
+            for slot in &mut self.slots {
+                if let Some(value) = slot.take() {
                     projected.push(value);
                 } else {
                     return Err(Error::InvalidMetadata {

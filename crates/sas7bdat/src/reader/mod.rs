@@ -129,8 +129,8 @@ impl<R: Read + Seek> SasReader<R> {
                     }
                 }
 
-                if let Some(label_name) = variable.value_labels.clone()
-                    && let Some(set) = metadata.label_sets.get(&label_name)
+                if let Some(label_name) = &variable.value_labels
+                    && let Some(set) = metadata.label_sets.get(label_name)
                 {
                     merge_label_set_missing(&mut variable.missing, set);
                 }
@@ -294,11 +294,13 @@ impl<R: Read + Seek> SasReader<R> {
             .map(|(position, column_index)| (column_index, position))
             .collect();
         sorted_projection.sort_unstable_by_key(|entry| entry.0);
+        let slots_len = normalized.len();
         Ok(ProjectedRowIter {
             inner,
             selected_indices: normalized,
             sorted_projection,
             exhausted: false,
+            slots: vec![None; slots_len],
         })
     }
 

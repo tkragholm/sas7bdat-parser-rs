@@ -224,10 +224,7 @@ pub fn decompress_rdc(
                     return Err("RDC copy invalid");
                 }
                 let start = out_pos - back_offset;
-                for j in 0..copy_len {
-                    let byte = buffer[start + j];
-                    buffer[out_pos + j] = byte;
-                }
+                buffer.copy_within(start..start + copy_len, out_pos);
                 out_pos += copy_len;
             }
         }

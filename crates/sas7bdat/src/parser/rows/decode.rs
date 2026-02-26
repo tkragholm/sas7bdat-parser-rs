@@ -2,7 +2,7 @@ use crate::{
     cell::{CellValue, MissingValue},
     dataset::{Endianness, MissingLiteral, TaggedMissing},
     parser::{
-        core::{encoding::trim_trailing, float_utils::try_int_from_f64},
+        core::float_utils::try_int_from_f64,
         metadata::{ColumnKind, NumericKind},
     },
 };
@@ -52,7 +52,7 @@ pub fn decode_value_inner<'data>(
 }
 
 pub fn decode_string<'a>(slice: &'a [u8], encoding: &'static Encoding) -> Cow<'a, str> {
-    let trimmed = trim_trailing(slice);
+    let trimmed = trim_trailing_space_or_nul_simd(slice);
     if trimmed.is_empty() {
         return Cow::Borrowed("");
     }
@@ -88,22 +88,16 @@ fn maybe_fix_mojibake(value: Cow<'_, str>) -> Cow<'_, str> {
         return value;
     }
 
-    let mut bytes = Vec::with_capacity(text.len());
-    let mut has_extended = false;
-
-    for ch in text.chars() {
-        let code = ch as u32;
-        if code > 0xFF {
-            return value;
-        }
-        if code >= 0x80 {
-            has_extended = true;
-        }
-        bytes.push(u8::try_from(code).expect("code <= 0xFF enforced above"));
+    // First pass: verify all chars are within Latin-1 range before allocating.
+    // Strings containing code points > U+00FF cannot be mojibake of Latin-1 bytes.
+    if text.chars().any(|ch| ch as u32 > 0xFF) {
+        return value;
     }
 
-    if has_extended
-        && let Ok(decoded) = std::str::from_utf8(&bytes)
+    // All chars are in U+0000–U+00FF. Reinterpret as raw Latin-1 bytes and check
+    // whether re-decoding those bytes as UTF-8 produces a different string.
+    let bytes: Vec<u8> = text.chars().map(|ch| ch as u8).collect();
+    if let Ok(decoded) = std::str::from_utf8(&bytes)
         && decoded != text
     {
         return Cow::Owned(decoded.to_owned());
@@ -145,9 +139,9 @@ pub fn numeric_bits(slice: &[u8], endian: Endianness) -> u64 {
                 buf[..len].copy_from_slice(slice);
             }
             Endianness::Little => {
-                for (idx, &byte) in slice.iter().rev().enumerate() {
-                    buf[idx] = byte;
-                }
+                let len = slice.len();
+                buf[..len].copy_from_slice(slice);
+                buf[..len].reverse();
             }
         }
         u64::from_be_bytes(buf)
