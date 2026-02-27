@@ -1,6 +1,6 @@
 use csv::ReaderBuilder;
 use num_traits::ToPrimitive;
-use sas7bdat::{CellValue, SasReader};
+use sas7bdat::{CellValue, OrderingMode, SasReader, Shape};
 use sas7bdat_test_support::common;
 use std::sync::OnceLock;
 use time::{
@@ -44,8 +44,12 @@ fn fixtures_match_csv_rows() {
             "row count mismatch for {sas_file}"
         );
 
-        let mut rows = sas
-            .rows()
+        let mut query = sas
+            .query()
+            .shape(Shape::Rows)
+            .ordering(OrderingMode::Ordered);
+        let mut rows = query
+            .stream_ordered()
             .unwrap_or_else(|err| panic!("failed to create row iterator for {sas_file}: {err}"));
         for (index, expected_row) in csv_fixture.rows.iter().enumerate() {
             let actual_row = rows

@@ -5,7 +5,7 @@ use crate::{
 };
 use csv::ReaderBuilder;
 use sas7bdat::{
-    SasReader,
+    OrderingMode, SasReader, Shape,
     parser::{ColumnKind, NumericKind, parse_metadata},
 };
 use serde_json::json;
@@ -68,8 +68,12 @@ pub fn collect_snapshot(path: &Path) -> Snapshot {
         .map(|var| var.name.trim_end().to_string())
         .collect();
 
-    let mut rows_iter = sas
-        .rows()
+    let mut query = sas
+        .query()
+        .shape(Shape::Rows)
+        .ordering(OrderingMode::Ordered);
+    let mut rows_iter = query
+        .stream_ordered()
         .unwrap_or_else(|err| panic!("failed to create row iterator for {}: {}", display, err));
     let mut rows = Vec::new();
     while let Some(row) = rows_iter

@@ -34,6 +34,10 @@ pub enum Error {
     #[error("invalid SAS metadata: {details}")]
     InvalidMetadata { details: Cow<'static, str> },
 
+    /// Invalid combination of reader/query options.
+    #[error("invalid SAS reader configuration: {details}")]
+    InvalidConfiguration { details: Cow<'static, str> },
+
     /// Failure encountered while interacting with the Parquet writer.
     #[error("parquet error: {details}")]
     Parquet { details: Cow<'static, str> },

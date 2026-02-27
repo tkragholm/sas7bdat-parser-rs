@@ -18,8 +18,10 @@ pub use parser::{
     scan_file_rows_with_decode_policy_unordered,
 };
 pub use reader::{
-    CatalogScanPolicy, Row, RowIter, RowLookup, RowSelection, RowValue, RowView, RowViewIter,
-    SasReader,
+    BinaryCol, CatalogScanPolicy, FrameBatch, FrameColumn, FrameColumnType, FrameSchema,
+    FrameSchemaField, MissingSummary, OrderingMode, PrimitiveCol, Query, QueryPlan, QueryStream,
+    Row, RowIter, RowLookup, RowSelection, RowValue, RowView, RowViewIter, SasReader, Shape,
+    SourceKind, Utf8Col,
 };
 #[cfg(feature = "csv")]
 pub use sinks::CsvSink;

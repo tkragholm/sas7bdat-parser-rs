@@ -1,4 +1,4 @@
-use sas7bdat::{CellValue, SasReader};
+use sas7bdat::{CellValue, OrderingMode, SasReader, Shape};
 use sas7bdat_test_support::common;
 
 #[test]
@@ -11,7 +11,11 @@ fn parse_test1_metadata_smoke() {
     assert_eq!(metadata.variables.len(), 100);
     assert_eq!(metadata.variables[0].name, "Column1");
 
-    let mut row_iter = sas.rows().expect("create row iterator");
+    let mut query = sas
+        .query()
+        .shape(Shape::Rows)
+        .ordering(OrderingMode::Ordered);
+    let mut row_iter = query.stream_ordered().expect("create row iterator");
     let row = row_iter.next().expect("row result").expect("row data");
     match &row[0] {
         CellValue::Float(v) => assert!((v - 0.636).abs() < 1e-6),

@@ -1,4 +1,4 @@
-use sas7bdat::{CatalogScanPolicy, SasReader};
+use sas7bdat::{CatalogScanPolicy, OrderingMode, SasReader, Shape};
 use sas7bdat_test_support::common;
 
 fn tagged_tags(policy: &sas7bdat::dataset::MissingValuePolicy) -> Vec<char> {
@@ -70,7 +70,13 @@ fn deferred_catalog_scan_matches_eager_after_row_access() {
         .attach_catalog_with_policy(&catalog, CatalogScanPolicy::Deferred)
         .expect("load catalog deferred");
 
-    let mut rows = deferred.rows().expect("rows should trigger deferred scan");
+    let mut query = deferred
+        .query()
+        .shape(Shape::Rows)
+        .ordering(OrderingMode::Ordered);
+    let mut rows = query
+        .stream_ordered()
+        .expect("rows should trigger deferred scan");
     let _ = rows.try_next().expect("iterate first row");
 
     let deferred_policies: Vec<_> = deferred

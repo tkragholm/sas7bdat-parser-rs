@@ -1,5 +1,5 @@
 use num_traits::ToPrimitive;
-use sas7bdat::{CellValue, SasReader, dataset::VariableKind};
+use sas7bdat::{CellValue, OrderingMode, SasReader, Shape, dataset::VariableKind};
 use serde::Serialize;
 use std::{env, error::Error, path::Path};
 
@@ -94,7 +94,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .collect();
 
     let mut total_rows: u64 = 0;
-    let mut rows = sas.rows()?;
+    let mut query = sas
+        .query()
+        .shape(Shape::Rows)
+        .ordering(OrderingMode::Ordered);
+    let mut rows = query.stream_ordered()?;
     while let Some(row) = rows.try_next()? {
         total_rows += 1;
 

@@ -1,6 +1,8 @@
+mod frame;
 mod labels;
 mod missing;
 mod projection;
+mod query;
 mod row;
 mod selection;
 mod window;
@@ -36,7 +38,12 @@ pub struct SasReader<R: Read + Seek> {
     source_path: Option<PathBuf>,
 }
 
+pub use frame::{
+    BinaryCol, FrameBatch, FrameColumn, FrameColumnType, FrameSchema, FrameSchemaField,
+    MissingSummary, PrimitiveCol, Utf8Col,
+};
 pub use projection::ProjectedRowIter;
+pub use query::{OrderingMode, Query, QueryPlan, QueryStream, Shape, SourceKind};
 pub use row::{Row, RowIter, RowLookup, RowValue, RowView, RowViewIter};
 pub use selection::{RowSelection, resolve_column_name_projection};
 pub use window::{ProjectedRowWindow, RowWindow};
@@ -51,6 +58,7 @@ pub enum CatalogScanPolicy {
     Deferred,
 }
 
+#[allow(deprecated)]
 impl SasReader<File> {
     /// Opens a SAS7BDAT file from disk.
     ///
@@ -105,6 +113,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).parallel(...).ordering(...).decode(...).scan_*()`."
+    )]
     pub fn scan_rows_parallel_with_decode_policy<F>(
         &mut self,
         parse_threads: usize,
@@ -122,6 +134,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).parallel(...).ordering(OrderingMode::Unordered).scan_unordered(...)`."
+    )]
     pub fn scan_rows_parallel<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
     where
         F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
@@ -137,6 +153,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).parallel(...).ordering(OrderingMode::Unordered).decode(...).scan_unordered(...)`."
+    )]
     pub fn scan_rows_parallel_unordered_with_decode_policy<F>(
         &mut self,
         parse_threads: usize,
@@ -181,6 +201,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).parallel(...).ordering(OrderingMode::Unordered).scan_unordered(...)`."
+    )]
     pub fn scan_rows_parallel_unordered<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
     where
         F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
@@ -197,6 +221,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).parallel(...).ordering(OrderingMode::Ordered).decode(...).scan_ordered(...)`."
+    )]
     pub fn scan_rows_parallel_ordered_with_decode_policy<F>(
         &mut self,
         parse_threads: usize,
@@ -241,6 +269,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row decoding fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).parallel(...).ordering(OrderingMode::Ordered).scan_ordered(...)`."
+    )]
     pub fn scan_rows_parallel_ordered<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
     where
         F: FnMut(&[crate::cell::CellValue<'static>]) -> Result<()>,
@@ -257,6 +289,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).parallel(...).ordering(...).decode(...).scan_*()`."
+    )]
     pub fn scan_projected_columns_parallel_with_decode_policy<F>(
         &mut self,
         indices: &[usize],
@@ -280,6 +316,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).parallel(...).ordering(OrderingMode::Unordered).scan_unordered(...)`."
+    )]
     pub fn scan_projected_columns_parallel<F>(
         &mut self,
         indices: &[usize],
@@ -302,6 +342,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).parallel(...).ordering(OrderingMode::Unordered).decode(...).scan_unordered(...)`."
+    )]
     pub fn scan_projected_columns_parallel_unordered_with_decode_policy<F>(
         &mut self,
         indices: &[usize],
@@ -358,6 +402,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).parallel(...).ordering(OrderingMode::Unordered).scan_unordered(...)`."
+    )]
     pub fn scan_projected_columns_parallel_unordered<F>(
         &mut self,
         indices: &[usize],
@@ -380,6 +428,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).parallel(...).ordering(OrderingMode::Ordered).decode(...).scan_ordered(...)`."
+    )]
     pub fn scan_projected_columns_parallel_ordered_with_decode_policy<F>(
         &mut self,
         indices: &[usize],
@@ -440,6 +492,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).parallel(...).ordering(OrderingMode::Ordered).scan_ordered(...)`."
+    )]
     pub fn scan_projected_columns_parallel_ordered<F>(
         &mut self,
         indices: &[usize],
@@ -462,6 +518,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row iteration fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Raw).parallel(...).ordering(OrderingMode::Unordered).scan_raw_unordered(...)`."
+    )]
     pub fn scan_raw_rows_parallel<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
     where
         F: Fn(&[u8]) -> Result<()> + Send + Sync,
@@ -476,6 +536,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row iteration fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Raw).parallel(...).ordering(OrderingMode::Unordered).scan_raw_unordered(...)`."
+    )]
     pub fn scan_raw_rows_parallel_with_stats<F>(
         &mut self,
         parse_threads: usize,
@@ -495,6 +559,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row iteration fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Raw).parallel(...).ordering(OrderingMode::Unordered).batch_rows(...).collect_raw_batches(...)`."
+    )]
     pub fn scan_raw_rows_parallel_batched_with_stats<F>(
         &mut self,
         parse_threads: usize,
@@ -512,6 +580,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row iteration fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Raw).parallel(...).ordering(OrderingMode::Unordered).scan_raw_unordered(...)`."
+    )]
     pub fn scan_raw_rows_parallel_unordered<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
     where
         F: Fn(&[u8]) -> Result<()> + Send + Sync,
@@ -526,6 +598,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row iteration fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Raw).parallel(...).ordering(OrderingMode::Unordered).scan_raw_unordered(...)`."
+    )]
     pub fn scan_raw_rows_parallel_unordered_with_stats<F>(
         &mut self,
         parse_threads: usize,
@@ -554,6 +630,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row iteration fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Raw).parallel(...).ordering(OrderingMode::Unordered).batch_rows(...).collect_raw_batches(...)`."
+    )]
     pub fn scan_raw_rows_parallel_unordered_batched_with_stats<F>(
         &mut self,
         parse_threads: usize,
@@ -584,6 +664,10 @@ impl SasReader<File> {
     /// # Errors
     ///
     /// Returns an error if row iteration fails or the callback errors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Raw).parallel(...).ordering(OrderingMode::Ordered).scan_raw_ordered(...)`."
+    )]
     pub fn scan_raw_rows_parallel_ordered<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
     where
         F: FnMut(&[u8]) -> Result<()>,
@@ -604,6 +688,7 @@ impl SasReader<File> {
     }
 }
 
+#[allow(deprecated)]
 impl<R: Read + Seek> SasReader<R> {
     /// Builds a reader from any `Read + Seek` implementor.
     ///
@@ -639,6 +724,11 @@ impl<R: Read + Seek> SasReader<R> {
 
     pub const fn metadata(&self) -> &DatasetMetadata {
         &self.layout.header.metadata
+    }
+
+    #[must_use]
+    pub fn query(&mut self) -> Query<'_, R> {
+        Query::new(self)
     }
 
     /// Loads value-label catalog metadata from a companion file.
@@ -786,6 +876,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).stream_ordered()`."
+    )]
     pub fn rows(&mut self) -> Result<RowIterator<'_, R>> {
         self.rows_with_decode_policy(DecodePolicy::default())
     }
@@ -795,6 +889,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).decode(policy).stream_ordered()`."
+    )]
     pub fn rows_with_decode_policy(&mut self, policy: DecodePolicy) -> Result<RowIterator<'_, R>> {
         self.ensure_missing_policies_fresh()?;
         self.reader.seek(SeekFrom::Start(0))?;
@@ -811,6 +909,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).decode(DecodePolicy::FAST_SCAN).stream_ordered()`."
+    )]
     pub fn rows_fast(&mut self) -> Result<RowIterator<'_, R>> {
         self.rows_with_decode_policy(DecodePolicy::FAST_SCAN)
     }
@@ -820,6 +922,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).stream_ordered()` and map rows by metadata names."
+    )]
     pub fn rows_named(&mut self) -> Result<RowIter<'_, R>> {
         self.rows_named_with_decode_policy(DecodePolicy::default())
     }
@@ -829,6 +935,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).decode(policy).stream_ordered()` and map rows by metadata names."
+    )]
     pub fn rows_named_with_decode_policy(
         &mut self,
         policy: DecodePolicy,
@@ -844,6 +954,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).decode(DecodePolicy::FAST_SCAN).stream_ordered()`."
+    )]
     pub fn rows_named_fast(&mut self) -> Result<RowIter<'_, R>> {
         self.rows_named_with_decode_policy(DecodePolicy::FAST_SCAN)
     }
@@ -855,6 +969,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).stream_ordered()`."
+    )]
     pub fn stream_rows(&mut self) -> Result<RowViewIter<'_, R>> {
         self.stream_rows_with_decode_policy(DecodePolicy::default())
     }
@@ -864,6 +982,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).decode(policy).stream_ordered()`."
+    )]
     pub fn stream_rows_with_decode_policy(
         &mut self,
         policy: DecodePolicy,
@@ -879,6 +1001,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).decode(DecodePolicy::FAST_SCAN).stream_ordered()`."
+    )]
     pub fn stream_rows_fast(&mut self) -> Result<RowViewIter<'_, R>> {
         self.stream_rows_with_decode_policy(DecodePolicy::FAST_SCAN)
     }
@@ -890,6 +1016,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if any column name cannot be resolved.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).columns_by_name(...).stream_ordered()`."
+    )]
     pub fn stream_rows_with_projection(&mut self, names: &[&str]) -> Result<RowViewIter<'_, R>> {
         self.stream_rows_with_projection_with_decode_policy(names, DecodePolicy::default())
     }
@@ -899,6 +1029,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if any column name cannot be resolved.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).columns_by_name(...).decode(policy).stream_ordered()`."
+    )]
     pub fn stream_rows_with_projection_with_decode_policy(
         &mut self,
         names: &[&str],
@@ -925,6 +1059,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if any column name cannot be resolved.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).columns_by_name(...).decode(DecodePolicy::FAST_SCAN).stream_ordered()`."
+    )]
     pub fn stream_rows_with_projection_fast(
         &mut self,
         names: &[&str],
@@ -1146,6 +1284,10 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if the selection specifies a projection, if the reader
     /// cannot be positioned, or if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).skip_rows(...).max_rows(...).stream_ordered()`."
+    )]
     pub fn rows_windowed(&mut self, selection: &RowSelection) -> Result<RowWindow<'_, R>> {
         self.rows_windowed_with_decode_policy(selection, DecodePolicy::default())
     }
@@ -1159,6 +1301,10 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if the selection specifies a projection, if the reader
     /// cannot be positioned, or if row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).decode(policy).skip_rows(...).max_rows(...).stream_ordered()`."
+    )]
     pub fn rows_windowed_with_decode_policy(
         &mut self,
         selection: &RowSelection,
@@ -1184,6 +1330,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if the selection specifies a projection or row iteration cannot be initialised.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Rows).decode(DecodePolicy::FAST_SCAN).skip_rows(...).max_rows(...).stream_ordered()`."
+    )]
     pub fn rows_windowed_fast(&mut self, selection: &RowSelection) -> Result<RowWindow<'_, R>> {
         self.rows_windowed_with_decode_policy(selection, DecodePolicy::FAST_SCAN)
     }
@@ -1234,6 +1384,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error when projection cannot be resolved or row decoding fails.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).skip_rows(...).max_rows(...).stream_ordered()`."
+    )]
     pub fn select_with(&mut self, selection: &RowSelection) -> Result<ProjectedRowWindow<'_, R>> {
         self.select_with_decode_policy(selection, DecodePolicy::default())
     }
@@ -1243,6 +1397,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error when projection cannot be resolved or row decoding fails.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).decode(policy).skip_rows(...).max_rows(...).stream_ordered()`."
+    )]
     pub fn select_with_decode_policy(
         &mut self,
         selection: &RowSelection,
@@ -1268,6 +1426,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error when projection cannot be resolved or row decoding fails.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).projection(...).decode(DecodePolicy::FAST_SCAN).skip_rows(...).max_rows(...).stream_ordered()`."
+    )]
     pub fn select_with_fast(
         &mut self,
         selection: &RowSelection,
@@ -1280,6 +1442,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if any column name cannot be resolved.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).columns_by_name(...).stream_ordered()`."
+    )]
     pub fn rows_with_projection(&mut self, names: &[&str]) -> Result<ProjectedRowIter<'_, R>> {
         self.rows_with_projection_with_decode_policy(names, DecodePolicy::default())
     }
@@ -1289,6 +1455,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if any column name cannot be resolved.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).columns_by_name(...).decode(policy).stream_ordered()`."
+    )]
     pub fn rows_with_projection_with_decode_policy(
         &mut self,
         names: &[&str],
@@ -1310,6 +1480,10 @@ impl<R: Read + Seek> SasReader<R> {
     /// # Errors
     ///
     /// Returns an error if any column name cannot be resolved.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `query().shape(Shape::Projection).columns_by_name(...).decode(DecodePolicy::FAST_SCAN).stream_ordered()`."
+    )]
     pub fn rows_with_projection_fast(&mut self, names: &[&str]) -> Result<ProjectedRowIter<'_, R>> {
         self.rows_with_projection_with_decode_policy(names, DecodePolicy::FAST_SCAN)
     }
@@ -1321,6 +1495,108 @@ impl<R: Read + Seek> SasReader<R> {
     /// Returns an error if row decoding fails or if the sink reports a failure.
     pub fn stream_into<S: RowSink>(&mut self, sink: &mut S) -> Result<()> {
         self.stream_into_with_decode_policy(sink, DecodePolicy::default())
+    }
+
+    /// Collects all rows into a frame-oriented in-memory batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if frame materialization fails.
+    pub fn collect_frame(&mut self) -> Result<FrameBatch> {
+        self.query().shape(Shape::Frame).collect_frame()
+    }
+
+    /// Reads all rows into a single frame-oriented in-memory batch.
+    ///
+    /// This is an alias for [`Self::collect_frame`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if frame materialization fails.
+    pub fn read_frame(&mut self) -> Result<FrameBatch> {
+        self.collect_frame()
+    }
+
+    /// Collects rows into multiple frame batches with at most `batch_rows` rows each.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if frame materialization fails.
+    pub fn collect_frame_batches(&mut self, batch_rows: usize) -> Result<Vec<FrameBatch>> {
+        self.query()
+            .shape(Shape::Frame)
+            .collect_frame_batches(batch_rows)
+    }
+
+    /// Reads rows into frame batches with at most `batch_rows` rows each.
+    ///
+    /// This is an alias for [`Self::collect_frame_batches`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if frame materialization fails.
+    pub fn read_frame_batches(&mut self, batch_rows: usize) -> Result<Vec<FrameBatch>> {
+        self.collect_frame_batches(batch_rows)
+    }
+
+    /// Throughput-first raw scan shortcut using unordered parallel execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if raw scanning fails or the callback errors.
+    pub fn scan_raw_fast_with_stats<F>(
+        &mut self,
+        parse_threads: usize,
+        f: F,
+    ) -> Result<RawScanStats>
+    where
+        F: Fn(&[u8]) -> Result<()> + Send + Sync,
+    {
+        self.query()
+            .shape(Shape::Raw)
+            .parallel(parse_threads)
+            .ordering(OrderingMode::Unordered)
+            .scan_raw_unordered(f)
+    }
+
+    /// Throughput-first projected scan shortcut using unordered parallel execution and fast decode.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    pub fn scan_projected_fast<F>(
+        &mut self,
+        indices: &[usize],
+        parse_threads: usize,
+        f: F,
+    ) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.query()
+            .shape(Shape::Projection)
+            .projection(indices)
+            .decode(DecodePolicy::FAST_SCAN)
+            .parallel(parse_threads)
+            .ordering(OrderingMode::Unordered)
+            .scan_unordered(f)
+    }
+
+    /// Throughput-first raw ingestion shortcut that materializes owned raw row batches.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if raw scanning fails.
+    pub fn collect_raw_batches_fast(
+        &mut self,
+        parse_threads: usize,
+        batch_rows: usize,
+    ) -> Result<Vec<RawRowBatch>> {
+        self.query()
+            .shape(Shape::Raw)
+            .parallel(parse_threads)
+            .ordering(OrderingMode::Unordered)
+            .collect_raw_batches(batch_rows)
     }
 
     /// Streams the full dataset into a custom sink implementation with explicit decode policy.
