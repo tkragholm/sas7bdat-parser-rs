@@ -1,10 +1,17 @@
 use super::{
-    columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnarBatch},
+    buffer::RowData,
+    columnar::{COLUMNAR_BATCH_ROWS, COLUMNAR_INLINE_ROWS, ColumnarBatch, RowSegment},
     iterator::RowIteratorCore,
 };
-use crate::{error::Result, parser::metadata::DatasetLayout};
+use crate::{
+    dataset::Compression,
+    error::{Error, Result, Section},
+    parser::metadata::DatasetLayout,
+};
+use bytes::Bytes;
 use smallvec::SmallVec;
 use std::{
+    borrow::Cow,
     convert::TryFrom,
     io::{Read, Seek},
     ops::Deref,
@@ -12,6 +19,85 @@ use std::{
 
 // Cap columnar staging to avoid enormous allocations when row_length is very large.
 const MAX_COLUMNAR_BUFFER_BYTES: usize = 512 * 1024 * 1024;
+const ADAPTIVE_MIN_BATCHES_BEFORE_SWITCH: usize = 3;
+const ADAPTIVE_WIDE_ROW_BYTES: usize = 256;
+const ADAPTIVE_MAX_SEGMENTED_ROWS: usize = 8192;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnarBatchMode {
+    Segmented,
+    Contiguous,
+    Adaptive,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AdaptiveBatchState {
+    initialized: bool,
+    active_mode: ColumnarBatchMode,
+    pending_mode: Option<ColumnarBatchMode>,
+    pending_batches: usize,
+    observations: u64,
+    switches: u64,
+}
+
+impl Default for AdaptiveBatchState {
+    fn default() -> Self {
+        Self {
+            initialized: false,
+            active_mode: ColumnarBatchMode::Segmented,
+            pending_mode: None,
+            pending_batches: 0,
+            observations: 0,
+            switches: 0,
+        }
+    }
+}
+
+impl AdaptiveBatchState {
+    pub(crate) const fn observations(&self) -> u64 {
+        self.observations
+    }
+
+    pub(crate) const fn switches(&self) -> u64 {
+        self.switches
+    }
+
+    pub(crate) fn select_mode(&mut self, desired_mode: ColumnarBatchMode) -> ColumnarBatchMode {
+        self.observations = self.observations.saturating_add(1);
+
+        if !self.initialized {
+            self.initialized = true;
+            self.active_mode = desired_mode;
+            self.pending_mode = None;
+            self.pending_batches = 0;
+            return self.active_mode;
+        }
+
+        if desired_mode == self.active_mode {
+            self.pending_mode = None;
+            self.pending_batches = 0;
+            return self.active_mode;
+        }
+
+        if self.pending_mode == Some(desired_mode) {
+            self.pending_batches = self.pending_batches.saturating_add(1);
+        } else {
+            self.pending_mode = Some(desired_mode);
+            self.pending_batches = 1;
+        }
+
+        if self.pending_batches >= ADAPTIVE_MIN_BATCHES_BEFORE_SWITCH {
+            if self.active_mode != desired_mode {
+                self.switches = self.switches.saturating_add(1);
+            }
+            self.active_mode = desired_mode;
+            self.pending_mode = None;
+            self.pending_batches = 0;
+        }
+
+        self.active_mode
+    }
+}
 
 struct PageChunk {
     start: usize,
@@ -89,6 +175,134 @@ where
     }
 }
 
+#[inline]
+fn page_snapshot(page_snapshot: &mut Option<Bytes>, page_buffer: &[u8]) -> Bytes {
+    page_snapshot
+        .get_or_insert_with(|| Bytes::copy_from_slice(page_buffer))
+        .clone()
+}
+
+fn push_segment_row<R, L>(
+    iter: &RowIteratorCore<R, L>,
+    row_index: usize,
+    page_snapshot_cache: &mut Option<Bytes>,
+    row_segments: &mut SmallVec<[RowSegment; COLUMNAR_INLINE_ROWS]>,
+) -> Result<()>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
+    if let Some(base) = iter.contiguous_base {
+        let offset = base + row_index.saturating_mul(iter.row_length);
+        let end = offset.saturating_add(iter.row_length);
+        if end > iter.page_buffer.len() {
+            return Err(Error::Corrupted {
+                section: Section::Row {
+                    index: row_index as u64,
+                },
+                details: Cow::from("row offset exceeds page bounds"),
+            });
+        }
+        let page = page_snapshot(page_snapshot_cache, &iter.page_buffer);
+        row_segments.push(RowSegment::paged(page, offset, iter.row_length));
+        return Ok(());
+    }
+
+    let row = iter
+        .current_rows
+        .get(row_index)
+        .ok_or_else(|| Error::Corrupted {
+            section: Section::Row {
+                index: row_index as u64,
+            },
+            details: Cow::from("row index out of bounds for current page"),
+        })?;
+
+    match row {
+        RowData::Borrowed(offset) => {
+            let end = offset.saturating_add(iter.row_length);
+            if end > iter.page_buffer.len() {
+                return Err(Error::Corrupted {
+                    section: Section::Row {
+                        index: row_index as u64,
+                    },
+                    details: Cow::from("row offset exceeds page bounds"),
+                });
+            }
+            let page = page_snapshot(page_snapshot_cache, &iter.page_buffer);
+            row_segments.push(RowSegment::paged(page, *offset, iter.row_length));
+        }
+        RowData::Owned(buffer) => {
+            // Compressed rows are already materialized into owned buffers per row.
+            row_segments.push(RowSegment::owned(Bytes::copy_from_slice(buffer.as_slice())));
+        }
+    }
+
+    Ok(())
+}
+
+fn desired_adaptive_mode<R, L>(
+    iter: &RowIteratorCore<R, L>,
+    target_rows: usize,
+) -> ColumnarBatchMode
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
+    if matches!(
+        iter.layout.row_info.compression,
+        Compression::Row | Compression::Binary
+    ) {
+        return ColumnarBatchMode::Contiguous;
+    }
+
+    if iter.row_length >= ADAPTIVE_WIDE_ROW_BYTES && target_rows <= ADAPTIVE_MAX_SEGMENTED_ROWS {
+        return ColumnarBatchMode::Segmented;
+    }
+
+    ColumnarBatchMode::Contiguous
+}
+
+fn effective_batch_mode<R, L>(
+    iter: &mut RowIteratorCore<R, L>,
+    max_rows: usize,
+) -> ColumnarBatchMode
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
+    let target_rows = if max_rows == 0 {
+        COLUMNAR_BATCH_ROWS
+    } else {
+        max_rows
+    };
+    let desired = desired_adaptive_mode(iter, target_rows);
+    iter.adaptive_batch_state.select_mode(desired)
+}
+
+pub fn next_columnar_batch_with_mode<R, L>(
+    iter: &mut RowIteratorCore<R, L>,
+    max_rows: usize,
+    mode: ColumnarBatchMode,
+) -> Result<Option<ColumnarBatch<'_>>>
+where
+    R: Read + Seek,
+    L: Deref<Target = DatasetLayout>,
+{
+    let effective_mode = match mode {
+        ColumnarBatchMode::Segmented => ColumnarBatchMode::Segmented,
+        ColumnarBatchMode::Contiguous => ColumnarBatchMode::Contiguous,
+        ColumnarBatchMode::Adaptive => effective_batch_mode(iter, max_rows),
+    };
+    iter.last_batch_mode = effective_mode;
+
+    match effective_mode {
+        ColumnarBatchMode::Segmented => next_columnar_batch(iter, max_rows),
+        ColumnarBatchMode::Contiguous => next_columnar_batch_contiguous(iter, max_rows),
+        ColumnarBatchMode::Adaptive => unreachable!("adaptive mode resolves to a concrete mode"),
+    }
+}
+
 pub fn next_columnar_batch<R, L>(
     iter: &mut RowIteratorCore<R, L>,
     max_rows: usize,
@@ -97,27 +311,44 @@ where
     R: Read + Seek,
     L: Deref<Target = DatasetLayout>,
 {
-    let Some((target, _)) = resolve_target_with_remaining(iter, max_rows) else {
+    let Some((target, remaining_rows)) = resolve_target_with_remaining(iter, max_rows) else {
         return Ok(None);
     };
 
-    let Some(chunk) = next_page_chunk(iter, target)? else {
+    let effective_target = target.min(remaining_rows);
+    if effective_target == 0 {
         return Ok(None);
-    };
+    }
 
-    let mut row_slices = SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(chunk.chunk_len);
-    for offset in 0..chunk.chunk_len {
-        let row_index = chunk.start + offset;
-        let slice = iter.row_slice(u16::try_from(row_index).unwrap_or(u16::MAX))?;
-        row_slices.push(slice);
+    let mut row_segments =
+        SmallVec::<[RowSegment; COLUMNAR_INLINE_ROWS]>::with_capacity(effective_target);
+
+    while row_segments.len() < effective_target {
+        let remaining = effective_target - row_segments.len();
+        let Some(chunk) = next_page_chunk(iter, remaining)? else {
+            break;
+        };
+
+        let mut page_snapshot_cache = None;
+        for row_index in chunk.start..chunk.row_end {
+            push_segment_row(iter, row_index, &mut page_snapshot_cache, &mut row_segments)?;
+        }
+
+        if iter.exhausted.get() {
+            break;
+        }
+    }
+
+    if row_segments.is_empty() {
+        return Ok(None);
     }
 
     let batch = ColumnarBatch::new(
-        row_slices,
+        row_segments,
         &iter.columnar_columns,
         iter.layout.header.endianness,
         iter.encoding,
-        false,
+        true,
     );
     Ok(Some(batch))
 }
@@ -176,22 +407,81 @@ where
         return Ok(None);
     }
 
-    let mut row_slices = SmallVec::<[&[u8]; COLUMNAR_INLINE_ROWS]>::with_capacity(
+    let mut row_segments = SmallVec::<[RowSegment; COLUMNAR_INLINE_ROWS]>::with_capacity(
         copied_rows.min(COLUMNAR_INLINE_ROWS),
+    );
+    let contiguous = Bytes::copy_from_slice(
+        &iter.columnar_owned_buffer[..copied_rows.saturating_mul(iter.row_length)],
     );
     let mut offset = 0usize;
     for _ in 0..copied_rows {
-        let end = offset + iter.row_length;
-        row_slices.push(&iter.columnar_owned_buffer[offset..end]);
-        offset = end;
+        row_segments.push(RowSegment::paged(
+            contiguous.clone(),
+            offset,
+            iter.row_length,
+        ));
+        offset = offset.saturating_add(iter.row_length);
     }
 
     let batch = ColumnarBatch::new(
-        row_slices,
+        row_segments,
         &iter.columnar_columns,
         iter.layout.header.endianness,
         iter.encoding,
         true,
     );
     Ok(Some(batch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AdaptiveBatchState, ColumnarBatchMode};
+
+    #[test]
+    fn adaptive_state_switches_after_hysteresis_window() {
+        let mut state = AdaptiveBatchState::default();
+        assert_eq!(state.active_mode, ColumnarBatchMode::Segmented);
+
+        assert_eq!(
+            state.select_mode(ColumnarBatchMode::Contiguous),
+            ColumnarBatchMode::Contiguous
+        );
+        assert_eq!(
+            state.select_mode(ColumnarBatchMode::Segmented),
+            ColumnarBatchMode::Contiguous
+        );
+        assert_eq!(
+            state.select_mode(ColumnarBatchMode::Segmented),
+            ColumnarBatchMode::Contiguous
+        );
+        assert_eq!(
+            state.select_mode(ColumnarBatchMode::Segmented),
+            ColumnarBatchMode::Segmented
+        );
+        assert_eq!(state.active_mode, ColumnarBatchMode::Segmented);
+        assert_eq!(state.observations(), 4);
+        assert_eq!(state.switches(), 1);
+    }
+
+    #[test]
+    fn adaptive_state_does_not_flap_under_alternating_desires() {
+        let mut state = AdaptiveBatchState::default();
+        assert_eq!(
+            state.select_mode(ColumnarBatchMode::Contiguous),
+            ColumnarBatchMode::Contiguous
+        );
+
+        for i in 0..12 {
+            let desired = if i % 2 == 0 {
+                ColumnarBatchMode::Segmented
+            } else {
+                ColumnarBatchMode::Contiguous
+            };
+            let _ = state.select_mode(desired);
+        }
+
+        assert_eq!(state.active_mode, ColumnarBatchMode::Contiguous);
+        assert_eq!(state.switches(), 0);
+        assert_eq!(state.observations(), 13);
+    }
 }

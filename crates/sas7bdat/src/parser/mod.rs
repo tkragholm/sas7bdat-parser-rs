@@ -12,10 +12,17 @@ pub use metadata::{
     MetadataReadOptions, NumericKind, RowInfo, TextRef, TextStore, parse_metadata,
     parse_metadata_with_options,
 };
+pub(crate) use rows::CompiledRuntimeColumnRef;
 pub use rows::{
-    ColumnarBatch, ColumnarColumn, MaterializedUtf8Column, OwnedRowIterator, RowIterator,
-    RowIteratorCore, RuntimeColumnRef, StagedUtf8Value, StreamingCell, StreamingRow,
-    TypedNumericColumn, row_iterator,
+    ColumnarBatch, ColumnarBatchMode, ColumnarColumn, DecodePolicy, MaterializedUtf8Column,
+    MojibakeFixPolicy, NumericRuntimeColumnRef, OwnedRowIterator, ParallelScanConfig, RawRowBatch,
+    RawScanStats, RowIterator, RowIteratorCore, RuntimeColumnRef, StagedUtf8Value, StreamingCell,
+    StreamingRow, StringTrimPolicy, TemporalDecodePolicy, TypedNumericColumn, row_iterator,
+    scan_file_projected_rows_with_decode_policy,
+    scan_file_projected_rows_with_decode_policy_unordered, scan_file_raw_rows,
+    scan_file_raw_rows_unordered, scan_file_raw_rows_unordered_batched_with_stats,
+    scan_file_raw_rows_unordered_with_stats, scan_file_rows_with_decode_policy,
+    scan_file_rows_with_decode_policy_unordered,
 };
 #[cfg(feature = "parquet")]
 pub(crate) use rows::{sas_days_to_datetime, sas_seconds_to_datetime, sas_seconds_to_time};

@@ -23,11 +23,11 @@ where
     block()
 }
 
-fn stream_numeric_typed<T: DataType, S: NumericColumnSource>(
+fn stream_numeric_typed<T: DataType>(
     def_levels: &mut Vec<i16>,
     def_bitmap: &mut Vec<u8>,
     column_writer: &mut SerializedColumnWriter<'_>,
-    column: &S,
+    column: &ColumnarColumn<'_>,
     values: &mut Vec<T::T>,
     chunk: usize,
     convert: impl FnMut(u64) -> Result<T::T>,
@@ -95,36 +95,12 @@ fn convert_time(bits: u64, column_name: &str) -> Result<i64> {
     })
 }
 
-// Trait to abstract over different column types
-trait NumericColumnSource {
-    fn len(&self) -> usize;
-    fn iter_numeric_bits_range(
-        &self,
-        start: usize,
-        len: usize,
-    ) -> Box<dyn Iterator<Item = Option<u64>> + '_>;
-}
-
-impl NumericColumnSource for ColumnarColumn<'_, '_> {
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn iter_numeric_bits_range(
-        &self,
-        start: usize,
-        len: usize,
-    ) -> Box<dyn Iterator<Item = Option<u64>> + '_> {
-        Box::new(self.iter_numeric_bits_range(start, len))
-    }
-}
-
 impl ColumnPlan {
     // Generic streaming function for numeric types
-    fn stream_numeric_column<S: NumericColumnSource>(
+    fn stream_numeric_column(
         &mut self,
         mut column_writer: SerializedColumnWriter<'_>,
-        column: &S,
+        column: &ColumnarColumn<'_>,
         chunk: usize,
         encoder_name: &str,
     ) -> Result<()> {
@@ -135,7 +111,7 @@ impl ColumnPlan {
         let result = match (&mut self.values, self.encoder) {
             (ColumnValues::Double(values), ColumnValueEncoder::Double) => {
                 measure_encoder(encoder_name, || {
-                    stream_numeric_typed::<DoubleType, _>(
+                    stream_numeric_typed::<DoubleType>(
                         def_levels,
                         def_bitmap,
                         &mut column_writer,
@@ -148,7 +124,7 @@ impl ColumnPlan {
             }
             (ColumnValues::Int32(values), ColumnValueEncoder::Date) => {
                 measure_encoder(encoder_name, || {
-                    stream_numeric_typed::<Int32Type, _>(
+                    stream_numeric_typed::<Int32Type>(
                         def_levels,
                         def_bitmap,
                         &mut column_writer,
@@ -161,7 +137,7 @@ impl ColumnPlan {
             }
             (ColumnValues::Int64(values), ColumnValueEncoder::DateTime) => {
                 measure_encoder(encoder_name, || {
-                    stream_numeric_typed::<Int64Type, _>(
+                    stream_numeric_typed::<Int64Type>(
                         def_levels,
                         def_bitmap,
                         &mut column_writer,
@@ -174,7 +150,7 @@ impl ColumnPlan {
             }
             (ColumnValues::Int64(values), ColumnValueEncoder::Time) => {
                 measure_encoder(encoder_name, || {
-                    stream_numeric_typed::<Int64Type, _>(
+                    stream_numeric_typed::<Int64Type>(
                         def_levels,
                         def_bitmap,
                         &mut column_writer,
@@ -194,7 +170,7 @@ impl ColumnPlan {
         Ok(())
     }
 
-    pub(super) fn extend_columnar(&mut self, column: &ColumnarColumn<'_, '_>) -> Result<()> {
+    pub(super) fn extend_columnar(&mut self, column: &ColumnarColumn<'_>) -> Result<()> {
         self.def_levels.reserve(column.len());
         match (&mut self.values, self.encoder) {
             (ColumnValues::Double(values), ColumnValueEncoder::Double) => {
@@ -263,7 +239,7 @@ impl ColumnPlan {
     pub(super) fn stream_columnar(
         &mut self,
         mut column_writer: SerializedColumnWriter<'_>,
-        column: &ColumnarColumn<'_, '_>,
+        column: &ColumnarColumn<'_>,
         chunk_rows: usize,
     ) -> Result<()> {
         let chunk = chunk_rows.max(1);
@@ -326,7 +302,7 @@ impl ColumnPlan {
                     .expect("utf8 scratch missing for UTF-8 encoder");
                 let mut dictionary_handles = Vec::with_capacity(materialized.dictionary().len());
                 for entry in materialized.dictionary() {
-                    dictionary_handles.push(scratch.intern_slice(entry));
+                    dictionary_handles.push(scratch.intern_slice(entry.as_ref()));
                 }
 
                 self.def_levels.clear();

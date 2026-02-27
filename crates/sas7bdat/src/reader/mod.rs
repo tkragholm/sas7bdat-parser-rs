@@ -9,8 +9,12 @@ use crate::{
     dataset::{DatasetMetadata, MissingValuePolicy},
     error::{Error, Result},
     parser::{
-        DatasetLayout, MetadataReadOptions, RowIterator, parse_catalog, parse_metadata,
-        parse_metadata_with_options,
+        DatasetLayout, DecodePolicy, MetadataReadOptions, ParallelScanConfig, RawRowBatch,
+        RawScanStats, RowIterator, parse_catalog, parse_metadata, parse_metadata_with_options,
+        scan_file_projected_rows_with_decode_policy,
+        scan_file_projected_rows_with_decode_policy_unordered, scan_file_raw_rows,
+        scan_file_raw_rows_unordered_batched_with_stats, scan_file_raw_rows_unordered_with_stats,
+        scan_file_rows_with_decode_policy, scan_file_rows_with_decode_policy_unordered,
     },
     sinks::{RowSink, SinkContext},
 };
@@ -21,19 +25,31 @@ use std::{
     collections::HashSet,
     fs::File,
     io::{Read, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
 pub struct SasReader<R: Read + Seek> {
     reader: R,
     layout: DatasetLayout,
+    missing_policies_stale: bool,
+    source_path: Option<PathBuf>,
 }
 
 pub use projection::ProjectedRowIter;
 pub use row::{Row, RowIter, RowLookup, RowValue, RowView, RowViewIter};
-pub use selection::RowSelection;
+pub use selection::{RowSelection, resolve_column_name_projection};
 pub use window::{ProjectedRowWindow, RowWindow};
+
+/// Controls when missing-value policies are refreshed after attaching a catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CatalogScanPolicy {
+    /// Scan immediately after attaching the catalog.
+    #[default]
+    Eager,
+    /// Defer scanning until a row-consuming API is called.
+    Deferred,
+}
 
 impl SasReader<File> {
     /// Opens a SAS7BDAT file from disk.
@@ -43,8 +59,11 @@ impl SasReader<File> {
     /// Returns an error if the file cannot be opened or if the metadata
     /// cannot be parsed.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = File::open(path)?;
-        Self::from_reader(file)
+        let path_buf = path.as_ref().to_path_buf();
+        let file = File::open(&path_buf)?;
+        let mut reader = Self::from_reader(file)?;
+        reader.source_path = Some(path_buf);
+        Ok(reader)
     }
 
     /// Opens a SAS7BDAT file from disk with custom metadata read options.
@@ -57,8 +76,531 @@ impl SasReader<File> {
         path: P,
         options: MetadataReadOptions,
     ) -> Result<Self> {
-        let file = File::open(path)?;
-        Self::from_reader_with_options(file, options)
+        let path_buf = path.as_ref().to_path_buf();
+        let file = File::open(&path_buf)?;
+        let mut reader = Self::from_reader_with_options(file, options)?;
+        reader.source_path = Some(path_buf);
+        Ok(reader)
+    }
+
+    fn parallel_scan_config(parse_threads: usize) -> ParallelScanConfig {
+        let mut config = ParallelScanConfig::new(parse_threads);
+        if let Ok(raw) = std::env::var("SAS7BDAT_PARSE_PAGE_CHUNK")
+            && let Ok(value) = raw.parse::<u64>()
+            && value > 0
+        {
+            config.page_chunk = value;
+        }
+        if let Ok(raw) = std::env::var("SAS7BDAT_PARSE_ROW_BATCH_SIZE")
+            && let Ok(value) = raw.parse::<usize>()
+            && value > 0
+        {
+            config.row_batch_size = value;
+        }
+        config
+    }
+
+    /// Scans all rows in parallel (unordered by default for throughput).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails or the callback errors.
+    pub fn scan_rows_parallel_with_decode_policy<F>(
+        &mut self,
+        parse_threads: usize,
+        policy: DecodePolicy,
+        f: F,
+    ) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.scan_rows_parallel_unordered_with_decode_policy(parse_threads, policy, f)
+    }
+
+    /// Scans all rows in parallel (unordered by default) using default decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails or the callback errors.
+    pub fn scan_rows_parallel<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.scan_rows_parallel_with_decode_policy(parse_threads, DecodePolicy::default(), f)
+    }
+
+    /// Scans all rows in parallel without preserving row order.
+    ///
+    /// This path runs the callback on parser worker threads and avoids ordered
+    /// chunk assembly overhead, typically improving high-thread throughput.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails or the callback errors.
+    pub fn scan_rows_parallel_unordered_with_decode_policy<F>(
+        &mut self,
+        parse_threads: usize,
+        policy: DecodePolicy,
+        f: F,
+    ) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.ensure_missing_policies_fresh()?;
+        if parse_threads <= 1 {
+            self.reader.seek(SeekFrom::Start(0))?;
+            let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+            iterator.set_decode_policy(policy);
+            let result = (|| -> Result<u64> {
+                let mut rows = 0u64;
+                while let Some(row) = iterator.try_next()? {
+                    f(&row)?;
+                    rows = rows.saturating_add(1);
+                }
+                Ok(rows)
+            })();
+            self.reader.seek(SeekFrom::Start(0))?;
+            return result;
+        }
+
+        let Some(path) = self.source_path.as_deref() else {
+            return self.scan_rows_parallel_unordered_with_decode_policy(1, policy, f);
+        };
+
+        scan_file_rows_with_decode_policy_unordered(
+            path,
+            &self.layout,
+            policy,
+            Self::parallel_scan_config(parse_threads),
+            f,
+        )
+    }
+
+    /// Scans all rows in unordered parallel mode using default decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails or the callback errors.
+    pub fn scan_rows_parallel_unordered<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.scan_rows_parallel_unordered_with_decode_policy(
+            parse_threads,
+            DecodePolicy::default(),
+            f,
+        )
+    }
+
+    /// Scans all rows in parallel while preserving row order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails or the callback errors.
+    pub fn scan_rows_parallel_ordered_with_decode_policy<F>(
+        &mut self,
+        parse_threads: usize,
+        policy: DecodePolicy,
+        mut f: F,
+    ) -> Result<u64>
+    where
+        F: FnMut(&[crate::cell::CellValue<'static>]) -> Result<()>,
+    {
+        self.ensure_missing_policies_fresh()?;
+        if parse_threads <= 1 {
+            self.reader.seek(SeekFrom::Start(0))?;
+            let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+            iterator.set_decode_policy(policy);
+            let result = (|| -> Result<u64> {
+                let mut rows = 0u64;
+                while let Some(row) = iterator.try_next_owned()? {
+                    f(&row)?;
+                    rows = rows.saturating_add(1);
+                }
+                Ok(rows)
+            })();
+            self.reader.seek(SeekFrom::Start(0))?;
+            return result;
+        }
+
+        let Some(path) = self.source_path.as_deref() else {
+            return self.scan_rows_parallel_ordered_with_decode_policy(1, policy, f);
+        };
+
+        scan_file_rows_with_decode_policy(
+            path,
+            &self.layout,
+            policy,
+            Self::parallel_scan_config(parse_threads),
+            f,
+        )
+    }
+
+    /// Scans all rows in ordered parallel mode using default decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails or the callback errors.
+    pub fn scan_rows_parallel_ordered<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
+    where
+        F: FnMut(&[crate::cell::CellValue<'static>]) -> Result<()>,
+    {
+        self.scan_rows_parallel_ordered_with_decode_policy(
+            parse_threads,
+            DecodePolicy::default(),
+            f,
+        )
+    }
+
+    /// Scans projected columns in parallel (unordered by default for throughput).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    pub fn scan_projected_columns_parallel_with_decode_policy<F>(
+        &mut self,
+        indices: &[usize],
+        parse_threads: usize,
+        policy: DecodePolicy,
+        f: F,
+    ) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.scan_projected_columns_parallel_unordered_with_decode_policy(
+            indices,
+            parse_threads,
+            policy,
+            f,
+        )
+    }
+
+    /// Scans projected columns in parallel (unordered by default) with default decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    pub fn scan_projected_columns_parallel<F>(
+        &mut self,
+        indices: &[usize],
+        parse_threads: usize,
+        f: F,
+    ) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.scan_projected_columns_parallel_with_decode_policy(
+            indices,
+            parse_threads,
+            DecodePolicy::default(),
+            f,
+        )
+    }
+
+    /// Scans projected columns in parallel without preserving row order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    pub fn scan_projected_columns_parallel_unordered_with_decode_policy<F>(
+        &mut self,
+        indices: &[usize],
+        parse_threads: usize,
+        policy: DecodePolicy,
+        f: F,
+    ) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.ensure_missing_policies_fresh()?;
+        let normalized = self.normalize_projection(indices)?;
+        if parse_threads <= 1 {
+            self.reader.seek(SeekFrom::Start(0))?;
+            let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+            iterator.set_decode_policy(policy);
+            let result = (|| -> Result<u64> {
+                let mut rows = 0u64;
+                while let Some(row) = iterator.try_next_projected(&normalized)? {
+                    f(&row)?;
+                    rows = rows.saturating_add(1);
+                }
+                Ok(rows)
+            })();
+            self.reader.seek(SeekFrom::Start(0))?;
+            return result;
+        }
+
+        let Some(path) = self.source_path.as_deref() else {
+            return self.scan_projected_columns_parallel_unordered_with_decode_policy(
+                &normalized,
+                1,
+                policy,
+                f,
+            );
+        };
+
+        let projection_legacy = std::env::var("SAS7BDAT_PROJECTION_DECODE_PLAN")
+            .map(|value| !value.eq_ignore_ascii_case("compiled"))
+            .unwrap_or(false);
+        scan_file_projected_rows_with_decode_policy_unordered(
+            path,
+            &self.layout,
+            &normalized,
+            policy,
+            Self::parallel_scan_config(parse_threads),
+            projection_legacy,
+            f,
+        )
+    }
+
+    /// Scans projected columns in unordered parallel mode with default decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    pub fn scan_projected_columns_parallel_unordered<F>(
+        &mut self,
+        indices: &[usize],
+        parse_threads: usize,
+        f: F,
+    ) -> Result<u64>
+    where
+        F: for<'row> Fn(&[crate::cell::CellValue<'row>]) -> Result<()> + Send + Sync,
+    {
+        self.scan_projected_columns_parallel_unordered_with_decode_policy(
+            indices,
+            parse_threads,
+            DecodePolicy::default(),
+            f,
+        )
+    }
+
+    /// Scans projected columns in parallel while preserving row order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    pub fn scan_projected_columns_parallel_ordered_with_decode_policy<F>(
+        &mut self,
+        indices: &[usize],
+        parse_threads: usize,
+        policy: DecodePolicy,
+        mut f: F,
+    ) -> Result<u64>
+    where
+        F: FnMut(&[crate::cell::CellValue<'static>]) -> Result<()>,
+    {
+        self.ensure_missing_policies_fresh()?;
+        let normalized = self.normalize_projection(indices)?;
+        if parse_threads <= 1 {
+            self.reader.seek(SeekFrom::Start(0))?;
+            let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+            iterator.set_decode_policy(policy);
+            let result = (|| -> Result<u64> {
+                let mut rows = 0u64;
+                while let Some(row) = iterator.try_next_projected(&normalized)? {
+                    let owned: Vec<crate::cell::CellValue<'static>> = row
+                        .into_iter()
+                        .map(crate::cell::CellValue::into_owned)
+                        .collect();
+                    f(&owned)?;
+                    rows = rows.saturating_add(1);
+                }
+                Ok(rows)
+            })();
+            self.reader.seek(SeekFrom::Start(0))?;
+            return result;
+        }
+
+        let Some(path) = self.source_path.as_deref() else {
+            return self.scan_projected_columns_parallel_ordered_with_decode_policy(
+                &normalized,
+                1,
+                policy,
+                f,
+            );
+        };
+
+        let projection_legacy = std::env::var("SAS7BDAT_PROJECTION_DECODE_PLAN")
+            .map(|value| !value.eq_ignore_ascii_case("compiled"))
+            .unwrap_or(false);
+        scan_file_projected_rows_with_decode_policy(
+            path,
+            &self.layout,
+            &normalized,
+            policy,
+            Self::parallel_scan_config(parse_threads),
+            projection_legacy,
+            f,
+        )
+    }
+
+    /// Scans projected columns in ordered parallel mode with default decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row decoding fails, or the callback errors.
+    pub fn scan_projected_columns_parallel_ordered<F>(
+        &mut self,
+        indices: &[usize],
+        parse_threads: usize,
+        f: F,
+    ) -> Result<u64>
+    where
+        F: FnMut(&[crate::cell::CellValue<'static>]) -> Result<()>,
+    {
+        self.scan_projected_columns_parallel_ordered_with_decode_policy(
+            indices,
+            parse_threads,
+            DecodePolicy::default(),
+            f,
+        )
+    }
+
+    /// Scans raw row bytes in parallel (unordered by default for throughput).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_parallel<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
+    where
+        F: Fn(&[u8]) -> Result<()> + Send + Sync,
+    {
+        Ok(self
+            .scan_raw_rows_parallel_with_stats(parse_threads, f)?
+            .rows)
+    }
+
+    /// Scans raw row bytes in parallel (unordered by default) and returns row/byte stats.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_parallel_with_stats<F>(
+        &mut self,
+        parse_threads: usize,
+        f: F,
+    ) -> Result<RawScanStats>
+    where
+        F: Fn(&[u8]) -> Result<()> + Send + Sync,
+    {
+        self.scan_raw_rows_parallel_unordered_with_stats(parse_threads, f)
+    }
+
+    /// Scans raw row bytes in parallel and invokes a callback per owned row batch.
+    ///
+    /// Batches are contiguous owned byte buffers to reduce callback overhead compared
+    /// to per-row callbacks when consumers ingest rows into memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_parallel_batched_with_stats<F>(
+        &mut self,
+        parse_threads: usize,
+        batch_rows: usize,
+        f: F,
+    ) -> Result<RawScanStats>
+    where
+        F: Fn(&RawRowBatch) -> Result<()> + Send + Sync,
+    {
+        self.scan_raw_rows_parallel_unordered_batched_with_stats(parse_threads, batch_rows, f)
+    }
+
+    /// Scans raw row bytes in parallel without preserving row order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_parallel_unordered<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
+    where
+        F: Fn(&[u8]) -> Result<()> + Send + Sync,
+    {
+        Ok(self
+            .scan_raw_rows_parallel_unordered_with_stats(parse_threads, f)?
+            .rows)
+    }
+
+    /// Scans raw row bytes in unordered parallel mode and returns row/byte stats.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_parallel_unordered_with_stats<F>(
+        &mut self,
+        parse_threads: usize,
+        f: F,
+    ) -> Result<RawScanStats>
+    where
+        F: Fn(&[u8]) -> Result<()> + Send + Sync,
+    {
+        self.ensure_missing_policies_fresh()?;
+        if parse_threads <= 1 {
+            return self.scan_raw_rows_with_stats(|row| f(row));
+        }
+        let Some(path) = self.source_path.as_deref() else {
+            return self.scan_raw_rows_with_stats(|row| f(row));
+        };
+        scan_file_raw_rows_unordered_with_stats(
+            path,
+            &self.layout,
+            Self::parallel_scan_config(parse_threads),
+            f,
+        )
+    }
+
+    /// Scans raw row bytes in unordered parallel mode and invokes a callback per owned row batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_parallel_unordered_batched_with_stats<F>(
+        &mut self,
+        parse_threads: usize,
+        batch_rows: usize,
+        f: F,
+    ) -> Result<RawScanStats>
+    where
+        F: Fn(&RawRowBatch) -> Result<()> + Send + Sync,
+    {
+        self.ensure_missing_policies_fresh()?;
+        if parse_threads <= 1 {
+            return self.scan_raw_rows_batched_with_stats(batch_rows, |batch| f(batch));
+        }
+        let Some(path) = self.source_path.as_deref() else {
+            return self.scan_raw_rows_batched_with_stats(batch_rows, |batch| f(batch));
+        };
+        scan_file_raw_rows_unordered_batched_with_stats(
+            path,
+            &self.layout,
+            Self::parallel_scan_config(parse_threads),
+            batch_rows,
+            f,
+        )
+    }
+
+    /// Scans raw row bytes in parallel while preserving row order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_parallel_ordered<F>(&mut self, parse_threads: usize, f: F) -> Result<u64>
+    where
+        F: FnMut(&[u8]) -> Result<()>,
+    {
+        self.ensure_missing_policies_fresh()?;
+        if parse_threads <= 1 {
+            return self.scan_raw_rows(f);
+        }
+        let Some(path) = self.source_path.as_deref() else {
+            return self.scan_raw_rows(f);
+        };
+        scan_file_raw_rows(
+            path,
+            &self.layout,
+            Self::parallel_scan_config(parse_threads),
+            f,
+        )
     }
 }
 
@@ -71,7 +613,12 @@ impl<R: Read + Seek> SasReader<R> {
     pub fn from_reader(mut reader: R) -> Result<Self> {
         let layout = parse_metadata(&mut reader)?;
         reader.seek(SeekFrom::Start(0))?;
-        Ok(Self { reader, layout })
+        Ok(Self {
+            reader,
+            layout,
+            missing_policies_stale: false,
+            source_path: None,
+        })
     }
 
     /// Builds a reader from any `Read + Seek` implementor with custom metadata read options.
@@ -82,7 +629,12 @@ impl<R: Read + Seek> SasReader<R> {
     pub fn from_reader_with_options(mut reader: R, options: MetadataReadOptions) -> Result<Self> {
         let layout = parse_metadata_with_options(&mut reader, options)?;
         reader.seek(SeekFrom::Start(0))?;
-        Ok(Self { reader, layout })
+        Ok(Self {
+            reader,
+            layout,
+            missing_policies_stale: false,
+            source_path: None,
+        })
     }
 
     pub const fn metadata(&self) -> &DatasetMetadata {
@@ -96,7 +648,21 @@ impl<R: Read + Seek> SasReader<R> {
     /// Returns an error if the catalog cannot be opened or parsed.
     pub fn attach_catalog<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let mut file = File::open(path)?;
-        self.attach_catalog_reader(&mut file)
+        self.attach_catalog_reader_with_policy(&mut file, CatalogScanPolicy::Eager)
+    }
+
+    /// Loads value-label catalog metadata with configurable missing-policy scan behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the catalog cannot be opened or parsed.
+    pub fn attach_catalog_with_policy<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        scan_policy: CatalogScanPolicy,
+    ) -> Result<()> {
+        let mut file = File::open(path)?;
+        self.attach_catalog_reader_with_policy(&mut file, scan_policy)
     }
 
     /// Loads value-label catalog metadata from the provided reader.
@@ -105,6 +671,22 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if the catalog cannot be parsed.
     pub fn attach_catalog_reader<C: Read + Seek>(&mut self, reader: &mut C) -> Result<()> {
+        self.attach_catalog_reader_with_policy(reader, CatalogScanPolicy::Eager)
+    }
+
+    /// Loads value-label catalog metadata from the provided reader with configurable scan behavior.
+    ///
+    /// `CatalogScanPolicy::Deferred` keeps merged policies marked as stale until a row-consuming
+    /// method is invoked or [`scan_missing_policies`](Self::scan_missing_policies) is called.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the catalog cannot be parsed.
+    pub fn attach_catalog_reader_with_policy<C: Read + Seek>(
+        &mut self,
+        reader: &mut C,
+        scan_policy: CatalogScanPolicy,
+    ) -> Result<()> {
         reader.seek(SeekFrom::Start(0))?;
         let catalog = parse_catalog(reader)?;
 
@@ -137,8 +719,13 @@ impl<R: Read + Seek> SasReader<R> {
             }
         }
 
-        self.scan_missing_policies()?;
-        Ok(())
+        match scan_policy {
+            CatalogScanPolicy::Eager => self.scan_missing_policies(),
+            CatalogScanPolicy::Deferred => {
+                self.missing_policies_stale = true;
+                Ok(())
+            }
+        }
     }
 
     /// Populates missing-value policies by scanning the dataset.
@@ -149,6 +736,7 @@ impl<R: Read + Seek> SasReader<R> {
     pub fn scan_missing_policies(&mut self) -> Result<()> {
         let variable_count = self.layout.header.metadata.variables.len();
         if variable_count == 0 {
+            self.missing_policies_stale = false;
             return Ok(());
         }
 
@@ -188,6 +776,7 @@ impl<R: Read + Seek> SasReader<R> {
             dedup_missing_ranges(&mut normalized_policy.ranges);
             variable.missing = normalized_policy;
         }
+        self.missing_policies_stale = false;
 
         Ok(())
     }
@@ -198,8 +787,32 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if row iteration cannot be initialised.
     pub fn rows(&mut self) -> Result<RowIterator<'_, R>> {
+        self.rows_with_decode_policy(DecodePolicy::default())
+    }
+
+    /// Creates a row iterator over the dataset with explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn rows_with_decode_policy(&mut self, policy: DecodePolicy) -> Result<RowIterator<'_, R>> {
+        self.ensure_missing_policies_fresh()?;
         self.reader.seek(SeekFrom::Start(0))?;
-        self.layout.row_iterator(&mut self.reader)
+        let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+        iterator.set_decode_policy(policy);
+        Ok(iterator)
+    }
+
+    /// Creates a row iterator using the fast-scan decode policy.
+    ///
+    /// Fast scan disables temporal conversion and mojibake repair and preserves
+    /// trailing string whitespace for maximum throughput.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn rows_fast(&mut self) -> Result<RowIterator<'_, R>> {
+        self.rows_with_decode_policy(DecodePolicy::FAST_SCAN)
     }
 
     /// Creates a row iterator that yields owned rows with column-name lookup.
@@ -208,10 +821,31 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if row iteration cannot be initialised.
     pub fn rows_named(&mut self) -> Result<RowIter<'_, R>> {
+        self.rows_named_with_decode_policy(DecodePolicy::default())
+    }
+
+    /// Creates a row iterator that yields owned rows with column-name lookup and explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn rows_named_with_decode_policy(
+        &mut self,
+        policy: DecodePolicy,
+    ) -> Result<RowIter<'_, R>> {
+        self.ensure_missing_policies_fresh()?;
         let lookup = Arc::new(row::RowLookup::from_metadata(self.metadata()));
-        self.reader.seek(SeekFrom::Start(0))?;
-        let iterator = self.layout.row_iterator(&mut self.reader)?;
+        let iterator = self.rows_with_decode_policy(policy)?;
         Ok(RowIter::new(iterator, lookup))
+    }
+
+    /// Creates a row iterator that yields owned rows with column-name lookup using fast-scan policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn rows_named_fast(&mut self) -> Result<RowIter<'_, R>> {
+        self.rows_named_with_decode_policy(DecodePolicy::FAST_SCAN)
     }
 
     /// Creates a streaming iterator that yields borrowed row views.
@@ -222,10 +856,31 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if row iteration cannot be initialised.
     pub fn stream_rows(&mut self) -> Result<RowViewIter<'_, R>> {
+        self.stream_rows_with_decode_policy(DecodePolicy::default())
+    }
+
+    /// Creates a streaming iterator that yields borrowed row views with explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn stream_rows_with_decode_policy(
+        &mut self,
+        policy: DecodePolicy,
+    ) -> Result<RowViewIter<'_, R>> {
+        self.ensure_missing_policies_fresh()?;
         let lookup = Arc::new(row::RowLookup::from_metadata(self.metadata()));
-        self.reader.seek(SeekFrom::Start(0))?;
-        let iterator = self.layout.row_iterator(&mut self.reader)?;
+        let iterator = self.rows_with_decode_policy(policy)?;
         Ok(RowViewIter::new(iterator, lookup, None))
+    }
+
+    /// Creates a streaming iterator that yields borrowed row views using fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn stream_rows_fast(&mut self) -> Result<RowViewIter<'_, R>> {
+        self.stream_rows_with_decode_policy(DecodePolicy::FAST_SCAN)
     }
 
     /// Creates a streaming iterator that yields borrowed row views for the named columns.
@@ -236,6 +891,20 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if any column name cannot be resolved.
     pub fn stream_rows_with_projection(&mut self, names: &[&str]) -> Result<RowViewIter<'_, R>> {
+        self.stream_rows_with_projection_with_decode_policy(names, DecodePolicy::default())
+    }
+
+    /// Creates a streaming iterator that yields borrowed row views for named columns with explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name cannot be resolved.
+    pub fn stream_rows_with_projection_with_decode_policy(
+        &mut self,
+        names: &[&str],
+        policy: DecodePolicy,
+    ) -> Result<RowViewIter<'_, R>> {
+        self.ensure_missing_policies_fresh()?;
         let selection = RowSelection::new().columns(names);
         let metadata = &self.layout.header.metadata;
         let indices =
@@ -247,9 +916,225 @@ impl<R: Read + Seek> SasReader<R> {
         let normalized = self.normalize_projection(&indices)?;
         let projection = RowProjection::new(&normalized, metadata.column_count as usize);
         let lookup = Arc::new(row::RowLookup::from_metadata(metadata));
-        self.reader.seek(SeekFrom::Start(0))?;
-        let iterator = self.layout.row_iterator(&mut self.reader)?;
+        let iterator = self.rows_with_decode_policy(policy)?;
         Ok(RowViewIter::new(iterator, lookup, Some(projection)))
+    }
+
+    /// Creates a streaming iterator for named columns using fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name cannot be resolved.
+    pub fn stream_rows_with_projection_fast(
+        &mut self,
+        names: &[&str],
+    ) -> Result<RowViewIter<'_, R>> {
+        self.stream_rows_with_projection_with_decode_policy(names, DecodePolicy::FAST_SCAN)
+    }
+
+    /// Streams raw row bytes and invokes the callback for each row without decoding cells.
+    ///
+    /// This is the highest-throughput parser path when callers only need row bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows<F>(&mut self, mut f: F) -> Result<u64>
+    where
+        F: for<'row> FnMut(&'row [u8]) -> Result<()>,
+    {
+        Ok(self.scan_raw_rows_with_stats(&mut f)?.rows)
+    }
+
+    /// Streams raw row bytes and invokes the callback for each row without decoding cells.
+    ///
+    /// Returns row and raw-byte counters alongside callback processing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_with_stats<F>(&mut self, mut f: F) -> Result<RawScanStats>
+    where
+        F: for<'row> FnMut(&'row [u8]) -> Result<()>,
+    {
+        self.ensure_missing_policies_fresh()?;
+        self.reader.seek(SeekFrom::Start(0))?;
+        let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+
+        let result = (|| -> Result<RawScanStats> {
+            let mut stats = RawScanStats::default();
+            let mut visit = |row: &[u8]| -> Result<()> {
+                f(row)?;
+                stats.rows = stats.rows.saturating_add(1);
+                stats.raw_bytes = stats.raw_bytes.saturating_add(row.len() as u64);
+                Ok(())
+            };
+            while iterator.try_next_raw_row_visit(&mut visit)?.is_some() {}
+            Ok(stats)
+        })();
+        self.reader.seek(SeekFrom::Start(0))?;
+        result
+    }
+
+    /// Streams raw row bytes and invokes the callback per owned row batch.
+    ///
+    /// Batches are contiguous owned byte buffers to reduce callback overhead when
+    /// callers ingest rows into memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration fails or the callback errors.
+    pub fn scan_raw_rows_batched_with_stats<F>(
+        &mut self,
+        batch_rows: usize,
+        mut f: F,
+    ) -> Result<RawScanStats>
+    where
+        F: FnMut(&RawRowBatch) -> Result<()>,
+    {
+        self.ensure_missing_policies_fresh()?;
+        self.reader.seek(SeekFrom::Start(0))?;
+        let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+
+        let result = (|| -> Result<RawScanStats> {
+            let batch_rows = batch_rows.max(1);
+            let row_length = usize::try_from(self.layout.row_info.row_length).unwrap_or(0);
+            let mut batch =
+                RawRowBatch::with_capacity(batch_rows, row_length.saturating_mul(batch_rows));
+            let mut stats = RawScanStats::default();
+            while let Some(row) = iterator.try_next_raw_row()? {
+                batch.push_row(row);
+                stats.rows = stats.rows.saturating_add(1);
+                stats.raw_bytes = stats.raw_bytes.saturating_add(row.len() as u64);
+                if batch.row_count() >= batch_rows {
+                    f(&batch)?;
+                    batch.clear();
+                }
+            }
+            if !batch.is_empty() {
+                f(&batch)?;
+            }
+            Ok(stats)
+        })();
+        self.reader.seek(SeekFrom::Start(0))?;
+        result
+    }
+
+    /// Streams selected columns and invokes the callback with borrowed decoded values per row.
+    ///
+    /// This path avoids owned row materialization and is intended for high-throughput scans.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row iteration fails, or the callback errors.
+    pub fn scan_projected_columns_with_decode_policy<F>(
+        &mut self,
+        indices: &[usize],
+        policy: DecodePolicy,
+        mut f: F,
+    ) -> Result<u64>
+    where
+        F: for<'row> FnMut(&[crate::cell::CellValue<'row>]) -> Result<()>,
+    {
+        self.ensure_missing_policies_fresh()?;
+        let normalized = self.normalize_projection(indices)?;
+
+        self.reader.seek(SeekFrom::Start(0))?;
+        let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+        iterator.set_decode_policy(policy);
+        let compiled_columns = iterator.resolve_compiled_runtime_columns(&normalized)?;
+
+        let result = (|| -> Result<u64> {
+            let mut rows = 0u64;
+            while iterator
+                .try_next_projected_compiled_columns_visit(&compiled_columns, &mut f)?
+                .is_some()
+            {
+                rows = rows.saturating_add(1);
+            }
+            Ok(rows)
+        })();
+        self.reader.seek(SeekFrom::Start(0))?;
+        result
+    }
+
+    /// Streams selected columns and invokes the callback with borrowed decoded values per row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row iteration fails, or the callback errors.
+    pub fn scan_projected_columns<F>(&mut self, indices: &[usize], f: F) -> Result<u64>
+    where
+        F: for<'row> FnMut(&[crate::cell::CellValue<'row>]) -> Result<()>,
+    {
+        self.scan_projected_columns_with_decode_policy(indices, DecodePolicy::default(), f)
+    }
+
+    /// Streams selected columns with fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection validation fails, row iteration fails, or the callback errors.
+    pub fn scan_projected_columns_fast<F>(&mut self, indices: &[usize], f: F) -> Result<u64>
+    where
+        F: for<'row> FnMut(&[crate::cell::CellValue<'row>]) -> Result<()>,
+    {
+        self.scan_projected_columns_with_decode_policy(indices, DecodePolicy::FAST_SCAN, f)
+    }
+
+    /// Streams selected numeric columns as raw SAS numeric values (`f64`) with missing values as `None`.
+    ///
+    /// This bypasses `CellValue` materialization and temporal conversion for maximum scan throughput.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any projected column is non-numeric or row iteration fails.
+    pub fn scan_numeric_columns<F>(&mut self, indices: &[usize], mut f: F) -> Result<u64>
+    where
+        F: FnMut(&[Option<f64>]) -> Result<()>,
+    {
+        self.ensure_missing_policies_fresh()?;
+        let normalized = self.normalize_projection(indices)?;
+
+        self.reader.seek(SeekFrom::Start(0))?;
+        let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+        iterator.set_decode_policy(DecodePolicy::FAST_SCAN);
+        let selected_columns = iterator.resolve_numeric_runtime_columns(&normalized)?;
+
+        let mut values = Vec::with_capacity(selected_columns.len());
+        let result = (|| -> Result<u64> {
+            let mut rows = 0u64;
+            while iterator
+                .try_next_numeric_projected_columns(&selected_columns, &mut values)?
+                .is_some()
+            {
+                f(&values)?;
+                rows = rows.saturating_add(1);
+            }
+            Ok(rows)
+        })();
+        self.reader.seek(SeekFrom::Start(0))?;
+        result
+    }
+
+    /// Streams selected numeric columns by name as raw SAS numeric values (`f64`) with missing as `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if projection resolution fails, any column is non-numeric, or row iteration fails.
+    pub fn scan_numeric_columns_by_name<F>(&mut self, names: &[&str], f: F) -> Result<u64>
+    where
+        F: FnMut(&[Option<f64>]) -> Result<()>,
+    {
+        let selection = RowSelection::new().columns(names);
+        let metadata = &self.layout.header.metadata;
+        let indices =
+            selection
+                .resolve_projection(metadata)?
+                .ok_or_else(|| Error::InvalidMetadata {
+                    details: "column projection not specified".into(),
+                })?;
+        self.scan_numeric_columns(&indices, f)
     }
 
     /// Creates a row iterator configured by the provided selection.
@@ -262,19 +1147,45 @@ impl<R: Read + Seek> SasReader<R> {
     /// Returns an error if the selection specifies a projection, if the reader
     /// cannot be positioned, or if row iteration cannot be initialised.
     pub fn rows_windowed(&mut self, selection: &RowSelection) -> Result<RowWindow<'_, R>> {
+        self.rows_windowed_with_decode_policy(selection, DecodePolicy::default())
+    }
+
+    /// Creates a row iterator configured by the provided selection with explicit decode policy.
+    ///
+    /// This method is intended for pagination without column projection. Use
+    /// [`select_with_decode_policy`] when selecting a subset of columns.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the selection specifies a projection, if the reader
+    /// cannot be positioned, or if row iteration cannot be initialised.
+    pub fn rows_windowed_with_decode_policy(
+        &mut self,
+        selection: &RowSelection,
+        policy: DecodePolicy,
+    ) -> Result<RowWindow<'_, R>> {
+        self.ensure_missing_policies_fresh()?;
         if selection.has_projection() {
             return Err(Error::InvalidMetadata {
                 details: "rows_windowed does not accept column projection; use select_with instead"
                     .into(),
             });
         }
-        self.reader.seek(SeekFrom::Start(0))?;
-        let iterator = self.layout.row_iterator(&mut self.reader)?;
+        let iterator = self.rows_with_decode_policy(policy)?;
         Ok(RowWindow::new(
             iterator,
             selection.skip_count(),
             selection.max_count(),
         ))
+    }
+
+    /// Creates a row window iterator using fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the selection specifies a projection or row iteration cannot be initialised.
+    pub fn rows_windowed_fast(&mut self, selection: &RowSelection) -> Result<RowWindow<'_, R>> {
+        self.rows_windowed_with_decode_policy(selection, DecodePolicy::FAST_SCAN)
     }
 
     /// Creates an iterator that yields a subset of columns for each row.
@@ -284,24 +1195,38 @@ impl<R: Read + Seek> SasReader<R> {
     /// Returns an error if any requested column index is invalid or if row
     /// decoding fails.
     pub fn select_columns(&mut self, indices: &[usize]) -> Result<ProjectedRowIter<'_, R>> {
+        self.select_columns_with_decode_policy(indices, DecodePolicy::default())
+    }
+
+    /// Creates an iterator that yields a subset of columns for each row with explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any requested column index is invalid or if row
+    /// decoding fails.
+    pub fn select_columns_with_decode_policy(
+        &mut self,
+        indices: &[usize],
+        policy: DecodePolicy,
+    ) -> Result<ProjectedRowIter<'_, R>> {
+        self.ensure_missing_policies_fresh()?;
         let normalized = self.normalize_projection(indices)?;
-        self.reader.seek(SeekFrom::Start(0))?;
-        let inner = self.layout.row_iterator(&mut self.reader)?;
-        let mut sorted_projection: Vec<(usize, usize)> = normalized
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(position, column_index)| (column_index, position))
-            .collect();
-        sorted_projection.sort_unstable_by_key(|entry| entry.0);
-        let slots_len = normalized.len();
+        let inner = self.rows_with_decode_policy(policy)?;
+        let compiled_columns = inner.resolve_compiled_runtime_columns(&normalized)?;
         Ok(ProjectedRowIter {
             inner,
-            selected_indices: normalized,
-            sorted_projection,
+            compiled_columns,
             exhausted: false,
-            slots: vec![None; slots_len],
         })
+    }
+
+    /// Creates a projected iterator using fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any requested column index is invalid or row decoding fails.
+    pub fn select_columns_fast(&mut self, indices: &[usize]) -> Result<ProjectedRowIter<'_, R>> {
+        self.select_columns_with_decode_policy(indices, DecodePolicy::FAST_SCAN)
     }
 
     /// Creates an iterator configured by selection with column projection.
@@ -310,6 +1235,19 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error when projection cannot be resolved or row decoding fails.
     pub fn select_with(&mut self, selection: &RowSelection) -> Result<ProjectedRowWindow<'_, R>> {
+        self.select_with_decode_policy(selection, DecodePolicy::default())
+    }
+
+    /// Creates an iterator configured by selection with column projection and explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when projection cannot be resolved or row decoding fails.
+    pub fn select_with_decode_policy(
+        &mut self,
+        selection: &RowSelection,
+        policy: DecodePolicy,
+    ) -> Result<ProjectedRowWindow<'_, R>> {
         let metadata = &self.layout.header.metadata;
         let indices =
             selection
@@ -317,12 +1255,24 @@ impl<R: Read + Seek> SasReader<R> {
                 .ok_or_else(|| Error::InvalidMetadata {
                     details: "column projection not specified".into(),
                 })?;
-        let projected = self.select_columns(&indices)?;
+        let projected = self.select_columns_with_decode_policy(&indices, policy)?;
         Ok(ProjectedRowWindow::new(
             projected,
             selection.skip_count(),
             selection.max_count(),
         ))
+    }
+
+    /// Creates a projected row window using fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when projection cannot be resolved or row decoding fails.
+    pub fn select_with_fast(
+        &mut self,
+        selection: &RowSelection,
+    ) -> Result<ProjectedRowWindow<'_, R>> {
+        self.select_with_decode_policy(selection, DecodePolicy::FAST_SCAN)
     }
 
     /// Creates an iterator that yields only the named columns.
@@ -331,6 +1281,19 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if any column name cannot be resolved.
     pub fn rows_with_projection(&mut self, names: &[&str]) -> Result<ProjectedRowIter<'_, R>> {
+        self.rows_with_projection_with_decode_policy(names, DecodePolicy::default())
+    }
+
+    /// Creates an iterator that yields only the named columns with explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name cannot be resolved.
+    pub fn rows_with_projection_with_decode_policy(
+        &mut self,
+        names: &[&str],
+        policy: DecodePolicy,
+    ) -> Result<ProjectedRowIter<'_, R>> {
         let selection = RowSelection::new().columns(names);
         let metadata = &self.layout.header.metadata;
         let indices =
@@ -339,7 +1302,16 @@ impl<R: Read + Seek> SasReader<R> {
                 .ok_or_else(|| Error::InvalidMetadata {
                     details: "column projection not specified".into(),
                 })?;
-        self.select_columns(&indices)
+        self.select_columns_with_decode_policy(&indices, policy)
+    }
+
+    /// Creates an iterator that yields named columns using fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name cannot be resolved.
+    pub fn rows_with_projection_fast(&mut self, names: &[&str]) -> Result<ProjectedRowIter<'_, R>> {
+        self.rows_with_projection_with_decode_policy(names, DecodePolicy::FAST_SCAN)
     }
 
     /// Streams the full dataset into a custom sink implementation.
@@ -348,14 +1320,38 @@ impl<R: Read + Seek> SasReader<R> {
     ///
     /// Returns an error if row decoding fails or if the sink reports a failure.
     pub fn stream_into<S: RowSink>(&mut self, sink: &mut S) -> Result<()> {
+        self.stream_into_with_decode_policy(sink, DecodePolicy::default())
+    }
+
+    /// Streams the full dataset into a custom sink implementation with explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails or if the sink reports a failure.
+    pub fn stream_into_with_decode_policy<S: RowSink>(
+        &mut self,
+        sink: &mut S,
+        policy: DecodePolicy,
+    ) -> Result<()> {
+        self.ensure_missing_policies_fresh()?;
         self.reader.seek(SeekFrom::Start(0))?;
         let context = SinkContext::new(&self.layout);
         sink.begin(context)?;
         let mut iterator = self.layout.row_iterator(&mut self.reader)?;
+        iterator.set_decode_policy(policy);
         iterator.stream_all(|row| sink.write_streaming_row(row))?;
         sink.finish()?;
         self.reader.seek(SeekFrom::Start(0))?;
         Ok(())
+    }
+
+    /// Streams the full dataset into a sink using fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row decoding fails or if the sink reports a failure.
+    pub fn stream_into_fast<S: RowSink>(&mut self, sink: &mut S) -> Result<()> {
+        self.stream_into_with_decode_policy(sink, DecodePolicy::FAST_SCAN)
     }
 
     /// Consumes the reader and returns a row iterator yielding owned rows.
@@ -365,14 +1361,45 @@ impl<R: Read + Seek> SasReader<R> {
     /// Returns an error if row iteration cannot be initialised.
     #[allow(clippy::should_implement_trait)]
     pub fn into_iter(self) -> Result<crate::parser::OwnedRowIterator<R>> {
+        self.into_iter_with_decode_policy(DecodePolicy::default())
+    }
+
+    /// Consumes the reader and returns a row iterator yielding owned rows with explicit decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn into_iter_with_decode_policy(
+        mut self,
+        policy: DecodePolicy,
+    ) -> Result<crate::parser::OwnedRowIterator<R>> {
+        self.ensure_missing_policies_fresh()?;
         let layout = Box::new(self.layout);
         let mut reader = self.reader;
         reader.seek(SeekFrom::Start(0))?;
-        crate::parser::RowIteratorCore::new(reader, layout)
+        let mut iterator = crate::parser::RowIteratorCore::new(reader, layout)?;
+        iterator.set_decode_policy(policy);
+        Ok(iterator)
+    }
+
+    /// Consumes the reader and returns an owned row iterator using fast-scan decode policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if row iteration cannot be initialised.
+    pub fn into_iter_fast(self) -> Result<crate::parser::OwnedRowIterator<R>> {
+        self.into_iter_with_decode_policy(DecodePolicy::FAST_SCAN)
     }
 
     pub fn into_parts(self) -> (R, DatasetLayout) {
         (self.reader, self.layout)
+    }
+
+    fn ensure_missing_policies_fresh(&mut self) -> Result<()> {
+        if self.missing_policies_stale {
+            self.scan_missing_policies()?;
+        }
+        Ok(())
     }
 
     fn normalize_projection(&self, indices: &[usize]) -> Result<Vec<usize>> {

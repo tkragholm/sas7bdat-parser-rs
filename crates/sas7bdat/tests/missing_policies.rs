@@ -1,4 +1,4 @@
-use sas7bdat::SasReader;
+use sas7bdat::{CatalogScanPolicy, SasReader};
 use sas7bdat_test_support::common;
 
 fn tagged_tags(policy: &sas7bdat::dataset::MissingValuePolicy) -> Vec<char> {
@@ -40,4 +40,45 @@ fn scan_missing_policies_records_numeric_tags() {
 
     let var7 = variables.iter().find(|var| var.name == "var7").unwrap();
     assert!(var7.missing.system_missing);
+}
+
+fn policy_signature(
+    policy: &sas7bdat::dataset::MissingValuePolicy,
+) -> (bool, Vec<Option<char>>, usize) {
+    let tags = policy.tagged_missing.iter().map(|item| item.tag).collect();
+    (policy.system_missing, tags, policy.ranges.len())
+}
+
+#[test]
+fn deferred_catalog_scan_matches_eager_after_row_access() {
+    let data = common::fixture_path("fixtures/raw_data/readstat/missing_test.sas7bdat");
+    let catalog = common::fixture_path("fixtures/raw_data/readstat/missing_formats.sas7bcat");
+
+    let mut eager = SasReader::open(&data).expect("open eager dataset");
+    eager
+        .attach_catalog_with_policy(&catalog, CatalogScanPolicy::Eager)
+        .expect("load catalog eagerly");
+    let eager_policies: Vec<_> = eager
+        .metadata()
+        .variables
+        .iter()
+        .map(|var| policy_signature(&var.missing))
+        .collect();
+
+    let mut deferred = SasReader::open(&data).expect("open deferred dataset");
+    deferred
+        .attach_catalog_with_policy(&catalog, CatalogScanPolicy::Deferred)
+        .expect("load catalog deferred");
+
+    let mut rows = deferred.rows().expect("rows should trigger deferred scan");
+    let _ = rows.try_next().expect("iterate first row");
+
+    let deferred_policies: Vec<_> = deferred
+        .metadata()
+        .variables
+        .iter()
+        .map(|var| policy_signature(&var.missing))
+        .collect();
+
+    assert_eq!(eager_policies, deferred_policies);
 }

@@ -9,6 +9,7 @@ use crate::{
             ColumnInfo, ColumnKind, ColumnOffsets, DatasetLayout, RowInfo, TextRef, TextStore,
         },
         rows::{
+            ColumnarBatchMode,
             columnar::COLUMNAR_BATCH_ROWS,
             compression::{decompress_rdc, decompress_rle},
             constants::SAS_PAGE_TYPE_DATA,
@@ -29,6 +30,26 @@ fn make_parsed_metadata(
     rows_per_page: u64,
     page_size: u32,
 ) -> DatasetLayout {
+    make_parsed_metadata_with_page_count(
+        vendor,
+        compression,
+        row_length,
+        total_rows,
+        rows_per_page,
+        page_size,
+        1,
+    )
+}
+
+fn make_parsed_metadata_with_page_count(
+    vendor: Vendor,
+    compression: Compression,
+    row_length: u32,
+    total_rows: u64,
+    rows_per_page: u64,
+    page_size: u32,
+    page_count: u64,
+) -> DatasetLayout {
     let mut metadata = DatasetMetadata::new(1);
     metadata.row_count = total_rows;
     metadata.column_count = 1;
@@ -45,7 +66,7 @@ fn make_parsed_metadata(
         subheader_signature_size: 4,
         header_size: 0,
         page_size,
-        page_count: 1,
+        page_count,
         pad_alignment: 0,
         data_offset: 0,
     };
@@ -201,6 +222,50 @@ fn fetches_rows_from_data_page() {
 }
 
 #[test]
+fn page_range_limits_iteration_to_requested_pages() {
+    let row_length = 4usize;
+    let page_size = 64usize;
+    let page_one = make_data_page(
+        &[b"A   ".as_slice(), b"B   ".as_slice()],
+        row_length,
+        page_size,
+    );
+    let page_two = make_data_page(
+        &[b"C   ".as_slice(), b"D   ".as_slice()],
+        row_length,
+        page_size,
+    );
+    let mut bytes = Vec::with_capacity(page_one.len() + page_two.len());
+    bytes.extend_from_slice(&page_one);
+    bytes.extend_from_slice(&page_two);
+    let parsed = make_parsed_metadata_with_page_count(
+        Vendor::Sas,
+        Compression::None,
+        u32::try_from(row_length).expect("row length fits in u32"),
+        4,
+        2,
+        u32::try_from(page_size).expect("page size fits in u32"),
+        2,
+    );
+
+    let mut cursor = Cursor::new(bytes);
+    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
+    iter.set_page_range(1, 2).expect("set page range");
+    assert_rows_from_iter(&mut iter, &["C", "D"]);
+}
+
+#[test]
+fn page_range_rejects_out_of_bounds_values() {
+    let row_length = 4usize;
+    let rows = [b"AAAA".as_slice(), b"BBBB".as_slice()];
+    let (mut cursor, parsed) = setup_data_iter(&rows, row_length);
+    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
+
+    assert!(iter.set_page_range(0, 2).is_err());
+    assert!(iter.set_page_range(1, 0).is_err());
+}
+
+#[test]
 fn columnar_batch_uses_borrowed_rows() {
     let row_length = 4usize;
     let rows = [b"A   ".as_slice(), b"B   ".as_slice()];
@@ -219,6 +284,222 @@ fn columnar_batch_uses_borrowed_rows() {
         .map(|opt| opt.map(std::borrow::Cow::into_owned))
         .collect();
     assert_eq!(texts, vec![Some("A".to_string()), Some("B".to_string())]);
+}
+
+#[test]
+fn segmented_batch_supports_utf8_staging() {
+    let row_length = 4usize;
+    let rows = [b"A   ".as_slice(), b"B   ".as_slice()];
+    let (mut cursor, parsed) = setup_data_iter(&rows, row_length);
+    let mut iter = row_iterator(&mut cursor, &parsed).expect("construct row iterator");
+
+    let batch = iter
+        .next_columnar_batch(COLUMNAR_BATCH_ROWS)
+        .expect("batch ok")
+        .expect("batch present");
+    let staged = batch
+        .materialize_utf8(0)
+        .expect("utf8 staging should succeed")
+        .expect("utf8 staging should be enabled");
+
+    assert_eq!(staged.len(), 2);
+    assert_eq!(staged.non_null_count(), 2);
+}
+
+#[test]
+fn segmented_and_contiguous_batches_are_equivalent_across_pages() {
+    let row_length = 4usize;
+    let page_size = 64usize;
+    let page_one = make_data_page(
+        &[b"A   ".as_slice(), b"B   ".as_slice()],
+        row_length,
+        page_size,
+    );
+    let page_two = make_data_page(
+        &[b"C   ".as_slice(), b"D   ".as_slice()],
+        row_length,
+        page_size,
+    );
+    let mut bytes = Vec::with_capacity(page_one.len() + page_two.len());
+    bytes.extend_from_slice(&page_one);
+    bytes.extend_from_slice(&page_two);
+
+    let parsed = make_parsed_metadata_with_page_count(
+        Vendor::Sas,
+        Compression::None,
+        u32::try_from(row_length).expect("row length fits in u32"),
+        4,
+        2,
+        u32::try_from(page_size).expect("page size fits in u32"),
+        2,
+    );
+
+    let mut segmented_cursor = Cursor::new(bytes.clone());
+    let mut segmented_iter =
+        row_iterator(&mut segmented_cursor, &parsed).expect("construct segmented iterator");
+    let segmented = segmented_iter
+        .next_columnar_batch(4)
+        .expect("segmented batch")
+        .expect("segmented rows");
+
+    let mut contiguous_cursor = Cursor::new(bytes);
+    let mut contiguous_iter =
+        row_iterator(&mut contiguous_cursor, &parsed).expect("construct contiguous iterator");
+    let contiguous = contiguous_iter
+        .next_columnar_batch_contiguous(4)
+        .expect("contiguous batch")
+        .expect("contiguous rows");
+
+    assert_eq!(segmented.row_count, contiguous.row_count);
+    assert_eq!(segmented.row_count, 4);
+
+    let segmented_col = segmented.column(0).expect("segmented column");
+    let contiguous_col = contiguous.column(0).expect("contiguous column");
+
+    let segmented_values: Vec<_> = segmented_col
+        .iter_strings()
+        .map(|value| value.map(Cow::into_owned))
+        .collect();
+    let contiguous_values: Vec<_> = contiguous_col
+        .iter_strings()
+        .map(|value| value.map(Cow::into_owned))
+        .collect();
+
+    assert_eq!(segmented_values, contiguous_values);
+}
+
+#[test]
+fn adaptive_mode_matches_contiguous_on_narrow_rows() {
+    let row_length = 4usize;
+    let page_size = 64usize;
+    let page_one = make_data_page(
+        &[b"A   ".as_slice(), b"B   ".as_slice()],
+        row_length,
+        page_size,
+    );
+    let page_two = make_data_page(
+        &[b"C   ".as_slice(), b"D   ".as_slice()],
+        row_length,
+        page_size,
+    );
+    let mut bytes = Vec::with_capacity(page_one.len() + page_two.len());
+    bytes.extend_from_slice(&page_one);
+    bytes.extend_from_slice(&page_two);
+
+    let parsed = make_parsed_metadata_with_page_count(
+        Vendor::Sas,
+        Compression::None,
+        u32::try_from(row_length).expect("row length fits in u32"),
+        4,
+        2,
+        u32::try_from(page_size).expect("page size fits in u32"),
+        2,
+    );
+
+    let mut adaptive_cursor = Cursor::new(bytes.clone());
+    let mut adaptive_iter =
+        row_iterator(&mut adaptive_cursor, &parsed).expect("construct adaptive iterator");
+    let mut adaptive_modes = Vec::new();
+    let mut adaptive_values = Vec::new();
+    while let Some(batch) = adaptive_iter
+        .next_columnar_batch_with_mode(1, ColumnarBatchMode::Adaptive)
+        .expect("adaptive batch")
+    {
+        let values: Vec<_> = batch
+            .column(0)
+            .expect("adaptive column")
+            .iter_strings()
+            .map(|value| value.map(Cow::into_owned))
+            .collect();
+        adaptive_values.extend(values);
+        drop(batch);
+        adaptive_modes.push(adaptive_iter.last_columnar_batch_mode());
+    }
+
+    assert!(!adaptive_modes.is_empty());
+    assert!(
+        adaptive_modes
+            .iter()
+            .all(|mode| *mode == ColumnarBatchMode::Contiguous)
+    );
+    assert_eq!(adaptive_iter.columnar_batch_mode_observations(), 5);
+    assert_eq!(adaptive_iter.columnar_batch_mode_switches(), 0);
+
+    let mut contiguous_cursor = Cursor::new(bytes);
+    let mut contiguous_iter =
+        row_iterator(&mut contiguous_cursor, &parsed).expect("construct contiguous iterator");
+    let mut contiguous_values = Vec::new();
+    while let Some(batch) = contiguous_iter
+        .next_columnar_batch_contiguous(1)
+        .expect("contiguous batch")
+    {
+        let values: Vec<_> = batch
+            .column(0)
+            .expect("contiguous column")
+            .iter_strings()
+            .map(|value| value.map(Cow::into_owned))
+            .collect();
+        contiguous_values.extend(values);
+    }
+
+    assert_eq!(adaptive_values, contiguous_values);
+}
+
+#[test]
+fn adaptive_mode_matches_segmented_on_wide_rows() {
+    let row_length = 256usize;
+    let page_size = 1024usize;
+    let row_a = vec![b'A'; row_length];
+    let row_b = vec![b'B'; row_length];
+    let rows = [row_a.as_slice(), row_b.as_slice()];
+    let page = make_data_page(&rows, row_length, page_size);
+
+    let parsed = make_parsed_metadata(
+        Vendor::Sas,
+        Compression::None,
+        u32::try_from(row_length).expect("row length fits in u32"),
+        2,
+        2,
+        u32::try_from(page_size).expect("page size fits in u32"),
+    );
+
+    let mut adaptive_cursor = Cursor::new(page.clone());
+    let mut adaptive_iter =
+        row_iterator(&mut adaptive_cursor, &parsed).expect("construct adaptive iterator");
+    let adaptive = adaptive_iter
+        .next_columnar_batch_with_mode(2, ColumnarBatchMode::Adaptive)
+        .expect("adaptive batch")
+        .expect("adaptive rows");
+
+    let mut segmented_cursor = Cursor::new(page);
+    let mut segmented_iter =
+        row_iterator(&mut segmented_cursor, &parsed).expect("construct segmented iterator");
+    let segmented = segmented_iter
+        .next_columnar_batch(2)
+        .expect("segmented batch")
+        .expect("segmented rows");
+
+    let adaptive_values: Vec<_> = adaptive
+        .column(0)
+        .expect("adaptive column")
+        .iter_strings()
+        .map(|value| value.map(Cow::into_owned))
+        .collect();
+    drop(adaptive);
+    assert_eq!(
+        adaptive_iter.last_columnar_batch_mode(),
+        ColumnarBatchMode::Segmented
+    );
+    assert_eq!(adaptive_iter.columnar_batch_mode_observations(), 1);
+    assert_eq!(adaptive_iter.columnar_batch_mode_switches(), 0);
+    let segmented_values: Vec<_> = segmented
+        .column(0)
+        .expect("segmented column")
+        .iter_strings()
+        .map(|value| value.map(Cow::into_owned))
+        .collect();
+
+    assert_eq!(adaptive_values, segmented_values);
 }
 
 #[test]

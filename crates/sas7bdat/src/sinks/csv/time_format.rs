@@ -11,8 +11,10 @@ fn write_date_components(date: Date, out: &mut Vec<u8>) {
             out.push(b'-');
         }
         let y = year.unsigned_abs();
-        write_two((y / 100) as u8, out);
-        write_two((y % 100) as u8, out);
+        let high = u8::try_from(y / 100).unwrap_or(99);
+        let low = u8::try_from(y % 100).unwrap_or(99);
+        write_two(high, out);
+        write_two(low, out);
     } else {
         out.extend_from_slice(date.to_string().as_bytes());
         return;

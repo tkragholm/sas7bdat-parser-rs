@@ -125,39 +125,10 @@ impl RowSelection {
             return Ok(None);
         };
 
-        let mut lookup: HashMap<String, usize> = HashMap::with_capacity(metadata.variables.len());
-        for variable in &metadata.variables {
-            let trimmed = variable.name.trim_end();
-            lookup
-                .entry(trimmed.to_owned())
-                .or_insert(variable.index as usize);
-            lookup
-                .entry(variable.name.clone())
-                .or_insert(variable.index as usize);
-        }
-
-        let mut resolved = Vec::with_capacity(names.len());
-        let mut seen = HashSet::with_capacity(names.len());
-        for name in names {
-            if let Some(index) = lookup.get(name) {
-                Self::insert_projection_index(name, *index, &mut seen, &mut resolved)?;
-                continue;
-            }
-            let normalized = name.trim_end();
-            if let Some(index) = lookup.get(normalized) {
-                Self::insert_projection_index(name, *index, &mut seen, &mut resolved)?;
-                continue;
-            }
-            return Err(Error::InvalidMetadata {
-                details: format!("column name '{name}' not found in metadata").into(),
-            });
-        }
-        if resolved.is_empty() {
-            return Err(Error::InvalidMetadata {
-                details: "column projection resolved to an empty set".into(),
-            });
-        }
-        Ok(Some(resolved))
+        Ok(Some(resolve_column_name_projection(
+            metadata,
+            names.as_slice(),
+        )?))
     }
 
     fn ensure_unique_indices(indices: &[usize]) -> Result<()> {
@@ -172,13 +143,28 @@ impl RowSelection {
         }
         Ok(())
     }
+}
 
-    fn insert_projection_index(
-        name: &str,
-        index: usize,
-        seen: &mut HashSet<usize>,
-        resolved: &mut Vec<usize>,
-    ) -> Result<()> {
+/// Resolves projection names against metadata with trailing-space-tolerant matching.
+///
+/// # Errors
+///
+/// Returns an error when a name is unknown, resolves to duplicate indices, or if
+/// the resolved projection is empty.
+pub fn resolve_column_name_projection(
+    metadata: &DatasetMetadata,
+    names: &[String],
+) -> Result<Vec<usize>> {
+    let lookup = build_column_name_lookup(metadata);
+    let mut resolved = Vec::with_capacity(names.len());
+    let mut seen = HashSet::with_capacity(names.len());
+
+    for name in names {
+        let Some(index) = resolve_column_index(&lookup, name) else {
+            return Err(Error::InvalidMetadata {
+                details: format!("column name '{name}' not found in metadata").into(),
+            });
+        };
         if !seen.insert(index) {
             return Err(Error::InvalidMetadata {
                 details: format!(
@@ -188,6 +174,83 @@ impl RowSelection {
             });
         }
         resolved.push(index);
-        Ok(())
+    }
+
+    if resolved.is_empty() {
+        return Err(Error::InvalidMetadata {
+            details: "column projection resolved to an empty set".into(),
+        });
+    }
+
+    Ok(resolved)
+}
+
+pub(super) fn build_column_name_lookup(metadata: &DatasetMetadata) -> HashMap<String, usize> {
+    let mut lookup: HashMap<String, usize> = HashMap::with_capacity(metadata.variables.len() * 2);
+    for variable in &metadata.variables {
+        let trimmed = variable.name.trim_end();
+        lookup
+            .entry(trimmed.to_owned())
+            .or_insert(variable.index as usize);
+        lookup
+            .entry(variable.name.clone())
+            .or_insert(variable.index as usize);
+    }
+    lookup
+}
+
+pub(super) fn resolve_column_index(lookup: &HashMap<String, usize>, name: &str) -> Option<usize> {
+    if let Some(index) = lookup.get(name) {
+        return Some(*index);
+    }
+    let normalized = name.trim_end();
+    if normalized != name {
+        return lookup.get(normalized).copied();
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_column_name_projection;
+    use crate::{
+        dataset::{DatasetMetadata, Variable, VariableKind},
+        error::Error,
+    };
+
+    fn sample_metadata() -> DatasetMetadata {
+        let mut metadata = DatasetMetadata::new(3);
+        metadata
+            .variables
+            .push(Variable::new(0, "ID".to_string(), VariableKind::Numeric, 8));
+        metadata.variables.push(Variable::new(
+            1,
+            "NAME   ".to_string(),
+            VariableKind::Character,
+            16,
+        ));
+        metadata.variables.push(Variable::new(
+            2,
+            "SCORE".to_string(),
+            VariableKind::Numeric,
+            8,
+        ));
+        metadata
+    }
+
+    #[test]
+    fn resolve_projection_accepts_trimmed_names() {
+        let metadata = sample_metadata();
+        let names = vec!["NAME".to_string(), "SCORE".to_string()];
+        let resolved = resolve_column_name_projection(&metadata, &names).unwrap();
+        assert_eq!(resolved, vec![1, 2]);
+    }
+
+    #[test]
+    fn resolve_projection_rejects_duplicate_names() {
+        let metadata = sample_metadata();
+        let names = vec!["NAME".to_string(), "NAME   ".to_string()];
+        let err = resolve_column_name_projection(&metadata, &names).unwrap_err();
+        assert!(matches!(err, Error::InvalidMetadata { .. }));
     }
 }

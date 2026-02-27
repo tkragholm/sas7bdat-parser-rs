@@ -1,5 +1,5 @@
 use super::{
-    decode::{decode_value_inner, is_blank, numeric_bits, numeric_bits_is_missing},
+    decode::{DecodePolicy, decode_value_inner, is_blank, numeric_bits, numeric_bits_is_missing},
     runtime_column::RuntimeColumn,
 };
 use crate::{
@@ -20,6 +20,7 @@ pub struct StreamingRow<'data, 'meta> {
     pub(crate) encoding: &'static Encoding,
     pub(crate) endianness: Endianness,
     pub(crate) columns_fit_row: bool,
+    pub(crate) decode_policy: DecodePolicy,
 }
 
 /// Lightweight accessor for a single column within a streaming row.
@@ -28,6 +29,7 @@ pub struct StreamingCell<'data, 'meta> {
     slice: &'data [u8],
     encoding: &'static Encoding,
     endianness: Endianness,
+    decode_policy: DecodePolicy,
 }
 
 impl<'data, 'meta> StreamingRow<'data, 'meta> {
@@ -37,17 +39,10 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
         columns: &'meta [RuntimeColumn],
         encoding: &'static Encoding,
         endianness: Endianness,
+        columns_fit_row: bool,
+        decode_policy: DecodePolicy,
     ) -> Self {
         let row_len = data.len();
-        let mut columns_fit_row = true;
-        let mut idx = 0;
-        while idx < columns.len() {
-            if columns[idx].end > row_len {
-                columns_fit_row = false;
-                break;
-            }
-            idx += 1;
-        }
         Self {
             data,
             columns,
@@ -55,6 +50,7 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
             encoding,
             endianness,
             columns_fit_row,
+            decode_policy,
         }
     }
 
@@ -106,6 +102,7 @@ impl<'data, 'meta> StreamingRow<'data, 'meta> {
             slice: &self.data[column.offset..column.end],
             encoding: self.encoding,
             endianness: self.endianness,
+            decode_policy: self.decode_policy,
         })
     }
 
@@ -188,6 +185,7 @@ impl<'data> StreamingCell<'data, '_> {
             self.slice,
             self.encoding,
             self.endianness,
+            self.decode_policy,
         ))
     }
 }
@@ -225,6 +223,7 @@ impl<'data, 'meta> Iterator for StreamingRowIter<'_, 'data, 'meta> {
             slice: &self.row.data[column.offset..column.end],
             encoding: self.row.encoding,
             endianness: self.row.endianness,
+            decode_policy: self.row.decode_policy,
         }))
     }
 }

@@ -8,9 +8,18 @@ pub mod reader;
 pub mod sinks;
 pub use crate::error::{Error, Result};
 pub use cell::{CellValue, MissingValue};
-pub use parser::{MetadataIoMode, MetadataReadOptions};
+pub use parser::{
+    ColumnarBatchMode, DecodePolicy, MetadataIoMode, MetadataReadOptions, MojibakeFixPolicy,
+    ParallelScanConfig, RawRowBatch, RawScanStats, StringTrimPolicy, TemporalDecodePolicy,
+    scan_file_projected_rows_with_decode_policy,
+    scan_file_projected_rows_with_decode_policy_unordered, scan_file_raw_rows,
+    scan_file_raw_rows_unordered, scan_file_raw_rows_unordered_batched_with_stats,
+    scan_file_raw_rows_unordered_with_stats, scan_file_rows_with_decode_policy,
+    scan_file_rows_with_decode_policy_unordered,
+};
 pub use reader::{
-    Row, RowIter, RowLookup, RowSelection, RowValue, RowView, RowViewIter, SasReader,
+    CatalogScanPolicy, Row, RowIter, RowLookup, RowSelection, RowValue, RowView, RowViewIter,
+    SasReader,
 };
 #[cfg(feature = "csv")]
 pub use sinks::CsvSink;

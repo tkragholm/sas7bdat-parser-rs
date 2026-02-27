@@ -1,11 +1,21 @@
 use crate::error::{Error, Result};
 use parquet::errors::ParquetError;
+use std::sync::OnceLock;
 
 pub(super) struct StreamNumericCtx<'a, T> {
     pub def_levels: &'a mut Vec<i16>,
     pub def_bitmap: &'a mut Vec<u8>,
     pub values: &'a mut Vec<T>,
     pub chunk: usize,
+}
+
+fn numeric_stream_legacy_bitmap_enabled() -> bool {
+    static LEGACY: OnceLock<bool> = OnceLock::new();
+    *LEGACY.get_or_init(|| {
+        std::env::var("SAS7BDAT_STREAM_NUMERIC_BITMAP")
+            .map(|value| !value.eq_ignore_ascii_case("onepass"))
+            .unwrap_or(true)
+    })
 }
 
 #[inline]
@@ -49,21 +59,38 @@ where
 {
     let total = total_len;
     let mut processed = 0;
+    let legacy_bitmap = numeric_stream_legacy_bitmap_enabled();
     while processed < total {
         let take = (total - processed).min(ctx.chunk);
-        prepare_def_bitmap(ctx.def_bitmap, take);
-        ctx.values.clear();
-        ctx.values.reserve(take);
-        for (idx, maybe_bits) in iter_provider(processed, take).enumerate() {
-            if let Some(bits) = maybe_bits {
-                let byte = idx >> 3;
-                let bit = idx & 7;
-                ctx.def_bitmap[byte] |= 1 << bit;
-                let value = map_value(bits)?;
-                ctx.values.push(value);
+        if legacy_bitmap {
+            prepare_def_bitmap(ctx.def_bitmap, take);
+            ctx.values.clear();
+            ctx.values.reserve(take);
+            for (idx, maybe_bits) in iter_provider(processed, take).enumerate() {
+                if let Some(bits) = maybe_bits {
+                    let byte = idx >> 3;
+                    let bit = idx & 7;
+                    ctx.def_bitmap[byte] |= 1 << bit;
+                    let value = map_value(bits)?;
+                    ctx.values.push(value);
+                }
+            }
+            expand_bitmap_to_def_levels(ctx.def_levels, ctx.def_bitmap, take);
+        } else {
+            ctx.def_levels.clear();
+            ctx.def_levels.reserve(take);
+            ctx.values.clear();
+            ctx.values.reserve(take);
+            for maybe_bits in iter_provider(processed, take) {
+                if let Some(bits) = maybe_bits {
+                    ctx.def_levels.push(1);
+                    let value = map_value(bits)?;
+                    ctx.values.push(value);
+                } else {
+                    ctx.def_levels.push(0);
+                }
             }
         }
-        expand_bitmap_to_def_levels(ctx.def_levels, ctx.def_bitmap, take);
         write_chunk(ctx.values, ctx.def_levels).map_err(Error::from)?;
         processed += take;
     }

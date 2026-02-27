@@ -21,70 +21,166 @@ pub enum NumericCell {
     Number(f64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MojibakeFixPolicy {
+    #[default]
+    Auto,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TemporalDecodePolicy {
+    #[default]
+    Yes,
+    No,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StringTrimPolicy {
+    #[default]
+    Yes,
+    No,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodePolicy {
+    pub mojibake_fix: MojibakeFixPolicy,
+    pub temporal: TemporalDecodePolicy,
+    pub trim_strings: StringTrimPolicy,
+}
+
+impl DecodePolicy {
+    pub const COMPAT: Self = Self {
+        mojibake_fix: MojibakeFixPolicy::Auto,
+        temporal: TemporalDecodePolicy::Yes,
+        trim_strings: StringTrimPolicy::Yes,
+    };
+
+    pub const FAST_SCAN: Self = Self {
+        mojibake_fix: MojibakeFixPolicy::Off,
+        temporal: TemporalDecodePolicy::No,
+        trim_strings: StringTrimPolicy::No,
+    };
+}
+
+impl Default for DecodePolicy {
+    fn default() -> Self {
+        Self::COMPAT
+    }
+}
+
 pub fn decode_value_inner<'data>(
     kind: ColumnKind,
     raw_width: u32,
     slice: &'data [u8],
     encoding: &'static Encoding,
     endianness: Endianness,
+    policy: DecodePolicy,
 ) -> CellValue<'data> {
     match kind {
-        ColumnKind::Character => CellValue::Str(decode_string(slice, encoding)),
+        ColumnKind::Character => CellValue::Str(decode_string_with_policy(slice, encoding, policy)),
         ColumnKind::Numeric(numeric_kind) => match decode_numeric_cell(slice, endianness) {
             NumericCell::Missing(missing) => CellValue::Missing(missing),
             NumericCell::Number(number) => match numeric_kind {
                 NumericKind::Double => numeric_value_from_width(number, raw_width),
-                NumericKind::Date => sas_days_to_datetime(number).map_or_else(
-                    || numeric_value_from_width(number, raw_width),
-                    CellValue::Date,
-                ),
-                NumericKind::DateTime => sas_seconds_to_datetime(number).map_or_else(
-                    || numeric_value_from_width(number, raw_width),
-                    CellValue::DateTime,
-                ),
-                NumericKind::Time => sas_seconds_to_time(number).map_or_else(
-                    || numeric_value_from_width(number, raw_width),
-                    CellValue::Time,
-                ),
+                NumericKind::Date => {
+                    if policy.temporal == TemporalDecodePolicy::Yes {
+                        sas_days_to_datetime(number).map_or_else(
+                            || numeric_value_from_width(number, raw_width),
+                            CellValue::Date,
+                        )
+                    } else {
+                        numeric_value_from_width(number, raw_width)
+                    }
+                }
+                NumericKind::DateTime => {
+                    if policy.temporal == TemporalDecodePolicy::Yes {
+                        sas_seconds_to_datetime(number).map_or_else(
+                            || numeric_value_from_width(number, raw_width),
+                            CellValue::DateTime,
+                        )
+                    } else {
+                        numeric_value_from_width(number, raw_width)
+                    }
+                }
+                NumericKind::Time => {
+                    if policy.temporal == TemporalDecodePolicy::Yes {
+                        sas_seconds_to_time(number).map_or_else(
+                            || numeric_value_from_width(number, raw_width),
+                            CellValue::Time,
+                        )
+                    } else {
+                        numeric_value_from_width(number, raw_width)
+                    }
+                }
             },
         },
     }
 }
 
 pub fn decode_string<'a>(slice: &'a [u8], encoding: &'static Encoding) -> Cow<'a, str> {
-    let trimmed = trim_trailing_space_or_nul_simd(slice);
-    if trimmed.is_empty() {
+    decode_string_with_policy(slice, encoding, DecodePolicy::COMPAT)
+}
+
+pub fn decode_string_with_policy<'a>(
+    slice: &'a [u8],
+    encoding: &'static Encoding,
+    policy: DecodePolicy,
+) -> Cow<'a, str> {
+    let text_slice = if policy.trim_strings == StringTrimPolicy::Yes {
+        trim_trailing_space_or_nul_simd(slice)
+    } else {
+        slice
+    };
+    if text_slice.is_empty() {
         return Cow::Borrowed("");
     }
 
-    if let Ok(text) = basic::from_utf8(trimmed) {
-        return maybe_fix_mojibake(Cow::Borrowed(text));
-    }
+    let decoded = basic::from_utf8(text_slice).map_or_else(
+        |_| {
+            if encoding == UTF_8 {
+                let mut owned = String::from_utf8_lossy(text_slice).into_owned();
+                if policy.trim_strings == StringTrimPolicy::Yes {
+                    let trimmed_len = owned.trim_end_matches([' ', '\u{0000}']).len();
+                    if trimmed_len != owned.len() {
+                        owned.truncate(trimmed_len);
+                    }
+                }
+                Cow::Owned(owned)
+            } else {
+                let (decoded, had_errors) = encoding.decode_without_bom_handling(text_slice);
+                let mut owned = decoded.into_owned();
+                if had_errors && owned.is_empty() {
+                    owned = String::from_utf8_lossy(text_slice).into_owned();
+                }
+                if policy.trim_strings == StringTrimPolicy::Yes {
+                    let trimmed_len = owned.trim_end_matches([' ', '\u{0000}']).len();
+                    if trimmed_len != owned.len() {
+                        owned.truncate(trimmed_len);
+                    }
+                }
+                Cow::Owned(owned)
+            }
+        },
+        Cow::Borrowed,
+    );
 
-    if encoding == UTF_8 {
-        let mut owned = String::from_utf8_lossy(trimmed).into_owned();
-        let trimmed_len = owned.trim_end_matches([' ', '\u{0000}']).len();
-        if trimmed_len != owned.len() {
-            owned.truncate(trimmed_len);
-        }
-        return maybe_fix_mojibake(Cow::Owned(owned));
+    if policy.mojibake_fix == MojibakeFixPolicy::Auto {
+        maybe_fix_mojibake(decoded)
+    } else {
+        decoded
     }
-
-    let (decoded, had_errors) = encoding.decode_without_bom_handling(trimmed);
-    let mut owned = decoded.into_owned();
-    if had_errors && owned.is_empty() {
-        owned = String::from_utf8_lossy(trimmed).into_owned();
-    }
-    let trimmed_len = owned.trim_end_matches([' ', '\u{0000}']).len();
-    if trimmed_len != owned.len() {
-        owned.truncate(trimmed_len);
-    }
-    maybe_fix_mojibake(Cow::Owned(owned))
 }
 
 fn maybe_fix_mojibake(value: Cow<'_, str>) -> Cow<'_, str> {
     let text = value.as_ref();
     if text.is_ascii() {
+        return value;
+    }
+
+    // Most non-ASCII text is valid and does not need mojibake repair.
+    // Bail out early unless common mojibake markers are present.
+    if !text.contains(['Ã', 'Â', 'â']) {
         return value;
     }
 
@@ -174,7 +270,7 @@ const fn decode_missing_from_bits(raw: u64) -> MissingValue {
     }
 }
 
-fn numeric_value_from_width<'a>(number: f64, width: u32) -> CellValue<'a> {
+pub fn numeric_value_from_width<'a>(number: f64, width: u32) -> CellValue<'a> {
     if let Some(int) = try_int_from_f64::<i64>(number) {
         if width <= 4 {
             if let Ok(value32) = i32::try_from(int) {
@@ -300,4 +396,58 @@ pub const fn sas_seconds_to_time(seconds: f64) -> Option<Duration> {
         return None;
     }
     Some(Duration::seconds_f64(seconds))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DecodePolicy, MojibakeFixPolicy, StringTrimPolicy, TemporalDecodePolicy, decode_string,
+        decode_string_with_policy, decode_value_inner,
+    };
+    use crate::{
+        cell::CellValue,
+        dataset::Endianness,
+        parser::metadata::{ColumnKind, NumericKind},
+    };
+    use encoding_rs::UTF_8;
+
+    #[test]
+    fn decode_string_compat_still_trims() {
+        let decoded = decode_string(b"abc   ", UTF_8);
+        assert_eq!(decoded.as_ref(), "abc");
+    }
+
+    #[test]
+    fn decode_string_fast_scan_preserves_trailing_spaces() {
+        let policy = DecodePolicy::FAST_SCAN;
+        let decoded = decode_string_with_policy(b"abc   ", UTF_8, policy);
+        assert_eq!(decoded.as_ref(), "abc   ");
+    }
+
+    #[test]
+    fn decode_date_respects_temporal_policy() {
+        let one_day = 1.0f64.to_le_bytes();
+        let compat = decode_value_inner(
+            ColumnKind::Numeric(NumericKind::Date),
+            8,
+            &one_day,
+            UTF_8,
+            Endianness::Little,
+            DecodePolicy::COMPAT,
+        );
+        let fast = decode_value_inner(
+            ColumnKind::Numeric(NumericKind::Date),
+            8,
+            &one_day,
+            UTF_8,
+            Endianness::Little,
+            DecodePolicy {
+                mojibake_fix: MojibakeFixPolicy::Off,
+                temporal: TemporalDecodePolicy::No,
+                trim_strings: StringTrimPolicy::No,
+            },
+        );
+        assert!(matches!(compat, CellValue::Date(_)));
+        assert!(matches!(fast, CellValue::Int64(1)));
+    }
 }

@@ -1,18 +1,15 @@
 use crate::{
     cell::CellValue,
-    error::{Error, Result},
+    error::Result,
     iter_utils::next_from_result,
-    parser::RowIterator,
+    parser::{CompiledRuntimeColumnRef, RowIterator},
 };
 use std::io::{Read, Seek};
 
 pub struct ProjectedRowIter<'a, R: Read + Seek> {
     pub(crate) inner: RowIterator<'a, R>,
-    pub(crate) selected_indices: Vec<usize>,
-    pub(crate) sorted_projection: Vec<(usize, usize)>,
+    pub(crate) compiled_columns: Vec<CompiledRuntimeColumnRef>,
     pub(crate) exhausted: bool,
-    /// Reusable staging buffer — one slot per projected column, cleared before each row.
-    pub(crate) slots: Vec<Option<CellValue<'static>>>,
 }
 
 impl<R: Read + Seek> ProjectedRowIter<'_, R> {
@@ -20,13 +17,15 @@ impl<R: Read + Seek> ProjectedRowIter<'_, R> {
     ///
     /// # Errors
     ///
-    /// Returns an error if row decoding fails or if a requested column is
-    /// missing from the row data.
+    /// Returns an error if row decoding fails.
     pub fn try_next(&mut self) -> Result<Option<Vec<CellValue<'static>>>> {
         if self.exhausted {
             return Ok(None);
         }
-        let maybe_row = match self.inner.try_next() {
+        let maybe_row = match self
+            .inner
+            .try_next_projected_compiled_columns_owned(&self.compiled_columns)
+        {
             Ok(value) => value,
             Err(err) => {
                 self.exhausted = true;
@@ -34,54 +33,7 @@ impl<R: Read + Seek> ProjectedRowIter<'_, R> {
             }
         };
         if let Some(row) = maybe_row {
-            // Clear the reusable slot buffer without reallocating.
-            for s in &mut self.slots {
-                *s = None;
-            }
-            let mut sorted_pos = 0usize;
-            let sorted_len = self.sorted_projection.len();
-            let mut filled = 0usize;
-            for (column_index, value) in row.into_iter().enumerate() {
-                if sorted_pos < sorted_len {
-                    let (target_index, result_position) = self.sorted_projection[sorted_pos];
-                    if target_index < column_index {
-                        return Err(Error::InvalidMetadata {
-                            details: format!(
-                                "projected column index {target_index} missing from row data"
-                            )
-                            .into(),
-                        });
-                    }
-                    if target_index == column_index {
-                        self.slots[result_position] = Some(value.into_owned());
-                        sorted_pos += 1;
-                        filled += 1;
-                        if filled == sorted_len {
-                            break;
-                        }
-                        continue;
-                    }
-                }
-                if filled == sorted_len {
-                    break;
-                }
-            }
-            if filled != sorted_len {
-                return Err(Error::InvalidMetadata {
-                    details: "row did not contain all projected columns".into(),
-                });
-            }
-            let mut projected = Vec::with_capacity(self.selected_indices.len());
-            for slot in &mut self.slots {
-                if let Some(value) = slot.take() {
-                    projected.push(value);
-                } else {
-                    return Err(Error::InvalidMetadata {
-                        details: "projected column resolved to empty slot".into(),
-                    });
-                }
-            }
-            Ok(Some(projected))
+            Ok(Some(row))
         } else {
             self.exhausted = true;
             Ok(None)

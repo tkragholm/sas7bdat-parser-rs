@@ -285,26 +285,7 @@ impl ColumnPlan {
             CellValue::Missing(_) => Ok(None),
             CellValue::Float(v) => Ok(Some(*v)),
             CellValue::Int32(v) => Ok(Some(f64::from(*v))),
-            CellValue::Int64(v) => {
-                const MAX_SAFE: i64 = 9_007_199_254_740_992; // 2^53
-                const MIN_SAFE: i64 = -9_007_199_254_740_992;
-                if *v < MIN_SAFE || *v > MAX_SAFE {
-                    return Err(Error::InvalidMetadata {
-                        details: Cow::Owned(format!(
-                            "column '{}' int64 value {} cannot be represented exactly as f64",
-                            self.name, v
-                        )),
-                    });
-                }
-                let text = v.to_string();
-                let parsed = text.parse::<f64>().map_err(|_| Error::InvalidMetadata {
-                    details: Cow::Owned(format!(
-                        "column '{}' int64 value '{text}' cannot be parsed as f64",
-                        self.name
-                    )),
-                })?;
-                Ok(Some(parsed))
-            }
+            CellValue::Int64(v) => Ok(Some(coerce_i64_to_f64_exact(*v, &self.name)?)),
             CellValue::DateTime(dt) => Ok(Some(datetime_to_sas_seconds(dt))),
             CellValue::Date(dt) => Ok(Some(datetime_to_sas_days(dt))),
             CellValue::Time(duration) => Ok(Some(time_to_sas_seconds(duration))),
@@ -539,4 +520,44 @@ fn datetime_to_sas_days(datetime: &OffsetDateTime) -> f64 {
 
 const fn time_to_sas_seconds(duration: &Duration) -> f64 {
     duration.as_seconds_f64()
+}
+
+fn coerce_i64_to_f64_exact(value: i64, column_name: &str) -> Result<f64> {
+    const MAX_SAFE: i64 = 9_007_199_254_740_992; // 2^53
+    const MIN_SAFE: i64 = -9_007_199_254_740_992;
+    if !(MIN_SAFE..=MAX_SAFE).contains(&value) {
+        return Err(Error::InvalidMetadata {
+            details: Cow::Owned(format!(
+                "column '{column_name}' int64 value {value} cannot be represented exactly as f64"
+            )),
+        });
+    }
+    #[allow(clippy::cast_precision_loss)]
+    Ok(value as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::coerce_i64_to_f64_exact;
+    use crate::error::Error;
+
+    #[test]
+    fn coerce_i64_to_f64_exact_accepts_safe_bounds() {
+        let pos = coerce_i64_to_f64_exact(9_007_199_254_740_992, "col").unwrap();
+        assert_eq!(pos.to_bits(), 9_007_199_254_740_992.0_f64.to_bits());
+        let neg = coerce_i64_to_f64_exact(-9_007_199_254_740_992, "col").unwrap();
+        assert_eq!(neg.to_bits(), (-9_007_199_254_740_992.0_f64).to_bits());
+    }
+
+    #[test]
+    fn coerce_i64_to_f64_exact_accepts_zero() {
+        let zero = coerce_i64_to_f64_exact(0, "col").unwrap();
+        assert_eq!(zero.to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn coerce_i64_to_f64_exact_rejects_out_of_range_values() {
+        let err = coerce_i64_to_f64_exact(9_007_199_254_740_993, "col").unwrap_err();
+        assert!(matches!(err, Error::InvalidMetadata { .. }));
+    }
 }

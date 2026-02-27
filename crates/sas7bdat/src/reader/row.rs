@@ -18,29 +18,13 @@ pub struct RowLookup {
 impl RowLookup {
     #[must_use]
     pub fn from_metadata(metadata: &DatasetMetadata) -> Self {
-        let mut name_to_index = HashMap::with_capacity(metadata.variables.len() * 2);
-        for variable in &metadata.variables {
-            let trimmed = variable.name.trim_end();
-            name_to_index
-                .entry(variable.name.clone())
-                .or_insert(variable.index as usize);
-            name_to_index
-                .entry(trimmed.to_owned())
-                .or_insert(variable.index as usize);
-        }
+        let name_to_index = super::selection::build_column_name_lookup(metadata);
         Self { name_to_index }
     }
 
     #[must_use]
     pub fn index(&self, name: &str) -> Option<usize> {
-        if let Some(index) = self.name_to_index.get(name) {
-            return Some(*index);
-        }
-        let trimmed = name.trim_end();
-        if trimmed != name {
-            return self.name_to_index.get(trimmed).copied();
-        }
-        None
+        super::selection::resolve_column_index(&self.name_to_index, name)
     }
 }
 
@@ -432,11 +416,8 @@ impl<'a, R: Read + Seek> RowIter<'a, R> {
     ///
     /// Returns an error if row decoding fails.
     pub fn try_next(&mut self) -> Result<Option<Row>> {
-        match self.inner.try_next()? {
-            Some(row) => Ok(Some(Row::new(
-                row.into_iter().map(CellValue::into_owned).collect(),
-                Arc::clone(&self.lookup),
-            ))),
+        match self.inner.try_next_owned()? {
+            Some(row) => Ok(Some(Row::new(row, Arc::clone(&self.lookup)))),
             None => Ok(None),
         }
     }

@@ -10,6 +10,7 @@ use crate::{
     error::{Error, Result},
     parser::metadata::{ColumnKind, NumericKind},
 };
+use bytes::Bytes;
 use encoding_rs::{Encoding, UTF_8};
 use hashbrown::{HashMap, hash_map::RawEntryMut};
 use rustc_hash::FxHasher;
@@ -27,10 +28,42 @@ pub const COLUMNAR_INLINE_ROWS: usize = 32;
 pub const STAGED_UTF8_DICTIONARY_LIMIT: usize = 2_048;
 const SECONDS_PER_DAY_I64: i64 = 86_400;
 
-pub struct ColumnarBatch<'rows> {
+pub enum RowSegment {
+    Paged {
+        page: Bytes,
+        offset: usize,
+        len: usize,
+    },
+    Owned(Bytes),
+}
+
+impl RowSegment {
+    #[must_use]
+    pub(super) const fn paged(page: Bytes, offset: usize, len: usize) -> Self {
+        Self::Paged { page, offset, len }
+    }
+
+    #[must_use]
+    pub(super) const fn owned(bytes: Bytes) -> Self {
+        Self::Owned(bytes)
+    }
+
+    #[must_use]
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Paged { page, offset, len } => {
+                let end = offset.saturating_add(*len);
+                &page[*offset..end]
+            }
+            Self::Owned(bytes) => bytes.as_ref(),
+        }
+    }
+}
+
+pub struct ColumnarBatch<'meta> {
     pub row_count: usize,
-    row_slices: SmallVec<[&'rows [u8]; COLUMNAR_INLINE_ROWS]>,
-    columns: &'rows [RuntimeColumnRef],
+    rows: SmallVec<[RowSegment; COLUMNAR_INLINE_ROWS]>,
+    columns: &'meta [RuntimeColumnRef],
     endianness: Endianness,
     encoding: &'static Encoding,
     typed_numeric: RefCell<Vec<Option<TypedNumericColumn>>>,
@@ -54,7 +87,7 @@ pub struct MaterializedUtf8Column {
     row_count: usize,
     def_levels: Vec<i16>,
     values: Vec<StagedUtf8Value>,
-    dictionary: Vec<Vec<u8>>,
+    dictionary: Vec<Bytes>,
 }
 
 impl MaterializedUtf8Column {
@@ -62,7 +95,7 @@ impl MaterializedUtf8Column {
         row_count: usize,
         def_levels: Vec<i16>,
         values: Vec<StagedUtf8Value>,
-        dictionary: Vec<Vec<u8>>,
+        dictionary: Vec<Bytes>,
     ) -> Self {
         Self {
             row_count,
@@ -93,7 +126,7 @@ impl MaterializedUtf8Column {
     }
 
     #[must_use]
-    pub fn dictionary(&self) -> &[Vec<u8>] {
+    pub fn dictionary(&self) -> &[Bytes] {
         &self.dictionary
     }
 
@@ -109,23 +142,23 @@ pub enum StagedUtf8Value {
     Inline(Vec<u8>),
 }
 
-impl<'rows> ColumnarBatch<'rows> {
+impl<'meta> ColumnarBatch<'meta> {
     #[must_use]
     pub(crate) fn new(
-        row_slices: SmallVec<[&'rows [u8]; COLUMNAR_INLINE_ROWS]>,
-        columns: &'rows [RuntimeColumnRef],
+        rows: SmallVec<[RowSegment; COLUMNAR_INLINE_ROWS]>,
+        columns: &'meta [RuntimeColumnRef],
         endianness: Endianness,
         encoding: &'static Encoding,
         stage_utf8: bool,
     ) -> Self {
-        let row_count = row_slices.len();
+        let row_count = rows.len();
         let mut typed_numeric = Vec::with_capacity(columns.len());
         typed_numeric.resize_with(columns.len(), || None);
         let mut utf8_staged = Vec::with_capacity(columns.len());
         utf8_staged.resize_with(columns.len(), || None);
         Self {
             row_count,
-            row_slices,
+            rows,
             columns,
             endianness,
             encoding,
@@ -137,11 +170,11 @@ impl<'rows> ColumnarBatch<'rows> {
 
     pub fn truncate_front(&mut self, rows: usize) {
         if rows >= self.row_count {
-            self.row_slices.clear();
+            self.rows.clear();
             self.row_count = 0;
             return;
         }
-        self.row_slices.drain(0..rows);
+        self.rows.drain(0..rows);
         self.row_count -= rows;
     }
 
@@ -149,7 +182,7 @@ impl<'rows> ColumnarBatch<'rows> {
         if rows >= self.row_count {
             return;
         }
-        self.row_slices.truncate(rows);
+        self.rows.truncate(rows);
         self.row_count = rows;
     }
 
@@ -159,11 +192,11 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 
     #[must_use]
-    pub fn column(&self, index: usize) -> Option<ColumnarColumn<'_, 'rows>> {
-        let column = self.columns.get(index)?;
+    pub fn column(&self, index: usize) -> Option<ColumnarColumn<'_>> {
+        let column = *self.columns.get(index)?;
         Some(ColumnarColumn {
             column,
-            rows: self.row_slices.as_slice(),
+            rows: self.rows.as_slice(),
             endianness: self.endianness,
             encoding: self.encoding,
         })
@@ -265,11 +298,11 @@ impl<'rows> ColumnarBatch<'rows> {
         }
     }
 
-    fn materialize_f64(column: &ColumnarColumn<'_, '_>) -> MaterializedColumn<f64> {
+    fn materialize_f64(column: &ColumnarColumn<'_>) -> MaterializedColumn<f64> {
         Self::materialize_numeric_mapped(column, |value| value)
     }
 
-    fn materialize_date(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i32>> {
+    fn materialize_date(column: &ColumnarColumn<'_>) -> Result<MaterializedColumn<i32>> {
         Self::materialize_numeric_result(column, |days| {
             let datetime = sas_days_to_datetime(days).ok_or_else(|| Error::InvalidMetadata {
                 details: Cow::Owned(format!(
@@ -289,7 +322,7 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 
     fn materialize_numeric_mapped<T>(
-        column: &ColumnarColumn<'_, '_>,
+        column: &ColumnarColumn<'_>,
         mut map: impl FnMut(f64) -> T,
     ) -> MaterializedColumn<T> {
         Self::materialize_numeric_result(column, |value| Ok(map(value)))
@@ -297,7 +330,7 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 
     fn materialize_numeric_result<T>(
-        column: &ColumnarColumn<'_, '_>,
+        column: &ColumnarColumn<'_>,
         mut map: impl FnMut(f64) -> Result<T>,
     ) -> Result<MaterializedColumn<T>> {
         let mut values = Vec::with_capacity(column.len());
@@ -318,13 +351,13 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 
     fn materialize_i64_mapped(
-        column: &ColumnarColumn<'_, '_>,
+        column: &ColumnarColumn<'_>,
         map: impl FnMut(f64) -> Result<i64>,
     ) -> Result<MaterializedColumn<i64>> {
         Self::materialize_numeric_result(column, map)
     }
 
-    fn materialize_datetime(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {
+    fn materialize_datetime(column: &ColumnarColumn<'_>) -> Result<MaterializedColumn<i64>> {
         Self::materialize_i64_mapped(column, |seconds| {
             let datetime =
                 sas_seconds_to_datetime(seconds).ok_or_else(|| Error::InvalidMetadata {
@@ -343,7 +376,7 @@ impl<'rows> ColumnarBatch<'rows> {
         })
     }
 
-    fn materialize_time(column: &ColumnarColumn<'_, '_>) -> Result<MaterializedColumn<i64>> {
+    fn materialize_time(column: &ColumnarColumn<'_>) -> Result<MaterializedColumn<i64>> {
         Self::materialize_i64_mapped(column, |seconds| {
             let duration = sas_seconds_to_time(seconds).ok_or_else(|| Error::InvalidMetadata {
                 details: Cow::Owned(format!(
@@ -367,7 +400,7 @@ impl<'rows> ColumnarBatch<'rows> {
         let mut def_levels = Vec::with_capacity(row_count);
         let mut values = Vec::with_capacity(row_count);
         let mut dictionary = Vec::with_capacity(STAGED_UTF8_DICTIONARY_LIMIT.min(row_count));
-        let mut dictionary_lookup: HashMap<Vec<u8>, u32, BuildHasherDefault<FxHasher>> =
+        let mut dictionary_lookup: HashMap<Bytes, u32, BuildHasherDefault<FxHasher>> =
             HashMap::with_capacity_and_hasher(
                 STAGED_UTF8_DICTIONARY_LIMIT.min(row_count),
                 BuildHasherDefault::<FxHasher>::default(),
@@ -443,12 +476,12 @@ impl<'rows> ColumnarBatch<'rows> {
                             values.push(StagedUtf8Value::Inline(bytes.into_owned()));
                             continue;
                         };
-                        let owned = match bytes {
-                            Cow::Borrowed(borrowed) => borrowed.to_vec(),
-                            Cow::Owned(owned) => owned,
+                        let key = match bytes {
+                            Cow::Borrowed(borrowed) => Bytes::copy_from_slice(borrowed),
+                            Cow::Owned(owned) => Bytes::from(owned),
                         };
-                        vacant.insert(owned.clone(), dict_index);
-                        dictionary.push(owned);
+                        vacant.insert(key.clone(), dict_index);
+                        dictionary.push(key);
                         values.push(StagedUtf8Value::Dictionary(dict_index));
                     }
                 }
@@ -461,14 +494,14 @@ impl<'rows> ColumnarBatch<'rows> {
     }
 }
 
-pub struct ColumnarColumn<'batch, 'rows> {
-    column: &'batch RuntimeColumnRef,
-    rows: &'batch [&'rows [u8]],
+pub struct ColumnarColumn<'batch> {
+    column: RuntimeColumnRef,
+    rows: &'batch [RowSegment],
     endianness: Endianness,
     encoding: &'static Encoding,
 }
 
-impl ColumnarColumn<'_, '_> {
+impl ColumnarColumn<'_> {
     #[must_use]
     pub const fn index(&self) -> u32 {
         self.column.index
@@ -480,7 +513,7 @@ impl ColumnarColumn<'_, '_> {
     }
 
     fn row_slice(&self, row_index: usize) -> Option<&[u8]> {
-        self.rows.get(row_index).copied()
+        self.rows.get(row_index).map(RowSegment::as_slice)
     }
 
     #[inline]

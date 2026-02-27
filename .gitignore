@@ -18,6 +18,8 @@ data/*.parquet
 fixtures/raw_data/ahs2019_metro/
 fixtures/raw_data/ahs2019_national/
 
+.quibble/
+
 # Python environments & caches
 .venv/
 venv/
@@ -88,8 +90,10 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
-# pkgdown site
-docs/
+# pkgdown site and generated docs (keep benchmark baselines tracked)
+docs/*
+!docs/benchmarks/
+!docs/benchmarks/**
 
 # translation temp files
 po/*~

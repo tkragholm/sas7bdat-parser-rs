@@ -39,10 +39,9 @@ where
     L: Deref<Target = DatasetLayout>,
 {
     pub(crate) fn fetch_next_page(&mut self) -> Result<()> {
-        let page_count = self.layout.header.page_count;
         let row_length = self.row_length;
 
-        while self.next_page_index < page_count {
+        while self.next_page_index < self.page_range_end {
             let (page_index, page_type, page_row_count) = self.read_page_header()?;
             if (page_type & SAS_PAGE_TYPE_COMP) != 0 {
                 continue;
