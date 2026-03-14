@@ -1421,6 +1421,9 @@ name = "sas7bdat"
 version = "0.2.0"
 dependencies = [
  "ahash",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-schema",
  "byteorder",
  "bytes",
  "chrono",

@@ -34,6 +34,9 @@ thiserror = "2"
 time = { version = "0.3", features = ["std", "formatting", "parsing", "macros"] }
 walkdir = "2"
 zip = { version = "7", default-features = false, features = ["deflate"] }
+arrow-array = "57"
+arrow-buffer = "57"
+arrow-schema = "57"
 
 [profile.release]
 codegen-units = 1

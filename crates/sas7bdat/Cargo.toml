@@ -40,6 +40,9 @@ smallvec = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 walkdir = { workspace = true }
+arrow-array = { workspace = true, optional = true }
+arrow-buffer = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
 csv = { workspace = true }
@@ -86,3 +89,4 @@ csv = ["dep:csv"]
 fast-string = []
 parquet = ["dep:parquet"]
 time = []
+arrow = ["dep:arrow-array", "dep:arrow-buffer", "dep:arrow-schema"]

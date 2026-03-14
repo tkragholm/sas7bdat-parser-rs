@@ -10,4 +10,4 @@ name = "sas7bdat-rustbench"
 path = "src/main.rs"
 
 [dependencies]
-sas7bdat = { workspace = true }
+sas7bdat = { workspace = true, features = ["arrow"] }
