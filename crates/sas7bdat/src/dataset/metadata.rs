@@ -1,6 +1,28 @@
 use super::{labels::LabelSet, variables::Variable};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use time::OffsetDateTime;
+
+/// Simplified column metadata for JSON export.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnInfoJson {
+    pub index: u32,
+    pub name: String,
+    pub label: Option<String>,
+    pub kind: String,
+    pub format: Option<String>,
+    pub width: usize,
+}
+
+/// Dataset metadata for JSON export.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableInfoJson {
+    pub table_name: Option<String>,
+    pub file_label: Option<String>,
+    pub row_count: u64,
+    pub column_count: u32,
+    pub columns: Vec<ColumnInfoJson>,
+}
 
 /// High-level metadata for a SAS dataset.
 #[derive(Debug, Clone)]

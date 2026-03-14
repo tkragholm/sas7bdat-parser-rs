@@ -1,5 +1,5 @@
 use crate::AnyError;
-use sas7bdat::{SasReader, dataset::VariableKind};
+use sas7bdat::{ColumnInfoJson, SasReader, TableInfoJson, dataset::VariableKind};
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -12,21 +12,6 @@ pub fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
     let sas = SasReader::open(&args.input)?;
     let meta = sas.metadata().clone();
     if args.json {
-        #[derive(serde::Serialize)]
-        struct ColumnInfoJson {
-            index: u32,
-            name: String,
-            label: Option<String>,
-            kind: &'static str,
-            format: Option<String>,
-            width: usize,
-        }
-        #[derive(serde::Serialize)]
-        struct InspectJson {
-            row_count: u64,
-            column_count: u32,
-            columns: Vec<ColumnInfoJson>,
-        }
         let columns = meta
             .variables
             .iter()
@@ -35,14 +20,16 @@ pub fn run_inspect(args: &InspectArgs) -> Result<(), AnyError> {
                 name: v.name.clone(),
                 label: v.label.clone(),
                 kind: match v.kind {
-                    VariableKind::Numeric => "numeric",
-                    VariableKind::Character => "character",
+                    VariableKind::Numeric => "numeric".to_string(),
+                    VariableKind::Character => "character".to_string(),
                 },
                 format: v.format.as_ref().map(|f| f.name.clone()),
                 width: v.storage_width,
             })
             .collect();
-        let payload = InspectJson {
+        let payload = TableInfoJson {
+            table_name: meta.table_name.clone(),
+            file_label: meta.file_label.clone(),
             row_count: meta.row_count,
             column_count: meta.column_count,
             columns,

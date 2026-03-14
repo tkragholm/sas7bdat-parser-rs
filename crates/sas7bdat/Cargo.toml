@@ -77,6 +77,11 @@ name = "sas_to_parquet"
 path = "examples/sas_to_parquet.rs"
 required-features = ["parquet"]
 
+[[example]]
+name = "read_parquet_metadata"
+path = "examples/read_parquet_metadata.rs"
+required-features = ["parquet"]
+
 [lints.clippy]
 pedantic = "warn"
 nursery = "warn"

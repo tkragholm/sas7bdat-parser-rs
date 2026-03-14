@@ -151,6 +151,10 @@ pub struct OutputOptions {
     )]
     pub(crate) columnar_batch_mode: ColumnarBatchModeArg,
 
+    /// Save dataset and column metadata in Parquet key_value_metadata.
+    #[arg(long, help_heading = "Parquet")]
+    pub(crate) parquet_metadata: bool,
+
     /// Flatten outputs into a single directory instead of mirroring input tree.
     #[arg(long, help_heading = "Output")]
     pub(crate) flatten: bool,

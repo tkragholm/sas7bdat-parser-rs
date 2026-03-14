@@ -4,8 +4,9 @@ use crate::{
 };
 use rayon::prelude::*;
 use sas7bdat::{
-    CellValue, ColumnarBatchMode, ColumnarSink, CsvSink, ParquetSink, RowSink, SasReader,
-    dataset::DatasetMetadata,
+    CellValue, ColumnInfoJson, ColumnarBatchMode, ColumnarSink, CsvSink, ParquetSink, RowSink,
+    SasReader, TableInfoJson,
+    dataset::{DatasetMetadata, VariableKind},
     logger::{log_error, log_warn, set_log_file, set_log_prefix},
     parser::{ColumnInfo, DatasetLayout},
 };
@@ -160,6 +161,36 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
                 sink = sink.with_target_row_group_bytes(bytes);
             }
             sink = sink.with_streaming_columnar(true);
+            if args.output.parquet_metadata {
+                let columns = meta_filtered
+                    .variables
+                    .iter()
+                    .map(|v| ColumnInfoJson {
+                        index: v.index,
+                        name: v.name.clone(),
+                        label: v.label.clone(),
+                        kind: match v.kind {
+                            VariableKind::Numeric => "numeric".to_string(),
+                            VariableKind::Character => "character".to_string(),
+                        },
+                        format: v.format.as_ref().map(|f| f.name.clone()),
+                        width: v.storage_width,
+                    })
+                    .collect();
+                let payload = TableInfoJson {
+                    table_name: meta_filtered.table_name.clone(),
+                    file_label: meta_filtered.file_label.clone(),
+                    row_count: meta_filtered.row_count,
+                    column_count: meta_filtered.column_count,
+                    columns,
+                };
+                if let Ok(json) = serde_json::to_string(&payload) {
+                    sink = sink.with_key_value_metadata(vec![parquet::file::metadata::KeyValue {
+                        key: "sas7bdat.metadata".to_string(),
+                        value: Some(json),
+                    }]);
+                }
+            }
             let batch_rows = columnar_row_group_rows.unwrap_or(columnar_batch_rows);
             let col_opts = ColumnarOptions {
                 selection: &selection,
@@ -203,6 +234,7 @@ fn convert_one(input: &Path, output: &Path, args: &ConvertArgs) -> Result<(), An
     }
 
     println!("{} -> {}", input.display(), output.display());
+
     Ok(())
 }
 

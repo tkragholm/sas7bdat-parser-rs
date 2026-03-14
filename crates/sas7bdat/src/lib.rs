@@ -6,6 +6,7 @@ pub mod logger;
 pub mod parser;
 pub mod reader;
 pub mod sinks;
+pub use crate::dataset::{ColumnInfoJson, TableInfoJson};
 pub use crate::error::{Error, Result};
 pub use cell::{CellValue, MissingValue};
 pub use parser::{

@@ -28,6 +28,7 @@ pub struct ParquetSink<W: Write + Send> {
     target_row_group_bytes: usize,
     streaming_columnar: bool,
     lenient_dates: bool,
+    key_value_metadata: Option<Vec<parquet::file::metadata::KeyValue>>,
 }
 
 impl<W: Write + Send> ParquetSink<W> {
@@ -44,7 +45,18 @@ impl<W: Write + Send> ParquetSink<W> {
             target_row_group_bytes: DEFAULT_TARGET_ROW_GROUP_BYTES,
             streaming_columnar: false,
             lenient_dates: true,
+            key_value_metadata: None,
         }
+    }
+
+    /// Sets the key-value metadata to be written to the Parquet file.
+    #[must_use]
+    pub fn with_key_value_metadata(
+        mut self,
+        metadata: Vec<parquet::file::metadata::KeyValue>,
+    ) -> Self {
+        self.key_value_metadata = Some(metadata);
+        self
     }
 
     /// Configures the number of rows buffered per Parquet row group.
@@ -172,7 +184,11 @@ impl<W: Write + Send> RowSink for ParquetSink<W> {
             .build()?;
         let schema = Arc::new(schema);
 
-        let props = WriterProperties::builder().build();
+        let mut props_builder = WriterProperties::builder();
+        if let Some(kv) = self.key_value_metadata.take() {
+            props_builder = props_builder.set_key_value_metadata(Some(kv));
+        }
+        let props = props_builder.build();
         let output = self.output.take().ok_or_else(|| Error::InvalidMetadata {
             details: Cow::from("Parquet sink output already taken"),
         })?;
