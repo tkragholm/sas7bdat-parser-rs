@@ -78,3 +78,20 @@ pub struct OwnedRow {
     pub row_index: u64,
     pub cells: Vec<OwnedCellValue>,
 }
+
+impl<'a> CellValue<'a> {
+    #[must_use]
+    pub fn to_owned_value(&self) -> OwnedCellValue {
+        match self {
+            Self::Null => OwnedCellValue::Null,
+            Self::Int32(value) => OwnedCellValue::Int32(*value),
+            Self::Int64(value) => OwnedCellValue::Int64(*value),
+            Self::Float64(value) => OwnedCellValue::Float64(*value),
+            Self::Str(value) => OwnedCellValue::String((*value).to_owned()),
+            Self::Bytes(value) => OwnedCellValue::Bytes((*value).to_vec()),
+            Self::Date(value) => OwnedCellValue::Date(*value),
+            Self::DateTime(value) => OwnedCellValue::DateTime(*value),
+            Self::Time(value) => OwnedCellValue::Time(*value),
+        }
+    }
+}

@@ -4,6 +4,7 @@ use crate::{
     layout::parse_layout,
     metadata::{ColumnMeta, DatasetMetadata},
     options::OpenOptions,
+    pages::compile_page_descriptors,
     probe::probe_header,
     projection::ProjectionBuilder,
     scan::ScanBuilder,
@@ -52,6 +53,13 @@ impl Dataset {
             })
         })?;
         let (layout, metadata) = parse_layout(&mut file, header, metadata)?;
+        file.rewind().map_err(|err| {
+            Error::Io(crate::error::IoError {
+                path: Some(path.to_path_buf()),
+                message: err.to_string(),
+            })
+        })?;
+        let descriptors = compile_page_descriptors(&mut file, &layout)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Path(path.to_path_buf()),
@@ -59,7 +67,7 @@ impl Dataset {
             }),
             metadata: Arc::new(metadata),
             layout: Arc::new(layout),
-            descriptors: Arc::new(PageDescriptorTable),
+            descriptors: Arc::new(descriptors),
         })
     }
 
@@ -69,6 +77,8 @@ impl Dataset {
         let (header, metadata) = probe_header(&mut cursor)?;
         cursor.set_position(0);
         let (layout, metadata) = parse_layout(&mut cursor, header, metadata)?;
+        cursor.set_position(0);
+        let descriptors = compile_page_descriptors(&mut cursor, &layout)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Bytes(Arc::clone(&bytes)),
@@ -76,7 +86,7 @@ impl Dataset {
             }),
             metadata: Arc::new(metadata),
             layout: Arc::new(layout),
-            descriptors: Arc::new(PageDescriptorTable),
+            descriptors: Arc::new(descriptors),
         })
     }
 

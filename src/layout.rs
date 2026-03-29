@@ -245,6 +245,9 @@ pub(crate) fn parse_layout<R: Read + Seek>(
         LayoutPlan {
             columns,
             header,
+            row_len: row_info.row_length,
+            total_rows: row_info.total_rows,
+            compression,
             rows_per_page: row_info.rows_per_page,
         },
         metadata,

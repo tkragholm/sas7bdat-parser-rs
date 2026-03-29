@@ -1,0 +1,735 @@
+use crate::{
+    error::{CorruptionError, Error, Result},
+    internal::{LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass, RowSpan},
+};
+use std::io::{Read, Seek, SeekFrom};
+
+const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
+const SAS_PAGE_TYPE_META: u16 = 0x0000;
+const SAS_PAGE_TYPE_DATA: u16 = 0x0100;
+const SAS_PAGE_TYPE_MIX: u16 = 0x0200;
+const SAS_PAGE_TYPE_META2: u16 = 0x4000;
+const SAS_PAGE_TYPE_AMD: u16 = 0x0400;
+const SAS_PAGE_TYPE_COMP: u16 = 0x9000;
+const SAS_PAGE_TYPE_COMP_TABLE: u16 = 0x8000;
+const SUBHEADER_POINTER_OFFSET: usize = 8;
+const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
+const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
+const SIG_COLUMN_TEXT: u32 = 0xFFFF_FFFD;
+const SIG_COLUMN_NAME: u32 = 0xFFFF_FFFF;
+const SIG_COLUMN_ATTRS: u32 = 0xFFFF_FFFC;
+const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
+const SIG_COUNTS: u32 = 0xFFFF_FC00;
+const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageKind {
+    Meta,
+    Data,
+    Mix,
+    Amd,
+    Meta2,
+    Comp,
+    CompTable,
+    Unknown,
+}
+
+pub(crate) fn compile_page_descriptors<R: Read + Seek>(
+    reader: &mut R,
+    layout: &LayoutPlan,
+) -> Result<PageDescriptorTable> {
+    let header = &layout.header;
+    if header.page_header_size > header.page_size {
+        return Err(page_corruption(
+            "page header size exceeds configured page size",
+        ));
+    }
+    if layout.row_len == 0 {
+        return Ok(PageDescriptorTable::default());
+    }
+
+    let mut descriptors = Vec::with_capacity(header.page_count as usize);
+    let mut row_spans = Vec::new();
+    let mut row_base = 0u64;
+    let mut page = vec![0u8; header.page_size as usize];
+
+    for page_index in 0..header.page_count {
+        let page_offset = header.data_offset + page_index * u64::from(header.page_size);
+        reader
+            .seek(SeekFrom::Start(page_offset))
+            .map_err(page_io_error)?;
+        reader.read_exact(&mut page).map_err(page_io_error)?;
+
+        let page_type = read_header_u16(&page, header.page_header_size as usize - 8, layout)?;
+        let page_row_count = u64::from(read_header_u16(
+            &page,
+            header.page_header_size as usize - 6,
+            layout,
+        )?);
+        let subheader_count = u64::from(read_header_u16(
+            &page,
+            header.page_header_size as usize - 4,
+            layout,
+        )?);
+
+        let descriptor = classify_descriptor(
+            layout,
+            &page,
+            page_index,
+            page_type,
+            page_row_count,
+            subheader_count,
+            row_base,
+            &mut row_spans,
+        )?;
+
+        row_base = row_base.saturating_add(u64::from(descriptor.row_count));
+        descriptors.push(descriptor);
+    }
+
+    Ok(PageDescriptorTable {
+        pages: descriptors.into_boxed_slice(),
+        row_spans: row_spans.into_boxed_slice(),
+        total_candidate_rows: row_base,
+    })
+}
+
+fn classify_descriptor(
+    layout: &LayoutPlan,
+    page: &[u8],
+    page_index: u64,
+    page_type: u16,
+    page_row_count: u64,
+    subheader_count: u64,
+    row_base: u64,
+    row_spans: &mut Vec<RowSpan>,
+) -> Result<PageDescriptor> {
+    let kind = classify_page(page_type);
+    let data_like = matches!(kind, PageKind::Data | PageKind::Mix);
+    if !data_like {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: match kind {
+                PageKind::Comp | PageKind::CompTable => PageExecClass::IndexedCompressedRows,
+                _ => PageExecClass::MetadataOrEmpty,
+            },
+        });
+    }
+
+    if layout.compression != crate::metadata::CompressionKind::None {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::IndexedCompressedRows,
+        });
+    }
+
+    let remaining_rows = layout.total_rows.saturating_sub(row_base);
+    if remaining_rows == 0 {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::MetadataOrEmpty,
+        });
+    }
+
+    if subheader_count != 0 {
+        return classify_indexed_descriptor(
+            layout,
+            page,
+            page_index,
+            kind,
+            page_row_count,
+            subheader_count,
+            row_base,
+            remaining_rows,
+            row_spans,
+        );
+    }
+
+    let data_start = contiguous_data_start(layout, page, kind, subheader_count)?;
+    let page_len = u64::try_from(page.len()).unwrap_or(u64::MAX);
+    if u64::from(data_start) >= page_len {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::MetadataOrEmpty,
+        });
+    }
+
+    let row_len = u64::from(layout.row_len);
+    if row_len == 0 {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::MetadataOrEmpty,
+        });
+    }
+
+    let available = page_len.saturating_sub(u64::from(data_start));
+    let possible_rows = available / row_len;
+    if possible_rows == 0 {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::MetadataOrEmpty,
+        });
+    }
+
+    let rows_to_take = match kind {
+        PageKind::Mix => {
+            let mix_limit = if layout.rows_per_page == 0 {
+                possible_rows
+            } else {
+                layout.rows_per_page
+            };
+            mix_limit.min(possible_rows)
+        }
+        PageKind::Data => {
+            let header_limit = if page_row_count == 0 {
+                possible_rows
+            } else {
+                page_row_count
+            };
+            header_limit.min(possible_rows)
+        }
+        _ => 0,
+    }
+    .min(remaining_rows);
+
+    let row_count = u32::try_from(rows_to_take).unwrap_or(u32::MAX);
+    if row_count == 0 {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::MetadataOrEmpty,
+        });
+    }
+
+    Ok(PageDescriptor {
+        page_index,
+        row_base,
+        row_count,
+        data_start,
+        row_span_start: 0,
+        row_span_count: 0,
+        exec_class: PageExecClass::FusedContiguousUncompressed,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn classify_indexed_descriptor(
+    layout: &LayoutPlan,
+    page: &[u8],
+    page_index: u64,
+    kind: PageKind,
+    page_row_count: u64,
+    subheader_count: u64,
+    row_base: u64,
+    remaining_rows: u64,
+    row_spans: &mut Vec<RowSpan>,
+) -> Result<PageDescriptor> {
+    let header = &layout.header;
+    let pointer_size = usize::try_from(header.subheader_pointer_size)
+        .map_err(|_| page_corruption("pointer size exceeds usize"))?;
+    let max_subheaders = page.len().saturating_sub(header.page_header_size as usize) / pointer_size;
+    let subheader_count = usize::try_from(subheader_count)
+        .unwrap_or(usize::MAX)
+        .min(max_subheaders);
+    let min_data_offset = header.page_header_size as usize + subheader_count * pointer_size;
+    let target_rows = if page_row_count == 0 {
+        None
+    } else {
+        Some(page_row_count.min(remaining_rows))
+    };
+
+    let row_span_start = u32::try_from(row_spans.len()).unwrap_or(u32::MAX);
+    let mut pointer_cursor = header.page_header_size as usize;
+
+    for _ in 0..subheader_count {
+        if target_rows.is_some_and(|target| {
+            u64::from(
+                u32::try_from(row_spans.len())
+                    .unwrap_or(u32::MAX)
+                    .saturating_sub(row_span_start),
+            ) >= target
+        }) {
+            break;
+        }
+
+        let pointer_end = pointer_cursor.saturating_add(pointer_size);
+        let Some(pointer_bytes) = page.get(pointer_cursor..pointer_end) else {
+            break;
+        };
+        pointer_cursor = pointer_end;
+
+        let pointer = parse_pointer(pointer_bytes, header)?;
+        if pointer.offset < min_data_offset || pointer.length == 0 {
+            continue;
+        }
+        let data_end = pointer.offset.saturating_add(pointer.length);
+        if data_end > page.len() {
+            continue;
+        }
+
+        match pointer.compression {
+            0 => {
+                let data = &page[pointer.offset..data_end];
+                if pointer.is_compressed_data
+                    && !signature_is_recognized(parse_subheader_signature(header, data))
+                {
+                    push_row_spans_from_pointer(
+                        row_spans,
+                        data,
+                        pointer.offset,
+                        layout.row_len,
+                        remaining_rows,
+                        row_span_start,
+                        target_rows,
+                    )?;
+                }
+            }
+            1 => {}
+            4 => {
+                return Ok(PageDescriptor {
+                    page_index,
+                    row_base,
+                    row_count: 0,
+                    data_start: 0,
+                    row_span_start: 0,
+                    row_span_count: 0,
+                    exec_class: PageExecClass::IndexedCompressedRows,
+                });
+            }
+            _ => {
+                return Err(page_corruption(format!(
+                    "unsupported subheader compression mode {}",
+                    pointer.compression
+                )));
+            }
+        }
+    }
+
+    let row_span_count = u32::try_from(row_spans.len())
+        .unwrap_or(u32::MAX)
+        .saturating_sub(row_span_start);
+    if row_span_count > 0 {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: row_span_count,
+            data_start: 0,
+            row_span_start,
+            row_span_count,
+            exec_class: PageExecClass::IndexedPointerRows,
+        });
+    }
+
+    let data_start = contiguous_data_start(layout, page, kind, subheader_count as u64)?;
+    let page_len = u64::try_from(page.len()).unwrap_or(u64::MAX);
+    let available = page_len.saturating_sub(u64::from(data_start));
+    let row_len = u64::from(layout.row_len);
+    if row_len == 0 || available < row_len {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::MetadataOrEmpty,
+        });
+    }
+    let possible_rows = available / row_len;
+    let rows_to_take = match kind {
+        PageKind::Mix => {
+            let mix_limit = if layout.rows_per_page == 0 {
+                possible_rows
+            } else {
+                layout.rows_per_page
+            };
+            mix_limit.min(possible_rows)
+        }
+        PageKind::Data => {
+            let header_limit = if page_row_count == 0 {
+                possible_rows
+            } else {
+                page_row_count
+            };
+            header_limit.min(possible_rows)
+        }
+        _ => 0,
+    }
+    .min(remaining_rows);
+    let row_count = u32::try_from(rows_to_take).unwrap_or(u32::MAX);
+    let exec_class = if row_count == 0 {
+        PageExecClass::MetadataOrEmpty
+    } else {
+        PageExecClass::FusedContiguousUncompressed
+    };
+    Ok(PageDescriptor {
+        page_index,
+        row_base,
+        row_count,
+        data_start: if row_count == 0 { 0 } else { data_start },
+        row_span_start: 0,
+        row_span_count: 0,
+        exec_class,
+    })
+}
+
+fn push_row_spans_from_pointer(
+    row_spans: &mut Vec<RowSpan>,
+    data: &[u8],
+    offset: usize,
+    row_len: u32,
+    remaining_rows: u64,
+    row_span_start: u32,
+    target_rows: Option<u64>,
+) -> Result<()> {
+    let row_len =
+        usize::try_from(row_len).map_err(|_| page_corruption("row length exceeds usize"))?;
+    if row_len == 0 {
+        return Ok(());
+    }
+    let mut local_offset = offset;
+    let mut remaining = data.len();
+    while remaining >= row_len {
+        let produced = u64::from(
+            u32::try_from(row_spans.len())
+                .unwrap_or(u32::MAX)
+                .saturating_sub(row_span_start),
+        );
+        if produced >= remaining_rows {
+            break;
+        }
+        if target_rows.is_some_and(|target| produced >= target) {
+            break;
+        }
+        row_spans.push(RowSpan {
+            offset: u32::try_from(local_offset)
+                .map_err(|_| page_corruption("row span offset exceeds u32"))?,
+            len: u32::try_from(row_len).unwrap_or(u32::MAX),
+        });
+        local_offset = local_offset.saturating_add(row_len);
+        remaining -= row_len;
+    }
+    Ok(())
+}
+
+fn contiguous_data_start(
+    layout: &LayoutPlan,
+    page: &[u8],
+    page_kind: PageKind,
+    subheader_count: u64,
+) -> Result<u32> {
+    let header = &layout.header;
+    let pointer_size = u64::from(header.subheader_pointer_size);
+    let pointer_section_len = subheader_count.saturating_mul(pointer_size);
+    let base_offset = u64::from(header.page_header_size).saturating_add(pointer_section_len);
+
+    let bit_offset = if header.uses_u64_pointers {
+        32_u64
+    } else {
+        16_u64
+    };
+    let alignment_base =
+        bit_offset + u64::try_from(SUBHEADER_POINTER_OFFSET).unwrap_or(0) + pointer_section_len;
+    let align_adjust = if alignment_base % 8 == 0 {
+        0
+    } else {
+        8 - (alignment_base % 8)
+    };
+    let mut data_start = base_offset.saturating_add(align_adjust);
+
+    if matches!(page_kind, PageKind::Mix)
+        && (data_start % 8) == 4
+        && usize::try_from(data_start.saturating_add(4))
+            .ok()
+            .is_some_and(|end| end <= page.len())
+    {
+        let start = usize::try_from(data_start).unwrap_or(0);
+        let word = u32::from_le_bytes(page[start..start + 4].try_into().unwrap_or([0; 4]));
+        if word == 0 || word == 0x2020_2020 {
+            data_start = data_start.saturating_add(4);
+        }
+    }
+
+    u32::try_from(data_start).map_err(|_| page_corruption("page data start exceeds u32"))
+}
+
+fn classify_page(page_type: u16) -> PageKind {
+    if (page_type & SAS_PAGE_TYPE_COMP) == SAS_PAGE_TYPE_COMP {
+        return PageKind::Comp;
+    }
+    if (page_type & SAS_PAGE_TYPE_COMP_TABLE) == SAS_PAGE_TYPE_COMP_TABLE {
+        return PageKind::CompTable;
+    }
+    if (page_type & SAS_PAGE_TYPE_META2) == SAS_PAGE_TYPE_META2 {
+        return PageKind::Meta2;
+    }
+    match page_type & SAS_PAGE_TYPE_MASK {
+        SAS_PAGE_TYPE_META => PageKind::Meta,
+        SAS_PAGE_TYPE_DATA => PageKind::Data,
+        SAS_PAGE_TYPE_MIX => PageKind::Mix,
+        SAS_PAGE_TYPE_AMD => PageKind::Amd,
+        _ => PageKind::Unknown,
+    }
+}
+
+fn read_header_u16(page: &[u8], start: usize, layout: &LayoutPlan) -> Result<u16> {
+    let end = start.saturating_add(2);
+    let Some(bytes) = page.get(start..end) else {
+        return Err(page_corruption("page header field exceeds page bounds"));
+    };
+    Ok(match layout.header.endianness {
+        crate::metadata::Endianness::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
+        crate::metadata::Endianness::Big => u16::from_be_bytes([bytes[0], bytes[1]]),
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PointerInfo {
+    offset: usize,
+    length: usize,
+    compression: u8,
+    is_compressed_data: bool,
+}
+
+fn parse_pointer(pointer: &[u8], header: &crate::internal::HeaderInfo) -> Result<PointerInfo> {
+    if header.uses_u64_pointers {
+        if pointer.len() < 18 {
+            return Err(page_corruption("64-bit pointer too short"));
+        }
+        Ok(PointerInfo {
+            offset: usize::try_from(read_u64(header.endianness, &pointer[0..8]))
+                .map_err(|_| page_corruption("pointer offset exceeds usize"))?,
+            length: usize::try_from(read_u64(header.endianness, &pointer[8..16]))
+                .map_err(|_| page_corruption("pointer length exceeds usize"))?,
+            compression: pointer[16],
+            is_compressed_data: pointer[17] != 0,
+        })
+    } else {
+        if pointer.len() < 10 {
+            return Err(page_corruption("32-bit pointer too short"));
+        }
+        Ok(PointerInfo {
+            offset: usize::try_from(read_u32(header.endianness, &pointer[0..4]))
+                .map_err(|_| page_corruption("pointer offset exceeds usize"))?,
+            length: usize::try_from(read_u32(header.endianness, &pointer[4..8]))
+                .map_err(|_| page_corruption("pointer length exceeds usize"))?,
+            compression: pointer[8],
+            is_compressed_data: pointer[9] != 0,
+        })
+    }
+}
+
+fn parse_subheader_signature(header: &crate::internal::HeaderInfo, data: &[u8]) -> u32 {
+    if data.len() < 4 {
+        return 0;
+    }
+    let mut signature = read_u32(header.endianness, &data[0..4]);
+    if matches!(header.endianness, crate::metadata::Endianness::Big)
+        && header.uses_u64_pointers
+        && signature == u32::MAX
+        && data.len() >= 8
+    {
+        signature = read_u32(header.endianness, &data[4..8]);
+    }
+    signature
+}
+
+const fn signature_is_recognized(signature: u32) -> bool {
+    matches!(
+        signature,
+        SIG_COLUMN_TEXT
+            | SIG_COLUMN_ATTRS
+            | SIG_COLUMN_FORMAT
+            | SIG_COLUMN_NAME
+            | SIG_COLUMN_SIZE
+            | SIG_ROW_SIZE
+            | SIG_COUNTS
+            | SIG_COLUMN_LIST
+    )
+}
+
+fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(bytes);
+    match endianness {
+        crate::metadata::Endianness::Little => u32::from_le_bytes(buf),
+        crate::metadata::Endianness::Big => u32::from_be_bytes(buf),
+    }
+}
+
+fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(bytes);
+    match endianness {
+        crate::metadata::Endianness::Little => u64::from_le_bytes(buf),
+        crate::metadata::Endianness::Big => u64::from_be_bytes(buf),
+    }
+}
+
+fn page_corruption(message: impl Into<String>) -> Error {
+    Error::Corruption(CorruptionError {
+        message: message.into(),
+    })
+}
+
+fn page_io_error(err: std::io::Error) -> Error {
+    page_corruption(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MIX, compile_page_descriptors};
+    use crate::{
+        internal::{HeaderInfo, LayoutPlan, PageExecClass},
+        metadata::{CompressionKind, Endianness},
+    };
+    use std::io::Cursor;
+
+    #[test]
+    fn compiles_fused_descriptors_for_simple_data_pages() {
+        let mut bytes = Vec::new();
+        bytes.extend(make_page(SAS_PAGE_TYPE_DATA, 2, 0, &[b"ABCD", b"EFGH"], 64));
+        bytes.extend(make_page(SAS_PAGE_TYPE_MIX, 0, 0, &[b"IJKL"], 64));
+
+        let layout = simple_layout(64, 2, 4, 3);
+        let mut cursor = Cursor::new(bytes);
+        let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
+
+        assert_eq!(descriptors.pages.len(), 2);
+        assert_eq!(descriptors.total_candidate_rows, 3);
+
+        let first = descriptors.pages[0];
+        assert_eq!(first.exec_class, PageExecClass::FusedContiguousUncompressed);
+        assert_eq!(first.row_base, 0);
+        assert_eq!(first.row_count, 2);
+        assert_eq!(first.data_start, 24);
+        assert_eq!(first.row_span_count, 0);
+
+        let second = descriptors.pages[1];
+        assert_eq!(
+            second.exec_class,
+            PageExecClass::FusedContiguousUncompressed
+        );
+        assert_eq!(second.row_base, 2);
+        assert_eq!(second.row_count, 1);
+        assert_eq!(second.data_start, 24);
+        assert_eq!(second.row_span_count, 0);
+    }
+
+    #[test]
+    fn marks_pointer_pages_as_indexed() {
+        let bytes = make_pointer_page(&[b"ABCD"], 64);
+        let layout = simple_layout(64, 1, 4, 1);
+        let mut cursor = Cursor::new(bytes);
+        let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
+
+        assert_eq!(descriptors.pages.len(), 1);
+        assert_eq!(
+            descriptors.pages[0].exec_class,
+            PageExecClass::IndexedPointerRows
+        );
+        assert_eq!(descriptors.pages[0].row_count, 1);
+        assert_eq!(descriptors.pages[0].row_span_count, 1);
+        assert_eq!(descriptors.row_spans.len(), 1);
+        assert_eq!(descriptors.row_spans[0].offset, 40);
+        assert_eq!(descriptors.row_spans[0].len, 4);
+    }
+
+    fn simple_layout(page_size: u32, page_count: u64, row_len: u32, total_rows: u64) -> LayoutPlan {
+        LayoutPlan {
+            columns: Vec::new(),
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size,
+                page_count,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len,
+            total_rows,
+            compression: CompressionKind::None,
+            rows_per_page: 1,
+        }
+    }
+
+    fn make_page(
+        page_type: u16,
+        row_count: u16,
+        pointer_count: u16,
+        rows: &[&[u8]],
+        page_size: usize,
+    ) -> Vec<u8> {
+        let mut page = vec![0u8; page_size];
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
+        page[(24 - 6)..(24 - 4)].copy_from_slice(&row_count.to_le_bytes());
+        page[(24 - 4)..(24 - 2)].copy_from_slice(&pointer_count.to_le_bytes());
+
+        let mut offset = 24usize;
+        for row in rows {
+            page[offset..offset + row.len()].copy_from_slice(row);
+            offset += row.len();
+        }
+        page
+    }
+
+    fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
+        let mut page = vec![0u8; page_size];
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_DATA.to_le_bytes());
+        page[(24 - 6)..(24 - 4)].copy_from_slice(&(rows.len() as u16).to_le_bytes());
+        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+
+        let data_offset = 40u32;
+        let data_len = u32::try_from(rows.len() * 4).unwrap_or(u32::MAX);
+        page[24..28].copy_from_slice(&data_offset.to_le_bytes());
+        page[28..32].copy_from_slice(&data_len.to_le_bytes());
+        page[32] = 0;
+        page[33] = 1;
+
+        let mut offset = data_offset as usize;
+        for row in rows {
+            page[offset..offset + row.len()].copy_from_slice(row);
+            offset += row.len();
+        }
+        page
+    }
+}

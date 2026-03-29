@@ -5,6 +5,7 @@ mod internal;
 mod layout;
 mod metadata;
 mod options;
+mod pages;
 mod probe;
 mod projection;
 mod row;

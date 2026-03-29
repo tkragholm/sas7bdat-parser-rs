@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use crate::{metadata::ColumnMeta, options::OpenOptions};
+use crate::{
+    metadata::{ColumnMeta, CompressionKind},
+    options::OpenOptions,
+};
 use std::{path::PathBuf, sync::Arc};
 
 #[derive(Debug)]
@@ -19,14 +22,48 @@ pub(crate) struct FileInner {
 pub(crate) struct LayoutPlan {
     pub columns: Vec<ColumnMeta>,
     pub header: HeaderInfo,
+    pub row_len: u32,
+    pub total_rows: u64,
+    pub compression: CompressionKind,
     pub rows_per_page: u64,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PageDescriptorTable;
+pub(crate) struct PageDescriptorTable {
+    pub pages: Box<[PageDescriptor]>,
+    pub row_spans: Box<[RowSpan]>,
+    pub total_candidate_rows: u64,
+}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl PageDescriptorTable {
+    #[must_use]
+    pub fn has_non_fused_pages(&self) -> bool {
+        self.pages
+            .iter()
+            .any(|page| page.exec_class != PageExecClass::FusedContiguousUncompressed)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PageDescriptor {
+    pub page_index: u64,
+    pub row_base: u64,
+    pub row_count: u32,
+    pub data_start: u32,
+    pub row_span_start: u32,
+    pub row_span_count: u32,
+    pub exec_class: PageExecClass,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RowSpan {
+    pub offset: u32,
+    pub len: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum PageExecClass {
+    #[default]
     FusedContiguousUncompressed,
     IndexedPointerRows,
     IndexedCompressedRows,
