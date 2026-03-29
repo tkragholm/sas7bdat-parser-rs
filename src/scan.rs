@@ -770,6 +770,7 @@ struct RowDecodePlan {
     max_end: usize,
     names: Arc<[String]>,
     encoding: &'static Encoding,
+    string_kernel: StringDecodeKernel,
     decode_mode: DecodeMode,
     string_options: StringDecodeOptions,
     endianness: Endianness,
@@ -799,6 +800,14 @@ enum DecodedStringBytes<'a> {
 struct TrimmedString<'a> {
     bytes: &'a [u8],
     is_ascii: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum StringDecodeKernel {
+    Utf8Strict,
+    Utf8Lenient,
+    EncodedStrict,
+    EncodedLenient,
 }
 
 #[derive(Debug, Clone)]
@@ -971,6 +980,7 @@ impl RowDecodePlan {
             max_end,
             names,
             encoding,
+            string_kernel: compile_string_decode_kernel(encoding, builder.string_options),
             decode_mode: builder.decode,
             string_options: builder.string_options,
             endianness: builder.ds.layout.header.endianness,
@@ -1068,49 +1078,7 @@ impl RowDecodePlan {
             ));
         }
 
-        if self.encoding == UTF_8 {
-            match std::str::from_utf8(slice) {
-                Ok(value) => return Ok(PlannedCell::StrBorrowed(value)),
-                Err(_)
-                    if matches!(
-                        self.string_options.utf8_validation,
-                        Utf8ValidationMode::Strict
-                    ) =>
-                {
-                    return Err(Error::Decode(crate::error::DecodeError {
-                        message: "invalid UTF-8 in fixed-width string cell".to_owned(),
-                    }));
-                }
-                Err(_) => {
-                    let repaired = maybe_fix_mojibake(
-                        String::from_utf8_lossy(slice).into_owned(),
-                        self.string_options.mojibake_fix,
-                    );
-                    owned_strings.push(repaired);
-                    return Ok(PlannedCell::StrOwned(owned_strings.len() - 1));
-                }
-            }
-        }
-
-        let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
-        if had_errors
-            && matches!(
-                self.string_options.utf8_validation,
-                Utf8ValidationMode::Strict
-            )
-        {
-            return Err(Error::Decode(crate::error::DecodeError {
-                message: "string decode failed under strict validation".to_owned(),
-            }));
-        }
-
-        match decoded {
-            std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
-            std::borrow::Cow::Owned(value) => {
-                owned_strings.push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
-                Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
-            }
-        }
+        self.decode_trimmed_string(slice, owned_strings)
     }
 
     fn decode_string_bytes_for_batch<'row>(
@@ -1131,19 +1099,75 @@ impl RowDecodePlan {
             return Ok(DecodedStringBytes::Borrowed(slice));
         }
 
-        if self.encoding == UTF_8 {
-            return match std::str::from_utf8(slice) {
-                Ok(_) => Ok(DecodedStringBytes::Borrowed(slice)),
-                Err(_)
-                    if matches!(
-                        self.string_options.utf8_validation,
-                        Utf8ValidationMode::Strict
-                    ) =>
-                {
-                    Err(Error::Decode(crate::error::DecodeError {
-                        message: "invalid UTF-8 in fixed-width string cell".to_owned(),
-                    }))
+        self.decode_trimmed_string_bytes(slice, owned_strings)
+    }
+
+    fn decode_trimmed_string<'row>(
+        &self,
+        slice: &'row [u8],
+        owned_strings: &mut Vec<String>,
+    ) -> Result<PlannedCell<'row>> {
+        match self.string_kernel {
+            StringDecodeKernel::Utf8Strict => match std::str::from_utf8(slice) {
+                Ok(value) => Ok(PlannedCell::StrBorrowed(value)),
+                Err(_) => Err(Error::Decode(crate::error::DecodeError {
+                    message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+                })),
+            },
+            StringDecodeKernel::Utf8Lenient => match std::str::from_utf8(slice) {
+                Ok(value) => Ok(PlannedCell::StrBorrowed(value)),
+                Err(_) => {
+                    owned_strings.push(maybe_fix_mojibake(
+                        String::from_utf8_lossy(slice).into_owned(),
+                        self.string_options.mojibake_fix,
+                    ));
+                    Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
                 }
+            },
+            StringDecodeKernel::EncodedStrict => {
+                let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
+                if had_errors {
+                    return Err(Error::Decode(crate::error::DecodeError {
+                        message: "string decode failed under strict validation".to_owned(),
+                    }));
+                }
+                match decoded {
+                    std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
+                    std::borrow::Cow::Owned(value) => {
+                        owned_strings
+                            .push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
+                        Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
+                    }
+                }
+            }
+            StringDecodeKernel::EncodedLenient => {
+                let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
+                match decoded {
+                    std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
+                    std::borrow::Cow::Owned(value) => {
+                        owned_strings
+                            .push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
+                        Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
+                    }
+                }
+            }
+        }
+    }
+
+    fn decode_trimmed_string_bytes<'row>(
+        &self,
+        slice: &'row [u8],
+        owned_strings: &mut Vec<String>,
+    ) -> Result<DecodedStringBytes<'row>> {
+        match self.string_kernel {
+            StringDecodeKernel::Utf8Strict => match std::str::from_utf8(slice) {
+                Ok(_) => Ok(DecodedStringBytes::Borrowed(slice)),
+                Err(_) => Err(Error::Decode(crate::error::DecodeError {
+                    message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+                })),
+            },
+            StringDecodeKernel::Utf8Lenient => match std::str::from_utf8(slice) {
+                Ok(_) => Ok(DecodedStringBytes::Borrowed(slice)),
                 Err(_) => {
                     owned_strings.push(maybe_fix_mojibake(
                         String::from_utf8_lossy(slice).into_owned(),
@@ -1151,26 +1175,37 @@ impl RowDecodePlan {
                     ));
                     Ok(DecodedStringBytes::Owned(owned_strings.len() - 1))
                 }
-            };
-        }
-
-        let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
-        if had_errors
-            && matches!(
-                self.string_options.utf8_validation,
-                Utf8ValidationMode::Strict
-            )
-        {
-            return Err(Error::Decode(crate::error::DecodeError {
-                message: "string decode failed under strict validation".to_owned(),
-            }));
-        }
-
-        match decoded {
-            std::borrow::Cow::Borrowed(value) => Ok(DecodedStringBytes::Borrowed(value.as_bytes())),
-            std::borrow::Cow::Owned(value) => {
-                owned_strings.push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
-                Ok(DecodedStringBytes::Owned(owned_strings.len() - 1))
+            },
+            StringDecodeKernel::EncodedStrict => {
+                let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
+                if had_errors {
+                    return Err(Error::Decode(crate::error::DecodeError {
+                        message: "string decode failed under strict validation".to_owned(),
+                    }));
+                }
+                match decoded {
+                    std::borrow::Cow::Borrowed(value) => {
+                        Ok(DecodedStringBytes::Borrowed(value.as_bytes()))
+                    }
+                    std::borrow::Cow::Owned(value) => {
+                        owned_strings
+                            .push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
+                        Ok(DecodedStringBytes::Owned(owned_strings.len() - 1))
+                    }
+                }
+            }
+            StringDecodeKernel::EncodedLenient => {
+                let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
+                match decoded {
+                    std::borrow::Cow::Borrowed(value) => {
+                        Ok(DecodedStringBytes::Borrowed(value.as_bytes()))
+                    }
+                    std::borrow::Cow::Owned(value) => {
+                        owned_strings
+                            .push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
+                        Ok(DecodedStringBytes::Owned(owned_strings.len() - 1))
+                    }
+                }
             }
         }
     }
@@ -1687,6 +1722,7 @@ impl OwnedBatchColumnBuilder {
         }
     }
 
+    #[inline(always)]
     fn append_staged_numeric_bits_fast(&mut self, raw: u64) -> Result<bool> {
         match self {
             Self::StagedNumeric {
@@ -2308,6 +2344,24 @@ const fn compile_owned_materialization_kind(
     }
 }
 
+fn compile_string_decode_kernel(
+    encoding: &'static Encoding,
+    string_options: StringDecodeOptions,
+) -> StringDecodeKernel {
+    let strict = matches!(string_options.utf8_validation, Utf8ValidationMode::Strict);
+    if encoding == UTF_8 {
+        if strict {
+            StringDecodeKernel::Utf8Strict
+        } else {
+            StringDecodeKernel::Utf8Lenient
+        }
+    } else if strict {
+        StringDecodeKernel::EncodedStrict
+    } else {
+        StringDecodeKernel::EncodedLenient
+    }
+}
+
 fn resolve_batch_row_capacity(builder: &ScanBuilder<'_>) -> Result<usize> {
     match builder.batch_hint {
         BatchHint::Rows(rows) => Ok(rows.max(1)),
@@ -2401,6 +2455,7 @@ fn decode_numeric_cell(slice: &[u8], endianness: Endianness) -> Option<f64> {
     }
 }
 
+#[inline(always)]
 fn decode_numeric_raw_bits_or_missing(slice: &[u8], endianness: Endianness) -> u64 {
     if slice.is_empty() {
         SAS_NUMERIC_MISSING_SENTINEL
@@ -2409,6 +2464,7 @@ fn decode_numeric_raw_bits_or_missing(slice: &[u8], endianness: Endianness) -> u
     }
 }
 
+#[inline(always)]
 fn numeric_bits(slice: &[u8], endianness: Endianness) -> u64 {
     debug_assert!(slice.len() <= 8);
     if slice.len() == 8 {
@@ -2700,6 +2756,7 @@ fn staged_numeric_raw_bits_from_planned_cell(cell: PlannedCell<'_>) -> Result<u6
     }
 }
 
+#[inline(always)]
 fn numeric_bits_scalar_8(slice: &[u8], endianness: Endianness) -> u64 {
     let bytes: [u8; 8] = slice.try_into().expect("len == 8");
     match endianness {
@@ -2712,6 +2769,7 @@ const NUMERIC_EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
 const NUMERIC_FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
 const SAS_NUMERIC_MISSING_SENTINEL: u64 = 0x7FF0_0000_0000_0001;
 
+#[inline(always)]
 const fn numeric_bits_is_missing(raw: u64) -> bool {
     (raw & NUMERIC_EXP_MASK) == NUMERIC_EXP_MASK && (raw & NUMERIC_FRACTION_MASK) != 0
 }
