@@ -255,10 +255,11 @@ impl<'a> ScanBuilder<'a> {
         let mut stats = scan_row_bytes_with_reader(self, &mut reader, &mut |row_index, bytes| {
             batcher.push_row(row_index, bytes)?;
             if batcher.is_full() {
-                let batch = batcher.finish_batch();
+                let batch = batcher.take_batch();
                 match f(batch)? {
                     ControlFlow::Continue(()) => {
                         decode_batches = decode_batches.saturating_add(1);
+                        batcher.reset_after_flush();
                     }
                     ControlFlow::Break(()) => {
                         decode_batches = decode_batches.saturating_add(1);
@@ -271,7 +272,7 @@ impl<'a> ScanBuilder<'a> {
         })?;
 
         if !stop_after_current_batch && !batcher.is_empty() {
-            let batch = batcher.finish_batch();
+            let batch = batcher.take_batch();
             decode_batches = decode_batches.saturating_add(1);
             let _ = f(batch)?;
         }
@@ -1036,13 +1037,23 @@ impl BatchAccumulator {
         Ok(())
     }
 
-    fn finish_batch(&mut self) -> OwnedColumnarBatch {
+    fn take_batch(&mut self) -> OwnedColumnarBatch {
         let row_base = self.row_base.unwrap_or(0);
         let row_count = self.row_count;
         let columns = std::mem::take(&mut self.columns)
             .into_iter()
             .map(OwnedBatchColumnBuilder::finish)
             .collect();
+        self.row_base = None;
+        self.row_count = 0;
+        OwnedColumnarBatch {
+            row_base,
+            row_count,
+            columns,
+        }
+    }
+
+    fn reset_after_flush(&mut self) {
         self.columns = self
             .plan
             .row_plan
@@ -1053,13 +1064,7 @@ impl BatchAccumulator {
                 OwnedBatchColumnBuilder::with_capacity_hint(kind, self.target_rows, column.width)
             })
             .collect();
-        self.row_base = None;
-        self.row_count = 0;
-        OwnedColumnarBatch {
-            row_base,
-            row_count,
-            columns,
-        }
+        self.owned_strings.clear();
     }
 }
 
