@@ -164,14 +164,24 @@ impl<'a> ScanBuilder<'a> {
     }
 
     pub fn collect_rows(self) -> Result<Vec<OwnedRow>> {
+        if matches!(self.decode, DecodeMode::Raw) {
+            return Err(Error::unsupported(
+                "collect_rows does not support DecodeMode::Raw; use visit_raw_rows instead",
+            ));
+        }
+
+        let plan = RowDecodePlan::new(&self)?;
         let mut rows = Vec::new();
-        self.visit_rows(|row| {
+        let mut owned_strings = Vec::new();
+        self.scan_raw_rows(&mut |raw| {
+            let planned = plan.plan_cells(raw.bytes, &mut owned_strings)?;
+            let mut cells = Vec::with_capacity(planned.len());
+            for cell in &planned {
+                cells.push(owned_cell_from_planned(*cell, &owned_strings)?);
+            }
             rows.push(OwnedRow {
-                row_index: row.row_index(),
-                cells: row
-                    .iter()
-                    .map(crate::row::CellValue::to_owned_value)
-                    .collect(),
+                row_index: raw.row_index,
+                cells,
             });
             Ok(ControlFlow::Continue(()))
         })?;
@@ -1614,6 +1624,29 @@ fn materialize_planned_cells<'a>(
         });
     }
     Ok(cells)
+}
+
+fn owned_cell_from_planned(
+    cell: PlannedCell<'_>,
+    owned_strings: &[String],
+) -> Result<crate::row::OwnedCellValue> {
+    Ok(match cell {
+        PlannedCell::Null => crate::row::OwnedCellValue::Null,
+        PlannedCell::Int32(value) => crate::row::OwnedCellValue::Int32(value),
+        PlannedCell::Int64(value) => crate::row::OwnedCellValue::Int64(value),
+        PlannedCell::Float64(value) => crate::row::OwnedCellValue::Float64(value),
+        PlannedCell::StrBorrowed(value) => crate::row::OwnedCellValue::String(value.to_owned()),
+        PlannedCell::StrOwned(index) => crate::row::OwnedCellValue::String(
+            owned_strings
+                .get(index)
+                .ok_or_else(|| Error::unsupported("owned string index out of range"))?
+                .clone(),
+        ),
+        PlannedCell::Bytes(value) => crate::row::OwnedCellValue::Bytes(value.to_vec()),
+        PlannedCell::Date(value) => crate::row::OwnedCellValue::Date(value),
+        PlannedCell::DateTime(value) => crate::row::OwnedCellValue::DateTime(value),
+        PlannedCell::Time(value) => crate::row::OwnedCellValue::Time(value),
+    })
 }
 
 fn column_materialization_kind(
