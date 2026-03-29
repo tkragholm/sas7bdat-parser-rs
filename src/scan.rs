@@ -4,7 +4,7 @@ use crate::{
     dataset::Dataset,
     encoding::resolve_encoding,
     error::{Error, Result},
-    internal::{FileSource, RowSpanKind},
+    internal::{FileSource, PageDescriptor, RowSpan, RowSpanKind},
     metadata::{ColumnMeta, Endianness, LogicalType, SasDate, SasDateTime, SasTime},
     options::{
         BatchHint, DecodeMode, MojibakePolicy, OrderingMode, Parallelism, RowSelection,
@@ -289,9 +289,8 @@ where
     R: Read + Seek,
     F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
 {
-    let row_len = usize::try_from(builder.ds.layout.row_len)
-        .map_err(|_| Error::unsupported("row length exceeds platform usize"))?;
-    if row_len == 0 {
+    let plan = RawScanPlan::compile(&builder)?;
+    if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
 
@@ -304,16 +303,12 @@ where
         ));
     }
 
-    let page_size = usize::try_from(builder.ds.layout.header.page_size)
-        .map_err(|_| Error::unsupported("page size exceeds platform usize"))?;
     let mut stats = ScanStats::default();
-    let mut page = vec![0u8; page_size];
+    let mut page = vec![0u8; plan.page_size];
     let mut decompressed_row = Vec::new();
 
     for descriptor in builder.ds.descriptors.pages.iter().copied() {
-        if let Some(limit) = builder.row_limit
-            && stats.rows_emitted >= limit
-        {
+        if plan.should_stop(&stats) {
             break;
         }
 
@@ -321,199 +316,42 @@ where
         match descriptor.exec_class {
             crate::internal::PageExecClass::FusedContiguousUncompressed => {
                 stats.fused_pages = stats.fused_pages.saturating_add(1);
-                let page_offset = builder.ds.layout.header.data_offset
-                    + descriptor.page_index * u64::from(builder.ds.layout.header.page_size);
-                reader
-                    .seek(SeekFrom::Start(page_offset))
-                    .map_err(scan_io_error)?;
-                reader.read_exact(&mut page).map_err(scan_io_error)?;
-                stats.raw_bytes_read = stats
-                    .raw_bytes_read
-                    .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
-
-                let data_start = usize::try_from(descriptor.data_start)
-                    .map_err(|_| Error::unsupported("row data start exceeds platform usize"))?;
-                for row_offset in 0..descriptor.row_count {
-                    let row_index = descriptor.row_base + u64::from(row_offset);
-                    stats.rows_seen = stats.rows_seen.saturating_add(1);
-                    if !row_selected(builder.row_selection, row_index) {
-                        continue;
-                    }
-                    if let Some(limit) = builder.row_limit
-                        && stats.rows_emitted >= limit
-                    {
-                        break;
-                    }
-
-                    let start = data_start
-                        .checked_add(
-                            usize::try_from(row_offset)
-                                .unwrap_or(usize::MAX)
-                                .saturating_mul(row_len),
-                        )
-                        .ok_or_else(|| Error::unsupported("row offset overflow"))?;
-                    let end = start
-                        .checked_add(row_len)
-                        .ok_or_else(|| Error::unsupported("row end overflow"))?;
-                    let Some(bytes) = page.get(start..end) else {
-                        return Err(Error::unsupported("row slice exceeds page bounds"));
-                    };
-
-                    match f(RawRow { row_index, bytes })? {
-                        ControlFlow::Continue(()) => {
-                            stats.rows_emitted = stats.rows_emitted.saturating_add(1);
-                        }
-                        ControlFlow::Break(()) => {
-                            stats.rows_emitted = stats.rows_emitted.saturating_add(1);
-                            return Ok(stats);
-                        }
-                    }
+                load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
+                if emit_contiguous_rows(&plan, descriptor, &page, &mut stats, f)? {
+                    return Ok(stats);
                 }
             }
             crate::internal::PageExecClass::MetadataOrEmpty => {}
             crate::internal::PageExecClass::IndexedPointerRows => {
                 stats.indexed_pages = stats.indexed_pages.saturating_add(1);
-                let page_offset = builder.ds.layout.header.data_offset
-                    + descriptor.page_index * u64::from(builder.ds.layout.header.page_size);
-                reader
-                    .seek(SeekFrom::Start(page_offset))
-                    .map_err(scan_io_error)?;
-                reader.read_exact(&mut page).map_err(scan_io_error)?;
-                stats.raw_bytes_read = stats
-                    .raw_bytes_read
-                    .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
-
-                let span_start = usize::try_from(descriptor.row_span_start)
-                    .map_err(|_| Error::unsupported("row span start exceeds platform usize"))?;
-                let span_end =
-                    span_start
-                        .checked_add(usize::try_from(descriptor.row_span_count).map_err(|_| {
-                            Error::unsupported("row span count exceeds platform usize")
-                        })?)
-                        .ok_or_else(|| Error::unsupported("row span range overflow"))?;
-                let Some(spans) = builder.ds.descriptors.row_spans.get(span_start..span_end) else {
-                    return Err(Error::unsupported(
-                        "row span range exceeds descriptor table",
-                    ));
-                };
-
-                for (span_index, span) in spans.iter().enumerate() {
-                    let row_index =
-                        descriptor.row_base + u64::try_from(span_index).unwrap_or(u64::MAX);
-                    stats.rows_seen = stats.rows_seen.saturating_add(1);
-                    if !row_selected(builder.row_selection, row_index) {
-                        continue;
-                    }
-                    if let Some(limit) = builder.row_limit
-                        && stats.rows_emitted >= limit
-                    {
-                        break;
-                    }
-
-                    let start = usize::try_from(span.offset).map_err(|_| {
-                        Error::unsupported("row span offset exceeds platform usize")
-                    })?;
-                    let len = usize::try_from(span.len).map_err(|_| {
-                        Error::unsupported("row span length exceeds platform usize")
-                    })?;
-                    let end = start
-                        .checked_add(len)
-                        .ok_or_else(|| Error::unsupported("row span end overflow"))?;
-                    let Some(bytes) = page.get(start..end) else {
-                        return Err(Error::unsupported("row span exceeds page bounds"));
-                    };
-                    match f(RawRow { row_index, bytes })? {
-                        ControlFlow::Continue(()) => {
-                            stats.rows_emitted = stats.rows_emitted.saturating_add(1);
-                        }
-                        ControlFlow::Break(()) => {
-                            stats.rows_emitted = stats.rows_emitted.saturating_add(1);
-                            return Ok(stats);
-                        }
-                    }
+                load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
+                let spans = descriptor_spans(&builder, descriptor)?;
+                if emit_indexed_rows(
+                    &plan,
+                    descriptor,
+                    spans,
+                    &page,
+                    &mut decompressed_row,
+                    &mut stats,
+                    f,
+                )? {
+                    return Ok(stats);
                 }
             }
             crate::internal::PageExecClass::IndexedCompressedRows => {
                 stats.compressed_pages = stats.compressed_pages.saturating_add(1);
-                let page_offset = builder.ds.layout.header.data_offset
-                    + descriptor.page_index * u64::from(builder.ds.layout.header.page_size);
-                reader
-                    .seek(SeekFrom::Start(page_offset))
-                    .map_err(scan_io_error)?;
-                reader.read_exact(&mut page).map_err(scan_io_error)?;
-                stats.raw_bytes_read = stats
-                    .raw_bytes_read
-                    .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
-
-                let span_start = usize::try_from(descriptor.row_span_start)
-                    .map_err(|_| Error::unsupported("row span start exceeds platform usize"))?;
-                let span_end =
-                    span_start
-                        .checked_add(usize::try_from(descriptor.row_span_count).map_err(|_| {
-                            Error::unsupported("row span count exceeds platform usize")
-                        })?)
-                        .ok_or_else(|| Error::unsupported("row span range overflow"))?;
-                let Some(spans) = builder.ds.descriptors.row_spans.get(span_start..span_end) else {
-                    return Err(Error::unsupported(
-                        "row span range exceeds descriptor table",
-                    ));
-                };
-
-                for (span_index, span) in spans.iter().enumerate() {
-                    let row_index =
-                        descriptor.row_base + u64::try_from(span_index).unwrap_or(u64::MAX);
-                    stats.rows_seen = stats.rows_seen.saturating_add(1);
-                    if !row_selected(builder.row_selection, row_index) {
-                        continue;
-                    }
-                    if let Some(limit) = builder.row_limit
-                        && stats.rows_emitted >= limit
-                    {
-                        break;
-                    }
-
-                    let start = usize::try_from(span.offset).map_err(|_| {
-                        Error::unsupported("row span offset exceeds platform usize")
-                    })?;
-                    let len = usize::try_from(span.len).map_err(|_| {
-                        Error::unsupported("row span length exceeds platform usize")
-                    })?;
-                    let end = start
-                        .checked_add(len)
-                        .ok_or_else(|| Error::unsupported("row span end overflow"))?;
-                    let Some(raw_bytes) = page.get(start..end) else {
-                        return Err(Error::unsupported("row span exceeds page bounds"));
-                    };
-
-                    let bytes = match span.kind {
-                        RowSpanKind::Borrowed => raw_bytes,
-                        RowSpanKind::Compressed => {
-                            let row_len =
-                                usize::try_from(builder.ds.layout.row_len).map_err(|_| {
-                                    Error::unsupported("row length exceeds platform usize")
-                                })?;
-                            let decoded = decompress_row(
-                                builder.ds.layout.compression,
-                                raw_bytes,
-                                row_len,
-                                &mut decompressed_row,
-                            )?;
-                            stats.row_bytes_materialized = stats
-                                .row_bytes_materialized
-                                .saturating_add(u64::try_from(decoded.len()).unwrap_or(u64::MAX));
-                            decoded
-                        }
-                    };
-
-                    match f(RawRow { row_index, bytes })? {
-                        ControlFlow::Continue(()) => {
-                            stats.rows_emitted = stats.rows_emitted.saturating_add(1);
-                        }
-                        ControlFlow::Break(()) => {
-                            stats.rows_emitted = stats.rows_emitted.saturating_add(1);
-                            return Ok(stats);
-                        }
-                    }
+                load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
+                let spans = descriptor_spans(&builder, descriptor)?;
+                if emit_indexed_rows(
+                    &plan,
+                    descriptor,
+                    spans,
+                    &page,
+                    &mut decompressed_row,
+                    &mut stats,
+                    f,
+                )? {
+                    return Ok(stats);
                 }
             }
         }
@@ -522,11 +360,191 @@ where
     Ok(stats)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RawScanPlan {
+    row_len: usize,
+    page_size: usize,
+    page_stride: u64,
+    data_offset: u64,
+    compression: crate::metadata::CompressionKind,
+    row_limit: Option<u64>,
+    row_selection: RowSelection,
+}
+
+impl RawScanPlan {
+    fn compile(builder: &ScanBuilder<'_>) -> Result<Self> {
+        let row_len = usize::try_from(builder.ds.layout.row_len)
+            .map_err(|_| Error::unsupported("row length exceeds platform usize"))?;
+        let page_size = usize::try_from(builder.ds.layout.header.page_size)
+            .map_err(|_| Error::unsupported("page size exceeds platform usize"))?;
+        Ok(Self {
+            row_len,
+            page_size,
+            page_stride: u64::from(builder.ds.layout.header.page_size),
+            data_offset: builder.ds.layout.header.data_offset,
+            compression: builder.ds.layout.compression,
+            row_limit: builder.row_limit,
+            row_selection: builder.row_selection,
+        })
+    }
+
+    fn should_stop(self, stats: &ScanStats) -> bool {
+        self.row_limit
+            .is_some_and(|limit| stats.rows_emitted >= limit)
+    }
+
+    fn page_offset(self, page_index: u64) -> u64 {
+        self.data_offset + page_index * self.page_stride
+    }
+}
+
 fn row_selected(selection: RowSelection, row_index: u64) -> bool {
     match selection {
         RowSelection::All => true,
         RowSelection::Range { start, end } => (start..end).contains(&row_index),
     }
+}
+
+fn prepare_row_visit(plan: &RawScanPlan, stats: &mut ScanStats, row_index: u64) -> bool {
+    stats.rows_seen = stats.rows_seen.saturating_add(1);
+    if !row_selected(plan.row_selection, row_index) {
+        return false;
+    }
+    if let Some(limit) = plan.row_limit
+        && stats.rows_emitted >= limit
+    {
+        return false;
+    }
+    true
+}
+
+fn finish_row_visit(stats: &mut ScanStats, flow: ControlFlow<()>) -> bool {
+    stats.rows_emitted = stats.rows_emitted.saturating_add(1);
+    matches!(flow, ControlFlow::Break(()))
+}
+
+fn load_descriptor_page<R: Read + Seek>(
+    reader: &mut R,
+    plan: &RawScanPlan,
+    descriptor: PageDescriptor,
+    page: &mut [u8],
+    stats: &mut ScanStats,
+) -> Result<()> {
+    reader
+        .seek(SeekFrom::Start(plan.page_offset(descriptor.page_index)))
+        .map_err(scan_io_error)?;
+    reader.read_exact(page).map_err(scan_io_error)?;
+    stats.raw_bytes_read = stats
+        .raw_bytes_read
+        .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
+    Ok(())
+}
+
+fn descriptor_spans<'a>(
+    builder: &'a ScanBuilder<'_>,
+    descriptor: PageDescriptor,
+) -> Result<&'a [RowSpan]> {
+    let span_start = usize::try_from(descriptor.row_span_start)
+        .map_err(|_| Error::unsupported("row span start exceeds platform usize"))?;
+    let span_end = span_start
+        .checked_add(
+            usize::try_from(descriptor.row_span_count)
+                .map_err(|_| Error::unsupported("row span count exceeds platform usize"))?,
+        )
+        .ok_or_else(|| Error::unsupported("row span range overflow"))?;
+    builder
+        .ds
+        .descriptors
+        .row_spans
+        .get(span_start..span_end)
+        .ok_or_else(|| Error::unsupported("row span range exceeds descriptor table"))
+}
+
+fn emit_contiguous_rows<F>(
+    plan: &RawScanPlan,
+    descriptor: PageDescriptor,
+    page: &[u8],
+    stats: &mut ScanStats,
+    f: &mut F,
+) -> Result<bool>
+where
+    F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
+{
+    let data_start = usize::try_from(descriptor.data_start)
+        .map_err(|_| Error::unsupported("row data start exceeds platform usize"))?;
+    for row_offset in 0..descriptor.row_count {
+        let row_index = descriptor.row_base + u64::from(row_offset);
+        if !prepare_row_visit(plan, stats, row_index) {
+            continue;
+        }
+
+        let start = data_start
+            .checked_add(
+                usize::try_from(row_offset)
+                    .unwrap_or(usize::MAX)
+                    .saturating_mul(plan.row_len),
+            )
+            .ok_or_else(|| Error::unsupported("row offset overflow"))?;
+        let end = start
+            .checked_add(plan.row_len)
+            .ok_or_else(|| Error::unsupported("row end overflow"))?;
+        let Some(bytes) = page.get(start..end) else {
+            return Err(Error::unsupported("row slice exceeds page bounds"));
+        };
+
+        if finish_row_visit(stats, f(RawRow { row_index, bytes })?) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn emit_indexed_rows<F>(
+    plan: &RawScanPlan,
+    descriptor: PageDescriptor,
+    spans: &[RowSpan],
+    page: &[u8],
+    decompressed_row: &mut Vec<u8>,
+    stats: &mut ScanStats,
+    f: &mut F,
+) -> Result<bool>
+where
+    F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
+{
+    for (span_index, span) in spans.iter().enumerate() {
+        let row_index = descriptor.row_base + u64::try_from(span_index).unwrap_or(u64::MAX);
+        if !prepare_row_visit(plan, stats, row_index) {
+            continue;
+        }
+
+        let start = usize::try_from(span.offset)
+            .map_err(|_| Error::unsupported("row span offset exceeds platform usize"))?;
+        let len = usize::try_from(span.len)
+            .map_err(|_| Error::unsupported("row span length exceeds platform usize"))?;
+        let end = start
+            .checked_add(len)
+            .ok_or_else(|| Error::unsupported("row span end overflow"))?;
+        let Some(raw_bytes) = page.get(start..end) else {
+            return Err(Error::unsupported("row span exceeds page bounds"));
+        };
+
+        let bytes = match span.kind {
+            RowSpanKind::Borrowed => raw_bytes,
+            RowSpanKind::Compressed => {
+                let decoded =
+                    decompress_row(plan.compression, raw_bytes, plan.row_len, decompressed_row)?;
+                stats.row_bytes_materialized = stats
+                    .row_bytes_materialized
+                    .saturating_add(u64::try_from(decoded.len()).unwrap_or(u64::MAX));
+                decoded
+            }
+        };
+
+        if finish_row_visit(stats, f(RawRow { row_index, bytes })?) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn scan_io_error(err: std::io::Error) -> Error {

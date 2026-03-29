@@ -5,3 +5,10 @@ edition = "2024"
 
 [dependencies]
 encoding_rs = "0.8"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "scan_hotpaths"
+harness = false
