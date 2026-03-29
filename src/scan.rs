@@ -968,10 +968,13 @@ impl BatchDecodePlan {
 impl BatchAccumulator {
     fn new(plan: BatchDecodePlan, target_rows: usize) -> Self {
         let columns = plan
-            .column_kinds
+            .row_plan
+            .columns
             .iter()
-            .copied()
-            .map(|kind| OwnedBatchColumnBuilder::new(kind, target_rows))
+            .zip(plan.column_kinds.iter().copied())
+            .map(|(column, kind)| {
+                OwnedBatchColumnBuilder::with_capacity_hint(kind, target_rows, column.width)
+            })
             .collect();
         Self {
             plan,
@@ -996,18 +999,11 @@ impl BatchAccumulator {
             self.row_base = Some(row_index);
         }
 
-        self.owned_strings.clear();
-        for (plan_column, batch_column) in self
+        let planned = self
             .plan
             .row_plan
-            .columns
-            .iter()
-            .zip(self.columns.iter_mut())
-        {
-            let cell = self
-                .plan
-                .row_plan
-                .plan_cell(row, plan_column, &mut self.owned_strings)?;
+            .plan_cells(row, &mut self.owned_strings)?;
+        for (batch_column, cell) in self.columns.iter_mut().zip(planned) {
             batch_column.append(cell, &self.owned_strings)?;
         }
         self.row_count += 1;
@@ -1023,10 +1019,13 @@ impl BatchAccumulator {
             .collect();
         self.columns = self
             .plan
-            .column_kinds
+            .row_plan
+            .columns
             .iter()
-            .copied()
-            .map(|kind| OwnedBatchColumnBuilder::new(kind, self.target_rows))
+            .zip(self.plan.column_kinds.iter().copied())
+            .map(|(column, kind)| {
+                OwnedBatchColumnBuilder::with_capacity_hint(kind, self.target_rows, column.width)
+            })
             .collect();
         self.row_base = None;
         self.row_count = 0;
@@ -1039,7 +1038,13 @@ impl BatchAccumulator {
 }
 
 impl OwnedBatchColumnBuilder {
-    fn new(kind: ColumnMaterializationKind, target_rows: usize) -> Self {
+    fn with_capacity_hint(
+        kind: ColumnMaterializationKind,
+        target_rows: usize,
+        width_hint: u32,
+    ) -> Self {
+        let variable_capacity =
+            target_rows.saturating_mul(usize::try_from(width_hint).unwrap_or(0));
         match kind {
             ColumnMaterializationKind::I32 => Self::I32 {
                 values: Vec::with_capacity(target_rows),
@@ -1066,16 +1071,25 @@ impl OwnedBatchColumnBuilder {
                 valid: None,
             },
             ColumnMaterializationKind::Utf8 => Self::Utf8 {
-                offsets: vec![0],
-                data: Vec::new(),
+                offsets: Vec::with_capacity(target_rows.saturating_add(1)),
+                data: Vec::with_capacity(variable_capacity),
                 valid: None,
             },
             ColumnMaterializationKind::RawBytes => Self::RawBytes {
-                offsets: vec![0],
-                data: Vec::new(),
+                offsets: Vec::with_capacity(target_rows.saturating_add(1)),
+                data: Vec::with_capacity(variable_capacity),
                 valid: None,
             },
         }
+        .with_initial_offset()
+    }
+
+    fn with_initial_offset(mut self) -> Self {
+        match &mut self {
+            Self::Utf8 { offsets, .. } | Self::RawBytes { offsets, .. } => offsets.push(0),
+            _ => {}
+        }
+        self
     }
 
     fn append(&mut self, cell: PlannedCell<'_>, owned_strings: &[String]) -> Result<()> {
