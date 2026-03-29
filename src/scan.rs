@@ -1065,43 +1065,36 @@ impl OwnedBatchColumnBuilder {
             Self::I32 { values, valid } => match cell {
                 PlannedCell::Null => push_primitive_null(values, valid, 0),
                 PlannedCell::Int32(value) => push_primitive_valid(values, valid, value),
-                PlannedCell::Int64(value) => push_primitive_valid(
-                    values,
-                    valid,
-                    i32::try_from(value).map_err(|_| {
-                        Error::Decode(crate::error::DecodeError {
-                            message: format!("integer value {value} does not fit in i32 batch"),
-                        })
-                    })?,
-                ),
-                PlannedCell::Float64(value) => push_primitive_valid(
-                    values,
-                    valid,
-                    try_i32_from_f64(value).ok_or_else(|| {
-                        Error::Decode(crate::error::DecodeError {
-                            message: format!(
-                                "non-integral float value {value} cannot be materialized as i32"
-                            ),
-                        })
-                    })?,
-                ),
+                PlannedCell::Int64(value) => {
+                    if let Ok(value32) = i32::try_from(value) {
+                        push_primitive_valid(values, valid, value32);
+                    } else {
+                        self.widen_integer_to_f64();
+                        return self.append(PlannedCell::Int64(value), owned_strings);
+                    }
+                }
+                PlannedCell::Float64(value) => {
+                    if let Some(value32) = try_i32_from_f64(value) {
+                        push_primitive_valid(values, valid, value32);
+                    } else {
+                        self.widen_integer_to_f64();
+                        return self.append(PlannedCell::Float64(value), owned_strings);
+                    }
+                }
                 other => return Err(unexpected_batch_cell("i32", other)),
             },
             Self::I64 { values, valid } => match cell {
                 PlannedCell::Null => push_primitive_null(values, valid, 0),
                 PlannedCell::Int32(value) => push_primitive_valid(values, valid, i64::from(value)),
                 PlannedCell::Int64(value) => push_primitive_valid(values, valid, value),
-                PlannedCell::Float64(value) => push_primitive_valid(
-                    values,
-                    valid,
-                    try_i64_from_f64(value).ok_or_else(|| {
-                        Error::Decode(crate::error::DecodeError {
-                            message: format!(
-                                "non-integral float value {value} cannot be materialized as i64"
-                            ),
-                        })
-                    })?,
-                ),
+                PlannedCell::Float64(value) => {
+                    if let Some(value64) = try_i64_from_f64(value) {
+                        push_primitive_valid(values, valid, value64);
+                    } else {
+                        self.widen_integer_to_f64();
+                        return self.append(PlannedCell::Float64(value), owned_strings);
+                    }
+                }
                 other => return Err(unexpected_batch_cell("i64", other)),
             },
             Self::F64 { values, valid } => match cell {
@@ -1240,6 +1233,27 @@ impl OwnedBatchColumnBuilder {
                     .into_iter()
                     .map(|value| value.seconds_since_midnight as f64)
                     .collect(),
+                valid,
+            },
+            other => other,
+        };
+        *self = widened;
+    }
+
+    fn widen_integer_to_f64(&mut self) {
+        let widened = match std::mem::replace(
+            self,
+            Self::F64 {
+                values: Vec::new(),
+                valid: None,
+            },
+        ) {
+            Self::I32 { values, valid } => Self::F64 {
+                values: values.into_iter().map(f64::from).collect(),
+                valid,
+            },
+            Self::I64 { values, valid } => Self::F64 {
+                values: values.into_iter().map(|value| value as f64).collect(),
                 valid,
             },
             other => other,
@@ -2149,6 +2163,88 @@ mod tests {
                 assert!(valid.is_none());
             }
             other => panic!("unexpected utf8 batch column: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
+        let row = make_numeric_text_row(1.5, b"INT ");
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Integer,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 4,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 12,
+            total_rows: 1,
+            compression: CompressionKind::None,
+            rows_per_page: 1,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 1,
+                row_len: 12,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let rows = ScanBuilder::new(&ds).collect_rows().expect("rows");
+        assert!(matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if value == 1.5));
+
+        let batches = ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(1))
+            .collect_batches()
+            .expect("batches");
+        assert_eq!(batches.len(), 1);
+        match &batches[0].columns[0] {
+            OwnedColumnBuffer::F64 { values, valid } => {
+                assert_eq!(values, &vec![1.5]);
+                assert!(valid.is_none());
+            }
+            other => panic!("unexpected widened integer batch column: {other:?}"),
         }
     }
 
