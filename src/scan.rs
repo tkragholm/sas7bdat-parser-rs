@@ -250,9 +250,10 @@ impl<'a> ScanBuilder<'a> {
         let mut batcher = BatchAccumulator::new(BatchDecodePlan::new(&self)?, target_rows);
         let mut decode_batches = 0u64;
         let mut stop_after_current_batch = false;
+        let mut reader = open_scan_reader(self.ds)?;
 
-        let mut stats = self.scan_raw_rows(&mut |raw| {
-            batcher.push_row(raw.row_index, raw.bytes)?;
+        let mut stats = scan_row_bytes_with_reader(self, &mut reader, &mut |row_index, bytes| {
+            batcher.push_row(row_index, bytes)?;
             if batcher.is_full() {
                 let batch = batcher.finish_batch();
                 match f(batch)? {
@@ -288,6 +289,20 @@ fn scan_raw_rows_with_reader<R, F>(
 where
     R: Read + Seek,
     F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
+{
+    scan_row_bytes_with_reader(builder, reader, &mut |row_index, bytes| {
+        f(RawRow { row_index, bytes })
+    })
+}
+
+fn scan_row_bytes_with_reader<R, F>(
+    builder: ScanBuilder<'_>,
+    reader: &mut R,
+    f: &mut F,
+) -> Result<ScanStats>
+where
+    R: Read + Seek,
+    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
 {
     let plan = RawScanPlan::compile(&builder)?;
     if plan.row_len == 0 {
@@ -468,7 +483,7 @@ fn emit_contiguous_rows<F>(
     f: &mut F,
 ) -> Result<bool>
 where
-    F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
+    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
 {
     let data_start = usize::try_from(descriptor.data_start)
         .map_err(|_| Error::unsupported("row data start exceeds platform usize"))?;
@@ -492,7 +507,7 @@ where
             return Err(Error::unsupported("row slice exceeds page bounds"));
         };
 
-        if finish_row_visit(stats, f(RawRow { row_index, bytes })?) {
+        if finish_row_visit(stats, f(row_index, bytes)?) {
             return Ok(true);
         }
     }
@@ -509,7 +524,7 @@ fn emit_indexed_rows<F>(
     f: &mut F,
 ) -> Result<bool>
 where
-    F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
+    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
 {
     for (span_index, span) in spans.iter().enumerate() {
         let row_index = descriptor.row_base + u64::try_from(span_index).unwrap_or(u64::MAX);
@@ -540,7 +555,7 @@ where
             }
         };
 
-        if finish_row_visit(stats, f(RawRow { row_index, bytes })?) {
+        if finish_row_visit(stats, f(row_index, bytes)?) {
             return Ok(true);
         }
     }
@@ -1005,11 +1020,16 @@ impl BatchAccumulator {
             self.row_base = Some(row_index);
         }
 
-        let planned = self
-            .plan
-            .row_plan
-            .plan_cells(row, &mut self.owned_strings)?;
-        for (batch_column, cell) in self.columns.iter_mut().zip(planned) {
+        self.owned_strings.clear();
+        for (batch_column, column) in self.columns.iter_mut().zip(&self.plan.row_plan.columns) {
+            if append_batch_fast_path(&self.plan.row_plan, batch_column, column, row)? {
+                continue;
+            }
+
+            let cell = self
+                .plan
+                .row_plan
+                .plan_cell(row, column, &mut self.owned_strings)?;
             batch_column.append(cell, &self.owned_strings)?;
         }
         self.row_count += 1;
@@ -1096,6 +1116,158 @@ impl OwnedBatchColumnBuilder {
             _ => {}
         }
         self
+    }
+
+    fn append_integer_fast(&mut self, number: Option<f64>) -> Result<bool> {
+        match self {
+            Self::I32 { values, valid } => match number {
+                None => {
+                    push_primitive_null(values, valid, 0);
+                    Ok(true)
+                }
+                Some(value) => {
+                    if let Some(value32) = try_i32_from_f64(value) {
+                        push_primitive_valid(values, valid, value32);
+                        Ok(true)
+                    } else {
+                        self.widen_integer_to_f64();
+                        self.append_f64_fast(number)
+                    }
+                }
+            },
+            Self::I64 { values, valid } => match number {
+                None => {
+                    push_primitive_null(values, valid, 0);
+                    Ok(true)
+                }
+                Some(value) => {
+                    if let Some(value64) = try_i64_from_f64(value) {
+                        push_primitive_valid(values, valid, value64);
+                        Ok(true)
+                    } else {
+                        self.widen_integer_to_f64();
+                        self.append_f64_fast(number)
+                    }
+                }
+            },
+            Self::F64 { .. } => self.append_f64_fast(number),
+            _ => Ok(false),
+        }
+    }
+
+    fn append_f64_fast(&mut self, number: Option<f64>) -> Result<bool> {
+        match self {
+            Self::F64 { values, valid } => {
+                match number {
+                    None => push_primitive_null(values, valid, 0.0),
+                    Some(value) => push_primitive_valid(values, valid, value),
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn append_date_fast(&mut self, number: Option<f64>) -> Result<bool> {
+        match self {
+            Self::Date { values, valid } => match number {
+                None => {
+                    push_primitive_null(
+                        values,
+                        valid,
+                        SasDate {
+                            days_since_sas_epoch: 0,
+                        },
+                    );
+                    Ok(true)
+                }
+                Some(value) => {
+                    if let Some(days) = try_i32_from_f64(value) {
+                        push_primitive_valid(
+                            values,
+                            valid,
+                            SasDate {
+                                days_since_sas_epoch: days,
+                            },
+                        );
+                        Ok(true)
+                    } else {
+                        self.widen_temporal_to_f64();
+                        self.append_f64_fast(number)
+                    }
+                }
+            },
+            Self::F64 { .. } => self.append_f64_fast(number),
+            _ => Ok(false),
+        }
+    }
+
+    fn append_datetime_fast(&mut self, number: Option<f64>) -> Result<bool> {
+        match self {
+            Self::DateTime { values, valid } => match number {
+                None => {
+                    push_primitive_null(
+                        values,
+                        valid,
+                        SasDateTime {
+                            seconds_since_sas_epoch: 0,
+                        },
+                    );
+                    Ok(true)
+                }
+                Some(value) => {
+                    if let Some(seconds) = try_i64_from_f64(value) {
+                        push_primitive_valid(
+                            values,
+                            valid,
+                            SasDateTime {
+                                seconds_since_sas_epoch: seconds,
+                            },
+                        );
+                        Ok(true)
+                    } else {
+                        self.widen_temporal_to_f64();
+                        self.append_f64_fast(number)
+                    }
+                }
+            },
+            Self::F64 { .. } => self.append_f64_fast(number),
+            _ => Ok(false),
+        }
+    }
+
+    fn append_time_fast(&mut self, number: Option<f64>) -> Result<bool> {
+        match self {
+            Self::Time { values, valid } => match number {
+                None => {
+                    push_primitive_null(
+                        values,
+                        valid,
+                        SasTime {
+                            seconds_since_midnight: 0,
+                        },
+                    );
+                    Ok(true)
+                }
+                Some(value) => {
+                    if let Some(seconds) = try_i64_from_f64(value) {
+                        push_primitive_valid(
+                            values,
+                            valid,
+                            SasTime {
+                                seconds_since_midnight: seconds,
+                            },
+                        );
+                        Ok(true)
+                    } else {
+                        self.widen_temporal_to_f64();
+                        self.append_f64_fast(number)
+                    }
+                }
+            },
+            Self::F64 { .. } => self.append_f64_fast(number),
+            _ => Ok(false),
+        }
     }
 
     fn append(&mut self, cell: PlannedCell<'_>, owned_strings: &[String]) -> Result<()> {
@@ -1326,6 +1498,89 @@ impl OwnedBatchColumnBuilder {
                 valid,
             },
         }
+    }
+}
+
+fn append_batch_fast_path(
+    row_plan: &RowDecodePlan,
+    batch_column: &mut OwnedBatchColumnBuilder,
+    column: &CompiledColumnPlan,
+    row: &[u8],
+) -> Result<bool> {
+    let slice = row
+        .get(column.start..column.end)
+        .ok_or_else(|| Error::unsupported("column slice exceeds row bounds"))?;
+
+    match (column.kind, batch_column) {
+        (CompiledColumnKind::Integer, batch_column) => {
+            let number = decode_numeric_cell(slice, row_plan.endianness);
+            batch_column.append_integer_fast(number)
+        }
+        (CompiledColumnKind::Float, batch_column) => {
+            let number = decode_numeric_cell(slice, row_plan.endianness);
+            batch_column.append_f64_fast(number)
+        }
+        (CompiledColumnKind::Date, batch_column) => {
+            let number = decode_numeric_cell(slice, row_plan.endianness);
+            batch_column.append_date_fast(number)
+        }
+        (CompiledColumnKind::DateTime, batch_column) => {
+            let number = decode_numeric_cell(slice, row_plan.endianness);
+            batch_column.append_datetime_fast(number)
+        }
+        (CompiledColumnKind::Time, batch_column) => {
+            let number = decode_numeric_cell(slice, row_plan.endianness);
+            batch_column.append_time_fast(number)
+        }
+        (
+            CompiledColumnKind::Bytes,
+            OwnedBatchColumnBuilder::RawBytes {
+                offsets,
+                data,
+                valid,
+            },
+        ) => {
+            push_variable_valid(offsets, data, valid, slice)?;
+            Ok(true)
+        }
+        (
+            CompiledColumnKind::String,
+            OwnedBatchColumnBuilder::RawBytes {
+                offsets,
+                data,
+                valid,
+            },
+        ) if matches!(row_plan.decode_mode, DecodeMode::TypedLossless) => {
+            push_variable_valid(offsets, data, valid, slice)?;
+            Ok(true)
+        }
+        (
+            CompiledColumnKind::String,
+            OwnedBatchColumnBuilder::Utf8 {
+                offsets,
+                data,
+                valid,
+            },
+        ) => {
+            let slice = if row_plan.string_options.trim_fixed_width {
+                trim_trailing_space_or_nul(slice)
+            } else {
+                slice
+            };
+
+            if slice.is_ascii() {
+                push_variable_valid(offsets, data, valid, slice)?;
+                return Ok(true);
+            }
+
+            if row_plan.encoding == UTF_8 && std::str::from_utf8(slice).is_ok() {
+                push_variable_valid(offsets, data, valid, slice)?;
+                return Ok(true);
+            }
+
+            Ok(false)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -2274,6 +2529,90 @@ mod tests {
             rows[0].cells[1],
             OwnedCellValue::String(ref value) if value == "pear"
         ));
+    }
+
+    #[test]
+    fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
+        let row = make_numeric_text_row(1.0, b"pear");
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Float,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 4,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 12,
+            total_rows: 1,
+            compression: CompressionKind::None,
+            rows_per_page: 1,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 1,
+                row_len: 12,
+                compression: CompressionKind::None,
+                encoding: Some("WINDOWS-1252".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let batches = ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(1))
+            .collect_batches()
+            .expect("batches");
+        assert_eq!(batches.len(), 1);
+        match &batches[0].columns[1] {
+            OwnedColumnBuffer::Utf8 {
+                offsets,
+                data,
+                valid,
+            } => {
+                assert_eq!(offsets, &vec![0, 4]);
+                assert_eq!(data, b"pear");
+                assert!(valid.is_none());
+            }
+            other => panic!("unexpected utf8 batch column: {other:?}"),
+        }
     }
 
     #[test]

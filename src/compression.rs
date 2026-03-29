@@ -142,9 +142,10 @@ pub(crate) fn decompress_rle(
     output: &mut Vec<u8>,
 ) -> Result<()> {
     output.clear();
-    output.resize(expected_len, 0);
     let mut cursor = 0usize;
-    let mut out_pos = 0usize;
+    if output.capacity() < expected_len {
+        output.reserve(expected_len - output.capacity());
+    }
     let mut block = SmallCommandBlock::<COMMAND_BLOCK_CAPACITY>::default();
 
     while cursor < input.len() {
@@ -152,10 +153,10 @@ pub(crate) fn decompress_rle(
         if block.len == 0 {
             break;
         }
-        execute_command_block(&block, input, output.as_mut_slice(), &mut out_pos)?;
+        execute_command_block(&block, input, output)?;
     }
 
-    if out_pos != expected_len {
+    if output.len() != expected_len {
         return Err(compression_error("RLE output length mismatch"));
     }
 
@@ -168,9 +169,10 @@ pub(crate) fn decompress_rdc(
     output: &mut Vec<u8>,
 ) -> Result<()> {
     output.clear();
-    output.resize(expected_len, 0);
     let mut cursor = 0usize;
-    let mut out_pos = 0usize;
+    if output.capacity() < expected_len {
+        output.reserve(expected_len - output.capacity());
+    }
     let mut state = RdcState::default();
     let mut block = SmallCommandBlock::<COMMAND_BLOCK_CAPACITY>::default();
 
@@ -179,10 +181,10 @@ pub(crate) fn decompress_rdc(
         if block.len == 0 {
             break;
         }
-        execute_command_block(&block, input, output.as_mut_slice(), &mut out_pos)?;
+        execute_command_block(&block, input, output)?;
     }
 
-    if out_pos != expected_len {
+    if output.len() != expected_len {
         return Err(compression_error("RDC output length mismatch"));
     }
 
@@ -301,14 +303,10 @@ fn decode_rdc_block(
 fn execute_command_block<const N: usize>(
     block: &SmallCommandBlock<N>,
     input: &[u8],
-    output: &mut [u8],
-    out_pos: &mut usize,
+    output: &mut Vec<u8>,
 ) -> Result<()> {
     for index in 0..usize::from(block.len) {
-        let Some(op) = block.ops[index] else {
-            return Err(compression_error("command block contains uninitialized op"));
-        };
-        match op {
+        match block.ops[index] {
             SmallOp::Literal { src_off, len } => {
                 let src_off = usize::try_from(src_off)
                     .map_err(|_| compression_error("literal src offset exceeds usize"))?;
@@ -316,33 +314,20 @@ fn execute_command_block<const N: usize>(
                 if src_off.saturating_add(len) > input.len() {
                     return Err(compression_error("literal exceeds input length"));
                 }
-                if out_pos.saturating_add(len) > output.len() {
-                    return Err(compression_error("literal exceeds output length"));
-                }
-                output[*out_pos..*out_pos + len].copy_from_slice(&input[src_off..src_off + len]);
-                *out_pos += len;
+                output.extend_from_slice(&input[src_off..src_off + len]);
             }
             SmallOp::Fill { byte, len } => {
                 let len = usize::from(len);
-                if out_pos.saturating_add(len) > output.len() {
-                    return Err(compression_error("fill exceeds output length"));
-                }
-                output[*out_pos..*out_pos + len].fill(byte);
-                *out_pos += len;
+                output.resize(output.len().saturating_add(len), byte);
             }
             SmallOp::CopyBackref { back, len } => {
                 let back = usize::from(back);
                 let len = usize::from(len);
-                if back == 0
-                    || *out_pos < back
-                    || len > back
-                    || out_pos.saturating_add(len) > output.len()
-                {
+                if back == 0 || output.len() < back || len > back {
                     return Err(compression_error("copy-backref invalid"));
                 }
-                let start = *out_pos - back;
-                output.copy_within(start..start + len, *out_pos);
-                *out_pos += len;
+                let start = output.len() - back;
+                output.extend_from_within(start..start + len);
             }
         }
     }
@@ -351,9 +336,6 @@ fn execute_command_block<const N: usize>(
 
 fn clear_block<const N: usize>(block: &mut SmallCommandBlock<N>) {
     block.len = 0;
-    for slot in &mut block.ops {
-        *slot = None;
-    }
 }
 
 fn push_literal_segments<const N: usize>(
@@ -370,11 +352,11 @@ fn push_literal_segments<const N: usize>(
             ));
         }
         let chunk = remaining.min(usize::from(u16::MAX));
-        block.ops[usize::from(block.len)] = Some(SmallOp::Literal {
+        block.ops[usize::from(block.len)] = SmallOp::Literal {
             src_off: u32::try_from(local_src)
                 .map_err(|_| compression_error("literal src offset exceeds u32"))?,
             len: u16::try_from(chunk).unwrap_or(u16::MAX),
-        });
+        };
         block.len = block.len.saturating_add(1);
         remaining -= chunk;
         local_src = local_src.saturating_add(chunk);
@@ -395,10 +377,10 @@ fn push_fill_segments<const N: usize>(
             ));
         }
         let chunk = remaining.min(usize::from(u16::MAX));
-        block.ops[usize::from(block.len)] = Some(SmallOp::Fill {
+        block.ops[usize::from(block.len)] = SmallOp::Fill {
             byte,
             len: u16::try_from(chunk).unwrap_or(u16::MAX),
-        });
+        };
         block.len = block.len.saturating_add(1);
         remaining -= chunk;
     }
@@ -419,10 +401,10 @@ fn push_copy_segments<const N: usize>(
             ));
         }
         let chunk = remaining.min(usize::from(u16::MAX));
-        block.ops[usize::from(block.len)] = Some(SmallOp::CopyBackref {
+        block.ops[usize::from(block.len)] = SmallOp::CopyBackref {
             back,
             len: u16::try_from(chunk).unwrap_or(u16::MAX),
-        });
+        };
         block.len = block.len.saturating_add(1);
         remaining -= chunk;
     }
@@ -454,5 +436,16 @@ mod tests {
         let mut output = Vec::new();
         decompress_rdc(&compressed, 4, &mut output).expect("rdc");
         assert_eq!(output, b"BCDE");
+    }
+
+    #[test]
+    fn decompresses_rdc_copy_backref_sequence() {
+        let mut compressed = Vec::new();
+        compressed.extend_from_slice(&0x1000u16.to_be_bytes());
+        compressed.extend_from_slice(b"ABC");
+        compressed.extend_from_slice(&[0x30, 0x00]);
+        let mut output = Vec::new();
+        decompress_rdc(&compressed, 6, &mut output).expect("rdc backref");
+        assert_eq!(output, b"ABCABC");
     }
 }

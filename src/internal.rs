@@ -107,21 +107,27 @@ pub(crate) struct PageSource;
 #[derive(Debug, Clone)]
 pub(crate) struct SmallCommandBlock<const N: usize = 16> {
     pub len: u8,
-    pub ops: [Option<SmallOp>; N],
+    pub ops: [SmallOp; N],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SmallOp {
-    Literal { src_off: u32, len: u16 },
     Fill { byte: u8, len: u16 },
+    Literal { src_off: u32, len: u16 },
     CopyBackref { back: u16, len: u16 },
+}
+
+impl Default for SmallOp {
+    fn default() -> Self {
+        Self::Fill { byte: 0, len: 0 }
+    }
 }
 
 impl<const N: usize> Default for SmallCommandBlock<N> {
     fn default() -> Self {
         Self {
             len: 0,
-            ops: [None; N],
+            ops: [SmallOp::default(); N],
         }
     }
 }
