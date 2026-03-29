@@ -171,29 +171,70 @@ impl<'a> ScanBuilder<'a> {
         }
 
         let plan = RowDecodePlan::new(&self)?;
-        let mut rows = Vec::new();
-        let mut owned_strings = Vec::new();
-        self.scan_raw_rows(&mut |raw| {
-            let planned = plan.plan_cells(raw.bytes, &mut owned_strings)?;
-            let mut cells = Vec::with_capacity(planned.len());
-            for cell in &planned {
-                cells.push(owned_cell_from_planned(*cell, &owned_strings)?);
+        let mut rows = Vec::with_capacity(usize::try_from(self.ds.metadata.row_count).unwrap_or(0));
+        match plan.decode_mode {
+            DecodeMode::Typed => {
+                scan_row_bytes(self, &mut |row_index, bytes| {
+                    plan.validate_row_bounds(bytes)?;
+                    let mut cells = Vec::with_capacity(plan.columns.len());
+                    for column in &plan.columns {
+                        cells.push(plan.materialize_owned_cell_typed(bytes, column)?);
+                    }
+                    rows.push(OwnedRow { row_index, cells });
+                    Ok(ControlFlow::Continue(()))
+                })?;
             }
-            rows.push(OwnedRow {
-                row_index: raw.row_index,
-                cells,
-            });
-            Ok(ControlFlow::Continue(()))
-        })?;
+            DecodeMode::TypedLossless => {
+                scan_row_bytes(self, &mut |row_index, bytes| {
+                    plan.validate_row_bounds(bytes)?;
+                    let mut cells = Vec::with_capacity(plan.columns.len());
+                    for column in &plan.columns {
+                        cells.push(plan.materialize_owned_cell_lossless(bytes, column)?);
+                    }
+                    rows.push(OwnedRow { row_index, cells });
+                    Ok(ControlFlow::Continue(()))
+                })?;
+            }
+            DecodeMode::Raw => {
+                return Err(Error::unsupported(
+                    "collect_rows does not support DecodeMode::Raw; use visit_raw_rows instead",
+                ));
+            }
+        }
         Ok(rows)
     }
 
     pub fn collect_batches(self) -> Result<Vec<OwnedColumnarBatch>> {
-        let mut batches = Vec::new();
-        self.scan_batches(&mut |batch| {
-            batches.push(batch);
+        if matches!(self.decode, DecodeMode::Raw) {
+            return Err(Error::unsupported(
+                "collect_batches does not support DecodeMode::Raw",
+            ));
+        }
+
+        let target_rows = resolve_batch_row_capacity(&self)?;
+        let capacity_hint_rows = effective_scan_row_capacity_hint(&self).min(target_rows);
+        let target_rows_u64 = u64::try_from(target_rows).unwrap_or(u64::MAX).max(1);
+        let estimated_batches = self.ds.metadata.row_count.div_ceil(target_rows_u64);
+        let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
+        let mut batcher = BatchAccumulator::new(
+            BatchDecodePlan::new(&self)?,
+            target_rows,
+            capacity_hint_rows,
+        );
+
+        let _stats = scan_row_bytes(self, &mut |row_index, bytes| {
+            batcher.push_row(row_index, bytes)?;
+            if batcher.is_full() {
+                batches.push(batcher.take_batch());
+                batcher.reset_after_flush();
+            }
             Ok(ControlFlow::Continue(()))
         })?;
+
+        if !batcher.is_empty() {
+            batches.push(batcher.take_batch());
+        }
+
         Ok(batches)
     }
 
@@ -218,8 +259,7 @@ impl<'a> ScanBuilder<'a> {
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
     {
-        let mut reader = open_scan_reader(self.ds)?;
-        scan_raw_rows_with_reader(self, &mut reader, f)
+        scan_raw_rows(self, f)
     }
 
     fn scan_rows<F>(self, f: &mut F) -> Result<ScanStats>
@@ -257,12 +297,16 @@ impl<'a> ScanBuilder<'a> {
         }
 
         let target_rows = resolve_batch_row_capacity(&self)?;
-        let mut batcher = BatchAccumulator::new(BatchDecodePlan::new(&self)?, target_rows);
+        let capacity_hint_rows = effective_scan_row_capacity_hint(&self).min(target_rows);
+        let mut batcher = BatchAccumulator::new(
+            BatchDecodePlan::new(&self)?,
+            target_rows,
+            capacity_hint_rows,
+        );
         let mut decode_batches = 0u64;
         let mut stop_after_current_batch = false;
-        let mut reader = open_scan_reader(self.ds)?;
 
-        let mut stats = scan_row_bytes_with_reader(self, &mut reader, &mut |row_index, bytes| {
+        let mut stats = scan_row_bytes(self, &mut |row_index, bytes| {
             batcher.push_row(row_index, bytes)?;
             if batcher.is_full() {
                 let batch = batcher.take_batch();
@@ -292,18 +336,26 @@ impl<'a> ScanBuilder<'a> {
     }
 }
 
-fn scan_raw_rows_with_reader<R, F>(
-    builder: ScanBuilder<'_>,
-    reader: &mut R,
-    f: &mut F,
-) -> Result<ScanStats>
+fn scan_raw_rows<F>(builder: ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
 where
-    R: Read + Seek,
     F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
 {
-    scan_row_bytes_with_reader(builder, reader, &mut |row_index, bytes| {
+    scan_row_bytes(builder, &mut |row_index, bytes| {
         f(RawRow { row_index, bytes })
     })
+}
+
+fn scan_row_bytes<F>(builder: ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
+where
+    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
+{
+    match &builder.ds.file.source {
+        FileSource::Bytes(bytes) => scan_row_bytes_in_memory(builder, bytes.as_ref(), f),
+        FileSource::Path(_) => {
+            let mut reader = open_scan_reader(builder.ds)?;
+            scan_row_bytes_with_reader(builder, &mut reader, f)
+        }
+    }
 }
 
 fn scan_row_bytes_with_reader<R, F>(
@@ -384,6 +436,101 @@ where
     }
 
     Ok(stats)
+}
+
+fn scan_row_bytes_in_memory<F>(
+    builder: ScanBuilder<'_>,
+    file_bytes: &[u8],
+    f: &mut F,
+) -> Result<ScanStats>
+where
+    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
+{
+    let plan = RawScanPlan::compile(&builder)?;
+    if plan.row_len == 0 {
+        return Ok(ScanStats::default());
+    }
+
+    if builder.ds.layout.compression != crate::metadata::CompressionKind::None
+        && builder.ds.metadata.row_count > 0
+        && builder.ds.descriptors.total_candidate_rows == 0
+    {
+        return Err(Error::unsupported(
+            "compressed dataset layout compiled no row producers; this compressed page layout is not implemented yet",
+        ));
+    }
+
+    let mut stats = ScanStats::default();
+    let mut decompressed_row = Vec::new();
+
+    for descriptor in builder.ds.descriptors.pages.iter().copied() {
+        if plan.should_stop(&stats) {
+            break;
+        }
+
+        let page = page_slice(file_bytes, &plan, descriptor)?;
+        stats.pages_seen = stats.pages_seen.saturating_add(1);
+        stats.raw_bytes_read = stats
+            .raw_bytes_read
+            .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
+
+        match descriptor.exec_class {
+            crate::internal::PageExecClass::FusedContiguousUncompressed => {
+                stats.fused_pages = stats.fused_pages.saturating_add(1);
+                if emit_contiguous_rows(&plan, descriptor, page, &mut stats, f)? {
+                    return Ok(stats);
+                }
+            }
+            crate::internal::PageExecClass::MetadataOrEmpty => {}
+            crate::internal::PageExecClass::IndexedPointerRows => {
+                stats.indexed_pages = stats.indexed_pages.saturating_add(1);
+                let spans = descriptor_spans(&builder, descriptor)?;
+                if emit_indexed_rows(
+                    &plan,
+                    descriptor,
+                    spans,
+                    page,
+                    &mut decompressed_row,
+                    &mut stats,
+                    f,
+                )? {
+                    return Ok(stats);
+                }
+            }
+            crate::internal::PageExecClass::IndexedCompressedRows => {
+                stats.compressed_pages = stats.compressed_pages.saturating_add(1);
+                let spans = descriptor_spans(&builder, descriptor)?;
+                if emit_indexed_rows(
+                    &plan,
+                    descriptor,
+                    spans,
+                    page,
+                    &mut decompressed_row,
+                    &mut stats,
+                    f,
+                )? {
+                    return Ok(stats);
+                }
+            }
+        }
+    }
+
+    Ok(stats)
+}
+
+fn page_slice<'a>(
+    file_bytes: &'a [u8],
+    plan: &RawScanPlan,
+    descriptor: PageDescriptor,
+) -> Result<&'a [u8]> {
+    let start = usize::try_from(plan.page_offset(descriptor.page_index))
+        .map_err(|_| Error::unsupported("page offset exceeds platform usize"))?;
+    let end = start
+        .checked_add(plan.page_size)
+        .ok_or_else(|| Error::unsupported("page end overflow"))?;
+    file_bytes
+        .get(start..end)
+        .ok_or_else(|| Error::unsupported("page slice exceeds source bounds"))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -618,6 +765,7 @@ fn open_scan_reader(ds: &Dataset) -> Result<ScanReader> {
 #[derive(Debug)]
 struct RowDecodePlan {
     columns: Vec<CompiledColumnPlan>,
+    max_end: usize,
     names: Vec<String>,
     encoding: &'static Encoding,
     decode_mode: DecodeMode,
@@ -681,6 +829,7 @@ struct BatchDecodePlan {
 struct BatchAccumulator {
     plan: BatchDecodePlan,
     target_rows: usize,
+    capacity_hint_rows: usize,
     row_base: Option<u64>,
     row_count: usize,
     columns: Vec<OwnedBatchColumnBuilder>,
@@ -758,9 +907,11 @@ impl RowDecodePlan {
             .iter()
             .map(|column| compile_column_plan(column))
             .collect::<Result<Vec<_>>>()?;
+        let max_end = columns.iter().map(|column| column.end).max().unwrap_or(0);
 
         Ok(Self {
             columns,
+            max_end,
             names,
             encoding,
             decode_mode: builder.decode,
@@ -786,26 +937,37 @@ impl RowDecodePlan {
         owned_strings: &mut Vec<String>,
         planned: &mut Vec<PlannedCell<'row>>,
     ) -> Result<()> {
+        self.validate_row_bounds(row)?;
         owned_strings.clear();
         planned.clear();
         if planned.capacity() < self.columns.len() {
             planned.reserve(self.columns.len() - planned.capacity());
         }
         for column in &self.columns {
-            planned.push(self.plan_cell(row, column, owned_strings)?);
+            planned.push(self.plan_cell_in_bounds(row, column, owned_strings)?);
         }
         Ok(())
     }
 
-    fn plan_cell<'row>(
+    fn validate_row_bounds(&self, row: &[u8]) -> Result<()> {
+        if row.len() < self.max_end {
+            return Err(Error::unsupported("column slice exceeds row bounds"));
+        }
+        Ok(())
+    }
+
+    fn slice_in_bounds<'row>(&self, row: &'row [u8], column: &CompiledColumnPlan) -> &'row [u8] {
+        debug_assert!(row.len() >= column.end);
+        &row[column.start..column.end]
+    }
+
+    fn plan_cell_in_bounds<'row>(
         &self,
         row: &'row [u8],
         column: &CompiledColumnPlan,
         owned_strings: &mut Vec<String>,
     ) -> Result<PlannedCell<'row>> {
-        let slice = row
-            .get(column.start..column.end)
-            .ok_or_else(|| Error::unsupported("column slice exceeds row bounds"))?;
+        let slice = self.slice_in_bounds(row, column);
 
         match column.kind {
             CompiledColumnKind::String => self.plan_string(slice, owned_strings),
@@ -964,6 +1126,181 @@ impl RowDecodePlan {
         }
     }
 
+    fn materialize_owned_cell_typed(
+        &self,
+        row: &[u8],
+        column: &CompiledColumnPlan,
+    ) -> Result<crate::row::OwnedCellValue> {
+        let slice = self.slice_in_bounds(row, column);
+
+        match column.kind {
+            CompiledColumnKind::String => self.materialize_owned_string_typed(slice),
+            CompiledColumnKind::Bytes => Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec())),
+            CompiledColumnKind::Date => {
+                self.materialize_owned_temporal_typed(slice, column.width, TemporalKind::Date)
+            }
+            CompiledColumnKind::DateTime => {
+                self.materialize_owned_temporal_typed(slice, column.width, TemporalKind::DateTime)
+            }
+            CompiledColumnKind::Time => {
+                self.materialize_owned_temporal_typed(slice, column.width, TemporalKind::Time)
+            }
+            CompiledColumnKind::Integer | CompiledColumnKind::Float => {
+                self.materialize_owned_numeric_typed(slice, column.width)
+            }
+        }
+    }
+
+    fn materialize_owned_cell_lossless(
+        &self,
+        row: &[u8],
+        column: &CompiledColumnPlan,
+    ) -> Result<crate::row::OwnedCellValue> {
+        let slice = self.slice_in_bounds(row, column);
+
+        match column.kind {
+            CompiledColumnKind::String | CompiledColumnKind::Bytes => {
+                Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec()))
+            }
+            CompiledColumnKind::Date
+            | CompiledColumnKind::DateTime
+            | CompiledColumnKind::Time
+            | CompiledColumnKind::Integer
+            | CompiledColumnKind::Float => self.materialize_owned_numeric_lossless(slice),
+        }
+    }
+
+    fn materialize_owned_string_typed(&self, slice: &[u8]) -> Result<crate::row::OwnedCellValue> {
+        let slice = if self.string_options.trim_fixed_width {
+            trim_trailing_space_or_nul(slice)
+        } else {
+            slice
+        };
+
+        if slice.is_empty() {
+            return Ok(crate::row::OwnedCellValue::String(String::new()));
+        }
+
+        if slice.is_ascii() {
+            return Ok(crate::row::OwnedCellValue::String(
+                std::str::from_utf8(slice)
+                    .expect("ASCII is valid UTF-8")
+                    .to_owned(),
+            ));
+        }
+
+        if self.encoding == UTF_8 {
+            return match std::str::from_utf8(slice) {
+                Ok(value) => Ok(crate::row::OwnedCellValue::String(value.to_owned())),
+                Err(_)
+                    if matches!(
+                        self.string_options.utf8_validation,
+                        Utf8ValidationMode::Strict
+                    ) =>
+                {
+                    Err(Error::Decode(crate::error::DecodeError {
+                        message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+                    }))
+                }
+                Err(_) => Ok(crate::row::OwnedCellValue::String(maybe_fix_mojibake(
+                    String::from_utf8_lossy(slice).into_owned(),
+                    self.string_options.mojibake_fix,
+                ))),
+            };
+        }
+
+        let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
+        if had_errors
+            && matches!(
+                self.string_options.utf8_validation,
+                Utf8ValidationMode::Strict
+            )
+        {
+            return Err(Error::Decode(crate::error::DecodeError {
+                message: "string decode failed under strict validation".to_owned(),
+            }));
+        }
+
+        Ok(crate::row::OwnedCellValue::String(maybe_fix_mojibake(
+            decoded.into_owned(),
+            self.string_options.mojibake_fix,
+        )))
+    }
+
+    fn materialize_owned_temporal_typed(
+        &self,
+        slice: &[u8],
+        width: u32,
+        temporal_kind: TemporalKind,
+    ) -> Result<crate::row::OwnedCellValue> {
+        match decode_numeric_cell(slice, self.endianness) {
+            None => Ok(crate::row::OwnedCellValue::Null),
+            Some(number) => match temporal_kind {
+                TemporalKind::Date if self.temporal_options.decode_dates => {
+                    if let Some(days) = try_i32_from_f64(number) {
+                        Ok(crate::row::OwnedCellValue::Date(SasDate {
+                            days_since_sas_epoch: days,
+                        }))
+                    } else {
+                        self.materialize_owned_numeric_typed(slice, width)
+                    }
+                }
+                TemporalKind::DateTime if self.temporal_options.decode_datetimes => {
+                    if let Some(seconds) = try_i64_from_f64(number) {
+                        Ok(crate::row::OwnedCellValue::DateTime(SasDateTime {
+                            seconds_since_sas_epoch: seconds,
+                        }))
+                    } else {
+                        self.materialize_owned_numeric_typed(slice, width)
+                    }
+                }
+                TemporalKind::Time if self.temporal_options.decode_times => {
+                    if let Some(seconds) = try_i64_from_f64(number) {
+                        Ok(crate::row::OwnedCellValue::Time(SasTime {
+                            seconds_since_midnight: seconds,
+                        }))
+                    } else {
+                        self.materialize_owned_numeric_typed(slice, width)
+                    }
+                }
+                _ => self.materialize_owned_numeric_typed(slice, width),
+            },
+        }
+    }
+
+    fn materialize_owned_numeric_typed(
+        &self,
+        slice: &[u8],
+        width: u32,
+    ) -> Result<crate::row::OwnedCellValue> {
+        match decode_numeric_cell(slice, self.endianness) {
+            None => Ok(crate::row::OwnedCellValue::Null),
+            Some(number) => {
+                if let Some(value) = try_i64_from_f64(number) {
+                    if width <= 4
+                        && let Ok(value32) = i32::try_from(value)
+                    {
+                        return Ok(crate::row::OwnedCellValue::Int32(value32));
+                    }
+                    return Ok(crate::row::OwnedCellValue::Int64(value));
+                }
+                Ok(crate::row::OwnedCellValue::Float64(number))
+            }
+        }
+    }
+
+    fn materialize_owned_numeric_lossless(
+        &self,
+        slice: &[u8],
+    ) -> Result<crate::row::OwnedCellValue> {
+        if slice.is_empty() {
+            return Ok(crate::row::OwnedCellValue::Null);
+        }
+        Ok(crate::row::OwnedCellValue::Float64(f64::from_bits(
+            numeric_bits(slice, self.endianness),
+        )))
+    }
+
     fn plan_numeric_lossless<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
         if slice.is_empty() {
             return Ok(PlannedCell::Null);
@@ -998,19 +1335,20 @@ impl BatchDecodePlan {
 }
 
 impl BatchAccumulator {
-    fn new(plan: BatchDecodePlan, target_rows: usize) -> Self {
+    fn new(plan: BatchDecodePlan, target_rows: usize, capacity_hint_rows: usize) -> Self {
         let columns = plan
             .row_plan
             .columns
             .iter()
             .zip(plan.column_kinds.iter().copied())
             .map(|(column, kind)| {
-                OwnedBatchColumnBuilder::with_capacity_hint(kind, target_rows, column.width)
+                OwnedBatchColumnBuilder::with_capacity_hint(kind, capacity_hint_rows, column.width)
             })
             .collect();
         Self {
             plan,
             target_rows: target_rows.max(1),
+            capacity_hint_rows: capacity_hint_rows.max(1),
             row_base: None,
             row_count: 0,
             columns,
@@ -1031,16 +1369,17 @@ impl BatchAccumulator {
             self.row_base = Some(row_index);
         }
 
+        self.plan.row_plan.validate_row_bounds(row)?;
         self.owned_strings.clear();
         for (batch_column, column) in self.columns.iter_mut().zip(&self.plan.row_plan.columns) {
             if append_batch_fast_path(&self.plan.row_plan, batch_column, column, row)? {
                 continue;
             }
 
-            let cell = self
-                .plan
-                .row_plan
-                .plan_cell(row, column, &mut self.owned_strings)?;
+            let cell =
+                self.plan
+                    .row_plan
+                    .plan_cell_in_bounds(row, column, &mut self.owned_strings)?;
             batch_column.append(cell, &self.owned_strings)?;
         }
         self.row_count += 1;
@@ -1071,7 +1410,11 @@ impl BatchAccumulator {
             .iter()
             .zip(self.plan.column_kinds.iter().copied())
             .map(|(column, kind)| {
-                OwnedBatchColumnBuilder::with_capacity_hint(kind, self.target_rows, column.width)
+                OwnedBatchColumnBuilder::with_capacity_hint(
+                    kind,
+                    self.capacity_hint_rows,
+                    column.width,
+                )
             })
             .collect();
         self.owned_strings.clear();
@@ -1522,9 +1865,7 @@ fn append_batch_fast_path(
     column: &CompiledColumnPlan,
     row: &[u8],
 ) -> Result<bool> {
-    let slice = row
-        .get(column.start..column.end)
-        .ok_or_else(|| Error::unsupported("column slice exceeds row bounds"))?;
+    let slice = row_plan.slice_in_bounds(row, column);
 
     match (column.kind, batch_column) {
         (CompiledColumnKind::Integer, batch_column) => {
@@ -1626,29 +1967,6 @@ fn materialize_planned_cells<'a>(
     Ok(cells)
 }
 
-fn owned_cell_from_planned(
-    cell: PlannedCell<'_>,
-    owned_strings: &[String],
-) -> Result<crate::row::OwnedCellValue> {
-    Ok(match cell {
-        PlannedCell::Null => crate::row::OwnedCellValue::Null,
-        PlannedCell::Int32(value) => crate::row::OwnedCellValue::Int32(value),
-        PlannedCell::Int64(value) => crate::row::OwnedCellValue::Int64(value),
-        PlannedCell::Float64(value) => crate::row::OwnedCellValue::Float64(value),
-        PlannedCell::StrBorrowed(value) => crate::row::OwnedCellValue::String(value.to_owned()),
-        PlannedCell::StrOwned(index) => crate::row::OwnedCellValue::String(
-            owned_strings
-                .get(index)
-                .ok_or_else(|| Error::unsupported("owned string index out of range"))?
-                .clone(),
-        ),
-        PlannedCell::Bytes(value) => crate::row::OwnedCellValue::Bytes(value.to_vec()),
-        PlannedCell::Date(value) => crate::row::OwnedCellValue::Date(value),
-        PlannedCell::DateTime(value) => crate::row::OwnedCellValue::DateTime(value),
-        PlannedCell::Time(value) => crate::row::OwnedCellValue::Time(value),
-    })
-}
-
 fn column_materialization_kind(
     column_kind: CompiledColumnKind,
     width: u32,
@@ -1734,6 +2052,21 @@ fn resolve_batch_row_capacity(builder: &ScanBuilder<'_>) -> Result<usize> {
             Ok(rows_per_page.max(1))
         }
     }
+}
+
+fn effective_scan_row_capacity_hint(builder: &ScanBuilder<'_>) -> usize {
+    let total_rows = match builder.row_selection {
+        RowSelection::All => builder.ds.metadata.row_count,
+        RowSelection::Range { start, end } => {
+            let end = end.min(builder.ds.metadata.row_count);
+            let start = start.min(end);
+            end.saturating_sub(start)
+        }
+    };
+    let limited_rows = builder
+        .row_limit
+        .map_or(total_rows, |limit| total_rows.min(limit));
+    usize::try_from(limited_rows).unwrap_or(usize::MAX).max(1)
 }
 
 fn borrow_column_buffers(columns: &[OwnedColumnBuffer]) -> Vec<ColumnBuffer<'_>> {
