@@ -1,7 +1,7 @@
 use crate::{
     dataset::Dataset,
     error::{Error, ProjectionError, Result},
-    internal::ProjectionPlan,
+    internal::{ProjectedColumnPlan, ProjectionPlan},
     metadata::ColumnMeta,
 };
 use std::sync::Arc;
@@ -156,9 +156,21 @@ impl<'a> ProjectionBuilder<'a> {
             })
             .collect();
         let names: Vec<String> = columns.iter().map(|col| col.name.clone()).collect();
+        let compiled_columns: Vec<ProjectedColumnPlan> = selected
+            .iter()
+            .map(|idx| compile_projected_column_plan(&available[*idx], *idx))
+            .collect::<Result<Vec<_>>>()?;
+        let max_end = compiled_columns
+            .iter()
+            .map(|column| column.end)
+            .max()
+            .unwrap_or(0);
 
         Ok(Projection {
-            inner: Arc::new(ProjectionPlan { columns: selected }),
+            inner: Arc::new(ProjectionPlan {
+                columns: compiled_columns.into_boxed_slice(),
+                max_end,
+            }),
             columns: Arc::from(columns),
             names: Arc::from(names),
         })
@@ -174,4 +186,22 @@ fn find_column(columns: &[ColumnMeta], name: &str) -> Result<usize> {
                 message: format!("unknown column {name:?}"),
             })
         })
+}
+
+fn compile_projected_column_plan(column: &ColumnMeta, index: usize) -> Result<ProjectedColumnPlan> {
+    let end = column
+        .offset
+        .checked_add(column.physical_width)
+        .ok_or_else(|| {
+            Error::Projection(ProjectionError {
+                message: format!("column {:?} end overflowed u32", column.name),
+            })
+        })?;
+    Ok(ProjectedColumnPlan {
+        index,
+        offset: column.offset,
+        width: column.physical_width,
+        end,
+        logical_type: column.logical_type,
+    })
 }

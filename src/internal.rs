@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::{
-    metadata::{ColumnMeta, CompressionKind},
+    metadata::{ColumnMeta, CompressionKind, LogicalType},
     options::OpenOptions,
 };
 use std::{path::PathBuf, sync::Arc};
@@ -80,7 +80,17 @@ pub(crate) enum PageExecClass {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectionPlan {
-    pub columns: Vec<usize>,
+    pub columns: Box<[ProjectedColumnPlan]>,
+    pub max_end: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ProjectedColumnPlan {
+    pub index: usize,
+    pub offset: u32,
+    pub width: u32,
+    pub end: u32,
+    pub logical_type: LogicalType,
 }
 
 #[derive(Debug, Clone, Default)]

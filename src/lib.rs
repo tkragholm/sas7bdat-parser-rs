@@ -1,3 +1,5 @@
+#![feature(portable_simd)]
+
 mod columnar;
 mod compression;
 mod dataset;

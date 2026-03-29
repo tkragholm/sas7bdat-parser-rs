@@ -1,5 +1,5 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use sas7bdat_simd::{BatchHint, Dataset, RowSelection};
+use sas7bdat_simd::{BatchHint, Dataset, Projection, RowSelection};
 use std::{fs, hint::black_box, path::PathBuf};
 
 fn fixture_path(relative: &str) -> PathBuf {
@@ -81,6 +81,36 @@ fn bench_dataset_scans(
     group.finish();
 }
 
+fn bench_projected_scans(c: &mut Criterion, name: &str, dataset: Dataset, projection: Projection) {
+    let mut group = c.benchmark_group(name);
+    group.throughput(Throughput::Elements(dataset.metadata().row_count));
+
+    group.bench_function(BenchmarkId::new("typed_rows", "projected"), |b| {
+        b.iter(|| {
+            let rows = dataset
+                .scan()
+                .with_projection(&projection)
+                .collect_rows()
+                .expect("projected typed rows");
+            black_box(rows.len());
+        });
+    });
+
+    group.bench_function(BenchmarkId::new("typed_batches", "projected"), |b| {
+        b.iter(|| {
+            let batches = dataset
+                .scan()
+                .with_projection(&projection)
+                .with_batch_hint(BatchHint::Rows(256))
+                .collect_batches()
+                .expect("projected typed batches");
+            black_box(batches.len());
+        });
+    });
+
+    group.finish();
+}
+
 fn scan_hotpaths(c: &mut Criterion) {
     if let Some(dataset) = load_dataset("raw_data/csharp/charset_utf8.sas7bdat") {
         bench_dataset_scans(c, "fixture_charset_utf8", dataset, true, true, true);
@@ -99,10 +129,55 @@ fn scan_hotpaths(c: &mut Criterion) {
     }
 
     if let Some(dataset) = load_dataset("raw_data/ahs2013/topical.sas7bdat") {
+        if let Ok(projection) = dataset
+            .projection()
+            .columns(["CONTROL", "PTCOSTGAS", "SPLTWGT1"])
+            .build()
+        {
+            bench_projected_scans(c, "fixture_topical_projection", dataset.clone(), projection);
+        }
+        if let Ok(projection) = dataset
+            .projection()
+            .columns([
+                "PTCOSTGAS",
+                "PTCOSTINSU",
+                "PTCOSTCARP",
+                "PTCOSTCARM",
+                "PTCOSTPARK",
+                "PTCOSTPTR",
+                "SPLTWGT1",
+                "SPLTWGT2",
+            ])
+            .build()
+        {
+            bench_projected_scans(
+                c,
+                "fixture_topical_projection_numeric",
+                dataset.clone(),
+                projection,
+            );
+        }
+        if let Ok(projection) = dataset
+            .projection()
+            .columns([
+                "CONTROL", "EABAN", "EBARCL", "PTBANK", "PTENTMNT", "PTGROCER",
+            ])
+            .build()
+        {
+            bench_projected_scans(
+                c,
+                "fixture_topical_projection_strings",
+                dataset.clone(),
+                projection,
+            );
+        }
         bench_dataset_scans(c, "fixture_topical", dataset, true, true, true);
     }
 
     if let Some(dataset) = load_dataset("raw_data/ahs2013/homimp.sas7bdat") {
+        if let Ok(projection) = dataset.projection().columns(["CONTROL", "RAD"]).build() {
+            bench_projected_scans(c, "fixture_homimp_projection", dataset.clone(), projection);
+        }
         bench_dataset_scans(c, "fixture_homimp", dataset, true, true, true);
     }
 }

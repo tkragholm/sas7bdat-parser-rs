@@ -4,7 +4,7 @@ use crate::{
     dataset::Dataset,
     encoding::resolve_encoding,
     error::{Error, Result},
-    internal::{FileSource, PageDescriptor, RowSpan, RowSpanKind},
+    internal::{FileSource, PageDescriptor, ProjectedColumnPlan, RowSpan, RowSpanKind},
     metadata::{ColumnMeta, Endianness, LogicalType, SasDate, SasDateTime, SasTime},
     options::{
         BatchHint, DecodeMode, MojibakePolicy, OrderingMode, Parallelism, RowSelection,
@@ -18,6 +18,7 @@ use std::{
     fs::File,
     io::{Cursor, Read, Seek, SeekFrom},
     ops::ControlFlow,
+    simd::{Simd, cmp::SimdPartialEq, num::SimdUint},
     sync::Arc,
 };
 
@@ -178,7 +179,7 @@ impl<'a> ScanBuilder<'a> {
                     plan.validate_row_bounds(bytes)?;
                     let mut cells = Vec::with_capacity(plan.columns.len());
                     for (column, kind) in plan.columns.iter().zip(&plan.owned_kinds) {
-                        cells.push(plan.materialize_owned_cell_typed(bytes, column, *kind)?);
+                        cells.push(plan.materialize_owned_cell_fast(bytes, column, *kind)?);
                     }
                     rows.push(OwnedRow { row_index, cells });
                     Ok(ControlFlow::Continue(()))
@@ -189,7 +190,7 @@ impl<'a> ScanBuilder<'a> {
                     plan.validate_row_bounds(bytes)?;
                     let mut cells = Vec::with_capacity(plan.columns.len());
                     for (column, kind) in plan.columns.iter().zip(&plan.owned_kinds) {
-                        cells.push(plan.materialize_owned_cell_lossless(bytes, column, *kind)?);
+                        cells.push(plan.materialize_owned_cell_fast(bytes, column, *kind)?);
                     }
                     rows.push(OwnedRow { row_index, cells });
                     Ok(ControlFlow::Continue(()))
@@ -279,7 +280,7 @@ impl<'a> ScanBuilder<'a> {
             let cells = materialize_planned_cells(&planned, &owned_strings)?;
             let row = RowView {
                 row_index: raw.row_index,
-                names: &plan.names,
+                names: plan.names.as_ref(),
                 cells: &cells,
             };
             f(row)
@@ -767,11 +768,10 @@ struct RowDecodePlan {
     columns: Vec<CompiledColumnPlan>,
     owned_kinds: Vec<OwnedCellMaterializationKind>,
     max_end: usize,
-    names: Vec<String>,
+    names: Arc<[String]>,
     encoding: &'static Encoding,
     decode_mode: DecodeMode,
     string_options: StringDecodeOptions,
-    temporal_options: TemporalDecodeOptions,
     endianness: Endianness,
 }
 
@@ -790,14 +790,15 @@ enum PlannedCell<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum CompiledColumnKind {
-    String,
-    Bytes,
-    Date,
-    DateTime,
-    Time,
-    Integer,
-    Float,
+enum DecodedStringBytes<'a> {
+    Borrowed(&'a [u8]),
+    Owned(usize),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TrimmedString<'a> {
+    bytes: &'a [u8],
+    is_ascii: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -805,7 +806,8 @@ struct CompiledColumnPlan {
     start: usize,
     end: usize,
     width: u32,
-    kind: CompiledColumnKind,
+    kernel: CompiledDecodeKernel,
+    numeric_tile: Option<NumericTileMode>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -818,6 +820,30 @@ enum ColumnMaterializationKind {
     Time,
     Utf8,
     RawBytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NumericTileMode {
+    F64RawBits,
+    IntegerWidth8,
+    Date,
+    DateTime,
+    Time,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CompiledDecodeKernel {
+    Utf8,
+    RawBytes,
+    Date,
+    DateAsNumeric,
+    DateTime,
+    DateTimeAsNumeric,
+    Time,
+    TimeAsNumeric,
+    Integer,
+    Float,
+    NumericLossless,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -865,6 +891,10 @@ enum OwnedBatchColumnBuilder {
         values: Vec<f64>,
         valid: Option<Vec<u8>>,
     },
+    StagedNumeric {
+        raw_bits: Vec<u64>,
+        mode: NumericTileMode,
+    },
     Date {
         values: Vec<SasDate>,
         valid: Option<Vec<u8>>,
@@ -891,42 +921,47 @@ enum OwnedBatchColumnBuilder {
 
 impl RowDecodePlan {
     fn new(builder: &ScanBuilder<'_>) -> Result<Self> {
-        let selected_columns: Vec<&ColumnMeta> = if let Some(projection) = builder.projection {
-            projection
-                .inner
-                .columns
-                .iter()
-                .map(|index| {
-                    builder.ds.layout.columns.get(*index).ok_or_else(|| {
-                        Error::Projection(crate::error::ProjectionError {
-                            message: format!("projection column index {index} is out of range"),
-                        })
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?
+        let names: Arc<[String]> = if let Some(projection) = builder.projection {
+            Arc::clone(&projection.names)
         } else {
-            builder.ds.layout.columns.iter().collect()
-        };
-
-        let names = if let Some(projection) = builder.projection {
-            projection.names.iter().cloned().collect()
-        } else {
-            selected_columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect()
+            Arc::from(
+                builder
+                    .ds
+                    .layout
+                    .columns
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect::<Vec<_>>(),
+            )
         };
 
         let encoding = resolve_encoding(builder.ds.metadata.encoding.as_deref());
-        let columns = selected_columns
-            .iter()
-            .map(|column| compile_column_plan(column))
-            .collect::<Result<Vec<_>>>()?;
+        let (columns, max_end) = if let Some(projection) = builder.projection {
+            (
+                projection
+                    .inner
+                    .columns
+                    .iter()
+                    .map(|column| compile_compiled_projection_column_plan(builder, column))
+                    .collect::<Result<Vec<_>>>()?,
+                usize::try_from(projection.inner.max_end)
+                    .map_err(|_| Error::unsupported("projection max end exceeds platform usize"))?,
+            )
+        } else {
+            let columns = builder
+                .ds
+                .layout
+                .columns
+                .iter()
+                .map(|column| compile_column_plan(builder, column))
+                .collect::<Result<Vec<_>>>()?;
+            let max_end = columns.iter().map(|column| column.end).max().unwrap_or(0);
+            (columns, max_end)
+        };
         let owned_kinds = columns
             .iter()
-            .map(|column| compile_owned_materialization_kind(builder, column.kind))
+            .map(|column| compile_owned_materialization_kind(column.kernel))
             .collect();
-        let max_end = columns.iter().map(|column| column.end).max().unwrap_or(0);
 
         Ok(Self {
             columns,
@@ -936,7 +971,6 @@ impl RowDecodePlan {
             encoding,
             decode_mode: builder.decode,
             string_options: builder.string_options,
-            temporal_options: builder.temporal_options,
             endianness: builder.ds.layout.header.endianness,
         })
     }
@@ -989,21 +1023,18 @@ impl RowDecodePlan {
     ) -> Result<PlannedCell<'row>> {
         let slice = self.slice_in_bounds(row, column);
 
-        match column.kind {
-            CompiledColumnKind::String => self.plan_string(slice, owned_strings),
-            CompiledColumnKind::Bytes => Ok(PlannedCell::Bytes(slice)),
-            CompiledColumnKind::Date => {
-                self.plan_numeric_temporal(slice, column.width, TemporalKind::Date)
-            }
-            CompiledColumnKind::DateTime => {
-                self.plan_numeric_temporal(slice, column.width, TemporalKind::DateTime)
-            }
-            CompiledColumnKind::Time => {
-                self.plan_numeric_temporal(slice, column.width, TemporalKind::Time)
-            }
-            CompiledColumnKind::Integer | CompiledColumnKind::Float => {
-                self.plan_numeric_value(slice, column.width)
-            }
+        match column.kernel {
+            CompiledDecodeKernel::Utf8 => self.plan_string(slice, owned_strings),
+            CompiledDecodeKernel::RawBytes => Ok(PlannedCell::Bytes(slice)),
+            CompiledDecodeKernel::Date => self.plan_numeric_date(slice),
+            CompiledDecodeKernel::DateAsNumeric
+            | CompiledDecodeKernel::Integer
+            | CompiledDecodeKernel::Float => self.plan_numeric_value(slice, column.width),
+            CompiledDecodeKernel::DateTime => self.plan_numeric_datetime(slice),
+            CompiledDecodeKernel::DateTimeAsNumeric => self.plan_numeric_value(slice, column.width),
+            CompiledDecodeKernel::Time => self.plan_numeric_time(slice),
+            CompiledDecodeKernel::TimeAsNumeric => self.plan_numeric_value(slice, column.width),
+            CompiledDecodeKernel::NumericLossless => self.plan_numeric_lossless(slice),
         }
     }
 
@@ -1016,16 +1047,20 @@ impl RowDecodePlan {
             return Ok(PlannedCell::Bytes(slice));
         }
 
-        let slice = if self.string_options.trim_fixed_width {
-            trim_trailing_space_or_nul(slice)
+        let trimmed = if self.string_options.trim_fixed_width {
+            trim_and_classify_ascii(slice)
         } else {
-            slice
+            TrimmedString {
+                bytes: slice,
+                is_ascii: slice.is_ascii(),
+            }
         };
+        let slice = trimmed.bytes;
         if slice.is_empty() {
             return Ok(PlannedCell::StrBorrowed(""));
         }
 
-        if slice.is_ascii() {
+        if trimmed.is_ascii {
             return Ok(PlannedCell::StrBorrowed(
                 std::str::from_utf8(slice).expect("ASCII is valid UTF-8"),
             ));
@@ -1076,50 +1111,65 @@ impl RowDecodePlan {
         }
     }
 
-    fn plan_numeric_temporal<'row>(
+    fn decode_string_bytes_for_batch<'row>(
         &self,
-        slice: &[u8],
-        width: u32,
-        temporal_kind: TemporalKind,
-    ) -> Result<PlannedCell<'row>> {
-        match self.decode_mode {
-            DecodeMode::Typed => match decode_numeric_cell(slice, self.endianness) {
-                None => Ok(PlannedCell::Null),
-                Some(number) => match temporal_kind {
-                    TemporalKind::Date if self.temporal_options.decode_dates => {
-                        if let Some(days) = try_i32_from_f64(number) {
-                            Ok(PlannedCell::Date(SasDate {
-                                days_since_sas_epoch: days,
-                            }))
-                        } else {
-                            self.plan_numeric_value(slice, width)
-                        }
-                    }
-                    TemporalKind::DateTime if self.temporal_options.decode_datetimes => {
-                        if let Some(seconds) = try_i64_from_f64(number) {
-                            Ok(PlannedCell::DateTime(SasDateTime {
-                                seconds_since_sas_epoch: seconds,
-                            }))
-                        } else {
-                            self.plan_numeric_value(slice, width)
-                        }
-                    }
-                    TemporalKind::Time if self.temporal_options.decode_times => {
-                        if let Some(seconds) = try_i64_from_f64(number) {
-                            Ok(PlannedCell::Time(SasTime {
-                                seconds_since_midnight: seconds,
-                            }))
-                        } else {
-                            self.plan_numeric_value(slice, width)
-                        }
-                    }
-                    _ => self.plan_numeric_value(slice, width),
-                },
-            },
-            DecodeMode::TypedLossless => self.plan_numeric_lossless(slice),
-            DecodeMode::Raw => Err(Error::unsupported(
-                "visit_rows does not support DecodeMode::Raw; use visit_raw_rows instead",
-            )),
+        slice: &'row [u8],
+        owned_strings: &mut Vec<String>,
+    ) -> Result<DecodedStringBytes<'row>> {
+        let trimmed = if self.string_options.trim_fixed_width {
+            trim_and_classify_ascii(slice)
+        } else {
+            TrimmedString {
+                bytes: slice,
+                is_ascii: slice.is_ascii(),
+            }
+        };
+        let slice = trimmed.bytes;
+        if slice.is_empty() || trimmed.is_ascii {
+            return Ok(DecodedStringBytes::Borrowed(slice));
+        }
+
+        if self.encoding == UTF_8 {
+            return match std::str::from_utf8(slice) {
+                Ok(_) => Ok(DecodedStringBytes::Borrowed(slice)),
+                Err(_)
+                    if matches!(
+                        self.string_options.utf8_validation,
+                        Utf8ValidationMode::Strict
+                    ) =>
+                {
+                    Err(Error::Decode(crate::error::DecodeError {
+                        message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+                    }))
+                }
+                Err(_) => {
+                    owned_strings.push(maybe_fix_mojibake(
+                        String::from_utf8_lossy(slice).into_owned(),
+                        self.string_options.mojibake_fix,
+                    ));
+                    Ok(DecodedStringBytes::Owned(owned_strings.len() - 1))
+                }
+            };
+        }
+
+        let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
+        if had_errors
+            && matches!(
+                self.string_options.utf8_validation,
+                Utf8ValidationMode::Strict
+            )
+        {
+            return Err(Error::Decode(crate::error::DecodeError {
+                message: "string decode failed under strict validation".to_owned(),
+            }));
+        }
+
+        match decoded {
+            std::borrow::Cow::Borrowed(value) => Ok(DecodedStringBytes::Borrowed(value.as_bytes())),
+            std::borrow::Cow::Owned(value) => {
+                owned_strings.push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
+                Ok(DecodedStringBytes::Owned(owned_strings.len() - 1))
+            }
         }
     }
 
@@ -1146,7 +1196,52 @@ impl RowDecodePlan {
         }
     }
 
-    fn materialize_owned_cell_typed(
+    fn plan_numeric_date<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
+        match decode_numeric_cell(slice, self.endianness) {
+            None => Ok(PlannedCell::Null),
+            Some(number) => {
+                if let Some(days) = try_i32_from_f64(number) {
+                    Ok(PlannedCell::Date(SasDate {
+                        days_since_sas_epoch: days,
+                    }))
+                } else {
+                    Ok(PlannedCell::Float64(number))
+                }
+            }
+        }
+    }
+
+    fn plan_numeric_datetime<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
+        match decode_numeric_cell(slice, self.endianness) {
+            None => Ok(PlannedCell::Null),
+            Some(number) => {
+                if let Some(seconds) = try_i64_from_f64(number) {
+                    Ok(PlannedCell::DateTime(SasDateTime {
+                        seconds_since_sas_epoch: seconds,
+                    }))
+                } else {
+                    Ok(PlannedCell::Float64(number))
+                }
+            }
+        }
+    }
+
+    fn plan_numeric_time<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
+        match decode_numeric_cell(slice, self.endianness) {
+            None => Ok(PlannedCell::Null),
+            Some(number) => {
+                if let Some(seconds) = try_i64_from_f64(number) {
+                    Ok(PlannedCell::Time(SasTime {
+                        seconds_since_midnight: seconds,
+                    }))
+                } else {
+                    Ok(PlannedCell::Float64(number))
+                }
+            }
+        }
+    }
+
+    fn materialize_owned_cell_fast(
         &self,
         row: &[u8],
         column: &CompiledColumnPlan,
@@ -1159,7 +1254,8 @@ impl RowDecodePlan {
                 Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec()))
             }
             OwnedCellMaterializationKind::Date => self.materialize_owned_date(slice),
-            OwnedCellMaterializationKind::DateAsNumeric => {
+            OwnedCellMaterializationKind::DateAsNumeric
+            | OwnedCellMaterializationKind::NumericTyped => {
                 self.materialize_owned_numeric_typed(slice, column.width)
             }
             OwnedCellMaterializationKind::DateTime => self.materialize_owned_datetime(slice),
@@ -1170,52 +1266,28 @@ impl RowDecodePlan {
             OwnedCellMaterializationKind::TimeAsNumeric => {
                 self.materialize_owned_numeric_typed(slice, column.width)
             }
-            OwnedCellMaterializationKind::NumericTyped => {
-                self.materialize_owned_numeric_typed(slice, column.width)
-            }
             OwnedCellMaterializationKind::NumericLossless => {
                 self.materialize_owned_numeric_lossless(slice)
             }
         }
     }
 
-    fn materialize_owned_cell_lossless(
-        &self,
-        row: &[u8],
-        column: &CompiledColumnPlan,
-        kind: OwnedCellMaterializationKind,
-    ) -> Result<crate::row::OwnedCellValue> {
-        let slice = self.slice_in_bounds(row, column);
-
-        match kind {
-            OwnedCellMaterializationKind::Utf8 | OwnedCellMaterializationKind::RawBytes => {
-                Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec()))
-            }
-            OwnedCellMaterializationKind::Date
-            | OwnedCellMaterializationKind::DateAsNumeric
-            | OwnedCellMaterializationKind::DateTime
-            | OwnedCellMaterializationKind::DateTimeAsNumeric
-            | OwnedCellMaterializationKind::Time
-            | OwnedCellMaterializationKind::TimeAsNumeric
-            | OwnedCellMaterializationKind::NumericTyped
-            | OwnedCellMaterializationKind::NumericLossless => {
-                self.materialize_owned_numeric_lossless(slice)
-            }
-        }
-    }
-
     fn materialize_owned_string_typed(&self, slice: &[u8]) -> Result<crate::row::OwnedCellValue> {
-        let slice = if self.string_options.trim_fixed_width {
-            trim_trailing_space_or_nul(slice)
+        let trimmed = if self.string_options.trim_fixed_width {
+            trim_and_classify_ascii(slice)
         } else {
-            slice
+            TrimmedString {
+                bytes: slice,
+                is_ascii: slice.is_ascii(),
+            }
         };
+        let slice = trimmed.bytes;
 
         if slice.is_empty() {
             return Ok(crate::row::OwnedCellValue::String(String::new()));
         }
 
-        if slice.is_ascii() {
+        if trimmed.is_ascii {
             return Ok(crate::row::OwnedCellValue::String(
                 std::str::from_utf8(slice)
                     .expect("ASCII is valid UTF-8")
@@ -1356,14 +1428,7 @@ impl BatchDecodePlan {
         let column_kinds = row_plan
             .columns
             .iter()
-            .map(|column| {
-                column_materialization_kind(
-                    column.kind,
-                    column.width,
-                    row_plan.temporal_options,
-                    row_plan.decode_mode,
-                )
-            })
+            .map(|column| column_materialization_kind(column.kernel, column.width))
             .collect();
         Ok(Self {
             row_plan,
@@ -1380,7 +1445,12 @@ impl BatchAccumulator {
             .iter()
             .zip(plan.column_kinds.iter().copied())
             .map(|(column, kind)| {
-                OwnedBatchColumnBuilder::with_capacity_hint(kind, capacity_hint_rows, column.width)
+                OwnedBatchColumnBuilder::with_capacity_hint(
+                    kind,
+                    capacity_hint_rows,
+                    column.width,
+                    column.numeric_tile,
+                )
             })
             .collect();
         Self {
@@ -1410,7 +1480,13 @@ impl BatchAccumulator {
         self.plan.row_plan.validate_row_bounds(row)?;
         self.owned_strings.clear();
         for (batch_column, column) in self.columns.iter_mut().zip(&self.plan.row_plan.columns) {
-            if append_batch_fast_path(&self.plan.row_plan, batch_column, column, row)? {
+            if append_batch_fast_path(
+                &self.plan.row_plan,
+                batch_column,
+                column,
+                row,
+                &mut self.owned_strings,
+            )? {
                 continue;
             }
 
@@ -1452,6 +1528,7 @@ impl BatchAccumulator {
                     kind,
                     self.capacity_hint_rows,
                     column.width,
+                    column.numeric_tile,
                 )
             })
             .collect();
@@ -1464,6 +1541,7 @@ impl OwnedBatchColumnBuilder {
         kind: ColumnMaterializationKind,
         target_rows: usize,
         width_hint: u32,
+        numeric_tile: Option<NumericTileMode>,
     ) -> Self {
         let variable_capacity =
             target_rows.saturating_mul(usize::try_from(width_hint).unwrap_or(0));
@@ -1503,7 +1581,18 @@ impl OwnedBatchColumnBuilder {
                 valid: None,
             },
         }
+        .with_numeric_tile(target_rows, numeric_tile)
         .with_initial_offset()
+    }
+
+    fn with_numeric_tile(self, target_rows: usize, numeric_tile: Option<NumericTileMode>) -> Self {
+        match (self, numeric_tile) {
+            (_, Some(mode)) => Self::StagedNumeric {
+                raw_bits: Vec::with_capacity(target_rows),
+                mode,
+            },
+            (builder, _) => builder,
+        }
     }
 
     fn with_initial_offset(mut self) -> Self {
@@ -1558,6 +1647,23 @@ impl OwnedBatchColumnBuilder {
                     None => push_primitive_null(values, valid, 0.0),
                     Some(value) => push_primitive_valid(values, valid, value),
                 }
+                Ok(true)
+            }
+            Self::StagedNumeric {
+                raw_bits,
+                mode: NumericTileMode::F64RawBits,
+            } => {
+                raw_bits.push(number.map_or(SAS_NUMERIC_MISSING_SENTINEL, f64::to_bits));
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn append_staged_numeric_bits_fast(&mut self, raw: u64) -> Result<bool> {
+        match self {
+            Self::StagedNumeric { raw_bits, .. } => {
+                raw_bits.push(raw);
                 Ok(true)
             }
             _ => Ok(false),
@@ -1710,6 +1816,9 @@ impl OwnedBatchColumnBuilder {
                 PlannedCell::Float64(value) => push_primitive_valid(values, valid, value),
                 other => return Err(unexpected_batch_cell("f64", other)),
             },
+            Self::StagedNumeric { raw_bits, .. } => {
+                raw_bits.push(staged_numeric_raw_bits_from_planned_cell(cell)?);
+            }
             Self::Date { values, valid } => match cell {
                 PlannedCell::Null => push_primitive_null(
                     values,
@@ -1872,6 +1981,9 @@ impl OwnedBatchColumnBuilder {
             Self::I32 { values, valid } => OwnedColumnBuffer::I32 { values, valid },
             Self::I64 { values, valid } => OwnedColumnBuffer::I64 { values, valid },
             Self::F64 { values, valid } => OwnedColumnBuffer::F64 { values, valid },
+            Self::StagedNumeric { raw_bits, mode } => {
+                materialize_staged_numeric_column(raw_bits, mode)
+            }
             Self::Date { values, valid } => OwnedColumnBuffer::Date { values, valid },
             Self::DateTime { values, valid } => OwnedColumnBuffer::DateTime { values, valid },
             Self::Time { values, valid } => OwnedColumnBuffer::Time { values, valid },
@@ -1902,32 +2014,45 @@ fn append_batch_fast_path(
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
+    owned_strings: &mut Vec<String>,
 ) -> Result<bool> {
     let slice = row_plan.slice_in_bounds(row, column);
 
-    match (column.kind, batch_column) {
-        (CompiledColumnKind::Integer, batch_column) => {
+    if column.numeric_tile.is_some() {
+        let raw = decode_numeric_raw_bits_or_missing(slice, row_plan.endianness);
+        return batch_column.append_staged_numeric_bits_fast(raw);
+    }
+
+    match (column.kernel, batch_column) {
+        (CompiledDecodeKernel::Integer, batch_column) => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_integer_fast(number)
         }
-        (CompiledColumnKind::Float, batch_column) => {
+        (CompiledDecodeKernel::Float, batch_column) => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_f64_fast(number)
         }
-        (CompiledColumnKind::Date, batch_column) => {
+        (CompiledDecodeKernel::DateAsNumeric, batch_column)
+        | (CompiledDecodeKernel::DateTimeAsNumeric, batch_column)
+        | (CompiledDecodeKernel::TimeAsNumeric, batch_column)
+        | (CompiledDecodeKernel::NumericLossless, batch_column) => {
+            let number = decode_numeric_cell(slice, row_plan.endianness);
+            batch_column.append_f64_fast(number)
+        }
+        (CompiledDecodeKernel::Date, batch_column) => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_date_fast(number)
         }
-        (CompiledColumnKind::DateTime, batch_column) => {
+        (CompiledDecodeKernel::DateTime, batch_column) => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_datetime_fast(number)
         }
-        (CompiledColumnKind::Time, batch_column) => {
+        (CompiledDecodeKernel::Time, batch_column) => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_time_fast(number)
         }
         (
-            CompiledColumnKind::Bytes,
+            CompiledDecodeKernel::RawBytes,
             OwnedBatchColumnBuilder::RawBytes {
                 offsets,
                 data,
@@ -1938,41 +2063,30 @@ fn append_batch_fast_path(
             Ok(true)
         }
         (
-            CompiledColumnKind::String,
-            OwnedBatchColumnBuilder::RawBytes {
-                offsets,
-                data,
-                valid,
-            },
-        ) if matches!(row_plan.decode_mode, DecodeMode::TypedLossless) => {
-            push_variable_valid(offsets, data, valid, slice)?;
-            Ok(true)
-        }
-        (
-            CompiledColumnKind::String,
+            CompiledDecodeKernel::Utf8,
             OwnedBatchColumnBuilder::Utf8 {
                 offsets,
                 data,
                 valid,
             },
         ) => {
-            let slice = if row_plan.string_options.trim_fixed_width {
-                trim_trailing_space_or_nul(slice)
-            } else {
-                slice
-            };
-
-            if slice.is_ascii() {
-                push_variable_valid(offsets, data, valid, slice)?;
-                return Ok(true);
+            match row_plan.decode_string_bytes_for_batch(slice, owned_strings)? {
+                DecodedStringBytes::Borrowed(bytes) => {
+                    push_variable_valid(offsets, data, valid, bytes)?;
+                }
+                DecodedStringBytes::Owned(index) => {
+                    push_variable_valid(
+                        offsets,
+                        data,
+                        valid,
+                        owned_strings
+                            .get(index)
+                            .ok_or_else(|| Error::unsupported("owned string index out of range"))?
+                            .as_bytes(),
+                    )?;
+                }
             }
-
-            if row_plan.encoding == UTF_8 && std::str::from_utf8(slice).is_ok() {
-                push_variable_valid(offsets, data, valid, slice)?;
-                return Ok(true);
-            }
-
-            Ok(false)
+            Ok(true)
         }
         _ => Ok(false),
     }
@@ -2006,51 +2120,34 @@ fn materialize_planned_cells<'a>(
 }
 
 fn column_materialization_kind(
-    column_kind: CompiledColumnKind,
+    kernel: CompiledDecodeKernel,
     width: u32,
-    temporal_options: TemporalDecodeOptions,
-    decode_mode: DecodeMode,
 ) -> ColumnMaterializationKind {
-    if matches!(decode_mode, DecodeMode::TypedLossless) {
-        return match column_kind {
-            CompiledColumnKind::String | CompiledColumnKind::Bytes => {
-                ColumnMaterializationKind::RawBytes
-            }
-            CompiledColumnKind::Integer
-            | CompiledColumnKind::Float
-            | CompiledColumnKind::Date
-            | CompiledColumnKind::DateTime
-            | CompiledColumnKind::Time => ColumnMaterializationKind::F64,
-        };
-    }
-
-    match column_kind {
-        CompiledColumnKind::Integer => {
+    match kernel {
+        CompiledDecodeKernel::Integer => {
             if width <= 4 {
                 ColumnMaterializationKind::I32
             } else {
                 ColumnMaterializationKind::I64
             }
         }
-        CompiledColumnKind::Float => ColumnMaterializationKind::F64,
-        CompiledColumnKind::String => ColumnMaterializationKind::Utf8,
-        CompiledColumnKind::Bytes => ColumnMaterializationKind::RawBytes,
-        CompiledColumnKind::Date if temporal_options.decode_dates => {
-            ColumnMaterializationKind::Date
-        }
-        CompiledColumnKind::DateTime if temporal_options.decode_datetimes => {
-            ColumnMaterializationKind::DateTime
-        }
-        CompiledColumnKind::Time if temporal_options.decode_times => {
-            ColumnMaterializationKind::Time
-        }
-        CompiledColumnKind::Date | CompiledColumnKind::DateTime | CompiledColumnKind::Time => {
-            ColumnMaterializationKind::F64
-        }
+        CompiledDecodeKernel::Float => ColumnMaterializationKind::F64,
+        CompiledDecodeKernel::NumericLossless
+        | CompiledDecodeKernel::DateAsNumeric
+        | CompiledDecodeKernel::DateTimeAsNumeric
+        | CompiledDecodeKernel::TimeAsNumeric => ColumnMaterializationKind::F64,
+        CompiledDecodeKernel::Utf8 => ColumnMaterializationKind::Utf8,
+        CompiledDecodeKernel::RawBytes => ColumnMaterializationKind::RawBytes,
+        CompiledDecodeKernel::Date => ColumnMaterializationKind::Date,
+        CompiledDecodeKernel::DateTime => ColumnMaterializationKind::DateTime,
+        CompiledDecodeKernel::Time => ColumnMaterializationKind::Time,
     }
 }
 
-fn compile_column_plan(column: &ColumnMeta) -> Result<CompiledColumnPlan> {
+fn compile_column_plan(
+    builder: &ScanBuilder<'_>,
+    column: &ColumnMeta,
+) -> Result<CompiledColumnPlan> {
     let start = usize::try_from(column.offset)
         .map_err(|_| Error::unsupported("column offset exceeds platform usize"))?;
     let width = column.physical_width;
@@ -2059,67 +2156,115 @@ fn compile_column_plan(column: &ColumnMeta) -> Result<CompiledColumnPlan> {
     let end = start
         .checked_add(width_usize)
         .ok_or_else(|| Error::unsupported("column end overflow"))?;
-    let kind = match column.logical_type {
-        LogicalType::String => CompiledColumnKind::String,
-        LogicalType::Bytes => CompiledColumnKind::Bytes,
-        LogicalType::Date => CompiledColumnKind::Date,
-        LogicalType::DateTime => CompiledColumnKind::DateTime,
-        LogicalType::Time => CompiledColumnKind::Time,
-        LogicalType::Integer => CompiledColumnKind::Integer,
-        LogicalType::Float => CompiledColumnKind::Float,
-    };
     Ok(CompiledColumnPlan {
         start,
         end,
         width,
-        kind,
+        kernel: compile_decode_kernel(builder, column.logical_type),
+        numeric_tile: compile_numeric_tile_mode(
+            compile_decode_kernel(builder, column.logical_type),
+            width,
+        ),
     })
 }
 
-fn compile_owned_materialization_kind(
+fn compile_compiled_projection_column_plan(
     builder: &ScanBuilder<'_>,
-    kind: CompiledColumnKind,
-) -> OwnedCellMaterializationKind {
+    column: &ProjectedColumnPlan,
+) -> Result<CompiledColumnPlan> {
+    Ok(CompiledColumnPlan {
+        start: usize::try_from(column.offset)
+            .map_err(|_| Error::unsupported("projection column offset exceeds platform usize"))?,
+        end: usize::try_from(column.end)
+            .map_err(|_| Error::unsupported("projection column end exceeds platform usize"))?,
+        width: column.width,
+        kernel: compile_decode_kernel(builder, column.logical_type),
+        numeric_tile: compile_numeric_tile_mode(
+            compile_decode_kernel(builder, column.logical_type),
+            column.width,
+        ),
+    })
+}
+
+fn compile_numeric_tile_mode(kernel: CompiledDecodeKernel, width: u32) -> Option<NumericTileMode> {
+    if width != 8 {
+        return None;
+    }
+
+    match kernel {
+        CompiledDecodeKernel::Float
+        | CompiledDecodeKernel::NumericLossless
+        | CompiledDecodeKernel::DateAsNumeric
+        | CompiledDecodeKernel::DateTimeAsNumeric
+        | CompiledDecodeKernel::TimeAsNumeric => Some(NumericTileMode::F64RawBits),
+        CompiledDecodeKernel::Integer => Some(NumericTileMode::IntegerWidth8),
+        CompiledDecodeKernel::Date => Some(NumericTileMode::Date),
+        CompiledDecodeKernel::DateTime => Some(NumericTileMode::DateTime),
+        CompiledDecodeKernel::Time => Some(NumericTileMode::Time),
+        _ => None,
+    }
+}
+
+fn compile_decode_kernel(
+    builder: &ScanBuilder<'_>,
+    logical_type: LogicalType,
+) -> CompiledDecodeKernel {
     match builder.decode {
-        DecodeMode::Typed => match kind {
-            CompiledColumnKind::String => OwnedCellMaterializationKind::Utf8,
-            CompiledColumnKind::Bytes => OwnedCellMaterializationKind::RawBytes,
-            CompiledColumnKind::Date => {
+        DecodeMode::Typed => match logical_type {
+            LogicalType::String => CompiledDecodeKernel::Utf8,
+            LogicalType::Bytes => CompiledDecodeKernel::RawBytes,
+            LogicalType::Date => {
                 if builder.temporal_options.decode_dates {
-                    OwnedCellMaterializationKind::Date
+                    CompiledDecodeKernel::Date
                 } else {
-                    OwnedCellMaterializationKind::DateAsNumeric
+                    CompiledDecodeKernel::DateAsNumeric
                 }
             }
-            CompiledColumnKind::DateTime => {
+            LogicalType::DateTime => {
                 if builder.temporal_options.decode_datetimes {
-                    OwnedCellMaterializationKind::DateTime
+                    CompiledDecodeKernel::DateTime
                 } else {
-                    OwnedCellMaterializationKind::DateTimeAsNumeric
+                    CompiledDecodeKernel::DateTimeAsNumeric
                 }
             }
-            CompiledColumnKind::Time => {
+            LogicalType::Time => {
                 if builder.temporal_options.decode_times {
-                    OwnedCellMaterializationKind::Time
+                    CompiledDecodeKernel::Time
                 } else {
-                    OwnedCellMaterializationKind::TimeAsNumeric
+                    CompiledDecodeKernel::TimeAsNumeric
                 }
             }
-            CompiledColumnKind::Integer | CompiledColumnKind::Float => {
-                OwnedCellMaterializationKind::NumericTyped
-            }
+            LogicalType::Integer => CompiledDecodeKernel::Integer,
+            LogicalType::Float => CompiledDecodeKernel::Float,
         },
-        DecodeMode::TypedLossless => match kind {
-            CompiledColumnKind::String | CompiledColumnKind::Bytes => {
-                OwnedCellMaterializationKind::RawBytes
-            }
-            CompiledColumnKind::Date
-            | CompiledColumnKind::DateTime
-            | CompiledColumnKind::Time
-            | CompiledColumnKind::Integer
-            | CompiledColumnKind::Float => OwnedCellMaterializationKind::NumericLossless,
+        DecodeMode::TypedLossless => match logical_type {
+            LogicalType::String | LogicalType::Bytes => CompiledDecodeKernel::RawBytes,
+            LogicalType::Date
+            | LogicalType::DateTime
+            | LogicalType::Time
+            | LogicalType::Integer
+            | LogicalType::Float => CompiledDecodeKernel::NumericLossless,
         },
-        DecodeMode::Raw => OwnedCellMaterializationKind::RawBytes,
+        DecodeMode::Raw => CompiledDecodeKernel::RawBytes,
+    }
+}
+
+fn compile_owned_materialization_kind(
+    kernel: CompiledDecodeKernel,
+) -> OwnedCellMaterializationKind {
+    match kernel {
+        CompiledDecodeKernel::Utf8 => OwnedCellMaterializationKind::Utf8,
+        CompiledDecodeKernel::RawBytes => OwnedCellMaterializationKind::RawBytes,
+        CompiledDecodeKernel::Date => OwnedCellMaterializationKind::Date,
+        CompiledDecodeKernel::DateAsNumeric => OwnedCellMaterializationKind::DateAsNumeric,
+        CompiledDecodeKernel::DateTime => OwnedCellMaterializationKind::DateTime,
+        CompiledDecodeKernel::DateTimeAsNumeric => OwnedCellMaterializationKind::DateTimeAsNumeric,
+        CompiledDecodeKernel::Time => OwnedCellMaterializationKind::Time,
+        CompiledDecodeKernel::TimeAsNumeric => OwnedCellMaterializationKind::TimeAsNumeric,
+        CompiledDecodeKernel::Integer | CompiledDecodeKernel::Float => {
+            OwnedCellMaterializationKind::NumericTyped
+        }
+        CompiledDecodeKernel::NumericLossless => OwnedCellMaterializationKind::NumericLossless,
     }
 }
 
@@ -2207,13 +2352,6 @@ fn unexpected_batch_cell(expected: &str, actual: PlannedCell<'_>) -> Error {
     })
 }
 
-#[derive(Debug, Clone, Copy)]
-enum TemporalKind {
-    Date,
-    DateTime,
-    Time,
-}
-
 fn decode_numeric_cell(slice: &[u8], endianness: Endianness) -> Option<f64> {
     if slice.is_empty() {
         return None;
@@ -2226,14 +2364,18 @@ fn decode_numeric_cell(slice: &[u8], endianness: Endianness) -> Option<f64> {
     }
 }
 
+fn decode_numeric_raw_bits_or_missing(slice: &[u8], endianness: Endianness) -> u64 {
+    if slice.is_empty() {
+        SAS_NUMERIC_MISSING_SENTINEL
+    } else {
+        numeric_bits(slice, endianness)
+    }
+}
+
 fn numeric_bits(slice: &[u8], endianness: Endianness) -> u64 {
     debug_assert!(slice.len() <= 8);
     if slice.len() == 8 {
-        let bytes: [u8; 8] = slice.try_into().expect("len == 8");
-        match endianness {
-            Endianness::Little => u64::from_le_bytes(bytes),
-            Endianness::Big => u64::from_be_bytes(bytes),
-        }
+        numeric_bits_simd_8(slice, endianness)
     } else {
         let mut buf = [0u8; 8];
         match endianness {
@@ -2249,10 +2391,232 @@ fn numeric_bits(slice: &[u8], endianness: Endianness) -> u64 {
     }
 }
 
+fn materialize_staged_numeric_column(
+    raw_bits: Vec<u64>,
+    mode: NumericTileMode,
+) -> OwnedColumnBuffer {
+    let valid = classify_missing_raw_bits(&raw_bits);
+    match mode {
+        NumericTileMode::F64RawBits => materialize_staged_f64_column(raw_bits, valid),
+        NumericTileMode::IntegerWidth8 => materialize_staged_i64_or_f64_column(raw_bits, valid),
+        NumericTileMode::Date => materialize_staged_date_or_f64_column(raw_bits, valid),
+        NumericTileMode::DateTime => materialize_staged_datetime_or_f64_column(raw_bits, valid),
+        NumericTileMode::Time => materialize_staged_time_or_f64_column(raw_bits, valid),
+    }
+}
+
+fn materialize_staged_f64_column(raw_bits: Vec<u64>, valid: Option<Vec<u8>>) -> OwnedColumnBuffer {
+    let mut values = Vec::with_capacity(raw_bits.len());
+    values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+        if validity_is_null(valid.as_deref(), index) {
+            0.0
+        } else {
+            f64::from_bits(bits)
+        }
+    }));
+    OwnedColumnBuffer::F64 { values, valid }
+}
+
+fn materialize_staged_i64_or_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let all_integral = raw_bits.iter().enumerate().all(|(index, &bits)| {
+        validity_is_null(valid.as_deref(), index)
+            || try_i64_from_f64(f64::from_bits(bits)).is_some()
+    });
+
+    if all_integral {
+        let mut values = Vec::with_capacity(raw_bits.len());
+        values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+            if validity_is_null(valid.as_deref(), index) {
+                0
+            } else {
+                try_i64_from_f64(f64::from_bits(bits)).expect("checked integer range")
+            }
+        }));
+        OwnedColumnBuffer::I64 { values, valid }
+    } else {
+        materialize_staged_f64_column(raw_bits, valid)
+    }
+}
+
+fn materialize_staged_date_or_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let all_dates = raw_bits.iter().enumerate().all(|(index, &bits)| {
+        validity_is_null(valid.as_deref(), index)
+            || try_i32_from_f64(f64::from_bits(bits)).is_some()
+    });
+
+    if all_dates {
+        let mut values = Vec::with_capacity(raw_bits.len());
+        values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+            if validity_is_null(valid.as_deref(), index) {
+                SasDate {
+                    days_since_sas_epoch: 0,
+                }
+            } else {
+                SasDate {
+                    days_since_sas_epoch: try_i32_from_f64(f64::from_bits(bits))
+                        .expect("checked date range"),
+                }
+            }
+        }));
+        OwnedColumnBuffer::Date { values, valid }
+    } else {
+        materialize_staged_f64_column(raw_bits, valid)
+    }
+}
+
+fn materialize_staged_datetime_or_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let all_datetimes = raw_bits.iter().enumerate().all(|(index, &bits)| {
+        validity_is_null(valid.as_deref(), index)
+            || try_i64_from_f64(f64::from_bits(bits)).is_some()
+    });
+
+    if all_datetimes {
+        let mut values = Vec::with_capacity(raw_bits.len());
+        values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+            if validity_is_null(valid.as_deref(), index) {
+                SasDateTime {
+                    seconds_since_sas_epoch: 0,
+                }
+            } else {
+                SasDateTime {
+                    seconds_since_sas_epoch: try_i64_from_f64(f64::from_bits(bits))
+                        .expect("checked datetime range"),
+                }
+            }
+        }));
+        OwnedColumnBuffer::DateTime { values, valid }
+    } else {
+        materialize_staged_f64_column(raw_bits, valid)
+    }
+}
+
+fn materialize_staged_time_or_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let all_times = raw_bits.iter().enumerate().all(|(index, &bits)| {
+        validity_is_null(valid.as_deref(), index)
+            || try_i64_from_f64(f64::from_bits(bits)).is_some()
+    });
+
+    if all_times {
+        let mut values = Vec::with_capacity(raw_bits.len());
+        values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+            if validity_is_null(valid.as_deref(), index) {
+                SasTime {
+                    seconds_since_midnight: 0,
+                }
+            } else {
+                SasTime {
+                    seconds_since_midnight: try_i64_from_f64(f64::from_bits(bits))
+                        .expect("checked time range"),
+                }
+            }
+        }));
+        OwnedColumnBuffer::Time { values, valid }
+    } else {
+        materialize_staged_f64_column(raw_bits, valid)
+    }
+}
+
+fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u8>> {
+    type U64x8 = Simd<u64, 8>;
+
+    let exp_mask = U64x8::splat(NUMERIC_EXP_MASK);
+    let fraction_mask = U64x8::splat(NUMERIC_FRACTION_MASK);
+    let zeros = U64x8::splat(0);
+    let mut valid: Option<Vec<u8>> = None;
+    let mut processed = 0usize;
+
+    let mut chunks = raw_bits.chunks_exact(8);
+    for chunk in &mut chunks {
+        let lanes = U64x8::from_slice(chunk);
+        let missing_mask = ((lanes & exp_mask).simd_eq(exp_mask)
+            & (lanes & fraction_mask).simd_ne(zeros))
+        .to_bitmask();
+        if missing_mask == 0 {
+            if let Some(valid) = &mut valid {
+                valid.extend(std::iter::repeat_n(1, chunk.len()));
+            }
+            processed += chunk.len();
+            continue;
+        }
+
+        let valid_vec = valid.get_or_insert_with(|| {
+            let mut valid = Vec::with_capacity(raw_bits.len());
+            valid.resize(processed, 1);
+            valid
+        });
+        for lane in 0..chunk.len() {
+            valid_vec.push(if ((missing_mask >> lane) & 1) == 0 {
+                1
+            } else {
+                0
+            });
+        }
+        processed += chunk.len();
+    }
+
+    for &bits in chunks.remainder() {
+        if numeric_bits_is_missing(bits) {
+            let valid_vec = valid.get_or_insert_with(|| {
+                let mut valid = Vec::with_capacity(raw_bits.len());
+                valid.resize(processed, 1);
+                valid
+            });
+            valid_vec.push(0);
+        } else if let Some(valid) = &mut valid {
+            valid.push(1);
+        }
+        processed += 1;
+    }
+
+    valid
+}
+
+fn validity_is_null(valid: Option<&[u8]>, index: usize) -> bool {
+    valid.is_some_and(|valid| valid.get(index).copied() == Some(0))
+}
+
+fn staged_numeric_raw_bits_from_planned_cell(cell: PlannedCell<'_>) -> Result<u64> {
+    match cell {
+        PlannedCell::Null => Ok(SAS_NUMERIC_MISSING_SENTINEL),
+        PlannedCell::Int32(value) => Ok(f64::from(value).to_bits()),
+        PlannedCell::Int64(value) => Ok((value as f64).to_bits()),
+        PlannedCell::Float64(value) => Ok(value.to_bits()),
+        PlannedCell::Date(value) => Ok((value.days_since_sas_epoch as f64).to_bits()),
+        PlannedCell::DateTime(value) => Ok((value.seconds_since_sas_epoch as f64).to_bits()),
+        PlannedCell::Time(value) => Ok((value.seconds_since_midnight as f64).to_bits()),
+        other => Err(unexpected_batch_cell("staged-numeric", other)),
+    }
+}
+
+fn numeric_bits_simd_8(slice: &[u8], endianness: Endianness) -> u64 {
+    type U8x8 = Simd<u8, 8>;
+
+    let lanes = U8x8::from_slice(slice);
+    let bytes = lanes.to_array();
+    match endianness {
+        Endianness::Little => u64::from_le_bytes(bytes),
+        Endianness::Big => u64::from_be_bytes(bytes),
+    }
+}
+
+const NUMERIC_EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
+const NUMERIC_FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
+const SAS_NUMERIC_MISSING_SENTINEL: u64 = 0x7FF0_0000_0000_0001;
+
 const fn numeric_bits_is_missing(raw: u64) -> bool {
-    const EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
-    const FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
-    (raw & EXP_MASK) == EXP_MASK && (raw & FRACTION_MASK) != 0
+    (raw & NUMERIC_EXP_MASK) == NUMERIC_EXP_MASK && (raw & NUMERIC_FRACTION_MASK) != 0
 }
 
 fn try_i64_from_f64(number: f64) -> Option<i64> {
@@ -2287,6 +2651,67 @@ fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
     &slice[..end]
 }
 
+fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
+    if slice.len() < 16 {
+        let trimmed = trim_trailing_space_or_nul(slice);
+        return TrimmedString {
+            bytes: trimmed,
+            is_ascii: trimmed.is_ascii(),
+        };
+    }
+
+    let trimmed = trim_trailing_space_or_nul_simd(slice);
+    TrimmedString {
+        bytes: trimmed,
+        is_ascii: is_ascii_simd(trimmed),
+    }
+}
+
+fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
+    type U8x16 = Simd<u8, 16>;
+
+    let mut end = slice.len();
+    let spaces = U8x16::splat(b' ');
+    let nuls = U8x16::splat(0);
+
+    while end >= 16 {
+        let start = end - 16;
+        let chunk = U8x16::from_slice(&slice[start..end]);
+        let trim_mask = chunk.simd_eq(spaces) | chunk.simd_eq(nuls);
+        if trim_mask.to_bitmask() == u64::from(u16::MAX) {
+            end = start;
+            continue;
+        }
+
+        let tail = &slice[start..end];
+        let mut local_end = tail.len();
+        while local_end > 0 {
+            let byte = tail[local_end - 1];
+            if byte != b' ' && byte != 0 {
+                break;
+            }
+            local_end -= 1;
+        }
+        return &slice[..start + local_end];
+    }
+
+    trim_trailing_space_or_nul(&slice[..end])
+}
+
+fn is_ascii_simd(slice: &[u8]) -> bool {
+    type U8x16 = Simd<u8, 16>;
+
+    let mut chunks = slice.chunks_exact(16);
+    let high_bits = U8x16::splat(0x80);
+    for chunk in &mut chunks {
+        let lanes = U8x16::from_slice(chunk);
+        if (lanes & high_bits).reduce_or() != 0 {
+            return false;
+        }
+    }
+    chunks.remainder().is_ascii()
+}
+
 fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> String {
     if !matches!(policy, MojibakePolicy::Auto) || value.is_ascii() {
         return value;
@@ -2310,7 +2735,7 @@ fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::ScanBuilder;
+    use super::{SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder};
     use crate::{
         columnar::OwnedColumnBuffer,
         dataset::Dataset,
@@ -3246,6 +3671,77 @@ mod tests {
                 assert!(valid.is_none());
             }
             other => panic!("unexpected lossless raw-bytes batch column: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collect_batches_staged_f64_preserves_missing_validity() {
+        let mut row_a = Vec::with_capacity(8);
+        row_a.extend_from_slice(&1.25f64.to_le_bytes());
+        let mut row_b = Vec::with_capacity(8);
+        row_b.extend_from_slice(&SAS_NUMERIC_MISSING_SENTINEL.to_le_bytes());
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 2, 0, &[&row_a, &row_b], 64));
+        let layout = LayoutPlan {
+            columns: vec![ColumnMeta {
+                index: 0,
+                name: "num".to_owned(),
+                logical_type: LogicalType::Float,
+                physical_width: 8,
+                offset: 0,
+                label: None,
+                format: None,
+            }],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 8,
+            total_rows: 2,
+            compression: CompressionKind::None,
+            rows_per_page: 2,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 2,
+                row_len: 8,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let batches = ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(2))
+            .collect_batches()
+            .expect("batches");
+        assert_eq!(batches.len(), 1);
+        match &batches[0].columns[0] {
+            OwnedColumnBuffer::F64 { values, valid } => {
+                assert_eq!(values, &vec![1.25, 0.0]);
+                assert_eq!(valid.as_deref(), Some(&[1, 0][..]));
+            }
+            other => panic!("unexpected staged f64 batch column: {other:?}"),
         }
     }
 
