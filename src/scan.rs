@@ -177,8 +177,8 @@ impl<'a> ScanBuilder<'a> {
                 scan_row_bytes(self, &mut |row_index, bytes| {
                     plan.validate_row_bounds(bytes)?;
                     let mut cells = Vec::with_capacity(plan.columns.len());
-                    for column in &plan.columns {
-                        cells.push(plan.materialize_owned_cell_typed(bytes, column)?);
+                    for (column, kind) in plan.columns.iter().zip(&plan.owned_kinds) {
+                        cells.push(plan.materialize_owned_cell_typed(bytes, column, *kind)?);
                     }
                     rows.push(OwnedRow { row_index, cells });
                     Ok(ControlFlow::Continue(()))
@@ -188,8 +188,8 @@ impl<'a> ScanBuilder<'a> {
                 scan_row_bytes(self, &mut |row_index, bytes| {
                     plan.validate_row_bounds(bytes)?;
                     let mut cells = Vec::with_capacity(plan.columns.len());
-                    for column in &plan.columns {
-                        cells.push(plan.materialize_owned_cell_lossless(bytes, column)?);
+                    for (column, kind) in plan.columns.iter().zip(&plan.owned_kinds) {
+                        cells.push(plan.materialize_owned_cell_lossless(bytes, column, *kind)?);
                     }
                     rows.push(OwnedRow { row_index, cells });
                     Ok(ControlFlow::Continue(()))
@@ -765,6 +765,7 @@ fn open_scan_reader(ds: &Dataset) -> Result<ScanReader> {
 #[derive(Debug)]
 struct RowDecodePlan {
     columns: Vec<CompiledColumnPlan>,
+    owned_kinds: Vec<OwnedCellMaterializationKind>,
     max_end: usize,
     names: Vec<String>,
     encoding: &'static Encoding,
@@ -817,6 +818,20 @@ enum ColumnMaterializationKind {
     Time,
     Utf8,
     RawBytes,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum OwnedCellMaterializationKind {
+    Utf8,
+    RawBytes,
+    Date,
+    DateAsNumeric,
+    DateTime,
+    DateTimeAsNumeric,
+    Time,
+    TimeAsNumeric,
+    NumericTyped,
+    NumericLossless,
 }
 
 #[derive(Debug)]
@@ -907,10 +922,15 @@ impl RowDecodePlan {
             .iter()
             .map(|column| compile_column_plan(column))
             .collect::<Result<Vec<_>>>()?;
+        let owned_kinds = columns
+            .iter()
+            .map(|column| compile_owned_materialization_kind(builder, column.kind))
+            .collect();
         let max_end = columns.iter().map(|column| column.end).max().unwrap_or(0);
 
         Ok(Self {
             columns,
+            owned_kinds,
             max_end,
             names,
             encoding,
@@ -1130,23 +1150,31 @@ impl RowDecodePlan {
         &self,
         row: &[u8],
         column: &CompiledColumnPlan,
+        kind: OwnedCellMaterializationKind,
     ) -> Result<crate::row::OwnedCellValue> {
         let slice = self.slice_in_bounds(row, column);
-
-        match column.kind {
-            CompiledColumnKind::String => self.materialize_owned_string_typed(slice),
-            CompiledColumnKind::Bytes => Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec())),
-            CompiledColumnKind::Date => {
-                self.materialize_owned_temporal_typed(slice, column.width, TemporalKind::Date)
+        match kind {
+            OwnedCellMaterializationKind::Utf8 => self.materialize_owned_string_typed(slice),
+            OwnedCellMaterializationKind::RawBytes => {
+                Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec()))
             }
-            CompiledColumnKind::DateTime => {
-                self.materialize_owned_temporal_typed(slice, column.width, TemporalKind::DateTime)
-            }
-            CompiledColumnKind::Time => {
-                self.materialize_owned_temporal_typed(slice, column.width, TemporalKind::Time)
-            }
-            CompiledColumnKind::Integer | CompiledColumnKind::Float => {
+            OwnedCellMaterializationKind::Date => self.materialize_owned_date(slice),
+            OwnedCellMaterializationKind::DateAsNumeric => {
                 self.materialize_owned_numeric_typed(slice, column.width)
+            }
+            OwnedCellMaterializationKind::DateTime => self.materialize_owned_datetime(slice),
+            OwnedCellMaterializationKind::DateTimeAsNumeric => {
+                self.materialize_owned_numeric_typed(slice, column.width)
+            }
+            OwnedCellMaterializationKind::Time => self.materialize_owned_time(slice),
+            OwnedCellMaterializationKind::TimeAsNumeric => {
+                self.materialize_owned_numeric_typed(slice, column.width)
+            }
+            OwnedCellMaterializationKind::NumericTyped => {
+                self.materialize_owned_numeric_typed(slice, column.width)
+            }
+            OwnedCellMaterializationKind::NumericLossless => {
+                self.materialize_owned_numeric_lossless(slice)
             }
         }
     }
@@ -1155,18 +1183,24 @@ impl RowDecodePlan {
         &self,
         row: &[u8],
         column: &CompiledColumnPlan,
+        kind: OwnedCellMaterializationKind,
     ) -> Result<crate::row::OwnedCellValue> {
         let slice = self.slice_in_bounds(row, column);
 
-        match column.kind {
-            CompiledColumnKind::String | CompiledColumnKind::Bytes => {
+        match kind {
+            OwnedCellMaterializationKind::Utf8 | OwnedCellMaterializationKind::RawBytes => {
                 Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec()))
             }
-            CompiledColumnKind::Date
-            | CompiledColumnKind::DateTime
-            | CompiledColumnKind::Time
-            | CompiledColumnKind::Integer
-            | CompiledColumnKind::Float => self.materialize_owned_numeric_lossless(slice),
+            OwnedCellMaterializationKind::Date
+            | OwnedCellMaterializationKind::DateAsNumeric
+            | OwnedCellMaterializationKind::DateTime
+            | OwnedCellMaterializationKind::DateTimeAsNumeric
+            | OwnedCellMaterializationKind::Time
+            | OwnedCellMaterializationKind::TimeAsNumeric
+            | OwnedCellMaterializationKind::NumericTyped
+            | OwnedCellMaterializationKind::NumericLossless => {
+                self.materialize_owned_numeric_lossless(slice)
+            }
         }
     }
 
@@ -1227,44 +1261,48 @@ impl RowDecodePlan {
         )))
     }
 
-    fn materialize_owned_temporal_typed(
-        &self,
-        slice: &[u8],
-        width: u32,
-        temporal_kind: TemporalKind,
-    ) -> Result<crate::row::OwnedCellValue> {
+    fn materialize_owned_date(&self, slice: &[u8]) -> Result<crate::row::OwnedCellValue> {
         match decode_numeric_cell(slice, self.endianness) {
             None => Ok(crate::row::OwnedCellValue::Null),
-            Some(number) => match temporal_kind {
-                TemporalKind::Date if self.temporal_options.decode_dates => {
-                    if let Some(days) = try_i32_from_f64(number) {
-                        Ok(crate::row::OwnedCellValue::Date(SasDate {
-                            days_since_sas_epoch: days,
-                        }))
-                    } else {
-                        self.materialize_owned_numeric_typed(slice, width)
-                    }
+            Some(number) => {
+                if let Some(days) = try_i32_from_f64(number) {
+                    Ok(crate::row::OwnedCellValue::Date(SasDate {
+                        days_since_sas_epoch: days,
+                    }))
+                } else {
+                    Ok(crate::row::OwnedCellValue::Float64(number))
                 }
-                TemporalKind::DateTime if self.temporal_options.decode_datetimes => {
-                    if let Some(seconds) = try_i64_from_f64(number) {
-                        Ok(crate::row::OwnedCellValue::DateTime(SasDateTime {
-                            seconds_since_sas_epoch: seconds,
-                        }))
-                    } else {
-                        self.materialize_owned_numeric_typed(slice, width)
-                    }
+            }
+        }
+    }
+
+    fn materialize_owned_datetime(&self, slice: &[u8]) -> Result<crate::row::OwnedCellValue> {
+        match decode_numeric_cell(slice, self.endianness) {
+            None => Ok(crate::row::OwnedCellValue::Null),
+            Some(number) => {
+                if let Some(seconds) = try_i64_from_f64(number) {
+                    Ok(crate::row::OwnedCellValue::DateTime(SasDateTime {
+                        seconds_since_sas_epoch: seconds,
+                    }))
+                } else {
+                    Ok(crate::row::OwnedCellValue::Float64(number))
                 }
-                TemporalKind::Time if self.temporal_options.decode_times => {
-                    if let Some(seconds) = try_i64_from_f64(number) {
-                        Ok(crate::row::OwnedCellValue::Time(SasTime {
-                            seconds_since_midnight: seconds,
-                        }))
-                    } else {
-                        self.materialize_owned_numeric_typed(slice, width)
-                    }
+            }
+        }
+    }
+
+    fn materialize_owned_time(&self, slice: &[u8]) -> Result<crate::row::OwnedCellValue> {
+        match decode_numeric_cell(slice, self.endianness) {
+            None => Ok(crate::row::OwnedCellValue::Null),
+            Some(number) => {
+                if let Some(seconds) = try_i64_from_f64(number) {
+                    Ok(crate::row::OwnedCellValue::Time(SasTime {
+                        seconds_since_midnight: seconds,
+                    }))
+                } else {
+                    Ok(crate::row::OwnedCellValue::Float64(number))
                 }
-                _ => self.materialize_owned_numeric_typed(slice, width),
-            },
+            }
         }
     }
 
@@ -2038,6 +2076,53 @@ fn compile_column_plan(column: &ColumnMeta) -> Result<CompiledColumnPlan> {
     })
 }
 
+fn compile_owned_materialization_kind(
+    builder: &ScanBuilder<'_>,
+    kind: CompiledColumnKind,
+) -> OwnedCellMaterializationKind {
+    match builder.decode {
+        DecodeMode::Typed => match kind {
+            CompiledColumnKind::String => OwnedCellMaterializationKind::Utf8,
+            CompiledColumnKind::Bytes => OwnedCellMaterializationKind::RawBytes,
+            CompiledColumnKind::Date => {
+                if builder.temporal_options.decode_dates {
+                    OwnedCellMaterializationKind::Date
+                } else {
+                    OwnedCellMaterializationKind::DateAsNumeric
+                }
+            }
+            CompiledColumnKind::DateTime => {
+                if builder.temporal_options.decode_datetimes {
+                    OwnedCellMaterializationKind::DateTime
+                } else {
+                    OwnedCellMaterializationKind::DateTimeAsNumeric
+                }
+            }
+            CompiledColumnKind::Time => {
+                if builder.temporal_options.decode_times {
+                    OwnedCellMaterializationKind::Time
+                } else {
+                    OwnedCellMaterializationKind::TimeAsNumeric
+                }
+            }
+            CompiledColumnKind::Integer | CompiledColumnKind::Float => {
+                OwnedCellMaterializationKind::NumericTyped
+            }
+        },
+        DecodeMode::TypedLossless => match kind {
+            CompiledColumnKind::String | CompiledColumnKind::Bytes => {
+                OwnedCellMaterializationKind::RawBytes
+            }
+            CompiledColumnKind::Date
+            | CompiledColumnKind::DateTime
+            | CompiledColumnKind::Time
+            | CompiledColumnKind::Integer
+            | CompiledColumnKind::Float => OwnedCellMaterializationKind::NumericLossless,
+        },
+        DecodeMode::Raw => OwnedCellMaterializationKind::RawBytes,
+    }
+}
+
 fn resolve_batch_row_capacity(builder: &ScanBuilder<'_>) -> Result<usize> {
     match builder.batch_hint {
         BatchHint::Rows(rows) => Ok(rows.max(1)),
@@ -2171,13 +2256,18 @@ const fn numeric_bits_is_missing(raw: u64) -> bool {
 }
 
 fn try_i64_from_f64(number: f64) -> Option<i64> {
-    if !number.is_finite() || number.fract() != 0.0 {
+    if !number.is_finite() {
         return None;
     }
     if number < i64::MIN as f64 || number > i64::MAX as f64 {
         return None;
     }
-    Some(number as i64)
+    let value = number as i64;
+    if value as f64 == number {
+        Some(value)
+    } else {
+        None
+    }
 }
 
 fn try_i32_from_f64(number: f64) -> Option<i32> {

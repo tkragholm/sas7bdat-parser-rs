@@ -1,6 +1,6 @@
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use sas7bdat_simd::{BatchHint, Dataset, RowSelection};
-use std::{fs, path::PathBuf};
+use std::{fs, hint::black_box, path::PathBuf};
 
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -96,6 +96,14 @@ fn scan_hotpaths(c: &mut Criterion) {
 
     if let Some(dataset) = load_dataset("raw_data/pandas/max_sas_date.sas7bdat") {
         bench_dataset_scans(c, "fixture_max_sas_date", dataset, true, true, true);
+    }
+
+    if let Some(dataset) = load_dataset("raw_data/ahs2013/topical.sas7bdat") {
+        bench_dataset_scans(c, "fixture_topical", dataset, true, true, true);
+    }
+
+    if let Some(dataset) = load_dataset("raw_data/ahs2013/homimp.sas7bdat") {
+        bench_dataset_scans(c, "fixture_homimp", dataset, true, true, true);
     }
 }
 
