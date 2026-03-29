@@ -1,5 +1,7 @@
 mod columnar;
+mod compression;
 mod dataset;
+mod encoding;
 mod error;
 mod internal;
 mod layout;

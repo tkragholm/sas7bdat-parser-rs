@@ -1,6 +1,8 @@
 use crate::{
     error::{CorruptionError, Error, Result},
-    internal::{LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass, RowSpan},
+    internal::{
+        LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass, RowSpan, RowSpanKind,
+    },
 };
 use std::io::{Read, Seek, SeekFrom};
 
@@ -105,7 +107,11 @@ fn classify_descriptor(
     row_spans: &mut Vec<RowSpan>,
 ) -> Result<PageDescriptor> {
     let kind = classify_page(page_type);
-    let data_like = matches!(kind, PageKind::Data | PageKind::Mix);
+    let data_like = matches!(
+        kind,
+        PageKind::Data | PageKind::Mix | PageKind::Amd | PageKind::Comp
+    ) || (layout.compression != crate::metadata::CompressionKind::None
+        && matches!(kind, PageKind::Meta | PageKind::Meta2));
     if !data_like {
         return Ok(PageDescriptor {
             page_index,
@@ -121,7 +127,7 @@ fn classify_descriptor(
         });
     }
 
-    if layout.compression != crate::metadata::CompressionKind::None {
+    if layout.compression != crate::metadata::CompressionKind::None && subheader_count == 0 {
         return Ok(PageDescriptor {
             page_index,
             row_base,
@@ -315,20 +321,28 @@ fn classify_indexed_descriptor(
                         remaining_rows,
                         row_span_start,
                         target_rows,
+                        RowSpanKind::Borrowed,
                     )?;
                 }
             }
             1 => {}
             4 => {
-                return Ok(PageDescriptor {
-                    page_index,
-                    row_base,
-                    row_count: 0,
-                    data_start: 0,
-                    row_span_start: 0,
-                    row_span_count: 0,
-                    exec_class: PageExecClass::IndexedCompressedRows,
-                });
+                let produced = u64::from(
+                    u32::try_from(row_spans.len())
+                        .unwrap_or(u32::MAX)
+                        .saturating_sub(row_span_start),
+                );
+                if produced < remaining_rows
+                    && !target_rows.is_some_and(|target| produced >= target)
+                {
+                    row_spans.push(RowSpan {
+                        offset: u32::try_from(pointer.offset)
+                            .map_err(|_| page_corruption("compressed row offset exceeds u32"))?,
+                        len: u32::try_from(pointer.length)
+                            .map_err(|_| page_corruption("compressed row length exceeds u32"))?,
+                        kind: RowSpanKind::Compressed,
+                    });
+                }
             }
             _ => {
                 return Err(page_corruption(format!(
@@ -342,7 +356,53 @@ fn classify_indexed_descriptor(
     let row_span_count = u32::try_from(row_spans.len())
         .unwrap_or(u32::MAX)
         .saturating_sub(row_span_start);
+    let data_start = contiguous_data_start(layout, page, kind, subheader_count as u64)?;
+    let page_len = u64::try_from(page.len()).unwrap_or(u64::MAX);
+    let available = page_len.saturating_sub(u64::from(data_start));
+    let row_len = u64::from(layout.row_len);
+    let possible_rows = if row_len == 0 { 0 } else { available / row_len };
+    let rows_to_take = match kind {
+        PageKind::Mix => {
+            let mix_limit = if layout.rows_per_page == 0 {
+                possible_rows
+            } else {
+                layout.rows_per_page
+            };
+            mix_limit.min(possible_rows)
+        }
+        PageKind::Data => {
+            let header_limit = if page_row_count == 0 {
+                possible_rows
+            } else {
+                page_row_count
+            };
+            header_limit.min(possible_rows)
+        }
+        _ => 0,
+    }
+    .min(remaining_rows);
+
+    let produced_rows = u64::from(row_span_count);
+    if row_span_count > 0 && produced_rows < rows_to_take {
+        push_contiguous_row_spans(
+            row_spans,
+            data_start,
+            layout.row_len,
+            rows_to_take - produced_rows,
+        )?;
+    }
+
+    let row_span_count = u32::try_from(row_spans.len())
+        .unwrap_or(u32::MAX)
+        .saturating_sub(row_span_start);
     if row_span_count > 0 {
+        let span_start = usize::try_from(row_span_start).unwrap_or(usize::MAX);
+        let span_end = span_start.saturating_add(usize::try_from(row_span_count).unwrap_or(0));
+        let has_compressed_spans = row_spans
+            .get(span_start..span_end)
+            .into_iter()
+            .flatten()
+            .any(|span| span.kind == RowSpanKind::Compressed);
         return Ok(PageDescriptor {
             page_index,
             row_base,
@@ -350,14 +410,14 @@ fn classify_indexed_descriptor(
             data_start: 0,
             row_span_start,
             row_span_count,
-            exec_class: PageExecClass::IndexedPointerRows,
+            exec_class: if has_compressed_spans {
+                PageExecClass::IndexedCompressedRows
+            } else {
+                PageExecClass::IndexedPointerRows
+            },
         });
     }
 
-    let data_start = contiguous_data_start(layout, page, kind, subheader_count as u64)?;
-    let page_len = u64::try_from(page.len()).unwrap_or(u64::MAX);
-    let available = page_len.saturating_sub(u64::from(data_start));
-    let row_len = u64::from(layout.row_len);
     if row_len == 0 || available < row_len {
         return Ok(PageDescriptor {
             page_index,
@@ -415,6 +475,7 @@ fn push_row_spans_from_pointer(
     remaining_rows: u64,
     row_span_start: u32,
     target_rows: Option<u64>,
+    kind: RowSpanKind,
 ) -> Result<()> {
     let row_len =
         usize::try_from(row_len).map_err(|_| page_corruption("row length exceeds usize"))?;
@@ -439,9 +500,32 @@ fn push_row_spans_from_pointer(
             offset: u32::try_from(local_offset)
                 .map_err(|_| page_corruption("row span offset exceeds u32"))?,
             len: u32::try_from(row_len).unwrap_or(u32::MAX),
+            kind,
         });
         local_offset = local_offset.saturating_add(row_len);
         remaining -= row_len;
+    }
+    Ok(())
+}
+
+fn push_contiguous_row_spans(
+    row_spans: &mut Vec<RowSpan>,
+    data_start: u32,
+    row_len: u32,
+    row_count: u64,
+) -> Result<()> {
+    let row_len_usize =
+        usize::try_from(row_len).map_err(|_| page_corruption("row length exceeds usize"))?;
+    let mut offset = usize::try_from(data_start)
+        .map_err(|_| page_corruption("contiguous row offset exceeds usize"))?;
+    for _ in 0..row_count {
+        row_spans.push(RowSpan {
+            offset: u32::try_from(offset)
+                .map_err(|_| page_corruption("contiguous row offset exceeds u32"))?,
+            len: row_len,
+            kind: RowSpanKind::Borrowed,
+        });
+        offset = offset.saturating_add(row_len_usize);
     }
     Ok(())
 }
@@ -614,7 +698,7 @@ fn page_io_error(err: std::io::Error) -> Error {
 mod tests {
     use super::{SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MIX, compile_page_descriptors};
     use crate::{
-        internal::{HeaderInfo, LayoutPlan, PageExecClass},
+        internal::{HeaderInfo, LayoutPlan, PageExecClass, RowSpanKind},
         metadata::{CompressionKind, Endianness},
     };
     use std::io::Cursor;
@@ -667,6 +751,43 @@ mod tests {
         assert_eq!(descriptors.row_spans.len(), 1);
         assert_eq!(descriptors.row_spans[0].offset, 40);
         assert_eq!(descriptors.row_spans[0].len, 4);
+        assert_eq!(descriptors.row_spans[0].kind, RowSpanKind::Borrowed);
+    }
+
+    #[test]
+    fn marks_compressed_pointer_pages_as_compressed() {
+        let bytes = make_compressed_page(&[0xC1u8, b'A'], 64);
+        let mut layout = simple_layout(64, 1, 4, 1);
+        layout.compression = CompressionKind::Row;
+        let mut cursor = Cursor::new(bytes);
+        let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
+
+        assert_eq!(descriptors.pages.len(), 1);
+        assert_eq!(
+            descriptors.pages[0].exec_class,
+            PageExecClass::IndexedCompressedRows
+        );
+        assert_eq!(descriptors.pages[0].row_count, 1);
+        assert_eq!(descriptors.pages[0].row_span_count, 1);
+        assert_eq!(descriptors.row_spans[0].kind, RowSpanKind::Compressed);
+    }
+
+    #[test]
+    fn compressed_meta_pages_compile_row_spans() {
+        let bytes = make_compressed_meta_page(&[0xC1u8, b'A'], 64);
+        let mut layout = simple_layout(64, 1, 4, 1);
+        layout.compression = CompressionKind::Row;
+        let mut cursor = Cursor::new(bytes);
+        let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
+
+        assert_eq!(descriptors.pages.len(), 1);
+        assert_eq!(
+            descriptors.pages[0].exec_class,
+            PageExecClass::IndexedCompressedRows
+        );
+        assert_eq!(descriptors.pages[0].row_count, 1);
+        assert_eq!(descriptors.pages[0].row_span_count, 1);
+        assert_eq!(descriptors.row_spans[0].kind, RowSpanKind::Compressed);
     }
 
     fn simple_layout(page_size: u32, page_count: u64, row_len: u32, total_rows: u64) -> LayoutPlan {
@@ -730,6 +851,40 @@ mod tests {
             page[offset..offset + row.len()].copy_from_slice(row);
             offset += row.len();
         }
+        page
+    }
+
+    fn make_compressed_page(compressed: &[u8], page_size: usize) -> Vec<u8> {
+        let mut page = vec![0u8; page_size];
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_DATA.to_le_bytes());
+        page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
+        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+
+        let data_offset = 40u32;
+        let data_len = u32::try_from(compressed.len()).unwrap_or(u32::MAX);
+        page[24..28].copy_from_slice(&data_offset.to_le_bytes());
+        page[28..32].copy_from_slice(&data_len.to_le_bytes());
+        page[32] = 4;
+        page[33] = 1;
+        let start = usize::try_from(data_offset).unwrap_or(0);
+        page[start..start + compressed.len()].copy_from_slice(compressed);
+        page
+    }
+
+    fn make_compressed_meta_page(compressed: &[u8], page_size: usize) -> Vec<u8> {
+        let mut page = vec![0u8; page_size];
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&0u16.to_le_bytes());
+        page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
+        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+
+        let data_offset = 40u32;
+        let data_len = u32::try_from(compressed.len()).unwrap_or(u32::MAX);
+        page[24..28].copy_from_slice(&data_offset.to_le_bytes());
+        page[28..32].copy_from_slice(&data_len.to_le_bytes());
+        page[32] = 4;
+        page[33] = 1;
+        let start = usize::try_from(data_offset).unwrap_or(0);
+        page[start..start + compressed.len()].copy_from_slice(compressed);
         page
     }
 }

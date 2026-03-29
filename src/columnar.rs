@@ -78,6 +78,57 @@ pub enum OwnedColumnBuffer {
     },
 }
 
+impl OwnedColumnBuffer {
+    #[must_use]
+    pub fn as_borrowed(&self) -> ColumnBuffer<'_> {
+        match self {
+            Self::I32 { values, valid } => ColumnBuffer::I32(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            }),
+            Self::I64 { values, valid } => ColumnBuffer::I64(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            }),
+            Self::F64 { values, valid } => ColumnBuffer::F64(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            }),
+            Self::Date { values, valid } => ColumnBuffer::Date(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            }),
+            Self::DateTime { values, valid } => ColumnBuffer::DateTime(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            }),
+            Self::Time { values, valid } => ColumnBuffer::Time(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            }),
+            Self::Utf8 {
+                offsets,
+                data,
+                valid,
+            } => ColumnBuffer::Utf8(Utf8Buffer {
+                offsets,
+                data,
+                valid: valid.as_deref(),
+                dictionary: None,
+            }),
+            Self::RawBytes {
+                offsets,
+                data,
+                valid,
+            } => ColumnBuffer::RawBytes(BytesBuffer {
+                offsets,
+                data,
+                valid: valid.as_deref(),
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ColumnarBatch<'a> {
     pub row_base: u64,

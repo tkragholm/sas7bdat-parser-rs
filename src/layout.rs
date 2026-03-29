@@ -1,4 +1,5 @@
 use crate::{
+    encoding::resolve_encoding,
     error::{Error, MetadataError, Result},
     internal::{HeaderInfo, LayoutPlan},
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
@@ -156,11 +157,7 @@ pub(crate) fn parse_layout<R: Read + Seek>(
     header: HeaderInfo,
     mut metadata: DatasetMetadata,
 ) -> Result<(LayoutPlan, DatasetMetadata)> {
-    let encoding = metadata
-        .encoding
-        .as_deref()
-        .and_then(|label| Encoding::for_label(label.as_bytes()))
-        .unwrap_or(UTF_8);
+    let encoding = resolve_encoding(metadata.encoding.as_deref());
     let mut state = MetadataState {
         text_store: TextStore::new(encoding),
         ..MetadataState::default()

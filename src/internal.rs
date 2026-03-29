@@ -59,6 +59,14 @@ pub(crate) struct PageDescriptor {
 pub(crate) struct RowSpan {
     pub offset: u32,
     pub len: u32,
+    pub kind: RowSpanKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum RowSpanKind {
+    #[default]
+    Borrowed,
+    Compressed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -1,8 +1,10 @@
 use crate::{
-    columnar::{ColumnBuffer, ColumnarBatch, OwnedColumnarBatch},
+    columnar::{ColumnBuffer, ColumnarBatch, OwnedColumnBuffer, OwnedColumnarBatch},
+    compression::decompress_row,
     dataset::Dataset,
+    encoding::resolve_encoding,
     error::{Error, Result},
-    internal::FileSource,
+    internal::{FileSource, RowSpanKind},
     metadata::{ColumnMeta, Endianness, LogicalType, SasDate, SasDateTime, SasTime},
     options::{
         BatchHint, DecodeMode, MojibakePolicy, OrderingMode, Parallelism, RowSelection,
@@ -149,9 +151,16 @@ impl<'a> ScanBuilder<'a> {
     where
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
     {
-        Err(Error::unsupported(
-            "columnar scanning is not implemented yet",
-        ))
+        let mut f = _f;
+        self.scan_batches(&mut |batch| {
+            let columns = borrow_column_buffers(&batch.columns);
+            let batch = ColumnarBatch {
+                row_base: batch.row_base,
+                row_count: batch.row_count,
+                columns: &columns,
+            };
+            f(batch)
+        })
     }
 
     pub fn collect_rows(self) -> Result<Vec<OwnedRow>> {
@@ -170,9 +179,12 @@ impl<'a> ScanBuilder<'a> {
     }
 
     pub fn collect_batches(self) -> Result<Vec<OwnedColumnarBatch>> {
-        Err(Error::unsupported(
-            "batch collection is not implemented yet",
-        ))
+        let mut batches = Vec::new();
+        self.scan_batches(&mut |batch| {
+            batches.push(batch);
+            Ok(ControlFlow::Continue(()))
+        })?;
+        Ok(batches)
     }
 
     pub fn write_raw_rows(self, _sink: &mut impl RawRowSink) -> Result<ScanStats> {
@@ -184,9 +196,7 @@ impl<'a> ScanBuilder<'a> {
     }
 
     pub fn write_batches(self, _sink: &mut impl BatchSink) -> Result<ScanStats> {
-        Err(Error::unsupported(
-            "batch sink writing is not implemented yet",
-        ))
+        self.visit_batches(|batch| _sink.push(batch))
     }
 }
 
@@ -213,10 +223,10 @@ impl<'a> ScanBuilder<'a> {
         }
 
         let plan = RowDecodePlan::new(&self)?;
+        let mut owned_strings = Vec::new();
         self.scan_raw_rows(&mut |raw| {
-            let mut owned_strings = Vec::new();
             let planned = plan.plan_cells(raw.bytes, &mut owned_strings)?;
-            let cells = materialize_planned_cells(planned, &owned_strings)?;
+            let cells = materialize_planned_cells(&planned, &owned_strings)?;
             let row = RowView {
                 row_index: raw.row_index,
                 names: &plan.names,
@@ -224,6 +234,49 @@ impl<'a> ScanBuilder<'a> {
             };
             f(row)
         })
+    }
+
+    fn scan_batches<F>(self, f: &mut F) -> Result<ScanStats>
+    where
+        F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+    {
+        if matches!(self.decode, DecodeMode::Raw) {
+            return Err(Error::unsupported(
+                "visit_batches does not support DecodeMode::Raw",
+            ));
+        }
+
+        let target_rows = resolve_batch_row_capacity(&self)?;
+        let mut batcher = BatchAccumulator::new(BatchDecodePlan::new(&self)?, target_rows);
+        let mut decode_batches = 0u64;
+        let mut stop_after_current_batch = false;
+
+        let mut stats = self.scan_raw_rows(&mut |raw| {
+            batcher.push_row(raw.row_index, raw.bytes)?;
+            if batcher.is_full() {
+                let batch = batcher.finish_batch();
+                match f(batch)? {
+                    ControlFlow::Continue(()) => {
+                        decode_batches = decode_batches.saturating_add(1);
+                    }
+                    ControlFlow::Break(()) => {
+                        decode_batches = decode_batches.saturating_add(1);
+                        stop_after_current_batch = true;
+                        return Ok(ControlFlow::Break(()));
+                    }
+                }
+            }
+            Ok(ControlFlow::Continue(()))
+        })?;
+
+        if !stop_after_current_batch && !batcher.is_empty() {
+            let batch = batcher.finish_batch();
+            decode_batches = decode_batches.saturating_add(1);
+            let _ = f(batch)?;
+        }
+
+        stats.decode_batches = decode_batches;
+        Ok(stats)
     }
 }
 
@@ -242,10 +295,20 @@ where
         return Ok(ScanStats::default());
     }
 
+    if builder.ds.layout.compression != crate::metadata::CompressionKind::None
+        && builder.ds.metadata.row_count > 0
+        && builder.ds.descriptors.total_candidate_rows == 0
+    {
+        return Err(Error::unsupported(
+            "compressed dataset layout compiled no row producers; this compressed page layout is not implemented yet",
+        ));
+    }
+
     let page_size = usize::try_from(builder.ds.layout.header.page_size)
         .map_err(|_| Error::unsupported("page size exceeds platform usize"))?;
     let mut stats = ScanStats::default();
     let mut page = vec![0u8; page_size];
+    let mut decompressed_row = Vec::new();
 
     for descriptor in builder.ds.descriptors.pages.iter().copied() {
         if let Some(limit) = builder.row_limit
@@ -371,9 +434,87 @@ where
                 }
             }
             crate::internal::PageExecClass::IndexedCompressedRows => {
-                return Err(Error::unsupported(
-                    "raw row scanning for compressed pages is not implemented yet",
-                ));
+                stats.compressed_pages = stats.compressed_pages.saturating_add(1);
+                let page_offset = builder.ds.layout.header.data_offset
+                    + descriptor.page_index * u64::from(builder.ds.layout.header.page_size);
+                reader
+                    .seek(SeekFrom::Start(page_offset))
+                    .map_err(scan_io_error)?;
+                reader.read_exact(&mut page).map_err(scan_io_error)?;
+                stats.raw_bytes_read = stats
+                    .raw_bytes_read
+                    .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
+
+                let span_start = usize::try_from(descriptor.row_span_start)
+                    .map_err(|_| Error::unsupported("row span start exceeds platform usize"))?;
+                let span_end =
+                    span_start
+                        .checked_add(usize::try_from(descriptor.row_span_count).map_err(|_| {
+                            Error::unsupported("row span count exceeds platform usize")
+                        })?)
+                        .ok_or_else(|| Error::unsupported("row span range overflow"))?;
+                let Some(spans) = builder.ds.descriptors.row_spans.get(span_start..span_end) else {
+                    return Err(Error::unsupported(
+                        "row span range exceeds descriptor table",
+                    ));
+                };
+
+                for (span_index, span) in spans.iter().enumerate() {
+                    let row_index =
+                        descriptor.row_base + u64::try_from(span_index).unwrap_or(u64::MAX);
+                    stats.rows_seen = stats.rows_seen.saturating_add(1);
+                    if !row_selected(builder.row_selection, row_index) {
+                        continue;
+                    }
+                    if let Some(limit) = builder.row_limit
+                        && stats.rows_emitted >= limit
+                    {
+                        break;
+                    }
+
+                    let start = usize::try_from(span.offset).map_err(|_| {
+                        Error::unsupported("row span offset exceeds platform usize")
+                    })?;
+                    let len = usize::try_from(span.len).map_err(|_| {
+                        Error::unsupported("row span length exceeds platform usize")
+                    })?;
+                    let end = start
+                        .checked_add(len)
+                        .ok_or_else(|| Error::unsupported("row span end overflow"))?;
+                    let Some(raw_bytes) = page.get(start..end) else {
+                        return Err(Error::unsupported("row span exceeds page bounds"));
+                    };
+
+                    let bytes = match span.kind {
+                        RowSpanKind::Borrowed => raw_bytes,
+                        RowSpanKind::Compressed => {
+                            let row_len =
+                                usize::try_from(builder.ds.layout.row_len).map_err(|_| {
+                                    Error::unsupported("row length exceeds platform usize")
+                                })?;
+                            let decoded = decompress_row(
+                                builder.ds.layout.compression,
+                                raw_bytes,
+                                row_len,
+                                &mut decompressed_row,
+                            )?;
+                            stats.row_bytes_materialized = stats
+                                .row_bytes_materialized
+                                .saturating_add(u64::try_from(decoded.len()).unwrap_or(u64::MAX));
+                            decoded
+                        }
+                    };
+
+                    match f(RawRow { row_index, bytes })? {
+                        ControlFlow::Continue(()) => {
+                            stats.rows_emitted = stats.rows_emitted.saturating_add(1);
+                        }
+                        ControlFlow::Break(()) => {
+                            stats.rows_emitted = stats.rows_emitted.saturating_add(1);
+                            return Ok(stats);
+                        }
+                    }
+                }
             }
         }
     }
@@ -431,8 +572,8 @@ fn open_scan_reader(ds: &Dataset) -> Result<ScanReader> {
 }
 
 #[derive(Debug)]
-struct RowDecodePlan<'a> {
-    columns: Vec<&'a ColumnMeta>,
+struct RowDecodePlan {
+    columns: Vec<CompiledColumnPlan>,
     names: Vec<String>,
     encoding: &'static Encoding,
     decode_mode: DecodeMode,
@@ -441,7 +582,7 @@ struct RowDecodePlan<'a> {
     endianness: Endianness,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum PlannedCell<'a> {
     Null,
     Int32(i32),
@@ -455,9 +596,94 @@ enum PlannedCell<'a> {
     Time(SasTime),
 }
 
-impl<'a> RowDecodePlan<'a> {
-    fn new(builder: &ScanBuilder<'a>) -> Result<Self> {
-        let columns: Vec<&ColumnMeta> = if let Some(projection) = builder.projection {
+#[derive(Debug, Clone, Copy)]
+enum CompiledColumnKind {
+    String,
+    Bytes,
+    Date,
+    DateTime,
+    Time,
+    Integer,
+    Float,
+}
+
+#[derive(Debug, Clone)]
+struct CompiledColumnPlan {
+    start: usize,
+    end: usize,
+    width: u32,
+    kind: CompiledColumnKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ColumnMaterializationKind {
+    I32,
+    I64,
+    F64,
+    Date,
+    DateTime,
+    Time,
+    Utf8,
+    RawBytes,
+}
+
+#[derive(Debug)]
+struct BatchDecodePlan {
+    row_plan: RowDecodePlan,
+    column_kinds: Vec<ColumnMaterializationKind>,
+}
+
+#[derive(Debug)]
+struct BatchAccumulator {
+    plan: BatchDecodePlan,
+    target_rows: usize,
+    row_base: Option<u64>,
+    row_count: usize,
+    columns: Vec<OwnedBatchColumnBuilder>,
+    owned_strings: Vec<String>,
+}
+
+#[derive(Debug)]
+enum OwnedBatchColumnBuilder {
+    I32 {
+        values: Vec<i32>,
+        valid: Option<Vec<u8>>,
+    },
+    I64 {
+        values: Vec<i64>,
+        valid: Option<Vec<u8>>,
+    },
+    F64 {
+        values: Vec<f64>,
+        valid: Option<Vec<u8>>,
+    },
+    Date {
+        values: Vec<SasDate>,
+        valid: Option<Vec<u8>>,
+    },
+    DateTime {
+        values: Vec<SasDateTime>,
+        valid: Option<Vec<u8>>,
+    },
+    Time {
+        values: Vec<SasTime>,
+        valid: Option<Vec<u8>>,
+    },
+    Utf8 {
+        offsets: Vec<u32>,
+        data: Vec<u8>,
+        valid: Option<Vec<u8>>,
+    },
+    RawBytes {
+        offsets: Vec<u32>,
+        data: Vec<u8>,
+        valid: Option<Vec<u8>>,
+    },
+}
+
+impl RowDecodePlan {
+    fn new(builder: &ScanBuilder<'_>) -> Result<Self> {
+        let selected_columns: Vec<&ColumnMeta> = if let Some(projection) = builder.projection {
             projection
                 .inner
                 .columns
@@ -477,16 +703,17 @@ impl<'a> RowDecodePlan<'a> {
         let names = if let Some(projection) = builder.projection {
             projection.names.iter().cloned().collect()
         } else {
-            columns.iter().map(|column| column.name.clone()).collect()
+            selected_columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect()
         };
 
-        let encoding = builder
-            .ds
-            .metadata
-            .encoding
-            .as_deref()
-            .and_then(|label| Encoding::for_label(label.as_bytes()))
-            .unwrap_or(UTF_8);
+        let encoding = resolve_encoding(builder.ds.metadata.encoding.as_deref());
+        let columns = selected_columns
+            .iter()
+            .map(|column| compile_column_plan(column))
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(Self {
             columns,
@@ -505,43 +732,51 @@ impl<'a> RowDecodePlan<'a> {
         owned_strings: &mut Vec<String>,
     ) -> Result<Vec<PlannedCell<'row>>> {
         let mut planned = Vec::with_capacity(self.columns.len());
+        self.plan_cells_into(row, owned_strings, &mut planned)?;
+        Ok(planned)
+    }
+
+    fn plan_cells_into<'row>(
+        &self,
+        row: &'row [u8],
+        owned_strings: &mut Vec<String>,
+        planned: &mut Vec<PlannedCell<'row>>,
+    ) -> Result<()> {
+        owned_strings.clear();
+        planned.clear();
+        if planned.capacity() < self.columns.len() {
+            planned.reserve(self.columns.len() - planned.capacity());
+        }
         for column in &self.columns {
             planned.push(self.plan_cell(row, column, owned_strings)?);
         }
-        Ok(planned)
+        Ok(())
     }
 
     fn plan_cell<'row>(
         &self,
         row: &'row [u8],
-        column: &ColumnMeta,
+        column: &CompiledColumnPlan,
         owned_strings: &mut Vec<String>,
     ) -> Result<PlannedCell<'row>> {
-        let start = usize::try_from(column.offset)
-            .map_err(|_| Error::unsupported("column offset exceeds platform usize"))?;
-        let width = usize::try_from(column.physical_width)
-            .map_err(|_| Error::unsupported("column width exceeds platform usize"))?;
-        let end = start
-            .checked_add(width)
-            .ok_or_else(|| Error::unsupported("column end overflow"))?;
         let slice = row
-            .get(start..end)
+            .get(column.start..column.end)
             .ok_or_else(|| Error::unsupported("column slice exceeds row bounds"))?;
 
-        match column.logical_type {
-            LogicalType::String => self.plan_string(slice, owned_strings),
-            LogicalType::Bytes => Ok(PlannedCell::Bytes(slice)),
-            LogicalType::Date => {
-                self.plan_numeric_temporal(slice, width as u32, TemporalKind::Date)
+        match column.kind {
+            CompiledColumnKind::String => self.plan_string(slice, owned_strings),
+            CompiledColumnKind::Bytes => Ok(PlannedCell::Bytes(slice)),
+            CompiledColumnKind::Date => {
+                self.plan_numeric_temporal(slice, column.width, TemporalKind::Date)
             }
-            LogicalType::DateTime => {
-                self.plan_numeric_temporal(slice, width as u32, TemporalKind::DateTime)
+            CompiledColumnKind::DateTime => {
+                self.plan_numeric_temporal(slice, column.width, TemporalKind::DateTime)
             }
-            LogicalType::Time => {
-                self.plan_numeric_temporal(slice, width as u32, TemporalKind::Time)
+            CompiledColumnKind::Time => {
+                self.plan_numeric_temporal(slice, column.width, TemporalKind::Time)
             }
-            LogicalType::Integer | LogicalType::Float => {
-                self.plan_numeric_value(slice, width as u32)
+            CompiledColumnKind::Integer | CompiledColumnKind::Float => {
+                self.plan_numeric_value(slice, column.width)
             }
         }
     }
@@ -551,6 +786,10 @@ impl<'a> RowDecodePlan<'a> {
         slice: &'row [u8],
         owned_strings: &mut Vec<String>,
     ) -> Result<PlannedCell<'row>> {
+        if matches!(self.decode_mode, DecodeMode::TypedLossless) {
+            return Ok(PlannedCell::Bytes(slice));
+        }
+
         let slice = if self.string_options.trim_fixed_width {
             trim_trailing_space_or_nul(slice)
         } else {
@@ -612,41 +851,40 @@ impl<'a> RowDecodePlan<'a> {
         temporal_kind: TemporalKind,
     ) -> Result<PlannedCell<'row>> {
         match self.decode_mode {
-            DecodeMode::Typed | DecodeMode::TypedLossless => {
-                match decode_numeric_cell(slice, self.endianness) {
-                    None => Ok(PlannedCell::Null),
-                    Some(number) => match temporal_kind {
-                        TemporalKind::Date if self.temporal_options.decode_dates => {
-                            if let Some(days) = try_i32_from_f64(number) {
-                                Ok(PlannedCell::Date(SasDate {
-                                    days_since_sas_epoch: days,
-                                }))
-                            } else {
-                                self.plan_numeric_value(slice, width)
-                            }
+            DecodeMode::Typed => match decode_numeric_cell(slice, self.endianness) {
+                None => Ok(PlannedCell::Null),
+                Some(number) => match temporal_kind {
+                    TemporalKind::Date if self.temporal_options.decode_dates => {
+                        if let Some(days) = try_i32_from_f64(number) {
+                            Ok(PlannedCell::Date(SasDate {
+                                days_since_sas_epoch: days,
+                            }))
+                        } else {
+                            self.plan_numeric_value(slice, width)
                         }
-                        TemporalKind::DateTime if self.temporal_options.decode_datetimes => {
-                            if let Some(seconds) = try_i64_from_f64(number) {
-                                Ok(PlannedCell::DateTime(SasDateTime {
-                                    seconds_since_sas_epoch: seconds,
-                                }))
-                            } else {
-                                self.plan_numeric_value(slice, width)
-                            }
+                    }
+                    TemporalKind::DateTime if self.temporal_options.decode_datetimes => {
+                        if let Some(seconds) = try_i64_from_f64(number) {
+                            Ok(PlannedCell::DateTime(SasDateTime {
+                                seconds_since_sas_epoch: seconds,
+                            }))
+                        } else {
+                            self.plan_numeric_value(slice, width)
                         }
-                        TemporalKind::Time if self.temporal_options.decode_times => {
-                            if let Some(seconds) = try_i64_from_f64(number) {
-                                Ok(PlannedCell::Time(SasTime {
-                                    seconds_since_midnight: seconds,
-                                }))
-                            } else {
-                                self.plan_numeric_value(slice, width)
-                            }
+                    }
+                    TemporalKind::Time if self.temporal_options.decode_times => {
+                        if let Some(seconds) = try_i64_from_f64(number) {
+                            Ok(PlannedCell::Time(SasTime {
+                                seconds_since_midnight: seconds,
+                            }))
+                        } else {
+                            self.plan_numeric_value(slice, width)
                         }
-                        _ => self.plan_numeric_value(slice, width),
-                    },
-                }
-            }
+                    }
+                    _ => self.plan_numeric_value(slice, width),
+                },
+            },
+            DecodeMode::TypedLossless => self.plan_numeric_lossless(slice),
             DecodeMode::Raw => Err(Error::unsupported(
                 "visit_rows does not support DecodeMode::Raw; use visit_raw_rows instead",
             )),
@@ -654,30 +892,398 @@ impl<'a> RowDecodePlan<'a> {
     }
 
     fn plan_numeric_value<'row>(&self, slice: &[u8], width: u32) -> Result<PlannedCell<'row>> {
-        match decode_numeric_cell(slice, self.endianness) {
-            None => Ok(PlannedCell::Null),
-            Some(number) => {
-                if let Some(value) = try_i64_from_f64(number) {
-                    if width <= 4 {
-                        if let Ok(value32) = i32::try_from(value) {
-                            return Ok(PlannedCell::Int32(value32));
+        match self.decode_mode {
+            DecodeMode::Typed => match decode_numeric_cell(slice, self.endianness) {
+                None => Ok(PlannedCell::Null),
+                Some(number) => {
+                    if let Some(value) = try_i64_from_f64(number) {
+                        if width <= 4 {
+                            if let Ok(value32) = i32::try_from(value) {
+                                return Ok(PlannedCell::Int32(value32));
+                            }
                         }
+                        return Ok(PlannedCell::Int64(value));
                     }
-                    return Ok(PlannedCell::Int64(value));
+                    Ok(PlannedCell::Float64(number))
                 }
-                Ok(PlannedCell::Float64(number))
-            }
+            },
+            DecodeMode::TypedLossless => self.plan_numeric_lossless(slice),
+            DecodeMode::Raw => Err(Error::unsupported(
+                "visit_rows does not support DecodeMode::Raw; use visit_raw_rows instead",
+            )),
+        }
+    }
+
+    fn plan_numeric_lossless<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
+        if slice.is_empty() {
+            return Ok(PlannedCell::Null);
+        }
+        Ok(PlannedCell::Float64(f64::from_bits(numeric_bits(
+            slice,
+            self.endianness,
+        ))))
+    }
+}
+
+impl BatchDecodePlan {
+    fn new(builder: &ScanBuilder<'_>) -> Result<Self> {
+        let row_plan = RowDecodePlan::new(builder)?;
+        let column_kinds = row_plan
+            .columns
+            .iter()
+            .map(|column| {
+                column_materialization_kind(
+                    column.kind,
+                    column.width,
+                    row_plan.temporal_options,
+                    row_plan.decode_mode,
+                )
+            })
+            .collect();
+        Ok(Self {
+            row_plan,
+            column_kinds,
+        })
+    }
+}
+
+impl BatchAccumulator {
+    fn new(plan: BatchDecodePlan, target_rows: usize) -> Self {
+        let columns = plan
+            .column_kinds
+            .iter()
+            .copied()
+            .map(|kind| OwnedBatchColumnBuilder::new(kind, target_rows))
+            .collect();
+        Self {
+            plan,
+            target_rows: target_rows.max(1),
+            row_base: None,
+            row_count: 0,
+            columns,
+            owned_strings: Vec::new(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.row_count == 0
+    }
+
+    fn is_full(&self) -> bool {
+        self.row_count >= self.target_rows
+    }
+
+    fn push_row(&mut self, row_index: u64, row: &[u8]) -> Result<()> {
+        if self.row_base.is_none() {
+            self.row_base = Some(row_index);
+        }
+
+        self.owned_strings.clear();
+        for (plan_column, batch_column) in self
+            .plan
+            .row_plan
+            .columns
+            .iter()
+            .zip(self.columns.iter_mut())
+        {
+            let cell = self
+                .plan
+                .row_plan
+                .plan_cell(row, plan_column, &mut self.owned_strings)?;
+            batch_column.append(cell, &self.owned_strings)?;
+        }
+        self.row_count += 1;
+        Ok(())
+    }
+
+    fn finish_batch(&mut self) -> OwnedColumnarBatch {
+        let row_base = self.row_base.unwrap_or(0);
+        let row_count = self.row_count;
+        let columns = std::mem::take(&mut self.columns)
+            .into_iter()
+            .map(OwnedBatchColumnBuilder::finish)
+            .collect();
+        self.columns = self
+            .plan
+            .column_kinds
+            .iter()
+            .copied()
+            .map(|kind| OwnedBatchColumnBuilder::new(kind, self.target_rows))
+            .collect();
+        self.row_base = None;
+        self.row_count = 0;
+        OwnedColumnarBatch {
+            row_base,
+            row_count,
+            columns,
+        }
+    }
+}
+
+impl OwnedBatchColumnBuilder {
+    fn new(kind: ColumnMaterializationKind, target_rows: usize) -> Self {
+        match kind {
+            ColumnMaterializationKind::I32 => Self::I32 {
+                values: Vec::with_capacity(target_rows),
+                valid: None,
+            },
+            ColumnMaterializationKind::I64 => Self::I64 {
+                values: Vec::with_capacity(target_rows),
+                valid: None,
+            },
+            ColumnMaterializationKind::F64 => Self::F64 {
+                values: Vec::with_capacity(target_rows),
+                valid: None,
+            },
+            ColumnMaterializationKind::Date => Self::Date {
+                values: Vec::with_capacity(target_rows),
+                valid: None,
+            },
+            ColumnMaterializationKind::DateTime => Self::DateTime {
+                values: Vec::with_capacity(target_rows),
+                valid: None,
+            },
+            ColumnMaterializationKind::Time => Self::Time {
+                values: Vec::with_capacity(target_rows),
+                valid: None,
+            },
+            ColumnMaterializationKind::Utf8 => Self::Utf8 {
+                offsets: vec![0],
+                data: Vec::new(),
+                valid: None,
+            },
+            ColumnMaterializationKind::RawBytes => Self::RawBytes {
+                offsets: vec![0],
+                data: Vec::new(),
+                valid: None,
+            },
+        }
+    }
+
+    fn append(&mut self, cell: PlannedCell<'_>, owned_strings: &[String]) -> Result<()> {
+        match self {
+            Self::I32 { values, valid } => match cell {
+                PlannedCell::Null => push_primitive_null(values, valid, 0),
+                PlannedCell::Int32(value) => push_primitive_valid(values, valid, value),
+                PlannedCell::Int64(value) => push_primitive_valid(
+                    values,
+                    valid,
+                    i32::try_from(value).map_err(|_| {
+                        Error::Decode(crate::error::DecodeError {
+                            message: format!("integer value {value} does not fit in i32 batch"),
+                        })
+                    })?,
+                ),
+                PlannedCell::Float64(value) => push_primitive_valid(
+                    values,
+                    valid,
+                    try_i32_from_f64(value).ok_or_else(|| {
+                        Error::Decode(crate::error::DecodeError {
+                            message: format!(
+                                "non-integral float value {value} cannot be materialized as i32"
+                            ),
+                        })
+                    })?,
+                ),
+                other => return Err(unexpected_batch_cell("i32", other)),
+            },
+            Self::I64 { values, valid } => match cell {
+                PlannedCell::Null => push_primitive_null(values, valid, 0),
+                PlannedCell::Int32(value) => push_primitive_valid(values, valid, i64::from(value)),
+                PlannedCell::Int64(value) => push_primitive_valid(values, valid, value),
+                PlannedCell::Float64(value) => push_primitive_valid(
+                    values,
+                    valid,
+                    try_i64_from_f64(value).ok_or_else(|| {
+                        Error::Decode(crate::error::DecodeError {
+                            message: format!(
+                                "non-integral float value {value} cannot be materialized as i64"
+                            ),
+                        })
+                    })?,
+                ),
+                other => return Err(unexpected_batch_cell("i64", other)),
+            },
+            Self::F64 { values, valid } => match cell {
+                PlannedCell::Null => push_primitive_null(values, valid, 0.0),
+                PlannedCell::Int32(value) => push_primitive_valid(values, valid, f64::from(value)),
+                PlannedCell::Int64(value) => push_primitive_valid(values, valid, value as f64),
+                PlannedCell::Float64(value) => push_primitive_valid(values, valid, value),
+                other => return Err(unexpected_batch_cell("f64", other)),
+            },
+            Self::Date { values, valid } => match cell {
+                PlannedCell::Null => push_primitive_null(
+                    values,
+                    valid,
+                    SasDate {
+                        days_since_sas_epoch: 0,
+                    },
+                ),
+                PlannedCell::Date(value) => push_primitive_valid(values, valid, value),
+                PlannedCell::Int32(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Int32(value), owned_strings);
+                }
+                PlannedCell::Int64(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Int64(value), owned_strings);
+                }
+                PlannedCell::Float64(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Float64(value), owned_strings);
+                }
+                other => return Err(unexpected_batch_cell("date", other)),
+            },
+            Self::DateTime { values, valid } => match cell {
+                PlannedCell::Null => push_primitive_null(
+                    values,
+                    valid,
+                    SasDateTime {
+                        seconds_since_sas_epoch: 0,
+                    },
+                ),
+                PlannedCell::DateTime(value) => push_primitive_valid(values, valid, value),
+                PlannedCell::Int32(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Int32(value), owned_strings);
+                }
+                PlannedCell::Int64(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Int64(value), owned_strings);
+                }
+                PlannedCell::Float64(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Float64(value), owned_strings);
+                }
+                other => return Err(unexpected_batch_cell("datetime", other)),
+            },
+            Self::Time { values, valid } => match cell {
+                PlannedCell::Null => push_primitive_null(
+                    values,
+                    valid,
+                    SasTime {
+                        seconds_since_midnight: 0,
+                    },
+                ),
+                PlannedCell::Time(value) => push_primitive_valid(values, valid, value),
+                PlannedCell::Int32(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Int32(value), owned_strings);
+                }
+                PlannedCell::Int64(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Int64(value), owned_strings);
+                }
+                PlannedCell::Float64(value) => {
+                    self.widen_temporal_to_f64();
+                    return self.append(PlannedCell::Float64(value), owned_strings);
+                }
+                other => return Err(unexpected_batch_cell("time", other)),
+            },
+            Self::Utf8 {
+                offsets,
+                data,
+                valid,
+            } => match cell {
+                PlannedCell::Null => push_variable_null(offsets, data, valid),
+                PlannedCell::StrBorrowed(value) => {
+                    push_variable_valid(offsets, data, valid, value.as_bytes())?
+                }
+                PlannedCell::StrOwned(index) => push_variable_valid(
+                    offsets,
+                    data,
+                    valid,
+                    owned_strings
+                        .get(index)
+                        .ok_or_else(|| Error::unsupported("owned string index out of range"))?
+                        .as_bytes(),
+                )?,
+                other => return Err(unexpected_batch_cell("utf8", other)),
+            },
+            Self::RawBytes {
+                offsets,
+                data,
+                valid,
+            } => match cell {
+                PlannedCell::Null => push_variable_null(offsets, data, valid),
+                PlannedCell::Bytes(value) => push_variable_valid(offsets, data, valid, value)?,
+                other => return Err(unexpected_batch_cell("raw-bytes", other)),
+            },
+        }
+        Ok(())
+    }
+
+    fn widen_temporal_to_f64(&mut self) {
+        let widened = match std::mem::replace(
+            self,
+            Self::F64 {
+                values: Vec::new(),
+                valid: None,
+            },
+        ) {
+            Self::Date { values, valid } => Self::F64 {
+                values: values
+                    .into_iter()
+                    .map(|value| value.days_since_sas_epoch as f64)
+                    .collect(),
+                valid,
+            },
+            Self::DateTime { values, valid } => Self::F64 {
+                values: values
+                    .into_iter()
+                    .map(|value| value.seconds_since_sas_epoch as f64)
+                    .collect(),
+                valid,
+            },
+            Self::Time { values, valid } => Self::F64 {
+                values: values
+                    .into_iter()
+                    .map(|value| value.seconds_since_midnight as f64)
+                    .collect(),
+                valid,
+            },
+            other => other,
+        };
+        *self = widened;
+    }
+
+    fn finish(self) -> OwnedColumnBuffer {
+        match self {
+            Self::I32 { values, valid } => OwnedColumnBuffer::I32 { values, valid },
+            Self::I64 { values, valid } => OwnedColumnBuffer::I64 { values, valid },
+            Self::F64 { values, valid } => OwnedColumnBuffer::F64 { values, valid },
+            Self::Date { values, valid } => OwnedColumnBuffer::Date { values, valid },
+            Self::DateTime { values, valid } => OwnedColumnBuffer::DateTime { values, valid },
+            Self::Time { values, valid } => OwnedColumnBuffer::Time { values, valid },
+            Self::Utf8 {
+                offsets,
+                data,
+                valid,
+            } => OwnedColumnBuffer::Utf8 {
+                offsets,
+                data,
+                valid,
+            },
+            Self::RawBytes {
+                offsets,
+                data,
+                valid,
+            } => OwnedColumnBuffer::RawBytes {
+                offsets,
+                data,
+                valid,
+            },
         }
     }
 }
 
 fn materialize_planned_cells<'a>(
-    planned: Vec<PlannedCell<'a>>,
+    planned: &[PlannedCell<'a>],
     owned_strings: &'a [String],
 ) -> Result<Vec<crate::row::CellValue<'a>>> {
     let mut cells = Vec::with_capacity(planned.len());
     for cell in planned {
-        cells.push(match cell {
+        cells.push(match *cell {
             PlannedCell::Null => crate::row::CellValue::Null,
             PlannedCell::Int32(value) => crate::row::CellValue::Int32(value),
             PlannedCell::Int64(value) => crate::row::CellValue::Int64(value),
@@ -696,6 +1302,146 @@ fn materialize_planned_cells<'a>(
         });
     }
     Ok(cells)
+}
+
+fn column_materialization_kind(
+    column_kind: CompiledColumnKind,
+    width: u32,
+    temporal_options: TemporalDecodeOptions,
+    decode_mode: DecodeMode,
+) -> ColumnMaterializationKind {
+    if matches!(decode_mode, DecodeMode::TypedLossless) {
+        return match column_kind {
+            CompiledColumnKind::String | CompiledColumnKind::Bytes => {
+                ColumnMaterializationKind::RawBytes
+            }
+            CompiledColumnKind::Integer
+            | CompiledColumnKind::Float
+            | CompiledColumnKind::Date
+            | CompiledColumnKind::DateTime
+            | CompiledColumnKind::Time => ColumnMaterializationKind::F64,
+        };
+    }
+
+    match column_kind {
+        CompiledColumnKind::Integer => {
+            if width <= 4 {
+                ColumnMaterializationKind::I32
+            } else {
+                ColumnMaterializationKind::I64
+            }
+        }
+        CompiledColumnKind::Float => ColumnMaterializationKind::F64,
+        CompiledColumnKind::String => ColumnMaterializationKind::Utf8,
+        CompiledColumnKind::Bytes => ColumnMaterializationKind::RawBytes,
+        CompiledColumnKind::Date if temporal_options.decode_dates => {
+            ColumnMaterializationKind::Date
+        }
+        CompiledColumnKind::DateTime if temporal_options.decode_datetimes => {
+            ColumnMaterializationKind::DateTime
+        }
+        CompiledColumnKind::Time if temporal_options.decode_times => {
+            ColumnMaterializationKind::Time
+        }
+        CompiledColumnKind::Date | CompiledColumnKind::DateTime | CompiledColumnKind::Time => {
+            ColumnMaterializationKind::F64
+        }
+    }
+}
+
+fn compile_column_plan(column: &ColumnMeta) -> Result<CompiledColumnPlan> {
+    let start = usize::try_from(column.offset)
+        .map_err(|_| Error::unsupported("column offset exceeds platform usize"))?;
+    let width = column.physical_width;
+    let width_usize = usize::try_from(width)
+        .map_err(|_| Error::unsupported("column width exceeds platform usize"))?;
+    let end = start
+        .checked_add(width_usize)
+        .ok_or_else(|| Error::unsupported("column end overflow"))?;
+    let kind = match column.logical_type {
+        LogicalType::String => CompiledColumnKind::String,
+        LogicalType::Bytes => CompiledColumnKind::Bytes,
+        LogicalType::Date => CompiledColumnKind::Date,
+        LogicalType::DateTime => CompiledColumnKind::DateTime,
+        LogicalType::Time => CompiledColumnKind::Time,
+        LogicalType::Integer => CompiledColumnKind::Integer,
+        LogicalType::Float => CompiledColumnKind::Float,
+    };
+    Ok(CompiledColumnPlan {
+        start,
+        end,
+        width,
+        kind,
+    })
+}
+
+fn resolve_batch_row_capacity(builder: &ScanBuilder<'_>) -> Result<usize> {
+    match builder.batch_hint {
+        BatchHint::Rows(rows) => Ok(rows.max(1)),
+        BatchHint::Bytes(bytes) => {
+            let row_len = usize::try_from(builder.ds.layout.row_len)
+                .map_err(|_| Error::unsupported("row length exceeds platform usize"))?;
+            Ok((bytes / row_len.max(1)).max(1))
+        }
+        BatchHint::Auto => {
+            let rows_per_page = usize::try_from(builder.ds.layout.rows_per_page)
+                .map_err(|_| Error::unsupported("rows per page exceeds platform usize"))?;
+            Ok(rows_per_page.max(1))
+        }
+    }
+}
+
+fn borrow_column_buffers(columns: &[OwnedColumnBuffer]) -> Vec<ColumnBuffer<'_>> {
+    columns.iter().map(OwnedColumnBuffer::as_borrowed).collect()
+}
+
+fn push_primitive_valid<T>(values: &mut Vec<T>, valid: &mut Option<Vec<u8>>, value: T) {
+    values.push(value);
+    if let Some(valid) = valid {
+        valid.push(1);
+    }
+}
+
+fn push_primitive_null<T: Copy>(values: &mut Vec<T>, valid: &mut Option<Vec<u8>>, default: T) {
+    if valid.is_none() {
+        *valid = Some(vec![1; values.len()]);
+    }
+    values.push(default);
+    valid.as_mut().expect("validity initialized").push(0);
+}
+
+fn push_variable_valid(
+    offsets: &mut Vec<u32>,
+    data: &mut Vec<u8>,
+    valid: &mut Option<Vec<u8>>,
+    value: &[u8],
+) -> Result<()> {
+    data.extend_from_slice(value);
+    let next_offset = u32::try_from(data.len())
+        .map_err(|_| Error::unsupported("columnar variable buffer exceeds u32 offset range"))?;
+    offsets.push(next_offset);
+    if let Some(valid) = valid {
+        valid.push(1);
+    }
+    Ok(())
+}
+
+fn push_variable_null(offsets: &mut Vec<u32>, _data: &mut Vec<u8>, valid: &mut Option<Vec<u8>>) {
+    if valid.is_none() {
+        *valid = Some(vec![1; offsets.len().saturating_sub(1)]);
+    }
+    let last = *offsets.last().unwrap_or(&0);
+    offsets.push(last);
+    valid.as_mut().expect("validity initialized").push(0);
+}
+
+fn unexpected_batch_cell(expected: &str, actual: PlannedCell<'_>) -> Error {
+    Error::Decode(crate::error::DecodeError {
+        message: format!(
+            "columnar decode expected {expected} cell but saw {:?}",
+            actual
+        ),
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -798,6 +1544,7 @@ fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> String {
 mod tests {
     use super::ScanBuilder;
     use crate::{
+        columnar::OwnedColumnBuffer,
         dataset::Dataset,
         internal::{FileInner, FileSource, HeaderInfo, LayoutPlan},
         metadata::{ColumnMeta, CompressionKind, DatasetMetadata, Endianness, LogicalType},
@@ -886,12 +1633,8 @@ mod tests {
     }
 
     #[test]
-    fn raw_scan_rejects_indexed_pages() {
-        let mut page = vec![0u8; 64];
-        page[(24 - 8)..(24 - 6)].copy_from_slice(&0x9000u16.to_le_bytes());
-        page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
-        page[(24 - 4)..(24 - 2)].copy_from_slice(&0u16.to_le_bytes());
-        let bytes = Arc::<[u8]>::from(page);
+    fn raw_scan_decompresses_rle_rows() {
+        let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, b'A'], 64, 4));
         let layout = LayoutPlan {
             columns: Vec::new(),
             header: HeaderInfo {
@@ -909,7 +1652,7 @@ mod tests {
             },
             row_len: 4,
             total_rows: 1,
-            compression: CompressionKind::None,
+            compression: CompressionKind::Row,
             rows_per_page: 1,
         };
         let ds = Dataset {
@@ -920,7 +1663,7 @@ mod tests {
             metadata: Arc::new(DatasetMetadata {
                 row_count: 1,
                 row_len: 4,
-                compression: CompressionKind::None,
+                compression: CompressionKind::Row,
                 ..DatasetMetadata::default()
             }),
             layout: Arc::new(layout.clone()),
@@ -933,10 +1676,16 @@ mod tests {
             ),
         };
 
-        let err = ScanBuilder::new(&ds)
-            .visit_raw_rows(|_| Ok(ControlFlow::Continue(())))
-            .expect_err("compressed pages are not supported yet");
-        assert!(err.to_string().contains("compressed pages"));
+        let mut rows = Vec::new();
+        let stats = ScanBuilder::new(&ds)
+            .visit_raw_rows(|row| {
+                rows.push((row.row_index, row.bytes.to_vec()));
+                Ok(ControlFlow::Continue(()))
+            })
+            .expect("compressed raw scan");
+        assert_eq!(rows, vec![(0, b"AAAA".to_vec())]);
+        assert_eq!(stats.compressed_pages, 1);
+        assert_eq!(stats.row_bytes_materialized, 4);
     }
 
     #[test]
@@ -992,6 +1741,63 @@ mod tests {
             .expect("scan succeeds");
 
         assert_eq!(rows, vec![(0, b"ABCD".to_vec()), (1, b"EFGH".to_vec())]);
+        assert_eq!(stats.indexed_pages, 1);
+        assert_eq!(stats.rows_emitted, 2);
+    }
+
+    #[test]
+    fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
+        let bytes = Arc::<[u8]>::from(make_mixed_pointer_page(b"WXYZ", b"ABCD", 64));
+        let layout = LayoutPlan {
+            columns: Vec::new(),
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 4,
+            total_rows: 2,
+            compression: CompressionKind::None,
+            rows_per_page: 2,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 2,
+                row_len: 4,
+                compression: CompressionKind::None,
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let mut rows = Vec::new();
+        let stats = ScanBuilder::new(&ds)
+            .visit_raw_rows(|row| {
+                rows.push((row.row_index, row.bytes.to_vec()));
+                Ok(ControlFlow::Continue(()))
+            })
+            .expect("scan succeeds");
+
+        assert_eq!(rows, vec![(0, b"WXYZ".to_vec()), (1, b"ABCD".to_vec())]);
         assert_eq!(stats.indexed_pages, 1);
         assert_eq!(stats.rows_emitted, 2);
     }
@@ -1092,6 +1898,89 @@ mod tests {
     }
 
     #[test]
+    fn typed_lossless_rows_preserve_numeric_bits_and_string_bytes() {
+        let mut row = Vec::with_capacity(12);
+        let missing_bits = 0x7FF0_0000_0000_0001u64;
+        row.extend_from_slice(&missing_bits.to_le_bytes());
+        row.extend_from_slice(b"A  ");
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Float,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 3,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 11,
+            total_rows: 1,
+            compression: CompressionKind::None,
+            rows_per_page: 1,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 1,
+                row_len: 11,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let rows = ScanBuilder::new(&ds)
+            .with_decode_mode(crate::DecodeMode::TypedLossless)
+            .collect_rows()
+            .expect("lossless rows");
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(
+            rows[0].cells[0],
+            crate::row::OwnedCellValue::Float64(value) if value.to_bits() == missing_bits
+        ));
+        assert!(matches!(
+            rows[0].cells[1],
+            crate::row::OwnedCellValue::Bytes(ref value) if value == b"A  "
+        ));
+    }
+
+    #[test]
     fn collect_rows_materializes_owned_values() {
         let row = make_numeric_text_row(7.0, b"ZX  ");
         let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
@@ -1168,6 +2057,347 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn collect_batches_materializes_columnar_values() {
+        let row_a = make_numeric_text_row(1.5, b"AA  ");
+        let row_b = make_numeric_text_row(2.0, b"BBBB");
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 2, 0, &[&row_a, &row_b], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Float,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 4,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 12,
+            total_rows: 2,
+            compression: CompressionKind::None,
+            rows_per_page: 2,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 2,
+                row_len: 12,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let batches = ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(2))
+            .collect_batches()
+            .expect("columnar batches");
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].row_base, 0);
+        assert_eq!(batches[0].row_count, 2);
+
+        match &batches[0].columns[0] {
+            OwnedColumnBuffer::F64 { values, valid } => {
+                assert_eq!(values, &vec![1.5, 2.0]);
+                assert!(valid.is_none());
+            }
+            other => panic!("unexpected numeric batch column: {other:?}"),
+        }
+        match &batches[0].columns[1] {
+            OwnedColumnBuffer::Utf8 {
+                offsets,
+                data,
+                valid,
+            } => {
+                assert_eq!(offsets, &vec![0, 2, 6]);
+                assert_eq!(data, b"AABBBB");
+                assert!(valid.is_none());
+            }
+            other => panic!("unexpected utf8 batch column: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collect_batches_typed_lossless_uses_f64_and_raw_bytes() {
+        let row = make_numeric_text_row(42.0, b"ZX  ");
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Integer,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 4,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 12,
+            total_rows: 1,
+            compression: CompressionKind::None,
+            rows_per_page: 1,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 1,
+                row_len: 12,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let batches = ScanBuilder::new(&ds)
+            .with_decode_mode(crate::DecodeMode::TypedLossless)
+            .collect_batches()
+            .expect("lossless batches");
+        assert_eq!(batches.len(), 1);
+        match &batches[0].columns[0] {
+            OwnedColumnBuffer::F64 { values, valid } => {
+                assert_eq!(values, &vec![42.0]);
+                assert!(valid.is_none());
+            }
+            other => panic!("unexpected lossless numeric batch column: {other:?}"),
+        }
+        match &batches[0].columns[1] {
+            OwnedColumnBuffer::RawBytes {
+                offsets,
+                data,
+                valid,
+            } => {
+                assert_eq!(offsets, &vec![0, 4]);
+                assert_eq!(data, b"ZX  ");
+                assert!(valid.is_none());
+            }
+            other => panic!("unexpected lossless raw-bytes batch column: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn visit_batches_streams_projected_columnar_views() {
+        let row_a = make_numeric_text_row(10.0, b"ABCD");
+        let row_b = make_numeric_text_row(20.0, b"EF  ");
+        let bytes = Arc::<[u8]>::from(make_pointer_page(&[&row_a, &row_b], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Float,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 4,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 12,
+            total_rows: 2,
+            compression: CompressionKind::None,
+            rows_per_page: 2,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 2,
+                row_len: 12,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+        let projection = ds.projection().column("txt").build().expect("projection");
+
+        let mut seen = Vec::new();
+        let stats = ScanBuilder::new(&ds)
+            .with_projection(&projection)
+            .with_batch_hint(crate::BatchHint::Rows(1))
+            .visit_batches(|batch| {
+                seen.push((
+                    batch.row_base,
+                    batch.row_count,
+                    read_utf8_column(&batch.columns[0]),
+                ));
+                Ok(ControlFlow::Continue(()))
+            })
+            .expect("batch scan");
+
+        assert_eq!(
+            seen,
+            vec![
+                (0, 1, vec!["ABCD".to_owned()]),
+                (1, 1, vec!["EF".to_owned()]),
+            ]
+        );
+        assert_eq!(stats.decode_batches, 2);
+        assert_eq!(stats.pages_seen, 1);
+    }
+
+    #[test]
+    fn collect_rows_decodes_compressed_string_rows() {
+        let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, b'Z'], 64, 4));
+        let layout = LayoutPlan {
+            columns: vec![ColumnMeta {
+                index: 0,
+                name: "txt".to_owned(),
+                logical_type: LogicalType::String,
+                physical_width: 4,
+                offset: 0,
+                label: None,
+                format: None,
+            }],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 4,
+            total_rows: 1,
+            compression: CompressionKind::Row,
+            rows_per_page: 1,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 1,
+                row_len: 4,
+                compression: CompressionKind::Row,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let rows = ScanBuilder::new(&ds)
+            .collect_rows()
+            .expect("typed compressed rows");
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(
+            rows[0].cells[0],
+            crate::row::OwnedCellValue::String(ref value) if value == "ZZZZ"
+        ));
+    }
+
     fn make_pages() -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend(make_page(0x0100, 2, 0, &[b"ABCD", b"EFGH"], 64));
@@ -1216,10 +2446,66 @@ mod tests {
         page
     }
 
+    fn make_mixed_pointer_page(
+        pointer_row: &[u8; 4],
+        contiguous_row: &[u8; 4],
+        page_size: usize,
+    ) -> Vec<u8> {
+        let mut page = vec![0u8; page_size];
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0100u16.to_le_bytes());
+        page[(24 - 6)..(24 - 4)].copy_from_slice(&2u16.to_le_bytes());
+        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+
+        let pointer_data_offset = 48u32;
+        page[24..28].copy_from_slice(&pointer_data_offset.to_le_bytes());
+        page[28..32].copy_from_slice(&4u32.to_le_bytes());
+        page[32] = 0;
+        page[33] = 1;
+
+        page[40..44].copy_from_slice(contiguous_row);
+        let start = usize::try_from(pointer_data_offset).unwrap_or(0);
+        page[start..start + 4].copy_from_slice(pointer_row);
+        page
+    }
+
     fn make_numeric_text_row(number: f64, text: &[u8; 4]) -> Vec<u8> {
         let mut row = Vec::with_capacity(12);
         row.extend_from_slice(&number.to_le_bytes());
         row.extend_from_slice(text);
         row
+    }
+
+    fn make_compressed_page(compressed: &[u8], page_size: usize, compression_flag: u8) -> Vec<u8> {
+        let mut page = vec![0u8; page_size];
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0100u16.to_le_bytes());
+        page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
+        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+
+        let data_offset = 40u32;
+        let data_len = u32::try_from(compressed.len()).unwrap_or(u32::MAX);
+        page[24..28].copy_from_slice(&data_offset.to_le_bytes());
+        page[28..32].copy_from_slice(&data_len.to_le_bytes());
+        page[32] = compression_flag;
+        page[33] = 1;
+
+        let start = usize::try_from(data_offset).unwrap_or(0);
+        let end = start + compressed.len();
+        page[start..end].copy_from_slice(compressed);
+        page
+    }
+
+    fn read_utf8_column(column: &crate::ColumnBuffer<'_>) -> Vec<String> {
+        let crate::ColumnBuffer::Utf8(buffer) = column else {
+            panic!("expected utf8 column, got {column:?}");
+        };
+        buffer
+            .offsets
+            .windows(2)
+            .map(|window| {
+                let start = usize::try_from(window[0]).expect("utf8 start");
+                let end = usize::try_from(window[1]).expect("utf8 end");
+                String::from_utf8(buffer.data[start..end].to_vec()).expect("utf8 cell")
+            })
+            .collect()
     }
 }
