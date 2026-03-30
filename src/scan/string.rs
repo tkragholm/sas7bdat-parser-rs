@@ -1,5 +1,5 @@
 use super::*;
-#[inline(always)]
+#[inline]
 pub(super) fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
     let mut end = slice.len();
     while end > 0 {
@@ -12,7 +12,7 @@ pub(super) fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
     &slice[..end]
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
     if slice.len() < 64 {
         let trimmed = trim_trailing_space_or_nul(slice);
@@ -97,7 +97,7 @@ pub(super) fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> Strin
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn mojibake_fix_maybe_needed_for_encoded_bytes(
     encoding: &'static Encoding,
     slice: &[u8],

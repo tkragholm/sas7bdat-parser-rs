@@ -158,15 +158,15 @@ impl RowDecodePlan {
         match column.kernel {
             CompiledDecodeKernel::Utf8 => self.plan_string(slice, owned_strings),
             CompiledDecodeKernel::RawBytes => Ok(PlannedCell::Bytes(slice)),
-            CompiledDecodeKernel::Date => self.plan_numeric_date(slice),
+            CompiledDecodeKernel::Date => Ok(self.plan_numeric_date(slice)),
             CompiledDecodeKernel::DateAsNumeric
             | CompiledDecodeKernel::Integer
             | CompiledDecodeKernel::Float => self.plan_numeric_value(slice, column.width),
-            CompiledDecodeKernel::DateTime => self.plan_numeric_datetime(slice),
+            CompiledDecodeKernel::DateTime => Ok(self.plan_numeric_datetime(slice)),
             CompiledDecodeKernel::DateTimeAsNumeric => self.plan_numeric_value(slice, column.width),
-            CompiledDecodeKernel::Time => self.plan_numeric_time(slice),
+            CompiledDecodeKernel::Time => Ok(self.plan_numeric_time(slice)),
             CompiledDecodeKernel::TimeAsNumeric => self.plan_numeric_value(slice, column.width),
-            CompiledDecodeKernel::NumericLossless => self.plan_numeric_lossless(slice),
+            CompiledDecodeKernel::NumericLossless => Ok(self.plan_numeric_lossless(slice)),
         }
     }
 
@@ -412,53 +412,53 @@ impl RowDecodePlan {
                     Ok(PlannedCell::Float64(number))
                 }
             },
-            DecodeMode::TypedLossless => self.plan_numeric_lossless(slice),
+            DecodeMode::TypedLossless => Ok(self.plan_numeric_lossless(slice)),
             DecodeMode::Raw => Err(Error::unsupported(
                 "visit_rows does not support DecodeMode::Raw; use visit_raw_rows instead",
             )),
         }
     }
 
-    pub(super) fn plan_numeric_date<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
+    pub(super) fn plan_numeric_date<'row>(&self, slice: &[u8]) -> PlannedCell<'row> {
         match decode_numeric_cell(slice, self.endianness) {
-            None => Ok(PlannedCell::Null),
+            None => PlannedCell::Null,
             Some(number) => {
                 if let Some(days) = try_i32_from_f64(number) {
-                    Ok(PlannedCell::Date(SasDate {
+                    PlannedCell::Date(SasDate {
                         days_since_sas_epoch: days,
-                    }))
+                    })
                 } else {
-                    Ok(PlannedCell::Float64(number))
+                    PlannedCell::Float64(number)
                 }
             }
         }
     }
 
-    pub(super) fn plan_numeric_datetime<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
+    pub(super) fn plan_numeric_datetime<'row>(&self, slice: &[u8]) -> PlannedCell<'row> {
         match decode_numeric_cell(slice, self.endianness) {
-            None => Ok(PlannedCell::Null),
+            None => PlannedCell::Null,
             Some(number) => {
                 if let Some(seconds) = try_i64_from_f64(number) {
-                    Ok(PlannedCell::DateTime(SasDateTime {
+                    PlannedCell::DateTime(SasDateTime {
                         seconds_since_sas_epoch: seconds,
-                    }))
+                    })
                 } else {
-                    Ok(PlannedCell::Float64(number))
+                    PlannedCell::Float64(number)
                 }
             }
         }
     }
 
-    pub(super) fn plan_numeric_time<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
+    pub(super) fn plan_numeric_time<'row>(&self, slice: &[u8]) -> PlannedCell<'row> {
         match decode_numeric_cell(slice, self.endianness) {
-            None => Ok(PlannedCell::Null),
+            None => PlannedCell::Null,
             Some(number) => {
                 if let Some(seconds) = try_i64_from_f64(number) {
-                    Ok(PlannedCell::Time(SasTime {
+                    PlannedCell::Time(SasTime {
                         seconds_since_midnight: seconds,
-                    }))
+                    })
                 } else {
-                    Ok(PlannedCell::Float64(number))
+                    PlannedCell::Float64(number)
                 }
             }
         }
@@ -473,24 +473,18 @@ impl RowDecodePlan {
         let slice = self.slice_in_bounds(row, column);
         match kind {
             OwnedCellMaterializationKind::Utf8 => self.materialize_owned_string_typed(slice),
-            OwnedCellMaterializationKind::RawBytes => {
-                Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec()))
-            }
-            OwnedCellMaterializationKind::Date => self.materialize_owned_date(slice),
+            OwnedCellMaterializationKind::RawBytes => Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec())),
+            OwnedCellMaterializationKind::Date => Ok(self.materialize_owned_date(slice)),
             OwnedCellMaterializationKind::DateAsNumeric
-            | OwnedCellMaterializationKind::NumericTyped => {
-                self.materialize_owned_numeric_typed(slice, column.width)
+            | OwnedCellMaterializationKind::NumericTyped
+            | OwnedCellMaterializationKind::DateTimeAsNumeric
+            | OwnedCellMaterializationKind::TimeAsNumeric => {
+                Ok(self.materialize_owned_numeric_typed(slice, column.width))
             }
-            OwnedCellMaterializationKind::DateTime => self.materialize_owned_datetime(slice),
-            OwnedCellMaterializationKind::DateTimeAsNumeric => {
-                self.materialize_owned_numeric_typed(slice, column.width)
-            }
-            OwnedCellMaterializationKind::Time => self.materialize_owned_time(slice),
-            OwnedCellMaterializationKind::TimeAsNumeric => {
-                self.materialize_owned_numeric_typed(slice, column.width)
-            }
+            OwnedCellMaterializationKind::DateTime => Ok(self.materialize_owned_datetime(slice)),
+            OwnedCellMaterializationKind::Time => Ok(self.materialize_owned_time(slice)),
             OwnedCellMaterializationKind::NumericLossless => {
-                self.materialize_owned_numeric_lossless(slice)
+                Ok(self.materialize_owned_numeric_lossless(slice))
             }
         }
     }
@@ -567,19 +561,16 @@ impl RowDecodePlan {
         ))
     }
 
-    pub(super) fn materialize_owned_date(
-        &self,
-        slice: &[u8],
-    ) -> Result<crate::row::OwnedCellValue> {
+    pub(super) fn materialize_owned_date(&self, slice: &[u8]) -> crate::row::OwnedCellValue {
         match decode_numeric_cell(slice, self.endianness) {
-            None => Ok(crate::row::OwnedCellValue::Null),
+            None => crate::row::OwnedCellValue::Null,
             Some(number) => {
                 if let Some(days) = try_i32_from_f64(number) {
-                    Ok(crate::row::OwnedCellValue::Date(SasDate {
+                    crate::row::OwnedCellValue::Date(SasDate {
                         days_since_sas_epoch: days,
-                    }))
+                    })
                 } else {
-                    Ok(crate::row::OwnedCellValue::Float64(number))
+                    crate::row::OwnedCellValue::Float64(number)
                 }
             }
         }
@@ -588,34 +579,31 @@ impl RowDecodePlan {
     pub(super) fn materialize_owned_datetime(
         &self,
         slice: &[u8],
-    ) -> Result<crate::row::OwnedCellValue> {
+    ) -> crate::row::OwnedCellValue {
         match decode_numeric_cell(slice, self.endianness) {
-            None => Ok(crate::row::OwnedCellValue::Null),
+            None => crate::row::OwnedCellValue::Null,
             Some(number) => {
                 if let Some(seconds) = try_i64_from_f64(number) {
-                    Ok(crate::row::OwnedCellValue::DateTime(SasDateTime {
+                    crate::row::OwnedCellValue::DateTime(SasDateTime {
                         seconds_since_sas_epoch: seconds,
-                    }))
+                    })
                 } else {
-                    Ok(crate::row::OwnedCellValue::Float64(number))
+                    crate::row::OwnedCellValue::Float64(number)
                 }
             }
         }
     }
 
-    pub(super) fn materialize_owned_time(
-        &self,
-        slice: &[u8],
-    ) -> Result<crate::row::OwnedCellValue> {
+    pub(super) fn materialize_owned_time(&self, slice: &[u8]) -> crate::row::OwnedCellValue {
         match decode_numeric_cell(slice, self.endianness) {
-            None => Ok(crate::row::OwnedCellValue::Null),
+            None => crate::row::OwnedCellValue::Null,
             Some(number) => {
                 if let Some(seconds) = try_i64_from_f64(number) {
-                    Ok(crate::row::OwnedCellValue::Time(SasTime {
+                    crate::row::OwnedCellValue::Time(SasTime {
                         seconds_since_midnight: seconds,
-                    }))
+                    })
                 } else {
-                    Ok(crate::row::OwnedCellValue::Float64(number))
+                    crate::row::OwnedCellValue::Float64(number)
                 }
             }
         }
@@ -625,19 +613,19 @@ impl RowDecodePlan {
         &self,
         slice: &[u8],
         width: u32,
-    ) -> Result<crate::row::OwnedCellValue> {
+    ) -> crate::row::OwnedCellValue {
         match decode_numeric_cell(slice, self.endianness) {
-            None => Ok(crate::row::OwnedCellValue::Null),
+            None => crate::row::OwnedCellValue::Null,
             Some(number) => {
                 if let Some(value) = try_i64_from_f64(number) {
                     if width <= 4
                         && let Ok(value32) = i32::try_from(value)
                     {
-                        return Ok(crate::row::OwnedCellValue::Int32(value32));
+                        return crate::row::OwnedCellValue::Int32(value32);
                     }
-                    return Ok(crate::row::OwnedCellValue::Int64(value));
+                    return crate::row::OwnedCellValue::Int64(value);
                 }
-                Ok(crate::row::OwnedCellValue::Float64(number))
+                crate::row::OwnedCellValue::Float64(number)
             }
         }
     }
@@ -645,23 +633,24 @@ impl RowDecodePlan {
     pub(super) fn materialize_owned_numeric_lossless(
         &self,
         slice: &[u8],
-    ) -> Result<crate::row::OwnedCellValue> {
+    ) -> crate::row::OwnedCellValue {
         if slice.is_empty() {
-            return Ok(crate::row::OwnedCellValue::Null);
+            return crate::row::OwnedCellValue::Null;
         }
-        Ok(crate::row::OwnedCellValue::Float64(f64::from_bits(
-            numeric_bits(slice, self.endianness),
+        crate::row::OwnedCellValue::Float64(f64::from_bits(numeric_bits(
+            slice,
+            self.endianness,
         )))
     }
 
-    pub(super) fn plan_numeric_lossless<'row>(&self, slice: &[u8]) -> Result<PlannedCell<'row>> {
+    pub(super) fn plan_numeric_lossless<'row>(&self, slice: &[u8]) -> PlannedCell<'row> {
         if slice.is_empty() {
-            return Ok(PlannedCell::Null);
+            return PlannedCell::Null;
         }
-        Ok(PlannedCell::Float64(f64::from_bits(numeric_bits(
+        PlannedCell::Float64(f64::from_bits(numeric_bits(
             slice,
             self.endianness,
-        ))))
+        )))
     }
 }
 
