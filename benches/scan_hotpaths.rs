@@ -3,7 +3,11 @@ use sas7bdat_simd::{
     BatchHint, Dataset, Projection, RowSelection,
     fixture_catalog::{FixtureCatalog, FixtureStatus, ProjectionPreset, build_projection},
 };
-use std::{env, fs, hint::black_box, path::{Path, PathBuf}};
+use std::{
+    env, fs,
+    hint::black_box,
+    path::{Path, PathBuf},
+};
 
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -162,7 +166,10 @@ fn maybe_scan_hotpaths_from_catalog(c: &mut Criterion) -> bool {
         let FixtureStatus::Profiled(profile) = entry.status else {
             continue;
         };
-        if !tags.iter().all(|tag| profile.tags.iter().any(|fixture_tag| fixture_tag == tag)) {
+        if !tags
+            .iter()
+            .all(|tag| profile.tags.iter().any(|fixture_tag| fixture_tag == tag))
+        {
             continue;
         }
         let Some(dataset) = load_dataset_path(Path::new(&entry.path)) else {
