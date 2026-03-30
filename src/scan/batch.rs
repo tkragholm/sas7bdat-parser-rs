@@ -769,9 +769,9 @@ impl OwnedBatchColumnBuilder {
             } => match cell {
                 PlannedCell::Null => push_variable_null(offsets, data, valid),
                 PlannedCell::StrBorrowed(value) => {
-                    push_variable_valid(offsets, data, valid, value.as_bytes())?;
+                    push_utf8_bytes_fast(offsets, data, valid, value.as_bytes())?;
                 }
-                PlannedCell::StrOwned(index) => push_variable_valid(
+                PlannedCell::StrOwned(index) => push_utf8_bytes_fast(
                     offsets,
                     data,
                     valid,
@@ -882,6 +882,20 @@ impl OwnedBatchColumnBuilder {
                 valid,
             },
         }
+    }
+}
+
+#[inline(always)]
+fn push_utf8_bytes_fast(
+    offsets: &mut Vec<u32>,
+    data: &mut Vec<u8>,
+    valid: &mut Option<Vec<u8>>,
+    value: &[u8],
+) -> Result<()> {
+    if valid.is_none() {
+        push_variable_valid_without_validity(offsets, data, value)
+    } else {
+        push_variable_valid(offsets, data, valid, value)
     }
 }
 
@@ -1278,6 +1292,22 @@ pub(super) fn push_variable_valid(
     if let Some(valid) = valid {
         valid.push(1);
     }
+    Ok(())
+}
+
+#[inline(always)]
+pub(super) fn push_variable_valid_without_validity(
+    offsets: &mut Vec<u32>,
+    data: &mut Vec<u8>,
+    value: &[u8],
+) -> Result<()> {
+    let next_offset = (*offsets.last().unwrap_or(&0) as usize)
+        .checked_add(value.len())
+        .ok_or_else(|| Error::unsupported("columnar variable buffer exceeds platform usize"))?;
+    let next_offset_u32 = u32::try_from(next_offset)
+        .map_err(|_| Error::unsupported("columnar variable buffer exceeds u32 offset range"))?;
+    data.extend_from_slice(value);
+    offsets.push(next_offset_u32);
     Ok(())
 }
 
