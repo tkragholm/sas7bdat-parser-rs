@@ -20,3 +20,7 @@ harness = false
 [[bench]]
 name = "compression_matrix"
 harness = false
+
+[[bench]]
+name = "backend_matrix"
+harness = false
