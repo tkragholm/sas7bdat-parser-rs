@@ -33,6 +33,56 @@ validation or benchmarks.
 - Python (`python/tests/`) and R (`R/tests/`) host pandas/pyreadstat/haven
   comparison checks.
 
+## Benchmark workflow
+
+The fixture workflow is intended to make benchmark selection explicit instead of
+implicitly relying on a few hand-picked files.
+
+Recommended procedure:
+
+1. Refresh the local fixture catalog:
+   - `just catalog`
+2. Inspect or diff the catalog if needed:
+   - `just catalog-stdout`
+3. Run a structured single-fixture profile:
+   - `just profile fixtures/raw_data/ahs2013/topical.sas7bdat typed_batches mixed 1 128`
+4. Add peak RSS:
+   - `just profile-rss fixtures/raw_data/ahs2013/topical.sas7bdat typed_batches mixed 1 128`
+5. Use tag-driven Criterion runs for fixture families:
+   - `just bench-standard`
+   - `just bench-compressed`
+   - `just bench-string-heavy`
+   - `just bench-numeric-heavy`
+   - `just bench-macro`
+
+The common tuning knobs are recipe arguments, not environment variables:
+
+- projection
+- max fixture count
+- sample rows
+- repeat
+- row limit
+- batch size
+
+The one remaining environment-based escape hatch is `CRITERION_ARGS`, because
+Criterion accepts a free-form set of pass-through flags and it is pragmatic to
+leave that as shell-style argument passthrough.
+
+Examples:
+
+- `just bench-standard full 2`
+- `just bench-compressed full 3`
+- `just bench-string-heavy strings 2`
+- `CRITERION_ARGS='--sample-size 10 --warm-up-time 0.1 --measurement-time 0.1' just bench-standard full 1`
+
+The intended interpretation of the fixture tags is:
+
+- `correctness-only`: useful for parser validation and narrow regressions, not representative throughput work
+- `benchmark-standard`: normal benchmark candidates
+- `benchmark-macro`: very large or ultra-wide datasets that should not run in every quick benchmark pass
+- `compressed` / `uncompressed`: compression-family selection
+- `string-heavy` / `numeric-heavy` / `mixed`: content-family selection
+
 ## Large datasets
 
 Large AHS 2019 datasets are not committed. Download the ZIPs listed in
