@@ -23,6 +23,7 @@ validation or benchmarks.
 - `benches/scan_hotpaths.rs` uses a smaller set of local fixtures for repeatable Criterion runs and now includes both the larger compressed `raw_data/ahs2013/topical.sas7bdat` case and the larger uncompressed `raw_data/ahs2013/homimp.sas7bdat` case so the suite is not biased toward tiny files.
 - `src/bin/fixture_catalog.rs` builds a local JSON catalog of the available fixture corpus, including the AHS datasets plus the `csharp`, `other`, `pandas`, `principlesofeco`, and `readstat` subcorpora. The catalog records metadata, sampled content features, and derived tags such as `compressed`, `string-heavy`, `benchmark-standard`, or `benchmark-macro`.
 - `src/bin/fixture_profile.rs` runs one fixture in a selected scan mode (`raw_rows`, `typed_rows`, `typed_batches`, etc.) and emits structured timing plus parser stats. This is intended to be wrapped by established OS tools for memory and CPU inspection.
+- In practice, `fixture_profile` is now the preferred tool for large file-backed workload decisions, backend comparisons, RSS checks, and one-off fixture studies. Criterion remains the primary tool for curated, repeatable hot-path suites over the pinned benchmark set.
 - The root `justfile` is the main entrypoint for this workflow:
   - `just catalog` generates `fixtures/fixture_catalog.local.json`
   - `just profile ...` runs a structured profile
@@ -54,6 +55,13 @@ Recommended procedure:
    - `just bench-string-heavy`
    - `just bench-numeric-heavy`
    - `just bench-macro`
+
+Use the tools differently:
+
+- Use `just profile ...` when the question is fixture-specific, backend-specific, or memory-related.
+- Use Criterion benches when the question is whether a code change improved a pinned hot-path family in a repeatable way.
+- Prefer `fixture_profile` for very large file-backed datasets like `ahs2013n.sas7bdat`, especially when comparing `mmap-preferred` versus `buffered-only`.
+- Prefer Criterion for curated regression families such as projected `topical`, compressed matrix runs, and backend matrix runs.
 
 The common tuning knobs are recipe arguments, not environment variables:
 
@@ -119,17 +127,20 @@ Current policy:
 - do not commit or revert based only on a fast screening run when the measured effect is roughly under `10%`
 - rerun the relevant benchmark family with the longer confirmation profile before deciding
 - confirm against the dedicated family benchmark and at least one guardrail benchmark
+- when a decision depends on a specific large file-backed workload or I/O backend, confirm it with `fixture_profile` as well instead of relying on in-memory Criterion runs alone
 
 For example:
 
 - string-heavy work must be checked against `fixture_topical_projection_strings`
 - mixed-path work must be checked against `fixture_topical_projection`
 - numeric guardrails should still be checked against `fixture_topical_projection_numeric`
+- large uncompressed file-backed tradeoffs should be checked against `ahs2013n.sas7bdat` with `fixture_profile`
 
 The practical interpretation is:
 
 - short runs are for steering
 - long runs are for decisions
+- `fixture_profile` is for large targeted workload truth
 
 ## Large datasets
 
