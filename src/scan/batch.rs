@@ -782,6 +782,7 @@ impl OwnedBatchColumnBuilder {
     }
 }
 
+#[inline(always)]
 pub(super) fn append_direct_numeric_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
@@ -827,6 +828,7 @@ pub(super) fn append_direct_numeric_batch_column(
     }
 }
 
+#[inline(always)]
 pub(super) fn append_direct_raw_bytes_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
@@ -847,6 +849,7 @@ pub(super) fn append_direct_raw_bytes_batch_column(
     }
 }
 
+#[inline(always)]
 pub(super) fn append_direct_utf8_borrowed_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
@@ -871,6 +874,7 @@ pub(super) fn append_direct_utf8_borrowed_batch_column(
     }
 }
 
+#[inline(always)]
 pub(super) fn append_direct_utf8_owned_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
@@ -984,6 +988,7 @@ pub(super) fn borrow_column_buffers(columns: &[OwnedColumnBuffer]) -> Vec<Column
     columns.iter().map(OwnedColumnBuffer::as_borrowed).collect()
 }
 
+#[inline(always)]
 pub(super) fn push_primitive_valid<T>(values: &mut Vec<T>, valid: &mut Option<Vec<u8>>, value: T) {
     values.push(value);
     if let Some(valid) = valid {
@@ -991,6 +996,7 @@ pub(super) fn push_primitive_valid<T>(values: &mut Vec<T>, valid: &mut Option<Ve
     }
 }
 
+#[inline(always)]
 pub(super) fn push_primitive_null<T: Copy>(
     values: &mut Vec<T>,
     valid: &mut Option<Vec<u8>>,
@@ -1003,6 +1009,7 @@ pub(super) fn push_primitive_null<T: Copy>(
     valid.as_mut().expect("validity initialized").push(0);
 }
 
+#[inline(always)]
 pub(super) fn push_variable_valid(
     offsets: &mut Vec<u32>,
     data: &mut Vec<u8>,
@@ -1019,6 +1026,7 @@ pub(super) fn push_variable_valid(
     Ok(())
 }
 
+#[inline(always)]
 pub(super) fn push_variable_null(
     offsets: &mut Vec<u32>,
     _data: &mut Vec<u8>,

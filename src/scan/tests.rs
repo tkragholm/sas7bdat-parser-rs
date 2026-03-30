@@ -1,4 +1,3 @@
-
 use super::{BatchDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder};
 use crate::{
     columnar::OwnedColumnBuffer,

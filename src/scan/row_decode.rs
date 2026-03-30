@@ -201,6 +201,7 @@ impl RowDecodePlan {
         self.decode_trimmed_string(slice, owned_strings)
     }
 
+    #[inline(always)]
     pub(super) fn decode_string_bytes_for_batch_borrowed<'row>(
         &self,
         slice: &'row [u8],
@@ -231,6 +232,7 @@ impl RowDecodePlan {
         }
     }
 
+    #[inline(always)]
     pub(super) fn decode_string_bytes_for_batch<'row>(
         &self,
         slice: &'row [u8],
