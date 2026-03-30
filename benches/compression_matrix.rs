@@ -34,7 +34,10 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: Dataset) {
 
     group.bench_function(BenchmarkId::new("typed_rows", "all"), |b| {
         b.iter(|| {
-            let rows = dataset.scan().collect_rows().expect("compressed typed rows");
+            let rows = dataset
+                .scan()
+                .collect_rows()
+                .expect("compressed typed rows");
             black_box(rows.len());
         });
     });
