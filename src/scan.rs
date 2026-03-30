@@ -873,7 +873,19 @@ enum OwnedCellMaterializationKind {
 struct BatchDecodePlan {
     row_plan: RowDecodePlan,
     column_kinds: Vec<ColumnMaterializationKind>,
+    families: BatchColumnFamilies,
     all_columns_staged_numeric: bool,
+    needs_owned_string_scratch: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BatchColumnFamilies {
+    staged_numeric: Vec<usize>,
+    direct_numeric: Vec<usize>,
+    direct_raw_bytes: Vec<usize>,
+    direct_utf8_borrowed: Vec<usize>,
+    direct_utf8_owned: Vec<usize>,
+    fallback: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -1079,6 +1091,36 @@ impl RowDecodePlan {
         }
 
         self.decode_trimmed_string(slice, owned_strings)
+    }
+
+    fn decode_string_bytes_for_batch_borrowed<'row>(
+        &self,
+        slice: &'row [u8],
+    ) -> Result<&'row [u8]> {
+        let trimmed = if self.string_options.trim_fixed_width {
+            trim_and_classify_ascii(slice)
+        } else {
+            TrimmedString {
+                bytes: slice,
+                is_ascii: slice.is_ascii(),
+            }
+        };
+        let slice = trimmed.bytes;
+        if slice.is_empty() || trimmed.is_ascii {
+            return Ok(slice);
+        }
+
+        match self.string_kernel {
+            StringDecodeKernel::Utf8Strict => match std::str::from_utf8(slice) {
+                Ok(_) => Ok(slice),
+                Err(_) => Err(Error::Decode(crate::error::DecodeError {
+                    message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+                })),
+            },
+            _ => Err(Error::unsupported(
+                "borrowed-only batch string decode requires strict UTF-8 kernel",
+            )),
+        }
     }
 
     fn decode_string_bytes_for_batch<'row>(
@@ -1468,15 +1510,22 @@ impl BatchDecodePlan {
             .columns
             .iter()
             .map(|column| column_materialization_kind(column.kernel, column.width))
-            .collect();
-        let all_columns_staged_numeric = row_plan
-            .columns
-            .iter()
-            .all(|column| column.numeric_tile.is_some());
+            .collect::<Vec<_>>();
+        let families =
+            compile_batch_column_families(&row_plan.columns, &column_kinds, row_plan.string_kernel);
+        let all_columns_staged_numeric =
+            !row_plan.columns.is_empty() && families.staged_numeric.len() == row_plan.columns.len();
+        let needs_owned_string_scratch = !families.direct_utf8_owned.is_empty()
+            || families
+                .fallback
+                .iter()
+                .any(|&idx| matches!(row_plan.columns[idx].kernel, CompiledDecodeKernel::Utf8));
         Ok(Self {
             row_plan,
             column_kinds,
+            families,
             all_columns_staged_numeric,
+            needs_owned_string_scratch,
         })
     }
 }
@@ -1523,7 +1572,9 @@ impl BatchAccumulator {
 
         self.plan.row_plan.validate_row_bounds(row)?;
         if self.plan.all_columns_staged_numeric {
-            for (batch_column, column) in self.columns.iter_mut().zip(&self.plan.row_plan.columns) {
+            for &idx in &self.plan.families.staged_numeric {
+                let batch_column = &mut self.columns[idx];
+                let column = &self.plan.row_plan.columns[idx];
                 let slice = self.plan.row_plan.slice_in_bounds(row, column);
                 let raw = decode_numeric_raw_bits_or_missing(slice, self.plan.row_plan.endianness);
                 let appended = batch_column.append_staged_numeric_bits_fast(raw)?;
@@ -1538,18 +1589,91 @@ impl BatchAccumulator {
             return Ok(());
         }
 
-        self.owned_strings.clear();
-        for (batch_column, column) in self.columns.iter_mut().zip(&self.plan.row_plan.columns) {
-            if append_batch_fast_path(
+        if self.plan.needs_owned_string_scratch {
+            self.owned_strings.clear();
+        }
+        for &idx in &self.plan.families.staged_numeric {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let slice = self.plan.row_plan.slice_in_bounds(row, column);
+            let raw = decode_numeric_raw_bits_or_missing(slice, self.plan.row_plan.endianness);
+            let appended = batch_column.append_staged_numeric_bits_fast(raw)?;
+            debug_assert!(appended, "compiled staged numeric batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled staged numeric batch plan did not match column builder",
+                ));
+            }
+        }
+
+        for &idx in &self.plan.families.direct_numeric {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let appended =
+                append_direct_numeric_batch_column(&self.plan.row_plan, batch_column, column, row)?;
+            debug_assert!(appended, "compiled direct numeric batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled direct numeric batch plan did not match column builder",
+                ));
+            }
+        }
+
+        for &idx in &self.plan.families.direct_raw_bytes {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let appended = append_direct_raw_bytes_batch_column(
+                &self.plan.row_plan,
+                batch_column,
+                column,
+                row,
+            )?;
+            debug_assert!(appended, "compiled raw-bytes batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled raw-bytes batch plan did not match column builder",
+                ));
+            }
+        }
+
+        for &idx in &self.plan.families.direct_utf8_borrowed {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let appended = append_direct_utf8_borrowed_batch_column(
+                &self.plan.row_plan,
+                batch_column,
+                column,
+                row,
+            )?;
+            debug_assert!(appended, "compiled borrowed utf8 batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled borrowed utf8 batch plan did not match column builder",
+                ));
+            }
+        }
+
+        for &idx in &self.plan.families.direct_utf8_owned {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let appended = append_direct_utf8_owned_batch_column(
                 &self.plan.row_plan,
                 batch_column,
                 column,
                 row,
                 &mut self.owned_strings,
-            )? {
-                continue;
+            )?;
+            debug_assert!(appended, "compiled utf8 batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled owned utf8 batch plan did not match column builder",
+                ));
             }
+        }
 
+        for &idx in &self.plan.families.fallback {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
             let cell =
                 self.plan
                     .row_plan
@@ -2081,12 +2205,11 @@ impl OwnedBatchColumnBuilder {
     }
 }
 
-fn append_batch_fast_path(
+fn append_direct_numeric_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
-    owned_strings: &mut Vec<String>,
 ) -> Result<bool> {
     let slice = row_plan.slice_in_bounds(row, column);
 
@@ -2095,48 +2218,91 @@ fn append_batch_fast_path(
         return batch_column.append_staged_numeric_bits_fast(raw);
     }
 
-    match (column.kernel, batch_column) {
-        (CompiledDecodeKernel::Integer, batch_column) => {
+    match column.kernel {
+        CompiledDecodeKernel::Integer => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_integer_fast(number)
         }
-        (CompiledDecodeKernel::Float, batch_column) => {
+        CompiledDecodeKernel::Float => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_f64_fast(number)
         }
-        (
-            CompiledDecodeKernel::DateAsNumeric
-            | CompiledDecodeKernel::DateTimeAsNumeric
-            | CompiledDecodeKernel::TimeAsNumeric
-            | CompiledDecodeKernel::NumericLossless,
-            batch_column,
-        ) => {
+        CompiledDecodeKernel::DateAsNumeric
+        | CompiledDecodeKernel::DateTimeAsNumeric
+        | CompiledDecodeKernel::TimeAsNumeric
+        | CompiledDecodeKernel::NumericLossless => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_f64_fast(number)
         }
-        (CompiledDecodeKernel::Date, batch_column) => {
+        CompiledDecodeKernel::Date => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_date_fast(number)
         }
-        (CompiledDecodeKernel::DateTime, batch_column) => {
+        CompiledDecodeKernel::DateTime => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_datetime_fast(number)
         }
-        (CompiledDecodeKernel::Time, batch_column) => {
+        CompiledDecodeKernel::Time => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_time_fast(number)
         }
+        _ => Ok(false),
+    }
+}
+
+fn append_direct_raw_bytes_batch_column(
+    row_plan: &RowDecodePlan,
+    batch_column: &mut OwnedBatchColumnBuilder,
+    column: &CompiledColumnPlan,
+    row: &[u8],
+) -> Result<bool> {
+    let slice = row_plan.slice_in_bounds(row, column);
+    match batch_column {
+        OwnedBatchColumnBuilder::RawBytes {
+            offsets,
+            data,
+            valid,
+        } if matches!(column.kernel, CompiledDecodeKernel::RawBytes) => {
+            push_variable_valid(offsets, data, valid, slice)?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn append_direct_utf8_borrowed_batch_column(
+    row_plan: &RowDecodePlan,
+    batch_column: &mut OwnedBatchColumnBuilder,
+    column: &CompiledColumnPlan,
+    row: &[u8],
+) -> Result<bool> {
+    let slice = row_plan.slice_in_bounds(row, column);
+    match (column.kernel, batch_column) {
         (
-            CompiledDecodeKernel::RawBytes,
-            OwnedBatchColumnBuilder::RawBytes {
+            CompiledDecodeKernel::Utf8,
+            OwnedBatchColumnBuilder::Utf8 {
                 offsets,
                 data,
                 valid,
             },
         ) => {
-            push_variable_valid(offsets, data, valid, slice)?;
+            let bytes = row_plan.decode_string_bytes_for_batch_borrowed(slice)?;
+            push_variable_valid(offsets, data, valid, bytes)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+fn append_direct_utf8_owned_batch_column(
+    row_plan: &RowDecodePlan,
+    batch_column: &mut OwnedBatchColumnBuilder,
+    column: &CompiledColumnPlan,
+    row: &[u8],
+    owned_strings: &mut Vec<String>,
+) -> Result<bool> {
+    let slice = row_plan.slice_in_bounds(row, column);
+    match (column.kernel, batch_column) {
         (
             CompiledDecodeKernel::Utf8,
             OwnedBatchColumnBuilder::Utf8 {
@@ -2165,6 +2331,51 @@ fn append_batch_fast_path(
         }
         _ => Ok(false),
     }
+}
+
+fn compile_batch_column_families(
+    columns: &[CompiledColumnPlan],
+    column_kinds: &[ColumnMaterializationKind],
+    string_kernel: StringDecodeKernel,
+) -> BatchColumnFamilies {
+    let mut families = BatchColumnFamilies::default();
+    for (idx, (column, kind)) in columns.iter().zip(column_kinds.iter().copied()).enumerate() {
+        if column.numeric_tile.is_some() {
+            families.staged_numeric.push(idx);
+            continue;
+        }
+
+        match (column.kernel, kind) {
+            (
+                CompiledDecodeKernel::Integer
+                | CompiledDecodeKernel::Float
+                | CompiledDecodeKernel::Date
+                | CompiledDecodeKernel::DateAsNumeric
+                | CompiledDecodeKernel::DateTime
+                | CompiledDecodeKernel::DateTimeAsNumeric
+                | CompiledDecodeKernel::Time
+                | CompiledDecodeKernel::TimeAsNumeric
+                | CompiledDecodeKernel::NumericLossless,
+                ColumnMaterializationKind::I32
+                | ColumnMaterializationKind::I64
+                | ColumnMaterializationKind::F64
+                | ColumnMaterializationKind::Date
+                | ColumnMaterializationKind::DateTime
+                | ColumnMaterializationKind::Time,
+            ) => families.direct_numeric.push(idx),
+            (CompiledDecodeKernel::RawBytes, ColumnMaterializationKind::RawBytes) => {
+                families.direct_raw_bytes.push(idx)
+            }
+            (CompiledDecodeKernel::Utf8, ColumnMaterializationKind::Utf8) => match string_kernel {
+                StringDecodeKernel::Utf8Strict => families.direct_utf8_borrowed.push(idx),
+                StringDecodeKernel::Utf8Lenient
+                | StringDecodeKernel::EncodedStrict
+                | StringDecodeKernel::EncodedLenient => families.direct_utf8_owned.push(idx),
+            },
+            _ => families.fallback.push(idx),
+        }
+    }
+    families
 }
 
 fn materialize_planned_cells<'a>(
@@ -2892,7 +3103,7 @@ fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder};
+    use super::{BatchDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder};
     use crate::{
         columnar::OwnedColumnBuffer,
         dataset::Dataset,
@@ -3500,6 +3711,274 @@ mod tests {
             }
             other => panic!("unexpected utf8 batch column: {other:?}"),
         }
+    }
+
+    #[test]
+    fn batch_decode_plan_compiles_mixed_projected_families() {
+        let row = {
+            let mut bytes = Vec::with_capacity(16);
+            bytes.extend_from_slice(&1.5f64.to_le_bytes());
+            bytes.extend_from_slice(b"ABCD");
+            bytes.extend_from_slice(&7.0f64.to_le_bytes()[..4]);
+            bytes
+        };
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Float,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 4,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 2,
+                    name: "id".to_owned(),
+                    logical_type: LogicalType::Integer,
+                    physical_width: 4,
+                    offset: 12,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 16,
+            total_rows: 1,
+            compression: CompressionKind::None,
+            rows_per_page: 1,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 1,
+                row_len: 16,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let projection = ds
+            .projection()
+            .column("num")
+            .column("txt")
+            .column("id")
+            .build()
+            .expect("projection");
+        let builder = ScanBuilder::new(&ds)
+            .with_projection(&projection)
+            .with_batch_hint(crate::BatchHint::Rows(1));
+        let plan = BatchDecodePlan::new(&builder).expect("batch plan");
+
+        assert_eq!(plan.families.staged_numeric, vec![0]);
+        assert!(plan.families.direct_utf8_borrowed.is_empty());
+        assert_eq!(plan.families.direct_utf8_owned, vec![1]);
+        assert_eq!(plan.families.direct_numeric, vec![2]);
+        assert!(plan.families.direct_raw_bytes.is_empty());
+        assert!(plan.families.fallback.is_empty());
+        assert!(!plan.all_columns_staged_numeric);
+        assert!(plan.needs_owned_string_scratch);
+    }
+
+    #[test]
+    fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
+        let row = make_numeric_text_row(42.0, b"ZX  ");
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Float,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 4,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 12,
+            total_rows: 1,
+            compression: CompressionKind::None,
+            rows_per_page: 1,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 1,
+                row_len: 12,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let plan = BatchDecodePlan::new(
+            &ScanBuilder::new(&ds)
+                .with_decode_mode(crate::DecodeMode::TypedLossless)
+                .with_batch_hint(crate::BatchHint::Rows(1)),
+        )
+        .expect("batch plan");
+
+        assert_eq!(plan.families.staged_numeric, vec![0]);
+        assert_eq!(plan.families.direct_raw_bytes, vec![1]);
+        assert!(plan.families.direct_numeric.is_empty());
+        assert!(plan.families.direct_utf8_borrowed.is_empty());
+        assert!(plan.families.direct_utf8_owned.is_empty());
+        assert!(plan.families.fallback.is_empty());
+        assert!(!plan.all_columns_staged_numeric);
+        assert!(!plan.needs_owned_string_scratch);
+    }
+
+    #[test]
+    fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
+        let row = make_numeric_text_row(1.0, b"pear");
+        let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+        let layout = LayoutPlan {
+            columns: vec![
+                ColumnMeta {
+                    index: 0,
+                    name: "num".to_owned(),
+                    logical_type: LogicalType::Float,
+                    physical_width: 8,
+                    offset: 0,
+                    label: None,
+                    format: None,
+                },
+                ColumnMeta {
+                    index: 1,
+                    name: "txt".to_owned(),
+                    logical_type: LogicalType::String,
+                    physical_width: 4,
+                    offset: 8,
+                    label: None,
+                    format: None,
+                },
+            ],
+            header: HeaderInfo {
+                endianness: Endianness::Little,
+                uses_u64_pointers: false,
+                page_size: 64,
+                page_count: 1,
+                page_header_size: 24,
+                subheader_pointer_size: 12,
+                subheader_signature_size: 4,
+                data_offset: 0,
+                header_size: 0,
+                release: String::new(),
+                is_catalog: false,
+            },
+            row_len: 12,
+            total_rows: 1,
+            compression: CompressionKind::None,
+            rows_per_page: 1,
+        };
+        let ds = Dataset {
+            file: Arc::new(FileInner {
+                source: FileSource::Bytes(Arc::clone(&bytes)),
+                options: OpenOptions::default(),
+            }),
+            metadata: Arc::new(DatasetMetadata {
+                row_count: 1,
+                row_len: 12,
+                compression: CompressionKind::None,
+                encoding: Some("UTF-8".to_owned()),
+                ..DatasetMetadata::default()
+            }),
+            layout: Arc::new(layout.clone()),
+            descriptors: Arc::new(
+                crate::pages::compile_page_descriptors(
+                    &mut std::io::Cursor::new(bytes.as_ref()),
+                    &layout,
+                )
+                .expect("descriptors"),
+            ),
+        };
+
+        let plan = BatchDecodePlan::new(
+            &ScanBuilder::new(&ds)
+                .with_string_options(crate::StringDecodeOptions {
+                    trim_fixed_width: true,
+                    utf8_validation: crate::Utf8ValidationMode::Strict,
+                    mojibake_fix: crate::MojibakePolicy::Auto,
+                    dictionary_staging: crate::DictionaryStaging::Auto,
+                })
+                .with_batch_hint(crate::BatchHint::Rows(1)),
+        )
+        .expect("batch plan");
+
+        assert_eq!(plan.families.staged_numeric, vec![0]);
+        assert_eq!(plan.families.direct_utf8_borrowed, vec![1]);
+        assert!(plan.families.direct_utf8_owned.is_empty());
+        assert!(plan.families.fallback.is_empty());
+        assert!(!plan.needs_owned_string_scratch);
     }
 
     #[test]
