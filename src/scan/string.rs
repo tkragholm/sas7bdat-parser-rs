@@ -105,5 +105,5 @@ pub(super) fn mojibake_fix_maybe_needed_for_encoded_bytes(
 ) -> bool {
     matches!(policy, MojibakePolicy::Auto)
         && encoding.is_single_byte()
-        && slice.iter().any(|&byte| byte == 0xC2 || byte == 0xC3)
+        && memchr::memchr2(0xC2, 0xC3, slice).is_some()
 }
