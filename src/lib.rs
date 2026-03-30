@@ -5,6 +5,8 @@ mod compression;
 mod dataset;
 mod encoding;
 mod error;
+#[doc(hidden)]
+pub mod fixture_catalog;
 mod internal;
 mod layout;
 mod metadata;
