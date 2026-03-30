@@ -1,18 +1,18 @@
 use crate::{CellValue, Dataset, LogicalType, Projection, Result, RowSelection, ScanStats};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixtureCatalog {
     pub roots: Vec<String>,
     pub sample_rows: usize,
     pub fixtures: Vec<FixtureEntry>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixtureEntry {
     pub path: String,
     pub file_name: String,
@@ -22,14 +22,14 @@ pub struct FixtureEntry {
     pub status: FixtureStatus,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum FixtureStatus {
     Profiled(FixtureProfile),
     Error { error: String },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixtureProfile {
     pub table_name: Option<String>,
     pub encoding: Option<String>,
@@ -45,7 +45,7 @@ pub struct FixtureProfile {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct LogicalTypeCounts {
     pub string: usize,
     pub integer: usize,
@@ -56,7 +56,7 @@ pub struct LogicalTypeCounts {
     pub bytes: usize,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct WidthSummary {
     pub string_width_sum: u64,
     pub string_width_max: u32,
@@ -64,7 +64,7 @@ pub struct WidthSummary {
     pub numeric_width_max: u32,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct SampleSummary {
     pub rows_sampled: u64,
     pub string_cells: u64,

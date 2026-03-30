@@ -1,6 +1,9 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use sas7bdat_simd::{BatchHint, Dataset, Projection, RowSelection};
-use std::{fs, hint::black_box, path::PathBuf};
+use sas7bdat_simd::{
+    BatchHint, Dataset, Projection, RowSelection,
+    fixture_catalog::{FixtureCatalog, FixtureStatus, ProjectionPreset, build_projection},
+};
+use std::{env, fs, hint::black_box, path::{Path, PathBuf}};
 
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -10,6 +13,16 @@ fn fixture_path(relative: &str) -> PathBuf {
 
 fn load_dataset(relative: &str) -> Option<Dataset> {
     let path = fixture_path(relative);
+    let bytes = fs::read(path).ok()?;
+    Dataset::from_bytes(bytes).ok()
+}
+
+fn load_dataset_path(path: &Path) -> Option<Dataset> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
+    };
     let bytes = fs::read(path).ok()?;
     Dataset::from_bytes(bytes).ok()
 }
@@ -111,7 +124,107 @@ fn bench_projected_scans(c: &mut Criterion, name: &str, dataset: Dataset, projec
     group.finish();
 }
 
+fn maybe_scan_hotpaths_from_catalog(c: &mut Criterion) -> bool {
+    let Some(tags) = requested_tags() else {
+        return false;
+    };
+    let catalog_path = env::var("BENCH_CATALOG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| fixture_path("fixture_catalog.local.json"));
+    let catalog_bytes = fs::read(&catalog_path).unwrap_or_else(|err| {
+        panic!(
+            "BENCH_TAGS was set but catalog {:?} could not be read: {}",
+            catalog_path, err
+        )
+    });
+    let catalog: FixtureCatalog = serde_json::from_slice(&catalog_bytes).unwrap_or_else(|err| {
+        panic!(
+            "BENCH_TAGS was set but catalog {:?} could not be parsed: {}",
+            catalog_path, err
+        )
+    });
+
+    let projection = env::var("BENCH_PROJECTION")
+        .ok()
+        .and_then(|value| ProjectionPreset::parse(&value))
+        .unwrap_or(ProjectionPreset::Full);
+    let limit = env::var("BENCH_MAX_FIXTURES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(usize::MAX);
+
+    let tag_label = tags.join("+");
+    let mut matched = 0usize;
+    for entry in catalog.fixtures {
+        if matched >= limit {
+            break;
+        }
+        let FixtureStatus::Profiled(profile) = entry.status else {
+            continue;
+        };
+        if !tags.iter().all(|tag| profile.tags.iter().any(|fixture_tag| fixture_tag == tag)) {
+            continue;
+        }
+        let Some(dataset) = load_dataset_path(Path::new(&entry.path)) else {
+            continue;
+        };
+        let fixture_id = sanitize_name(&entry.file_name);
+        match projection {
+            ProjectionPreset::Full => {
+                let name = format!("tag_{tag_label}_{fixture_id}");
+                bench_dataset_scans(c, &name, dataset, true, true, true);
+            }
+            preset => {
+                let Some(projection) = build_projection(&dataset, preset) else {
+                    continue;
+                };
+                let name = format!("tag_{tag_label}_{fixture_id}_projected");
+                bench_projected_scans(c, &name, dataset, projection);
+            }
+        }
+        matched += 1;
+    }
+
+    assert!(
+        matched > 0,
+        "BENCH_TAGS={:?} matched no profiled fixtures in {:?}",
+        tags,
+        catalog_path
+    );
+    true
+}
+
+fn requested_tags() -> Option<Vec<String>> {
+    let value = env::var("BENCH_TAGS").ok()?;
+    let tags: Vec<String> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    (!tags.is_empty()).then_some(tags)
+}
+
+fn sanitize_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('_');
+        }
+    }
+    while out.contains("__") {
+        out = out.replace("__", "_");
+    }
+    out.trim_matches('_').to_owned()
+}
+
 fn scan_hotpaths(c: &mut Criterion) {
+    if maybe_scan_hotpaths_from_catalog(c) {
+        return;
+    }
+
     if let Some(dataset) = load_dataset("raw_data/csharp/charset_utf8.sas7bdat") {
         bench_dataset_scans(c, "fixture_charset_utf8", dataset, true, true, true);
     }

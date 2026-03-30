@@ -24,3 +24,6 @@ profile-sample fixture mode:
 
 profile-leaks fixture mode:
     @leaks --atExit -- cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection "${PROJECTION:-full}" --repeat "${REPEAT:-1}" --limit "${LIMIT:-0}" --batch-rows "${BATCH_ROWS:-256}"
+
+bench-tags tags:
+    @/bin/zsh -lc 'args=(${=CRITERION_ARGS:-}); BENCH_TAGS={{tags}} BENCH_PROJECTION="${PROJECTION:-full}" BENCH_CATALOG="${BENCH_CATALOG:-fixtures/fixture_catalog.local.json}" BENCH_MAX_FIXTURES="${BENCH_MAX_FIXTURES:-999}" cargo bench --bench scan_hotpaths -- "${args[@]}"'
