@@ -15,6 +15,9 @@ correctness-all:
 profile fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
     @cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
 
+string-profile fixture sample_rows="2048" top="12":
+    @cargo run --release --bin fixture_string_profile -- --fixture {{fixture}} --sample-rows {{sample_rows}} --top {{top}}
+
 profile-rss fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
     @/bin/zsh -lc 'set +e; tmp="$(mktemp)"; /usr/bin/time -l cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}} 2>"$tmp"; code=$?; grep -v "^time: sysctl kern.clockrate: Operation not permitted$" "$tmp" >&2 || true; rm -f "$tmp"; if [[ "$code" -eq 1 ]]; then exit 0; fi; exit "$code"'
 
