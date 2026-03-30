@@ -5,6 +5,7 @@ pub(super) struct BatchDecodePlan {
     pub(super) column_kinds: Vec<ColumnMaterializationKind>,
     pub(super) families: BatchColumnFamilies,
     pub(super) direct_utf8_owned_mode: Option<DirectUtf8OwnedMode>,
+    pub(super) use_single_byte_utf8_family: bool,
     pub(super) all_columns_staged_numeric: bool,
     pub(super) needs_owned_string_scratch: bool,
 }
@@ -14,6 +15,7 @@ pub(super) struct BatchColumnFamilies {
     pub(super) staged_numeric: Vec<usize>,
     pub(super) direct_numeric: Vec<usize>,
     pub(super) direct_raw_bytes: Vec<usize>,
+    pub(super) direct_utf8_single_byte: Vec<usize>,
     pub(super) direct_utf8_borrowed: Vec<usize>,
     pub(super) direct_utf8_owned: Vec<usize>,
     pub(super) fallback: Vec<usize>,
@@ -89,8 +91,16 @@ impl BatchDecodePlan {
             .iter()
             .map(|column| column_materialization_kind(column.kernel, column.width))
             .collect::<Vec<_>>();
-        let families =
-            compile_batch_column_families(&row_plan.columns, &column_kinds, row_plan.string_kernel);
+        let enable_single_byte_utf8 = !matches!(
+            builder.ds.metadata().compression,
+            crate::CompressionKind::None
+        );
+        let families = compile_batch_column_families(
+            &row_plan.columns,
+            &column_kinds,
+            row_plan.string_kernel,
+            enable_single_byte_utf8,
+        );
         let direct_utf8_owned_mode = if families.direct_utf8_owned.is_empty() {
             None
         } else {
@@ -105,6 +115,7 @@ impl BatchDecodePlan {
                 StringDecodeKernel::EncodedLenient => DirectUtf8OwnedMode::EncodedLenient,
             })
         };
+        let use_single_byte_utf8_family = !families.direct_utf8_single_byte.is_empty();
         let all_columns_staged_numeric =
             !row_plan.columns.is_empty() && families.staged_numeric.len() == row_plan.columns.len();
         let needs_owned_string_scratch = families
@@ -116,6 +127,7 @@ impl BatchDecodePlan {
             column_kinds,
             families,
             direct_utf8_owned_mode,
+            use_single_byte_utf8_family,
             all_columns_staged_numeric,
             needs_owned_string_scratch,
         })
@@ -230,6 +242,29 @@ impl BatchAccumulator {
                 return Err(Error::unsupported(
                     "compiled raw-bytes batch plan did not match column builder",
                 ));
+            }
+        }
+
+        if self.plan.use_single_byte_utf8_family {
+            for &idx in &self.plan.families.direct_utf8_single_byte {
+                let batch_column = &mut self.columns[idx];
+                let column = &self.plan.row_plan.columns[idx];
+                let appended = append_direct_utf8_single_byte_batch_column(
+                    &self.plan.row_plan,
+                    batch_column,
+                    column,
+                    row,
+                    &mut self.utf8_decode_scratch,
+                )?;
+                debug_assert!(
+                    appended,
+                    "compiled single-byte utf8 batch must match builder"
+                );
+                if !appended {
+                    return Err(Error::unsupported(
+                        "compiled single-byte utf8 batch plan did not match column builder",
+                    ));
+                }
             }
         }
 
@@ -918,6 +953,91 @@ pub(super) fn append_direct_raw_bytes_batch_column(
 }
 
 #[inline(always)]
+pub(super) fn append_direct_utf8_single_byte_batch_column(
+    row_plan: &RowDecodePlan,
+    batch_column: &mut OwnedBatchColumnBuilder,
+    column: &CompiledColumnPlan,
+    row: &[u8],
+    utf8_decode_scratch: &mut String,
+) -> Result<bool> {
+    match (column.kernel, batch_column) {
+        (
+            CompiledDecodeKernel::Utf8,
+            OwnedBatchColumnBuilder::Utf8 {
+                offsets,
+                data,
+                valid,
+            },
+        ) if column.width == 1 => {
+            let byte = row[column.start];
+            let slice = if row_plan.string_options.trim_fixed_width && byte == b' ' {
+                &[][..]
+            } else {
+                &row[column.start..column.end]
+            };
+
+            if slice.is_empty() || byte.is_ascii() {
+                push_variable_valid(offsets, data, valid, slice)?;
+                return Ok(true);
+            }
+
+            let trimmed = TrimmedString {
+                bytes: slice,
+                is_ascii: false,
+            };
+            match row_plan.string_kernel {
+                StringDecodeKernel::Utf8Strict => match std::str::from_utf8(slice) {
+                    Ok(_) => push_variable_valid(offsets, data, valid, slice)?,
+                    Err(_) => {
+                        return Err(Error::Decode(crate::error::DecodeError {
+                            message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+                        }));
+                    }
+                },
+                StringDecodeKernel::Utf8Lenient => match row_plan
+                    .decode_utf8_lenient_trimmed_bytes_for_batch_direct(
+                        trimmed,
+                        utf8_decode_scratch,
+                    )? {
+                    DecodedUtf8BatchValue::Borrowed(bytes) => {
+                        push_variable_valid(offsets, data, valid, bytes)?
+                    }
+                    DecodedUtf8BatchValue::Scratch => {
+                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?
+                    }
+                },
+                StringDecodeKernel::EncodedStrict => match row_plan
+                    .decode_encoded_strict_trimmed_bytes_for_batch_direct(
+                        trimmed,
+                        utf8_decode_scratch,
+                    )? {
+                    DecodedUtf8BatchValue::Borrowed(bytes) => {
+                        push_variable_valid(offsets, data, valid, bytes)?
+                    }
+                    DecodedUtf8BatchValue::Scratch => {
+                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?
+                    }
+                },
+                StringDecodeKernel::EncodedLenient => match row_plan
+                    .decode_encoded_lenient_trimmed_bytes_for_batch_direct(
+                        trimmed,
+                        utf8_decode_scratch,
+                    )? {
+                    DecodedUtf8BatchValue::Borrowed(bytes) => {
+                        push_variable_valid(offsets, data, valid, bytes)?
+                    }
+                    DecodedUtf8BatchValue::Scratch => {
+                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?
+                    }
+                },
+            }
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+#[inline(always)]
 pub(super) fn append_direct_utf8_borrowed_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
@@ -1047,6 +1167,7 @@ pub(super) fn compile_batch_column_families(
     columns: &[CompiledColumnPlan],
     column_kinds: &[ColumnMaterializationKind],
     string_kernel: StringDecodeKernel,
+    enable_single_byte_utf8: bool,
 ) -> BatchColumnFamilies {
     let mut families = BatchColumnFamilies::default();
     for (idx, (column, kind)) in columns.iter().zip(column_kinds.iter().copied()).enumerate() {
@@ -1056,6 +1177,11 @@ pub(super) fn compile_batch_column_families(
         }
 
         match (column.kernel, kind) {
+            (CompiledDecodeKernel::Utf8, ColumnMaterializationKind::Utf8)
+                if enable_single_byte_utf8 && column.width == 1 =>
+            {
+                families.direct_utf8_single_byte.push(idx)
+            }
             (
                 CompiledDecodeKernel::Integer
                 | CompiledDecodeKernel::Float

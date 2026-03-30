@@ -883,6 +883,172 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
 }
 
 #[test]
+fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_scan() {
+    let row = {
+        let mut row = [0u8; 9];
+        row[..8].copy_from_slice(&1.0f64.to_bits().to_le_bytes());
+        row[8] = b'B';
+        row
+    };
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+    let layout = LayoutPlan {
+        columns: vec![
+            ColumnMeta {
+                index: 0,
+                name: "num".to_owned(),
+                logical_type: LogicalType::Float,
+                physical_width: 8,
+                offset: 0,
+                label: None,
+                format: None,
+            },
+            ColumnMeta {
+                index: 1,
+                name: "code".to_owned(),
+                logical_type: LogicalType::String,
+                physical_width: 1,
+                offset: 8,
+                label: None,
+                format: None,
+            },
+        ],
+        header: HeaderInfo {
+            endianness: Endianness::Little,
+            uses_u64_pointers: false,
+            page_size: 64,
+            page_count: 1,
+            page_header_size: 24,
+            subheader_pointer_size: 12,
+            subheader_signature_size: 4,
+            data_offset: 0,
+            header_size: 0,
+            release: String::new(),
+            is_catalog: false,
+        },
+        row_len: 9,
+        total_rows: 1,
+        compression: CompressionKind::None,
+        rows_per_page: 1,
+    };
+    let ds = Dataset {
+        file: Arc::new(FileInner {
+            source: FileSource::Bytes(Arc::clone(&bytes)),
+            options: OpenOptions::default(),
+        }),
+        metadata: Arc::new(DatasetMetadata {
+            row_count: 1,
+            row_len: 9,
+            compression: CompressionKind::None,
+            encoding: Some("ISO-8859-1".to_owned()),
+            ..DatasetMetadata::default()
+        }),
+        layout: Arc::new(layout.clone()),
+        descriptors: Arc::new(
+            crate::pages::compile_page_descriptors(
+                &mut std::io::Cursor::new(bytes.as_ref()),
+                &layout,
+            )
+            .expect("descriptors"),
+        ),
+    };
+
+    let plan =
+        BatchDecodePlan::new(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)))
+            .expect("batch plan");
+
+    assert_eq!(plan.families.staged_numeric, vec![0]);
+    assert!(plan.families.direct_utf8_single_byte.is_empty());
+    assert!(plan.families.direct_utf8_borrowed.is_empty());
+    assert_eq!(plan.families.direct_utf8_owned, vec![1]);
+    assert_eq!(
+        plan.direct_utf8_owned_mode,
+        Some(DirectUtf8OwnedMode::EncodedLenient)
+    );
+    assert!(plan.families.fallback.is_empty());
+}
+
+#[test]
+fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
+    let row = {
+        let mut row = [0u8; 9];
+        row[..8].copy_from_slice(&1.0f64.to_bits().to_le_bytes());
+        row[8] = b'B';
+        row
+    };
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+    let layout = LayoutPlan {
+        columns: vec![
+            ColumnMeta {
+                index: 0,
+                name: "num".to_owned(),
+                logical_type: LogicalType::Float,
+                physical_width: 8,
+                offset: 0,
+                label: None,
+                format: None,
+            },
+            ColumnMeta {
+                index: 1,
+                name: "code".to_owned(),
+                logical_type: LogicalType::String,
+                physical_width: 1,
+                offset: 8,
+                label: None,
+                format: None,
+            },
+        ],
+        header: HeaderInfo {
+            endianness: Endianness::Little,
+            uses_u64_pointers: false,
+            page_size: 64,
+            page_count: 1,
+            page_header_size: 24,
+            subheader_pointer_size: 12,
+            subheader_signature_size: 4,
+            data_offset: 0,
+            header_size: 0,
+            release: String::new(),
+            is_catalog: false,
+        },
+        row_len: 9,
+        total_rows: 1,
+        compression: CompressionKind::Row,
+        rows_per_page: 1,
+    };
+    let ds = Dataset {
+        file: Arc::new(FileInner {
+            source: FileSource::Bytes(Arc::clone(&bytes)),
+            options: OpenOptions::default(),
+        }),
+        metadata: Arc::new(DatasetMetadata {
+            row_count: 1,
+            row_len: 9,
+            compression: CompressionKind::Row,
+            encoding: Some("ISO-8859-1".to_owned()),
+            ..DatasetMetadata::default()
+        }),
+        layout: Arc::new(layout.clone()),
+        descriptors: Arc::new(
+            crate::pages::compile_page_descriptors(
+                &mut std::io::Cursor::new(bytes.as_ref()),
+                &layout,
+            )
+            .expect("descriptors"),
+        ),
+    };
+
+    let plan =
+        BatchDecodePlan::new(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)))
+            .expect("batch plan");
+
+    assert_eq!(plan.families.staged_numeric, vec![0]);
+    assert_eq!(plan.families.direct_utf8_single_byte, vec![1]);
+    assert!(plan.families.direct_utf8_borrowed.is_empty());
+    assert!(plan.families.direct_utf8_owned.is_empty());
+    assert!(plan.families.fallback.is_empty());
+}
+
+#[test]
 fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
     let row = make_numeric_text_row(1.0, b"pear");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
