@@ -1,0 +1,354 @@
+use super::*;
+pub(super) fn decode_numeric_cell(slice: &[u8], endianness: Endianness) -> Option<f64> {
+    if slice.is_empty() {
+        return None;
+    }
+    let raw = numeric_bits(slice, endianness);
+    if numeric_bits_is_missing(raw) {
+        None
+    } else {
+        Some(f64::from_bits(raw))
+    }
+}
+
+#[inline(always)]
+pub(super) fn decode_numeric_raw_bits_or_missing(slice: &[u8], endianness: Endianness) -> u64 {
+    if slice.is_empty() {
+        SAS_NUMERIC_MISSING_SENTINEL
+    } else {
+        numeric_bits(slice, endianness)
+    }
+}
+
+#[inline(always)]
+pub(super) fn numeric_bits(slice: &[u8], endianness: Endianness) -> u64 {
+    debug_assert!(slice.len() <= 8);
+    if slice.len() == 8 {
+        numeric_bits_scalar_8(slice, endianness)
+    } else {
+        let mut buf = [0u8; 8];
+        match endianness {
+            Endianness::Big => {
+                buf[..slice.len()].copy_from_slice(slice);
+            }
+            Endianness::Little => {
+                buf[..slice.len()].copy_from_slice(slice);
+                buf[..slice.len()].reverse();
+            }
+        }
+        u64::from_be_bytes(buf)
+    }
+}
+
+pub(super) fn materialize_staged_numeric_column(
+    raw_bits: Vec<u64>,
+    mode: NumericTileMode,
+    has_missing: bool,
+) -> OwnedColumnBuffer {
+    match mode {
+        NumericTileMode::F64RawBits => {
+            if has_missing {
+                let valid = classify_missing_raw_bits(&raw_bits);
+                materialize_staged_f64_column(raw_bits, valid)
+            } else {
+                materialize_staged_f64_column(raw_bits, None)
+            }
+        }
+        NumericTileMode::IntegerWidth8 => {
+            let valid = if has_missing {
+                classify_missing_raw_bits(&raw_bits)
+            } else {
+                None
+            };
+            materialize_staged_i64_or_f64_column(raw_bits, valid)
+        }
+        NumericTileMode::Date => {
+            let valid = if has_missing {
+                classify_missing_raw_bits(&raw_bits)
+            } else {
+                None
+            };
+            materialize_staged_date_or_f64_column(raw_bits, valid)
+        }
+        NumericTileMode::DateTime => {
+            let valid = if has_missing {
+                classify_missing_raw_bits(&raw_bits)
+            } else {
+                None
+            };
+            materialize_staged_datetime_or_f64_column(raw_bits, valid)
+        }
+        NumericTileMode::Time => {
+            let valid = if has_missing {
+                classify_missing_raw_bits(&raw_bits)
+            } else {
+                None
+            };
+            materialize_staged_time_or_f64_column(raw_bits, valid)
+        }
+    }
+}
+
+pub(super) fn materialize_staged_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let mut values = Vec::with_capacity(raw_bits.len());
+    if valid.is_none() {
+        values.extend(raw_bits.into_iter().map(f64::from_bits));
+        return OwnedColumnBuffer::F64 { values, valid };
+    }
+
+    values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+        if validity_is_null(valid.as_deref(), index) {
+            0.0
+        } else {
+            f64::from_bits(bits)
+        }
+    }));
+    OwnedColumnBuffer::F64 { values, valid }
+}
+
+pub(super) fn materialize_staged_i64_or_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let all_integral = raw_bits.iter().enumerate().all(|(index, &bits)| {
+        validity_is_null(valid.as_deref(), index)
+            || try_i64_from_f64(f64::from_bits(bits)).is_some()
+    });
+
+    if all_integral {
+        let mut values = Vec::with_capacity(raw_bits.len());
+        if valid.is_none() {
+            values.extend(raw_bits.iter().map(|&bits| {
+                try_i64_from_f64(f64::from_bits(bits)).expect("checked integer range")
+            }));
+        } else {
+            values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+                if validity_is_null(valid.as_deref(), index) {
+                    0
+                } else {
+                    try_i64_from_f64(f64::from_bits(bits)).expect("checked integer range")
+                }
+            }));
+        }
+        OwnedColumnBuffer::I64 { values, valid }
+    } else {
+        materialize_staged_f64_column(raw_bits, valid)
+    }
+}
+
+pub(super) fn materialize_staged_date_or_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let all_dates = raw_bits.iter().enumerate().all(|(index, &bits)| {
+        validity_is_null(valid.as_deref(), index)
+            || try_i32_from_f64(f64::from_bits(bits)).is_some()
+    });
+
+    if all_dates {
+        let mut values = Vec::with_capacity(raw_bits.len());
+        if valid.is_none() {
+            values.extend(raw_bits.iter().map(|&bits| SasDate {
+                days_since_sas_epoch:
+                    try_i32_from_f64(f64::from_bits(bits)).expect("checked date range"),
+            }));
+        } else {
+            values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+                if validity_is_null(valid.as_deref(), index) {
+                    SasDate {
+                        days_since_sas_epoch: 0,
+                    }
+                } else {
+                    SasDate {
+                        days_since_sas_epoch: try_i32_from_f64(f64::from_bits(bits))
+                            .expect("checked date range"),
+                    }
+                }
+            }));
+        }
+        OwnedColumnBuffer::Date { values, valid }
+    } else {
+        materialize_staged_f64_column(raw_bits, valid)
+    }
+}
+
+pub(super) fn materialize_staged_datetime_or_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let all_datetimes = raw_bits.iter().enumerate().all(|(index, &bits)| {
+        validity_is_null(valid.as_deref(), index)
+            || try_i64_from_f64(f64::from_bits(bits)).is_some()
+    });
+
+    if all_datetimes {
+        let mut values = Vec::with_capacity(raw_bits.len());
+        if valid.is_none() {
+            values.extend(raw_bits.iter().map(|&bits| SasDateTime {
+                seconds_since_sas_epoch:
+                    try_i64_from_f64(f64::from_bits(bits)).expect("checked datetime range"),
+            }));
+        } else {
+            values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+                if validity_is_null(valid.as_deref(), index) {
+                    SasDateTime {
+                        seconds_since_sas_epoch: 0,
+                    }
+                } else {
+                    SasDateTime {
+                        seconds_since_sas_epoch: try_i64_from_f64(f64::from_bits(bits))
+                            .expect("checked datetime range"),
+                    }
+                }
+            }));
+        }
+        OwnedColumnBuffer::DateTime { values, valid }
+    } else {
+        materialize_staged_f64_column(raw_bits, valid)
+    }
+}
+
+pub(super) fn materialize_staged_time_or_f64_column(
+    raw_bits: Vec<u64>,
+    valid: Option<Vec<u8>>,
+) -> OwnedColumnBuffer {
+    let all_times = raw_bits.iter().enumerate().all(|(index, &bits)| {
+        validity_is_null(valid.as_deref(), index)
+            || try_i64_from_f64(f64::from_bits(bits)).is_some()
+    });
+
+    if all_times {
+        let mut values = Vec::with_capacity(raw_bits.len());
+        if valid.is_none() {
+            values.extend(raw_bits.iter().map(|&bits| SasTime {
+                seconds_since_midnight:
+                    try_i64_from_f64(f64::from_bits(bits)).expect("checked time range"),
+            }));
+        } else {
+            values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+                if validity_is_null(valid.as_deref(), index) {
+                    SasTime {
+                        seconds_since_midnight: 0,
+                    }
+                } else {
+                    SasTime {
+                        seconds_since_midnight: try_i64_from_f64(f64::from_bits(bits))
+                            .expect("checked time range"),
+                    }
+                }
+            }));
+        }
+        OwnedColumnBuffer::Time { values, valid }
+    } else {
+        materialize_staged_f64_column(raw_bits, valid)
+    }
+}
+
+pub(super) fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u8>> {
+    type U64x8 = Simd<u64, 8>;
+
+    let exp_mask = U64x8::splat(NUMERIC_EXP_MASK);
+    let fraction_mask = U64x8::splat(NUMERIC_FRACTION_MASK);
+    let zeros = U64x8::splat(0);
+    let mut valid: Option<Vec<u8>> = None;
+    let mut processed = 0usize;
+
+    let mut chunks = raw_bits.chunks_exact(8);
+    for chunk in &mut chunks {
+        let lanes = U64x8::from_slice(chunk);
+        let missing_mask = ((lanes & exp_mask).simd_eq(exp_mask)
+            & (lanes & fraction_mask).simd_ne(zeros))
+        .to_bitmask();
+        if missing_mask == 0 {
+            if let Some(valid) = &mut valid {
+                valid.extend(std::iter::repeat_n(1, chunk.len()));
+            }
+            processed += chunk.len();
+            continue;
+        }
+
+        let valid_vec = valid.get_or_insert_with(|| {
+            let mut valid = Vec::with_capacity(raw_bits.len());
+            valid.resize(processed, 1);
+            valid
+        });
+        for lane in 0..chunk.len() {
+            valid_vec.push(u8::from(((missing_mask >> lane) & 1) == 0));
+        }
+        processed += chunk.len();
+    }
+
+    for &bits in chunks.remainder() {
+        if numeric_bits_is_missing(bits) {
+            let valid_vec = valid.get_or_insert_with(|| {
+                let mut valid = Vec::with_capacity(raw_bits.len());
+                valid.resize(processed, 1);
+                valid
+            });
+            valid_vec.push(0);
+        } else if let Some(valid) = &mut valid {
+            valid.push(1);
+        }
+        processed += 1;
+    }
+
+    valid
+}
+
+pub(super) fn validity_is_null(valid: Option<&[u8]>, index: usize) -> bool {
+    valid.is_some_and(|valid| valid.get(index).copied() == Some(0))
+}
+
+pub(super) fn staged_numeric_raw_bits_from_planned_cell(cell: PlannedCell<'_>) -> Result<u64> {
+    match cell {
+        PlannedCell::Null => Ok(SAS_NUMERIC_MISSING_SENTINEL),
+        PlannedCell::Int32(value) => Ok(f64::from(value).to_bits()),
+        PlannedCell::Int64(value) => Ok((value as f64).to_bits()),
+        PlannedCell::Float64(value) => Ok(value.to_bits()),
+        PlannedCell::Date(value) => Ok(f64::from(value.days_since_sas_epoch).to_bits()),
+        PlannedCell::DateTime(value) => Ok((value.seconds_since_sas_epoch as f64).to_bits()),
+        PlannedCell::Time(value) => Ok((value.seconds_since_midnight as f64).to_bits()),
+        other => Err(unexpected_batch_cell("staged-numeric", other)),
+    }
+}
+
+#[inline(always)]
+pub(super) fn numeric_bits_scalar_8(slice: &[u8], endianness: Endianness) -> u64 {
+    let bytes: [u8; 8] = slice.try_into().expect("len == 8");
+    match endianness {
+        Endianness::Little => u64::from_le_bytes(bytes),
+        Endianness::Big => u64::from_be_bytes(bytes),
+    }
+}
+
+pub(super) const NUMERIC_EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
+pub(super) const NUMERIC_FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
+pub(super) const SAS_NUMERIC_MISSING_SENTINEL: u64 = 0x7FF0_0000_0000_0001;
+
+#[inline(always)]
+pub(super) const fn numeric_bits_is_missing(raw: u64) -> bool {
+    (raw & NUMERIC_EXP_MASK) == NUMERIC_EXP_MASK && (raw & NUMERIC_FRACTION_MASK) != 0
+}
+
+pub(super) fn try_i64_from_f64(number: f64) -> Option<i64> {
+    if !number.is_finite() {
+        return None;
+    }
+    if number < i64::MIN as f64 || number > i64::MAX as f64 {
+        return None;
+    }
+    let value = number as i64;
+    if value as f64 == number {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+pub(super) fn try_i32_from_f64(number: f64) -> Option<i32> {
+    let value = try_i64_from_f64(number)?;
+    i32::try_from(value).ok()
+}
