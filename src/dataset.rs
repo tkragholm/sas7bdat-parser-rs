@@ -108,7 +108,7 @@ impl Dataset {
     }
 
     #[must_use]
-    pub fn projection(&self) -> ProjectionBuilder<'_> {
+    pub const fn projection(&self) -> ProjectionBuilder<'_> {
         ProjectionBuilder::new(self)
     }
 

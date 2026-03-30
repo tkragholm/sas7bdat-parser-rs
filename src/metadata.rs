@@ -3,8 +3,9 @@ use std::time::SystemTime;
 
 pub type Timestamp = SystemTime;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Endianness {
+    #[default]
     Little,
     Big,
 }
@@ -77,25 +78,19 @@ impl ColumnMeta {
     }
 }
 
-impl Default for Endianness {
-    fn default() -> Self {
-        Self::Little
-    }
-}
-
-impl<'a> From<SasDate> for CellValue<'a> {
+impl From<SasDate> for CellValue<'_> {
     fn from(value: SasDate) -> Self {
         Self::Date(value)
     }
 }
 
-impl<'a> From<SasDateTime> for CellValue<'a> {
+impl From<SasDateTime> for CellValue<'_> {
     fn from(value: SasDateTime) -> Self {
         Self::DateTime(value)
     }
 }
 
-impl<'a> From<SasTime> for CellValue<'a> {
+impl From<SasTime> for CellValue<'_> {
     fn from(value: SasTime) -> Self {
         Self::Time(value)
     }

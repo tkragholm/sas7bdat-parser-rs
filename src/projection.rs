@@ -53,7 +53,7 @@ pub struct ProjectionBuilder<'a> {
 }
 
 impl<'a> ProjectionBuilder<'a> {
-    pub(crate) fn new(ds: &'a Dataset) -> Self {
+    pub(crate) const fn new(ds: &'a Dataset) -> Self {
         Self {
             ds,
             items: Vec::new(),

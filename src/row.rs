@@ -41,17 +41,17 @@ pub struct RowView<'a> {
 
 impl<'a> RowView<'a> {
     #[must_use]
-    pub fn row_index(&self) -> u64 {
+    pub const fn row_index(&self) -> u64 {
         self.row_index
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.cells.len()
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.cells.is_empty()
     }
 
@@ -79,7 +79,7 @@ pub struct OwnedRow {
     pub cells: Vec<OwnedCellValue>,
 }
 
-impl<'a> CellValue<'a> {
+impl CellValue<'_> {
     #[must_use]
     pub fn to_owned_value(&self) -> OwnedCellValue {
         match self {

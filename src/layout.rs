@@ -55,7 +55,7 @@ impl Default for TextStore {
 }
 
 impl TextStore {
-    fn new(encoding: &'static Encoding) -> Self {
+    const fn new(encoding: &'static Encoding) -> Self {
         Self {
             blob_end_offsets: Vec::new(),
             bytes: Vec::new(),
@@ -184,7 +184,7 @@ pub(crate) fn parse_layout<R: Read + Seek>(
 
         match classify_page(page_type) {
             PageKind::Meta | PageKind::Mix | PageKind::Meta2 | PageKind::Amd => {
-                parse_page_subheaders(&header, &page, &mut state)?
+                parse_page_subheaders(&header, &page, &mut state)?;
             }
             PageKind::Data | PageKind::Comp | PageKind::CompTable | PageKind::Unknown => {}
         }
@@ -199,15 +199,15 @@ pub(crate) fn parse_layout<R: Read + Seek>(
         .unwrap_or_else(|| u32::try_from(state.columns.len()).unwrap_or(u32::MAX));
     state.columns.truncate(column_count as usize);
 
-    let compression = state
-        .text_store
-        .resolve(row_info.compression_ref)
-        .map(|value| match value.trim() {
-            "SASYZCR2" => CompressionKind::Binary,
-            "SASYZCRL" => CompressionKind::Row,
-            _ => CompressionKind::None,
-        })
-        .unwrap_or(CompressionKind::None);
+    let compression =
+        state
+            .text_store
+            .resolve(row_info.compression_ref)
+            .map_or(CompressionKind::None, |value| match value.trim() {
+                "SASYZCR2" => CompressionKind::Binary,
+                "SASYZCRL" => CompressionKind::Row,
+                _ => CompressionKind::None,
+            });
 
     metadata.row_count = row_info.total_rows;
     metadata.row_len = row_info.row_length;
@@ -632,7 +632,7 @@ fn infer_logical_type(type_code: u8, format_name: Option<&str>) -> LogicalType {
     }
 }
 
-fn read_u16(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
+const fn read_u16(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
     let mut buf = [0u8; 2];
     buf.copy_from_slice(bytes);
     match endianness {
@@ -641,7 +641,7 @@ fn read_u16(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
     }
 }
 
-fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
+const fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
     let mut buf = [0u8; 4];
     buf.copy_from_slice(bytes);
     match endianness {
@@ -650,7 +650,7 @@ fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
     }
 }
 
-fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
+const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
     let mut buf = [0u8; 8];
     buf.copy_from_slice(bytes);
     match endianness {

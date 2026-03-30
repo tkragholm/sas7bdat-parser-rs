@@ -1114,15 +1114,12 @@ impl RowDecodePlan {
                     message: "invalid UTF-8 in fixed-width string cell".to_owned(),
                 })),
             },
-            StringDecodeKernel::Utf8Lenient => match std::str::from_utf8(slice) {
-                Ok(value) => Ok(PlannedCell::StrBorrowed(value)),
-                Err(_) => {
-                    owned_strings.push(maybe_fix_mojibake(
-                        String::from_utf8_lossy(slice).into_owned(),
-                        self.string_options.mojibake_fix,
-                    ));
-                    Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
-                }
+            StringDecodeKernel::Utf8Lenient => if let Ok(value) = std::str::from_utf8(slice) { Ok(PlannedCell::StrBorrowed(value)) } else {
+                owned_strings.push(maybe_fix_mojibake(
+                    String::from_utf8_lossy(slice).into_owned(),
+                    self.string_options.mojibake_fix,
+                ));
+                Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
             },
             StringDecodeKernel::EncodedStrict => {
                 let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
@@ -1166,15 +1163,12 @@ impl RowDecodePlan {
                     message: "invalid UTF-8 in fixed-width string cell".to_owned(),
                 })),
             },
-            StringDecodeKernel::Utf8Lenient => match std::str::from_utf8(slice) {
-                Ok(_) => Ok(DecodedStringBytes::Borrowed(slice)),
-                Err(_) => {
-                    owned_strings.push(maybe_fix_mojibake(
-                        String::from_utf8_lossy(slice).into_owned(),
-                        self.string_options.mojibake_fix,
-                    ));
-                    Ok(DecodedStringBytes::Owned(owned_strings.len() - 1))
-                }
+            StringDecodeKernel::Utf8Lenient => if let Ok(_) = std::str::from_utf8(slice) { Ok(DecodedStringBytes::Borrowed(slice)) } else {
+                owned_strings.push(maybe_fix_mojibake(
+                    String::from_utf8_lossy(slice).into_owned(),
+                    self.string_options.mojibake_fix,
+                ));
+                Ok(DecodedStringBytes::Owned(owned_strings.len() - 1))
             },
             StringDecodeKernel::EncodedStrict => {
                 let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);

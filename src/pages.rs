@@ -332,9 +332,7 @@ fn classify_indexed_descriptor(
                         .unwrap_or(u32::MAX)
                         .saturating_sub(row_span_start),
                 );
-                if produced < remaining_rows
-                    && !target_rows.is_some_and(|target| produced >= target)
-                {
+                if produced < remaining_rows && target_rows.is_none_or(|target| produced < target) {
                     row_spans.push(RowSpan {
                         offset: u32::try_from(pointer.offset)
                             .map_err(|_| page_corruption("compressed row offset exceeds u32"))?,
@@ -571,7 +569,7 @@ fn contiguous_data_start(
     u32::try_from(data_start).map_err(|_| page_corruption("page data start exceeds u32"))
 }
 
-fn classify_page(page_type: u16) -> PageKind {
+const fn classify_page(page_type: u16) -> PageKind {
     if (page_type & SAS_PAGE_TYPE_COMP) == SAS_PAGE_TYPE_COMP {
         return PageKind::Comp;
     }
@@ -666,7 +664,7 @@ const fn signature_is_recognized(signature: u32) -> bool {
     )
 }
 
-fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
+const fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
     let mut buf = [0u8; 4];
     buf.copy_from_slice(bytes);
     match endianness {
@@ -675,7 +673,7 @@ fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
     }
 }
 
-fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
+const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
     let mut buf = [0u8; 8];
     buf.copy_from_slice(bytes);
     match endianness {
