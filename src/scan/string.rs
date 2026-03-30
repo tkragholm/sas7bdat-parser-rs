@@ -14,6 +14,13 @@ pub(super) fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
 
 #[inline]
 pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
+    if slice.len() == 12 && is_all_space_or_nul_12(slice) {
+        return TrimmedString {
+            bytes: &[],
+            is_ascii: true,
+        };
+    }
+
     if slice.len() < 64 {
         let trimmed = trim_trailing_space_or_nul(slice);
         return TrimmedString {
@@ -27,6 +34,18 @@ pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
         bytes: trimmed,
         is_ascii: is_ascii_simd(trimmed),
     }
+}
+
+#[inline(always)]
+fn is_all_space_or_nul_12(slice: &[u8]) -> bool {
+    debug_assert_eq!(slice.len(), 12);
+    let head = u64::from_ne_bytes(slice[..8].try_into().expect("fixed-width head"));
+    let tail = u32::from_ne_bytes(slice[8..12].try_into().expect("fixed-width tail"));
+
+    const SPACES_HEAD: u64 = u64::from_ne_bytes([b' '; 8]);
+    const SPACES_TAIL: u32 = u32::from_ne_bytes([b' '; 4]);
+
+    (head == 0 && tail == 0) || (head == SPACES_HEAD && tail == SPACES_TAIL)
 }
 
 #[inline(always)]

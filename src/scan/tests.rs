@@ -1,4 +1,7 @@
-use super::{BatchDecodePlan, DirectUtf8OwnedMode, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder};
+use super::{
+    BatchDecodePlan, DirectUtf8OwnedMode, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder,
+    trim_and_classify_ascii,
+};
 use crate::{
     columnar::OwnedColumnBuffer,
     dataset::Dataset,
@@ -86,6 +89,13 @@ fn raw_scan_visits_rows_from_fused_pages() {
     assert_eq!(stats.rows_seen, 3);
     assert_eq!(stats.rows_emitted, 2);
     assert_eq!(stats.fused_pages, 2);
+}
+
+#[test]
+fn trim_and_classify_ascii_fast_path_handles_all_space_width_12() {
+    let trimmed = trim_and_classify_ascii(b"            ");
+    assert!(trimmed.bytes.is_empty());
+    assert!(trimmed.is_ascii);
 }
 
 #[test]
