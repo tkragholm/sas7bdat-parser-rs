@@ -1,4 +1,4 @@
-use super::{BatchDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder};
+use super::{BatchDecodePlan, DirectUtf8OwnedMode, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder};
 use crate::{
     columnar::OwnedColumnBuffer,
     dataset::Dataset,
@@ -703,6 +703,10 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert!(plan.families.direct_utf8_borrowed.is_empty());
     assert_eq!(plan.families.direct_utf8_owned, vec![1]);
+    assert_eq!(
+        plan.direct_utf8_owned_mode,
+        Some(DirectUtf8OwnedMode::Utf8Lenient)
+    );
     assert_eq!(plan.families.direct_numeric, vec![2]);
     assert!(plan.families.direct_raw_bytes.is_empty());
     assert!(plan.families.fallback.is_empty());
@@ -787,6 +791,7 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
     assert!(plan.families.direct_numeric.is_empty());
     assert!(plan.families.direct_utf8_borrowed.is_empty());
     assert!(plan.families.direct_utf8_owned.is_empty());
+    assert!(plan.direct_utf8_owned_mode.is_none());
     assert!(plan.families.fallback.is_empty());
     assert!(!plan.all_columns_staged_numeric);
     assert!(!plan.needs_owned_string_scratch);
@@ -872,6 +877,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert_eq!(plan.families.direct_utf8_borrowed, vec![1]);
     assert!(plan.families.direct_utf8_owned.is_empty());
+    assert!(plan.direct_utf8_owned_mode.is_none());
     assert!(plan.families.fallback.is_empty());
     assert!(!plan.needs_owned_string_scratch);
 }

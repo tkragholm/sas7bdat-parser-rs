@@ -233,70 +233,90 @@ impl RowDecodePlan {
     }
 
     #[inline(always)]
-    pub(super) fn decode_utf8_bytes_for_batch_direct<'row>(
+    pub(super) fn decode_utf8_lenient_trimmed_bytes_for_batch_direct<'row>(
         &self,
-        slice: &'row [u8],
+        trimmed: TrimmedString<'row>,
         scratch: &mut String,
     ) -> Result<DecodedUtf8BatchValue<'row>> {
-        let trimmed = if self.string_options.trim_fixed_width {
-            trim_and_classify_ascii(slice)
-        } else {
-            TrimmedString {
-                bytes: slice,
-                is_ascii: slice.is_ascii(),
-            }
-        };
         let slice = trimmed.bytes;
         if slice.is_empty() || trimmed.is_ascii {
             return Ok(DecodedUtf8BatchValue::Borrowed(slice));
         }
 
-        match self.string_kernel {
-            StringDecodeKernel::Utf8Strict => match std::str::from_utf8(slice) {
-                Ok(_) => Ok(DecodedUtf8BatchValue::Borrowed(slice)),
-                Err(_) => Err(Error::Decode(crate::error::DecodeError {
-                    message: "invalid UTF-8 in fixed-width string cell".to_owned(),
-                })),
-            },
-            StringDecodeKernel::Utf8Lenient => {
-                if std::str::from_utf8(slice).is_ok() {
-                    Ok(DecodedUtf8BatchValue::Borrowed(slice))
+        if std::str::from_utf8(slice).is_ok() {
+            Ok(DecodedUtf8BatchValue::Borrowed(slice))
+        } else {
+            *scratch = maybe_fix_mojibake(
+                String::from_utf8_lossy(slice).into_owned(),
+                self.string_options.mojibake_fix,
+            );
+            Ok(DecodedUtf8BatchValue::Scratch)
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn decode_encoded_strict_trimmed_bytes_for_batch_direct<'row>(
+        &self,
+        trimmed: TrimmedString<'row>,
+        scratch: &mut String,
+    ) -> Result<DecodedUtf8BatchValue<'row>> {
+        let slice = trimmed.bytes;
+        if slice.is_empty() || trimmed.is_ascii {
+            return Ok(DecodedUtf8BatchValue::Borrowed(slice));
+        }
+
+        let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
+        if had_errors {
+            return Err(Error::Decode(crate::error::DecodeError {
+                message: "string decode failed under strict validation".to_owned(),
+            }));
+        }
+        match decoded {
+            std::borrow::Cow::Borrowed(value) => {
+                Ok(DecodedUtf8BatchValue::Borrowed(value.as_bytes()))
+            }
+            std::borrow::Cow::Owned(value) => {
+                *scratch = if mojibake_fix_maybe_needed_for_encoded_bytes(
+                    self.encoding,
+                    slice,
+                    self.string_options.mojibake_fix,
+                ) {
+                    maybe_fix_mojibake(value, self.string_options.mojibake_fix)
                 } else {
-                    *scratch = maybe_fix_mojibake(
-                        String::from_utf8_lossy(slice).into_owned(),
-                        self.string_options.mojibake_fix,
-                    );
-                    Ok(DecodedUtf8BatchValue::Scratch)
-                }
+                    value
+                };
+                Ok(DecodedUtf8BatchValue::Scratch)
             }
-            StringDecodeKernel::EncodedStrict => {
-                let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
-                if had_errors {
-                    return Err(Error::Decode(crate::error::DecodeError {
-                        message: "string decode failed under strict validation".to_owned(),
-                    }));
-                }
-                match decoded {
-                    std::borrow::Cow::Borrowed(value) => {
-                        Ok(DecodedUtf8BatchValue::Borrowed(value.as_bytes()))
-                    }
-                    std::borrow::Cow::Owned(value) => {
-                        *scratch = maybe_fix_mojibake(value, self.string_options.mojibake_fix);
-                        Ok(DecodedUtf8BatchValue::Scratch)
-                    }
-                }
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn decode_encoded_lenient_trimmed_bytes_for_batch_direct<'row>(
+        &self,
+        trimmed: TrimmedString<'row>,
+        scratch: &mut String,
+    ) -> Result<DecodedUtf8BatchValue<'row>> {
+        let slice = trimmed.bytes;
+        if slice.is_empty() || trimmed.is_ascii {
+            return Ok(DecodedUtf8BatchValue::Borrowed(slice));
+        }
+
+        let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
+        match decoded {
+            std::borrow::Cow::Borrowed(value) => {
+                Ok(DecodedUtf8BatchValue::Borrowed(value.as_bytes()))
             }
-            StringDecodeKernel::EncodedLenient => {
-                let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
-                match decoded {
-                    std::borrow::Cow::Borrowed(value) => {
-                        Ok(DecodedUtf8BatchValue::Borrowed(value.as_bytes()))
-                    }
-                    std::borrow::Cow::Owned(value) => {
-                        *scratch = maybe_fix_mojibake(value, self.string_options.mojibake_fix);
-                        Ok(DecodedUtf8BatchValue::Scratch)
-                    }
-                }
+            std::borrow::Cow::Owned(value) => {
+                *scratch = if mojibake_fix_maybe_needed_for_encoded_bytes(
+                    self.encoding,
+                    slice,
+                    self.string_options.mojibake_fix,
+                ) {
+                    maybe_fix_mojibake(value, self.string_options.mojibake_fix)
+                } else {
+                    value
+                };
+                Ok(DecodedUtf8BatchValue::Scratch)
             }
         }
     }
@@ -334,8 +354,17 @@ impl RowDecodePlan {
                 match decoded {
                     std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
                     std::borrow::Cow::Owned(value) => {
-                        owned_strings
-                            .push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
+                        owned_strings.push(
+                            if mojibake_fix_maybe_needed_for_encoded_bytes(
+                                self.encoding,
+                                slice,
+                                self.string_options.mojibake_fix,
+                            ) {
+                                maybe_fix_mojibake(value, self.string_options.mojibake_fix)
+                            } else {
+                                value
+                            },
+                        );
                         Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
                     }
                 }
@@ -345,8 +374,17 @@ impl RowDecodePlan {
                 match decoded {
                     std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
                     std::borrow::Cow::Owned(value) => {
-                        owned_strings
-                            .push(maybe_fix_mojibake(value, self.string_options.mojibake_fix));
+                        owned_strings.push(
+                            if mojibake_fix_maybe_needed_for_encoded_bytes(
+                                self.encoding,
+                                slice,
+                                self.string_options.mojibake_fix,
+                            ) {
+                                maybe_fix_mojibake(value, self.string_options.mojibake_fix)
+                            } else {
+                                value
+                            },
+                        );
                         Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
                     }
                 }
@@ -515,10 +553,18 @@ impl RowDecodePlan {
             }));
         }
 
-        Ok(crate::row::OwnedCellValue::String(maybe_fix_mojibake(
-            decoded.into_owned(),
-            self.string_options.mojibake_fix,
-        )))
+        let value = decoded.into_owned();
+        Ok(crate::row::OwnedCellValue::String(
+            if mojibake_fix_maybe_needed_for_encoded_bytes(
+                self.encoding,
+                slice,
+                self.string_options.mojibake_fix,
+            ) {
+                maybe_fix_mojibake(value, self.string_options.mojibake_fix)
+            } else {
+                value
+            },
+        ))
     }
 
     pub(super) fn materialize_owned_date(

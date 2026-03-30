@@ -4,6 +4,7 @@ pub(super) struct BatchDecodePlan {
     pub(super) row_plan: RowDecodePlan,
     pub(super) column_kinds: Vec<ColumnMaterializationKind>,
     pub(super) families: BatchColumnFamilies,
+    pub(super) direct_utf8_owned_mode: Option<DirectUtf8OwnedMode>,
     pub(super) all_columns_staged_numeric: bool,
     pub(super) needs_owned_string_scratch: bool,
 }
@@ -16,6 +17,13 @@ pub(super) struct BatchColumnFamilies {
     pub(super) direct_utf8_borrowed: Vec<usize>,
     pub(super) direct_utf8_owned: Vec<usize>,
     pub(super) fallback: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DirectUtf8OwnedMode {
+    Utf8Lenient,
+    EncodedStrict,
+    EncodedLenient,
 }
 
 #[derive(Debug)]
@@ -83,6 +91,20 @@ impl BatchDecodePlan {
             .collect::<Vec<_>>();
         let families =
             compile_batch_column_families(&row_plan.columns, &column_kinds, row_plan.string_kernel);
+        let direct_utf8_owned_mode = if families.direct_utf8_owned.is_empty() {
+            None
+        } else {
+            Some(match row_plan.string_kernel {
+                StringDecodeKernel::Utf8Strict => {
+                    return Err(Error::unsupported(
+                        "strict UTF-8 must not compile owned utf8 batch family",
+                    ));
+                }
+                StringDecodeKernel::Utf8Lenient => DirectUtf8OwnedMode::Utf8Lenient,
+                StringDecodeKernel::EncodedStrict => DirectUtf8OwnedMode::EncodedStrict,
+                StringDecodeKernel::EncodedLenient => DirectUtf8OwnedMode::EncodedLenient,
+            })
+        };
         let all_columns_staged_numeric =
             !row_plan.columns.is_empty() && families.staged_numeric.len() == row_plan.columns.len();
         let needs_owned_string_scratch = families
@@ -93,6 +115,7 @@ impl BatchDecodePlan {
             row_plan,
             column_kinds,
             families,
+            direct_utf8_owned_mode,
             all_columns_staged_numeric,
             needs_owned_string_scratch,
         })
@@ -227,22 +250,65 @@ impl BatchAccumulator {
             }
         }
 
-        for &idx in &self.plan.families.direct_utf8_owned {
-            let batch_column = &mut self.columns[idx];
-            let column = &self.plan.row_plan.columns[idx];
-            let appended = append_direct_utf8_owned_batch_column(
-                &self.plan.row_plan,
-                batch_column,
-                column,
-                row,
-                &mut self.utf8_decode_scratch,
-            )?;
-            debug_assert!(appended, "compiled utf8 batch must match builder");
-            if !appended {
-                return Err(Error::unsupported(
-                    "compiled owned utf8 batch plan did not match column builder",
-                ));
+        match self.plan.direct_utf8_owned_mode {
+            Some(DirectUtf8OwnedMode::Utf8Lenient) => {
+                for &idx in &self.plan.families.direct_utf8_owned {
+                    let batch_column = &mut self.columns[idx];
+                    let column = &self.plan.row_plan.columns[idx];
+                    let appended = append_direct_utf8_lenient_batch_column(
+                        &self.plan.row_plan,
+                        batch_column,
+                        column,
+                        row,
+                        &mut self.utf8_decode_scratch,
+                    )?;
+                    debug_assert!(appended, "compiled utf8 batch must match builder");
+                    if !appended {
+                        return Err(Error::unsupported(
+                            "compiled owned utf8 batch plan did not match column builder",
+                        ));
+                    }
+                }
             }
+            Some(DirectUtf8OwnedMode::EncodedStrict) => {
+                for &idx in &self.plan.families.direct_utf8_owned {
+                    let batch_column = &mut self.columns[idx];
+                    let column = &self.plan.row_plan.columns[idx];
+                    let appended = append_direct_encoded_strict_batch_column(
+                        &self.plan.row_plan,
+                        batch_column,
+                        column,
+                        row,
+                        &mut self.utf8_decode_scratch,
+                    )?;
+                    debug_assert!(appended, "compiled utf8 batch must match builder");
+                    if !appended {
+                        return Err(Error::unsupported(
+                            "compiled owned utf8 batch plan did not match column builder",
+                        ));
+                    }
+                }
+            }
+            Some(DirectUtf8OwnedMode::EncodedLenient) => {
+                for &idx in &self.plan.families.direct_utf8_owned {
+                    let batch_column = &mut self.columns[idx];
+                    let column = &self.plan.row_plan.columns[idx];
+                    let appended = append_direct_encoded_lenient_batch_column(
+                        &self.plan.row_plan,
+                        batch_column,
+                        column,
+                        row,
+                        &mut self.utf8_decode_scratch,
+                    )?;
+                    debug_assert!(appended, "compiled utf8 batch must match builder");
+                    if !appended {
+                        return Err(Error::unsupported(
+                            "compiled owned utf8 batch plan did not match column builder",
+                        ));
+                    }
+                }
+            }
+            None => {}
         }
 
         for &idx in &self.plan.families.fallback {
@@ -877,12 +943,17 @@ pub(super) fn append_direct_utf8_borrowed_batch_column(
 }
 
 #[inline(always)]
-pub(super) fn append_direct_utf8_owned_batch_column(
+fn append_direct_utf8_owned_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
     utf8_decode_scratch: &mut String,
+    decode_owned: impl for<'a> FnOnce(
+        &'a RowDecodePlan,
+        TrimmedString<'a>,
+        &'a mut String,
+    ) -> Result<DecodedUtf8BatchValue<'a>>,
 ) -> Result<bool> {
     let slice = row_plan.slice_in_bounds(row, column);
     match (column.kernel, batch_column) {
@@ -907,7 +978,7 @@ pub(super) fn append_direct_utf8_owned_batch_column(
                 push_variable_valid(offsets, data, valid, slice)?;
                 return Ok(true);
             }
-            match row_plan.decode_utf8_bytes_for_batch_direct(slice, utf8_decode_scratch)? {
+            match decode_owned(row_plan, trimmed, utf8_decode_scratch)? {
                 DecodedUtf8BatchValue::Borrowed(bytes) => {
                     push_variable_valid(offsets, data, valid, bytes)?;
                 }
@@ -919,6 +990,57 @@ pub(super) fn append_direct_utf8_owned_batch_column(
         }
         _ => Ok(false),
     }
+}
+
+pub(super) fn append_direct_utf8_lenient_batch_column(
+    row_plan: &RowDecodePlan,
+    batch_column: &mut OwnedBatchColumnBuilder,
+    column: &CompiledColumnPlan,
+    row: &[u8],
+    utf8_decode_scratch: &mut String,
+) -> Result<bool> {
+    append_direct_utf8_owned_batch_column(
+        row_plan,
+        batch_column,
+        column,
+        row,
+        utf8_decode_scratch,
+        RowDecodePlan::decode_utf8_lenient_trimmed_bytes_for_batch_direct,
+    )
+}
+
+pub(super) fn append_direct_encoded_strict_batch_column(
+    row_plan: &RowDecodePlan,
+    batch_column: &mut OwnedBatchColumnBuilder,
+    column: &CompiledColumnPlan,
+    row: &[u8],
+    utf8_decode_scratch: &mut String,
+) -> Result<bool> {
+    append_direct_utf8_owned_batch_column(
+        row_plan,
+        batch_column,
+        column,
+        row,
+        utf8_decode_scratch,
+        RowDecodePlan::decode_encoded_strict_trimmed_bytes_for_batch_direct,
+    )
+}
+
+pub(super) fn append_direct_encoded_lenient_batch_column(
+    row_plan: &RowDecodePlan,
+    batch_column: &mut OwnedBatchColumnBuilder,
+    column: &CompiledColumnPlan,
+    row: &[u8],
+    utf8_decode_scratch: &mut String,
+) -> Result<bool> {
+    append_direct_utf8_owned_batch_column(
+        row_plan,
+        batch_column,
+        column,
+        row,
+        utf8_decode_scratch,
+        RowDecodePlan::decode_encoded_lenient_trimmed_bytes_for_batch_direct,
+    )
 }
 
 pub(super) fn compile_batch_column_families(

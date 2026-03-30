@@ -96,3 +96,14 @@ pub(super) fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> Strin
         _ => value,
     }
 }
+
+#[inline(always)]
+pub(super) fn mojibake_fix_maybe_needed_for_encoded_bytes(
+    encoding: &'static Encoding,
+    slice: &[u8],
+    policy: MojibakePolicy,
+) -> bool {
+    matches!(policy, MojibakePolicy::Auto)
+        && encoding.is_single_byte()
+        && slice.iter().any(|&byte| byte == 0xC2 || byte == 0xC3)
+}
