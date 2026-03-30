@@ -15,3 +15,7 @@ criterion = "0.8.2"
 [[bench]]
 name = "scan_hotpaths"
 harness = false
+
+[[bench]]
+name = "compression_matrix"
+harness = false
