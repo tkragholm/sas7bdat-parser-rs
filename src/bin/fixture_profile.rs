@@ -1,5 +1,5 @@
 use sas7bdat_simd::{
-    BatchHint, Dataset, DecodeMode,
+    BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions,
     fixture_catalog::{ProjectionPreset, ScanStatsSummary, build_projection, summarize_scan_stats},
 };
 use serde::Serialize;
@@ -43,6 +43,7 @@ struct ProfileOutput {
     fixture: String,
     mode: String,
     projection: String,
+    io_backend: String,
     limit: Option<u64>,
     repeat: usize,
     elapsed_ns_total: u128,
@@ -80,6 +81,7 @@ fn run() -> std::result::Result<(), String> {
     let mut repeat = 1usize;
     let mut limit: Option<u64> = None;
     let mut batch_rows = 256usize;
+    let mut io_backend = IoBackendPreference::Auto;
 
     while let Some(arg) = args.next() {
         match arg.to_string_lossy().as_ref() {
@@ -113,6 +115,11 @@ fn run() -> std::result::Result<(), String> {
                     .parse()
                     .map_err(|_| format!("invalid --batch-rows value: {value}"))?;
             }
+            "--io-backend" => {
+                let value = next_value(&mut args, "--io-backend")?;
+                io_backend = parse_io_backend(&value)
+                    .ok_or_else(|| format!("invalid --io-backend value: {value}"))?;
+            }
             "--help" | "-h" => {
                 print_usage();
                 return Ok(());
@@ -122,7 +129,14 @@ fn run() -> std::result::Result<(), String> {
     }
 
     let fixture = fixture.ok_or_else(|| "missing required --fixture".to_owned())?;
-    let ds = Dataset::open(&fixture).map_err(|err| err.to_string())?;
+    let ds = Dataset::open_with(
+        &fixture,
+        OpenOptions {
+            io_backend,
+            ..OpenOptions::default()
+        },
+    )
+    .map_err(|err| err.to_string())?;
     let projection_obj = build_projection(&ds, projection);
 
     let mut elapsed_total = 0u128;
@@ -179,6 +193,13 @@ fn run() -> std::result::Result<(), String> {
             ProjectionPreset::Mixed => "mixed",
         }
         .to_owned(),
+        io_backend: match io_backend {
+            IoBackendPreference::Auto => "auto",
+            IoBackendPreference::MmapPreferred => "mmap-preferred",
+            IoBackendPreference::BufferedPreferred => "buffered-preferred",
+            IoBackendPreference::BufferedOnly => "buffered-only",
+        }
+        .to_owned(),
         limit,
         repeat,
         elapsed_ns_total: elapsed_total,
@@ -204,8 +225,18 @@ fn next_value(
     Ok(value.to_string_lossy().into_owned())
 }
 
+fn parse_io_backend(value: &str) -> Option<IoBackendPreference> {
+    match value {
+        "auto" => Some(IoBackendPreference::Auto),
+        "mmap-preferred" => Some(IoBackendPreference::MmapPreferred),
+        "buffered-preferred" => Some(IoBackendPreference::BufferedPreferred),
+        "buffered-only" => Some(IoBackendPreference::BufferedOnly),
+        _ => None,
+    }
+}
+
 fn print_usage() {
     eprintln!(
-        "usage: cargo run --bin fixture_profile -- --fixture PATH --mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches [--projection full|numeric|strings|mixed] [--repeat N] [--limit N] [--batch-rows N]"
+        "usage: cargo run --bin fixture_profile -- --fixture PATH --mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches [--projection full|numeric|strings|mixed] [--repeat N] [--limit N] [--batch-rows N] [--io-backend auto|mmap-preferred|buffered-preferred|buffered-only]"
     );
 }

@@ -12,18 +12,18 @@ catalog-stdout sample_rows="64":
 correctness-all:
     @cargo test -q --test fixture_smoke
 
-profile fixture mode projection="full" repeat="1" limit="0" batch_rows="256":
-    @cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}}
+profile fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
+    @cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
 
-profile-rss fixture mode projection="full" repeat="1" limit="0" batch_rows="256":
-    @/bin/zsh -lc 'set +e; tmp="$(mktemp)"; /usr/bin/time -l cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} 2>"$tmp"; code=$?; grep -v "^time: sysctl kern.clockrate: Operation not permitted$" "$tmp" >&2 || true; rm -f "$tmp"; if [[ "$code" -eq 1 ]]; then exit 0; fi; exit "$code"'
+profile-rss fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
+    @/bin/zsh -lc 'set +e; tmp="$(mktemp)"; /usr/bin/time -l cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}} 2>"$tmp"; code=$?; grep -v "^time: sysctl kern.clockrate: Operation not permitted$" "$tmp" >&2 || true; rm -f "$tmp"; if [[ "$code" -eq 1 ]]; then exit 0; fi; exit "$code"'
 
-profile-sample fixture mode projection="full" repeat="50" limit="0" batch_rows="256" seconds="5" out="tmp/profile.sample.txt":
+profile-sample fixture mode projection="full" repeat="50" limit="0" batch_rows="256" seconds="5" out="tmp/profile.sample.txt" io_backend="auto":
     @mkdir -p "$(dirname {{out}})"
-    @/bin/zsh -lc 'cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} >/tmp/sas7bdat-fixture-profile.json & pid=$!; sleep 0.5; /usr/bin/sample "$pid" {{seconds}} -file {{out}} >/dev/null 2>&1 || true; wait "$pid"; cat /tmp/sas7bdat-fixture-profile.json'
+    @/bin/zsh -lc 'cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}} >/tmp/sas7bdat-fixture-profile.json & pid=$!; sleep 0.5; /usr/bin/sample "$pid" {{seconds}} -file {{out}} >/dev/null 2>&1 || true; wait "$pid"; cat /tmp/sas7bdat-fixture-profile.json'
 
-profile-leaks fixture mode projection="full" repeat="1" limit="0" batch_rows="256":
-    @leaks --atExit -- cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}}
+profile-leaks fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
+    @leaks --atExit -- cargo run --release --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
 
 bench-tags tags projection="full" max_fixtures="999" catalog="fixtures/fixture_catalog.local.json":
     @/bin/zsh -lc 'args=(${=CRITERION_ARGS:-}); BENCH_TAGS={{tags}} BENCH_PROJECTION={{projection}} BENCH_CATALOG={{catalog}} BENCH_MAX_FIXTURES={{max_fixtures}} cargo bench --bench scan_hotpaths -- "${args[@]}"'

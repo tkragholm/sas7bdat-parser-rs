@@ -4,12 +4,14 @@ use crate::{
     metadata::{ColumnMeta, CompressionKind, LogicalType},
     options::OpenOptions,
 };
+use memmap2::Mmap;
 use std::{path::PathBuf, sync::Arc};
 
 #[derive(Debug)]
 pub(crate) enum FileSource {
     Path(PathBuf),
     Bytes(Arc<[u8]>),
+    Mmap(Arc<Mmap>),
 }
 
 #[derive(Debug)]

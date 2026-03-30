@@ -14,6 +14,7 @@ where
 {
     match &builder.ds.file.source {
         FileSource::Bytes(bytes) => scan_row_bytes_in_memory(builder, bytes.as_ref(), f),
+        FileSource::Mmap(mmap) => scan_row_bytes_in_memory(builder, &mmap[..], f),
         FileSource::Path(_) => {
             let mut reader = open_scan_reader(builder.ds)?;
             scan_row_bytes_with_reader(builder, &mut reader, f)
@@ -422,5 +423,6 @@ pub(super) fn open_scan_reader(ds: &Dataset) -> Result<ScanReader> {
             })
         }),
         FileSource::Bytes(bytes) => Ok(ScanReader::Bytes(Cursor::new(Arc::clone(bytes)))),
+        FileSource::Mmap(_) => unreachable!("mapped files use the in-memory scan path"),
     }
 }
