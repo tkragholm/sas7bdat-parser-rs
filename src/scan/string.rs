@@ -14,7 +14,7 @@ pub(super) fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
 
 #[inline(always)]
 pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
-    if slice.len() < 32 {
+    if slice.len() < 64 {
         let trimmed = trim_trailing_space_or_nul(slice);
         return TrimmedString {
             bytes: trimmed,
@@ -31,17 +31,17 @@ pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
 
 #[inline(always)]
 pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
-    type U8x32 = Simd<u8, 32>;
+    type U8x64 = Simd<u8, 64>;
 
     let mut end = slice.len();
-    let spaces = U8x32::splat(b' ');
-    let nuls = U8x32::splat(0);
+    let spaces = U8x64::splat(b' ');
+    let nuls = U8x64::splat(0);
 
-    while end >= 32 {
-        let start = end - 32;
-        let chunk = U8x32::from_slice(&slice[start..end]);
+    while end >= 64 {
+        let start = end - 64;
+        let chunk = U8x64::from_slice(&slice[start..end]);
         let trim_mask = chunk.simd_eq(spaces) | chunk.simd_eq(nuls);
-        if trim_mask.to_bitmask() == u64::from(u32::MAX) {
+        if trim_mask.to_bitmask() == u64::MAX {
             end = start;
             continue;
         }
@@ -63,12 +63,12 @@ pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
 
 #[inline(always)]
 pub(super) fn is_ascii_simd(slice: &[u8]) -> bool {
-    type U8x32 = Simd<u8, 32>;
+    type U8x64 = Simd<u8, 64>;
 
-    let mut chunks = slice.chunks_exact(32);
-    let high_bits = U8x32::splat(0x80);
+    let mut chunks = slice.chunks_exact(64);
+    let high_bits = U8x64::splat(0x80);
     for chunk in &mut chunks {
-        let lanes = U8x32::from_slice(chunk);
+        let lanes = U8x64::from_slice(chunk);
         if (lanes & high_bits).reduce_or() != 0 {
             return false;
         }
