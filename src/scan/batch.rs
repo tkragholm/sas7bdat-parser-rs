@@ -27,6 +27,7 @@ pub(super) struct BatchAccumulator {
     row_count: usize,
     columns: Vec<OwnedBatchColumnBuilder>,
     owned_strings: Vec<String>,
+    utf8_decode_scratch: String,
 }
 
 #[derive(Debug)]
@@ -84,11 +85,10 @@ impl BatchDecodePlan {
             compile_batch_column_families(&row_plan.columns, &column_kinds, row_plan.string_kernel);
         let all_columns_staged_numeric =
             !row_plan.columns.is_empty() && families.staged_numeric.len() == row_plan.columns.len();
-        let needs_owned_string_scratch = !families.direct_utf8_owned.is_empty()
-            || families
-                .fallback
-                .iter()
-                .any(|&idx| matches!(row_plan.columns[idx].kernel, CompiledDecodeKernel::Utf8));
+        let needs_owned_string_scratch = families
+            .fallback
+            .iter()
+            .any(|&idx| matches!(row_plan.columns[idx].kernel, CompiledDecodeKernel::Utf8));
         Ok(Self {
             row_plan,
             column_kinds,
@@ -127,6 +127,7 @@ impl BatchAccumulator {
             row_count: 0,
             columns,
             owned_strings: Vec::new(),
+            utf8_decode_scratch: String::new(),
         }
     }
 
@@ -234,7 +235,7 @@ impl BatchAccumulator {
                 batch_column,
                 column,
                 row,
-                &mut self.owned_strings,
+                &mut self.utf8_decode_scratch,
             )?;
             debug_assert!(appended, "compiled utf8 batch must match builder");
             if !appended {
@@ -290,6 +291,7 @@ impl BatchAccumulator {
             })
             .collect();
         self.owned_strings.clear();
+        self.utf8_decode_scratch.clear();
     }
 }
 
@@ -880,7 +882,7 @@ pub(super) fn append_direct_utf8_owned_batch_column(
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
-    owned_strings: &mut Vec<String>,
+    utf8_decode_scratch: &mut String,
 ) -> Result<bool> {
     let slice = row_plan.slice_in_bounds(row, column);
     match (column.kernel, batch_column) {
@@ -892,20 +894,25 @@ pub(super) fn append_direct_utf8_owned_batch_column(
                 valid,
             },
         ) => {
-            match row_plan.decode_string_bytes_for_batch(slice, owned_strings)? {
-                DecodedStringBytes::Borrowed(bytes) => {
+            let trimmed = if row_plan.string_options.trim_fixed_width {
+                trim_and_classify_ascii(slice)
+            } else {
+                TrimmedString {
+                    bytes: slice,
+                    is_ascii: slice.is_ascii(),
+                }
+            };
+            let slice = trimmed.bytes;
+            if slice.is_empty() || trimmed.is_ascii {
+                push_variable_valid(offsets, data, valid, slice)?;
+                return Ok(true);
+            }
+            match row_plan.decode_utf8_bytes_for_batch_direct(slice, utf8_decode_scratch)? {
+                DecodedUtf8BatchValue::Borrowed(bytes) => {
                     push_variable_valid(offsets, data, valid, bytes)?;
                 }
-                DecodedStringBytes::Owned(index) => {
-                    push_variable_valid(
-                        offsets,
-                        data,
-                        valid,
-                        owned_strings
-                            .get(index)
-                            .ok_or_else(|| Error::unsupported("owned string index out of range"))?
-                            .as_bytes(),
-                    )?;
+                DecodedUtf8BatchValue::Scratch => {
+                    push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
                 }
             }
             Ok(true)

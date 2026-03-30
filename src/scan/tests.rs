@@ -707,7 +707,7 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
     assert!(plan.families.direct_raw_bytes.is_empty());
     assert!(plan.families.fallback.is_empty());
     assert!(!plan.all_columns_staged_numeric);
-    assert!(plan.needs_owned_string_scratch);
+    assert!(!plan.needs_owned_string_scratch);
 }
 
 #[test]

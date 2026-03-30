@@ -83,6 +83,54 @@ The intended interpretation of the fixture tags is:
 - `compressed` / `uncompressed`: compression-family selection
 - `string-heavy` / `numeric-heavy` / `mixed`: content-family selection
 
+## Benchmark decision policy
+
+Criterion runs in this repository are now treated as two different tools:
+
+1. Fast screening runs.
+2. Decision-grade confirmation runs.
+
+Fast screening runs are for iteration only. They are useful when:
+
+- rejecting obvious losers quickly
+- checking that a change did not catastrophically break a benchmark family
+- narrowing down where to spend effort next
+
+Typical fast screening settings are short, for example:
+
+- `--sample-size 10`
+- `--warm-up-time 0.1`
+- `--measurement-time 0.1`
+
+These runs are not considered strong enough on their own for commit or revert
+decisions when the measured effect is small or medium.
+
+Decision-grade confirmation runs are required before concluding that a change is
+worth keeping or backing out when the effect is not overwhelmingly large.
+
+Typical confirmation settings are longer, for example:
+
+- `--sample-size 20`
+- `--warm-up-time 0.5`
+- `--measurement-time 1`
+
+Current policy:
+
+- do not commit or revert based only on a fast screening run when the measured effect is roughly under `10%`
+- rerun the relevant benchmark family with the longer confirmation profile before deciding
+- confirm against the dedicated family benchmark and at least one guardrail benchmark
+
+For example:
+
+- string-heavy work must be checked against `fixture_topical_projection_strings`
+- mixed-path work must be checked against `fixture_topical_projection`
+- numeric guardrails should still be checked against `fixture_topical_projection_numeric`
+
+The practical interpretation is:
+
+- short runs are for steering
+- long runs are for decisions
+
 ## Large datasets
 
 Large AHS 2019 datasets are not committed. Download the ZIPs listed in
