@@ -25,7 +25,7 @@ pub struct FixtureEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum FixtureStatus {
-    Profiled(FixtureProfile),
+    Profiled(Box<FixtureProfile>),
     Error { error: String },
 }
 
@@ -165,7 +165,7 @@ pub fn profile_fixture(path: &Path, sample_rows: usize) -> FixtureEntry {
     let source_group = source_group(path);
 
     let status = match Dataset::open(path) {
-        Ok(ds) => FixtureStatus::Profiled(profile_dataset(&ds, sample_rows)),
+        Ok(ds) => FixtureStatus::Profiled(Box::new(profile_dataset(&ds, sample_rows))),
         Err(err) => FixtureStatus::Error {
             error: err.to_string(),
         },
@@ -346,12 +346,13 @@ fn classify_tags(
     logical_types: LogicalTypeCounts,
     sample: SampleSummary,
 ) -> Vec<String> {
-    let mut tags = Vec::new();
-    tags.push(compression_name(ds).to_owned());
-    tags.push(encoding_tag(ds));
-    tags.push(size_tag(ds));
-    tags.push(width_tag(ds));
-    tags.push(content_tag(ds, logical_types));
+    let mut tags = vec![
+        compression_name(ds).to_owned(),
+        encoding_tag(ds),
+        size_tag(ds),
+        width_tag(ds),
+        content_tag(ds, logical_types),
+    ];
 
     if logical_types.string > logical_types.integer + logical_types.float
         && sample.avg_trimmed_string_len() <= 4.0

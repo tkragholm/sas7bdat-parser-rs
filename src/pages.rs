@@ -36,6 +36,24 @@ enum PageKind {
     Unknown,
 }
 
+#[derive(Clone, Copy)]
+struct DescriptorInputs {
+    page_index: u64,
+    page_type: u16,
+    page_row_count: u64,
+    subheader_count: u64,
+    row_base: u64,
+}
+
+#[derive(Clone, Copy)]
+struct PointerRowSpanContext {
+    row_len: u32,
+    remaining_rows: u64,
+    row_span_start: u32,
+    target_rows: Option<u64>,
+    kind: RowSpanKind,
+}
+
 pub(crate) fn compile_page_descriptors<R: Read + Seek>(
     reader: &mut R,
     layout: &LayoutPlan,
@@ -77,11 +95,13 @@ pub(crate) fn compile_page_descriptors<R: Read + Seek>(
         let descriptor = classify_descriptor(
             layout,
             &page,
-            page_index,
-            page_type,
-            page_row_count,
-            subheader_count,
-            row_base,
+            DescriptorInputs {
+                page_index,
+                page_type,
+                page_row_count,
+                subheader_count,
+                row_base,
+            },
             &mut row_spans,
         )?;
 
@@ -99,13 +119,16 @@ pub(crate) fn compile_page_descriptors<R: Read + Seek>(
 fn classify_descriptor(
     layout: &LayoutPlan,
     page: &[u8],
-    page_index: u64,
-    page_type: u16,
-    page_row_count: u64,
-    subheader_count: u64,
-    row_base: u64,
+    inputs: DescriptorInputs,
     row_spans: &mut Vec<RowSpan>,
 ) -> Result<PageDescriptor> {
+    let DescriptorInputs {
+        page_index,
+        page_type,
+        page_row_count,
+        subheader_count,
+        row_base,
+    } = inputs;
     let kind = classify_page(page_type);
     let data_like = matches!(
         kind,
@@ -317,11 +340,13 @@ fn classify_indexed_descriptor(
                         row_spans,
                         data,
                         pointer.offset,
-                        layout.row_len,
-                        remaining_rows,
-                        row_span_start,
-                        target_rows,
-                        RowSpanKind::Borrowed,
+                        PointerRowSpanContext {
+                            row_len: layout.row_len,
+                            remaining_rows,
+                            row_span_start,
+                            target_rows,
+                            kind: RowSpanKind::Borrowed,
+                        },
                     )?;
                 }
             }
@@ -358,7 +383,7 @@ fn classify_indexed_descriptor(
     let page_len = u64::try_from(page.len()).unwrap_or(u64::MAX);
     let available = page_len.saturating_sub(u64::from(data_start));
     let row_len = u64::from(layout.row_len);
-    let possible_rows = if row_len == 0 { 0 } else { available / row_len };
+    let possible_rows = available.checked_div(row_len).unwrap_or(0);
     let rows_to_take = match kind {
         PageKind::Mix => {
             let mix_limit = if layout.rows_per_page == 0 {
@@ -469,12 +494,15 @@ fn push_row_spans_from_pointer(
     row_spans: &mut Vec<RowSpan>,
     data: &[u8],
     offset: usize,
-    row_len: u32,
-    remaining_rows: u64,
-    row_span_start: u32,
-    target_rows: Option<u64>,
-    kind: RowSpanKind,
+    context: PointerRowSpanContext,
 ) -> Result<()> {
+    let PointerRowSpanContext {
+        row_len,
+        remaining_rows,
+        row_span_start,
+        target_rows,
+        kind,
+    } = context;
     let row_len =
         usize::try_from(row_len).map_err(|_| page_corruption("row length exceeds usize"))?;
     if row_len == 0 {
