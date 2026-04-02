@@ -74,6 +74,10 @@ impl ColumnInfo {
         }
         variable.measure = self.measure;
         variable.alignment = self.alignment;
+        // Propagate column-level decimal places unconditionally so callers can distinguish
+        // integer-valued columns (decimals == Some(0)) from true floating-point ones even
+        // when no named format is attached.
+        variable.decimals = self.format_decimals;
 
         if let Some(name) = text_store.resolve(self.name_ref)? {
             variable.name = name.into_owned();

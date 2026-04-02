@@ -345,6 +345,13 @@ pub fn parse_column_format_subheader(
         column.format_width = Some(read_u16(endian, &bytes[24..26]));
         column.format_decimals = Some(read_u16(endian, &bytes[26..28]));
     }
+    // 32-bit files: format_width and format_decimals sit at bytes[12..14] and [14..16]
+    // (same 18-byte non-pointer gap before format_ref as in 64-bit), but older SAS
+    // generators leave those fields as zero even for float columns — indistinguishable
+    // from a genuine "0 decimals / integer" declaration.  We therefore leave
+    // format_decimals as None for 32-bit files to avoid incorrectly mapping float
+    // columns to Bigint.  Files that carry explicit non-zero format_width values could
+    // be handled here in the future if the need arises.
     column.format_ref = format_ref;
     column.label_ref = label_ref;
 
