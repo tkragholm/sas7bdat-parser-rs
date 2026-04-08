@@ -2,6 +2,35 @@ use super::{
     Endianness, NumericTileMode, OwnedColumnBuffer, PlannedCell, Result, SasDate, SasDateTime,
     SasTime, Simd, SimdPartialEq, unexpected_batch_cell,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum TypedNumericValue {
+    Null,
+    Int32(i32),
+    Int64(i64),
+    Float64(f64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum DateNumericValue {
+    Null,
+    Date(SasDate),
+    Float64(f64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum DateTimeNumericValue {
+    Null,
+    DateTime(SasDateTime),
+    Float64(f64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum TimeNumericValue {
+    Null,
+    Time(SasTime),
+    Float64(f64),
+}
 pub(super) fn decode_numeric_cell(slice: &[u8], endianness: Endianness) -> Option<f64> {
     if slice.is_empty() {
         return None;
@@ -354,4 +383,138 @@ pub(super) fn try_i64_from_f64(number: f64) -> Option<i64> {
 pub(super) fn try_i32_from_f64(number: f64) -> Option<i32> {
     let value = try_i64_from_f64(number)?;
     i32::try_from(value).ok()
+}
+
+pub(super) fn classify_typed_numeric_value(
+    number: Option<f64>,
+    prefer_i32: bool,
+) -> TypedNumericValue {
+    let Some(number) = number else {
+        return TypedNumericValue::Null;
+    };
+    let Some(value64) = try_i64_from_f64(number) else {
+        return TypedNumericValue::Float64(number);
+    };
+    if prefer_i32 && let Ok(value32) = i32::try_from(value64) {
+        return TypedNumericValue::Int32(value32);
+    }
+    TypedNumericValue::Int64(value64)
+}
+
+pub(super) fn classify_date_numeric_value(number: Option<f64>) -> DateNumericValue {
+    match number {
+        None => DateNumericValue::Null,
+        Some(number) => match try_i32_from_f64(number) {
+            Some(days) => DateNumericValue::Date(SasDate {
+                days_since_sas_epoch: days,
+            }),
+            None => DateNumericValue::Float64(number),
+        },
+    }
+}
+
+pub(super) fn classify_datetime_numeric_value(number: Option<f64>) -> DateTimeNumericValue {
+    match number {
+        None => DateTimeNumericValue::Null,
+        Some(number) => match try_i64_from_f64(number) {
+            Some(seconds) => DateTimeNumericValue::DateTime(SasDateTime {
+                seconds_since_sas_epoch: seconds,
+            }),
+            None => DateTimeNumericValue::Float64(number),
+        },
+    }
+}
+
+pub(super) fn classify_time_numeric_value(number: Option<f64>) -> TimeNumericValue {
+    match number {
+        None => TimeNumericValue::Null,
+        Some(number) => match try_i64_from_f64(number) {
+            Some(seconds) => TimeNumericValue::Time(SasTime {
+                seconds_since_midnight: seconds,
+            }),
+            None => TimeNumericValue::Float64(number),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DateNumericValue, DateTimeNumericValue, TimeNumericValue, TypedNumericValue,
+        classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value,
+        classify_typed_numeric_value, try_i64_from_f64,
+    };
+
+    #[test]
+    fn try_i64_requires_finite_integral_values() {
+        assert_eq!(try_i64_from_f64(42.0), Some(42));
+        assert_eq!(try_i64_from_f64(-42.0), Some(-42));
+        assert_eq!(try_i64_from_f64(42.5), None);
+        assert_eq!(try_i64_from_f64(f64::NAN), None);
+        assert_eq!(try_i64_from_f64(f64::INFINITY), None);
+        assert_eq!(try_i64_from_f64(f64::NEG_INFINITY), None);
+    }
+
+    #[test]
+    fn typed_numeric_classification_handles_i32_i64_and_float() {
+        assert_eq!(
+            classify_typed_numeric_value(None, true),
+            TypedNumericValue::Null
+        );
+        assert_eq!(
+            classify_typed_numeric_value(Some(7.0), true),
+            TypedNumericValue::Int32(7)
+        );
+        assert_eq!(
+            classify_typed_numeric_value(Some(f64::from(i32::MAX) + 1.0), true),
+            TypedNumericValue::Int64(i64::from(i32::MAX) + 1)
+        );
+        assert_eq!(
+            classify_typed_numeric_value(Some(7.25), true),
+            TypedNumericValue::Float64(7.25)
+        );
+    }
+
+    #[test]
+    fn date_datetime_time_classification_handles_fractional_fallback() {
+        assert_eq!(
+            classify_date_numeric_value(Some(12.0)),
+            DateNumericValue::Date(crate::metadata::SasDate {
+                days_since_sas_epoch: 12,
+            })
+        );
+        assert_eq!(
+            classify_date_numeric_value(Some(12.5)),
+            DateNumericValue::Float64(12.5)
+        );
+
+        assert_eq!(
+            classify_datetime_numeric_value(Some(120.0)),
+            DateTimeNumericValue::DateTime(crate::metadata::SasDateTime {
+                seconds_since_sas_epoch: 120,
+            })
+        );
+        assert_eq!(
+            classify_datetime_numeric_value(Some(120.25)),
+            DateTimeNumericValue::Float64(120.25)
+        );
+
+        assert_eq!(
+            classify_time_numeric_value(Some(3600.0)),
+            TimeNumericValue::Time(crate::metadata::SasTime {
+                seconds_since_midnight: 3600,
+            })
+        );
+        assert_eq!(
+            classify_time_numeric_value(Some(3600.5)),
+            TimeNumericValue::Float64(3600.5)
+        );
+    }
+
+    #[test]
+    fn f64_precision_boundary_is_not_recovered_as_unrepresentable_integer() {
+        let rounded = 9_007_199_254_740_993_i64 as f64;
+        assert_eq!(rounded, 9_007_199_254_740_992.0);
+        assert_eq!(try_i64_from_f64(rounded), Some(9_007_199_254_740_992));
+    }
 }

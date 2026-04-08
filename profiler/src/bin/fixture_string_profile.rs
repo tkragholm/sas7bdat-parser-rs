@@ -1,5 +1,5 @@
 use sas7bdat_profiler::init_profiler_runtime;
-use sas7bdat_simd::{Dataset, LogicalType, RowSelection};
+use sas7bdat_simd::{Dataset, LogicalType, RowSelection, types::RowIndex};
 use serde::Serialize;
 use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
 
@@ -155,8 +155,8 @@ fn run() -> std::result::Result<(), String> {
         ds.scan()
             .with_projection(&projection)
             .select(RowSelection::Range {
-                start: 0,
-                end: sample_rows as u64,
+                start: RowIndex(0),
+                end: RowIndex(sample_rows as u64),
             })
             .visit_rows(|row| {
                 for (stats, cell) in per_column.iter_mut().zip(row.iter()) {

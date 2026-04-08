@@ -34,9 +34,11 @@ pub use builder::ScanBuilder;
 
 use batch::{BatchAccumulator, BatchDecodePlan, borrow_column_buffers, unexpected_batch_cell};
 use numeric::{
-    SAS_NUMERIC_MISSING_SENTINEL, decode_numeric_cell, decode_numeric_raw_bits_or_missing,
-    materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
-    staged_numeric_raw_bits_from_planned_cell, try_i32_from_f64, try_i64_from_f64,
+    DateNumericValue, DateTimeNumericValue, SAS_NUMERIC_MISSING_SENTINEL, TimeNumericValue,
+    TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
+    classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
+    decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column, numeric_bits,
+    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
 };
 use plan::{
     ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, NumericTileMode,

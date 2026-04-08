@@ -43,7 +43,9 @@ impl fmt::Display for MetadataError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidColumnType(t) => write!(f, "invalid column type: {t}"),
-            Self::MissingColumnDescriptor(idx) => write!(f, "missing column descriptor at index {idx}"),
+            Self::MissingColumnDescriptor(idx) => {
+                write!(f, "missing column descriptor at index {idx}")
+            }
             Self::InvalidCompression(c) => write!(f, "invalid compression: {c}"),
             Self::Other(msg) => write!(f, "{msg}"),
         }

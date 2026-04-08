@@ -223,7 +223,11 @@ impl<'a> PageSlice<'a> {
     }
 
     #[must_use]
-    pub fn get_u16(&self, offset: ByteOffset, endianness: crate::metadata::Endianness) -> Option<u16> {
+    pub fn get_u16(
+        &self,
+        offset: ByteOffset,
+        endianness: crate::metadata::Endianness,
+    ) -> Option<u16> {
         let start = usize::from(offset);
         let end = start + 2;
         let bytes = self.bytes.get(start..end)?;
@@ -234,7 +238,11 @@ impl<'a> PageSlice<'a> {
     }
 
     #[must_use]
-    pub fn get_u32(&self, offset: ByteOffset, endianness: crate::metadata::Endianness) -> Option<u32> {
+    pub fn get_u32(
+        &self,
+        offset: ByteOffset,
+        endianness: crate::metadata::Endianness,
+    ) -> Option<u32> {
         let start = usize::from(offset);
         let end = start + 4;
         let bytes = self.bytes.get(start..end)?;

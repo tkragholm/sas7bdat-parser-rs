@@ -76,7 +76,10 @@ fn raw_scan_visits_rows_from_fused_pages() {
 
     let mut rows = Vec::new();
     let stats = ScanBuilder::new(&ds)
-        .select(crate::RowSelection::Range { start: crate::types::RowIndex(1), end: crate::types::RowIndex(3) })
+        .select(crate::RowSelection::Range {
+            start: crate::types::RowIndex(1),
+            end: crate::types::RowIndex(3),
+        })
         .visit_raw_rows(|row| {
             rows.push((row.row_index, row.bytes.to_vec()));
             Ok(ControlFlow::Continue(()))
@@ -206,7 +209,13 @@ fn raw_scan_visits_rows_from_indexed_pointer_pages() {
         })
         .expect("scan succeeds");
 
-    assert_eq!(rows, vec![(crate::types::RowIndex(0), b"ABCD".to_vec()), (crate::types::RowIndex(1), b"EFGH".to_vec())]);
+    assert_eq!(
+        rows,
+        vec![
+            (crate::types::RowIndex(0), b"ABCD".to_vec()),
+            (crate::types::RowIndex(1), b"EFGH".to_vec())
+        ]
+    );
     assert_eq!(stats.indexed_pages, 1);
     assert_eq!(stats.rows_emitted, 2);
 }
@@ -263,7 +272,13 @@ fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
         })
         .expect("scan succeeds");
 
-    assert_eq!(rows, vec![(crate::types::RowIndex(0), b"WXYZ".to_vec()), (crate::types::RowIndex(1), b"ABCD".to_vec())]);
+    assert_eq!(
+        rows,
+        vec![
+            (crate::types::RowIndex(0), b"WXYZ".to_vec()),
+            (crate::types::RowIndex(1), b"ABCD".to_vec())
+        ]
+    );
     assert_eq!(stats.indexed_pages, 1);
     assert_eq!(stats.rows_emitted, 2);
 }
@@ -1280,7 +1295,9 @@ fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
     };
 
     let rows = ScanBuilder::new(&ds).collect_rows().expect("rows");
-    assert!(matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if (value - 1.5).abs() < f64::EPSILON));
+    assert!(
+        matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if (value - 1.5).abs() < f64::EPSILON)
+    );
 
     let batches = ScanBuilder::new(&ds)
         .with_batch_hint(crate::BatchHint::Rows(1))
@@ -1643,7 +1660,8 @@ fn make_page(
 fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
     page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0100u16.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&u16::try_from(rows.len()).expect("rows").to_le_bytes());
+    page[(24 - 6)..(24 - 4)]
+        .copy_from_slice(&u16::try_from(rows.len()).expect("rows").to_le_bytes());
     page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
 
     let data_offset = 40u32;

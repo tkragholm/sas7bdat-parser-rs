@@ -45,7 +45,6 @@ impl<'a> RowView<'a> {
         self.row_index
     }
 
-
     #[must_use]
     pub const fn len(&self) -> usize {
         self.cells.len()

@@ -8,6 +8,7 @@ members = ["profiler"]
 resolver = "2"
 
 [dependencies]
+bstr = "1"
 encoding_rs = "0.8"
 memchr = "2.8"
 memmap2 = "0.9"
