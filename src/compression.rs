@@ -1,3 +1,5 @@
+#![allow(clippy::missing_errors_doc)]
+
 use crate::{
     error::{CompressionError, Error, Result},
     internal::{SmallCommandBlock, SmallOp},
@@ -21,7 +23,7 @@ struct RdcState {
     has_prefix: bool,
 }
 
-pub(crate) fn decompress_row<'a>(
+pub fn decompress_row<'a>(
     compression: CompressionKind,
     input: &'a [u8],
     expected_len: usize,
@@ -125,7 +127,6 @@ fn decode_rle_command(control: u8, input: &[u8], cursor: &mut usize) -> Result<R
             insert_len = length_nibble + 2;
             insert_byte = 0;
         }
-        3 => {}
         _ => {}
     }
 
@@ -136,38 +137,48 @@ fn decode_rle_command(control: u8, input: &[u8], cursor: &mut usize) -> Result<R
     })
 }
 
-pub(crate) fn decompress_rle(
-    input: &[u8],
-    expected_len: usize,
-    output: &mut Vec<u8>,
-) -> Result<()> {
+pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -> Result<()> {
     output.clear();
+    output.resize(expected_len, 0);
+    let buffer = output.as_mut_slice();
     let mut cursor = 0usize;
-    if output.capacity() < expected_len {
-        output.reserve(expected_len - output.capacity());
-    }
-    let mut block = SmallCommandBlock::<COMMAND_BLOCK_CAPACITY>::default();
+    let mut out_pos = 0usize;
 
-    while cursor < input.len() {
-        decode_rle_block(input, &mut cursor, &mut block)?;
-        if block.len == 0 {
-            break;
+    while cursor < input.len() && out_pos < expected_len {
+        let control = input[cursor];
+        cursor += 1;
+        let op = decode_rle_command(control, input, &mut cursor)?;
+
+        if op.copy_len > 0 {
+            if cursor.saturating_add(op.copy_len) > input.len() {
+                return Err(compression_error("RLE copy exceeds input length"));
+            }
+            if out_pos.saturating_add(op.copy_len) > expected_len {
+                return Err(compression_error("RLE copy exceeds output length"));
+            }
+            buffer[out_pos..out_pos + op.copy_len]
+                .copy_from_slice(&input[cursor..cursor + op.copy_len]);
+            cursor += op.copy_len;
+            out_pos += op.copy_len;
         }
-        execute_command_block(&block, input, output)?;
+
+        if op.insert_len > 0 {
+            if out_pos.saturating_add(op.insert_len) > expected_len {
+                return Err(compression_error("RLE insert exceeds output length"));
+            }
+            buffer[out_pos..out_pos + op.insert_len].fill(op.insert_byte);
+            out_pos += op.insert_len;
+        }
     }
 
-    if output.len() != expected_len {
+    if out_pos != expected_len {
         return Err(compression_error("RLE output length mismatch"));
     }
 
     Ok(())
 }
 
-pub(crate) fn decompress_rdc(
-    input: &[u8],
-    expected_len: usize,
-    output: &mut Vec<u8>,
-) -> Result<()> {
+pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -> Result<()> {
     output.clear();
     let mut cursor = 0usize;
     if output.capacity() < expected_len {
@@ -188,37 +199,6 @@ pub(crate) fn decompress_rdc(
         return Err(compression_error("RDC output length mismatch"));
     }
 
-    Ok(())
-}
-
-fn decode_rle_block(
-    input: &[u8],
-    cursor: &mut usize,
-    block: &mut SmallCommandBlock<COMMAND_BLOCK_CAPACITY>,
-) -> Result<()> {
-    clear_block(block);
-    while *cursor < input.len() && usize::from(block.len) < COMMAND_BLOCK_CAPACITY {
-        let control = input[*cursor];
-        *cursor += 1;
-        let op = decode_rle_command(control, input, cursor)?;
-
-        if op.copy_len > 0 {
-            let src_off = *cursor;
-            if cursor.saturating_add(op.copy_len) > input.len() {
-                return Err(compression_error("RLE copy exceeds input length"));
-            }
-            push_literal_segments(block, src_off, op.copy_len)?;
-            *cursor += op.copy_len;
-        }
-
-        if op.insert_len > 0 {
-            push_fill_segments(block, op.insert_byte, op.insert_len)?;
-        }
-
-        if usize::from(block.len) >= COMMAND_BLOCK_CAPACITY {
-            break;
-        }
-    }
     Ok(())
 }
 
@@ -447,5 +427,15 @@ mod tests {
         let mut output = Vec::new();
         decompress_rdc(&compressed, 6, &mut output).expect("rdc backref");
         assert_eq!(output, b"ABCABC");
+    }
+
+    #[test]
+    fn ignores_trailing_rle_padding_once_row_is_full() {
+        let mut output = Vec::new();
+        // 0xC1, 'A' -> command 12, length 4, byte 'A'.
+        // 0x80 -> padding: command 8, length 1. Needs 1 literal byte.
+        let input = &[0xC1, b'A', 0x80];
+        decompress_rle(input, 4, &mut output).expect("rle with trailing padding");
+        assert_eq!(output, b"AAAA");
     }
 }

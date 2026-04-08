@@ -1,4 +1,18 @@
-use super::*;
+#![allow(
+    clippy::inline_always,
+    clippy::missing_errors_doc,
+    clippy::needless_pass_by_value,
+    clippy::used_underscore_binding
+)]
+
+use super::{
+    BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch,
+    ControlFlow, Dataset, DecodeMode, Error, OrderingMode, OwnedColumnarBatch, OwnedRow,
+    Parallelism, Projection, RawRow, RawRowSink, Result, RowDecodePlan, RowSelection, RowSink,
+    RowView, ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions,
+    TemporalDecodeOptions, borrow_column_buffers, effective_scan_row_capacity_hint,
+    materialize_planned_cells, resolve_batch_row_capacity, scan_raw_rows, scan_row_bytes,
+};
 pub struct ScanBuilder<'a> {
     #[allow(dead_code)]
     pub(crate) ds: &'a Dataset,
@@ -11,6 +25,7 @@ pub struct ScanBuilder<'a> {
     pub(crate) batch_hint: BatchHint,
     pub(crate) row_limit: Option<u64>,
     pub(crate) row_selection: RowSelection,
+    pub(crate) progress: Option<ScanProgressObserver>,
 }
 
 impl<'a> ScanBuilder<'a> {
@@ -26,6 +41,7 @@ impl<'a> ScanBuilder<'a> {
             batch_hint: BatchHint::Auto,
             row_limit: None,
             row_selection: RowSelection::All,
+            progress: None,
         }
     }
 
@@ -83,6 +99,16 @@ impl<'a> ScanBuilder<'a> {
         self
     }
 
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_progress<F>(mut self, observer: F) -> Self
+    where
+        F: Fn(ScanProgress) + Send + Sync + 'static,
+    {
+        self.progress = Some(std::sync::Arc::new(observer));
+        self
+    }
+
     pub fn visit_raw_rows<F>(self, _f: F) -> Result<ScanStats>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
@@ -91,12 +117,32 @@ impl<'a> ScanBuilder<'a> {
         self.scan_raw_rows(&mut f)
     }
 
+    #[doc(hidden)]
+    pub fn visit_raw_rows_with_tap<F, T>(self, _f: F, tap: &mut T) -> Result<ScanStats>
+    where
+        F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
+        T: FnMut(u64, &[u8]),
+    {
+        let mut f = _f;
+        self.scan_raw_rows_with_tap(&mut f, tap)
+    }
+
     pub fn visit_rows<F>(self, _f: F) -> Result<ScanStats>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
     {
         let mut f = _f;
         self.scan_rows(&mut f)
+    }
+
+    #[doc(hidden)]
+    pub fn visit_rows_with_tap<F, T>(self, _f: F, tap: &mut T) -> Result<ScanStats>
+    where
+        F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
+        T: FnMut(u64, &[u8]),
+    {
+        let mut f = _f;
+        self.scan_rows_with_tap(&mut f, tap)
     }
 
     pub fn visit_batches<F>(self, _f: F) -> Result<ScanStats>
@@ -113,6 +159,27 @@ impl<'a> ScanBuilder<'a> {
             };
             f(batch)
         })
+    }
+
+    #[doc(hidden)]
+    pub fn visit_batches_with_tap<F, T>(self, _f: F, tap: &mut T) -> Result<ScanStats>
+    where
+        F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
+        T: FnMut(u64, &[u8]),
+    {
+        let mut f = _f;
+        self.scan_batches_with_tap(
+            &mut |batch| {
+                let columns = borrow_column_buffers(&batch.columns);
+                let batch = ColumnarBatch {
+                    row_base: batch.row_base,
+                    row_count: batch.row_count,
+                    columns: &columns,
+                };
+                f(batch)
+            },
+            tap,
+        )
     }
 
     pub fn collect_rows(self) -> Result<Vec<OwnedRow>> {
@@ -168,23 +235,23 @@ impl<'a> ScanBuilder<'a> {
         let target_rows_u64 = u64::try_from(target_rows).unwrap_or(u64::MAX).max(1);
         let estimated_batches = self.ds.metadata.row_count.div_ceil(target_rows_u64);
         let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
-        let mut batcher = BatchAccumulator::new(
+        let mut batch_accumulator = BatchAccumulator::new(
             BatchDecodePlan::new(&self)?,
             target_rows,
             capacity_hint_rows,
         );
 
         let _stats = scan_row_bytes(self, &mut |row_index, bytes| {
-            batcher.push_row(row_index, bytes)?;
-            if batcher.is_full() {
-                batches.push(batcher.take_batch());
-                batcher.reset_after_flush();
+            batch_accumulator.push_row(row_index, bytes)?;
+            if batch_accumulator.is_full() {
+                batches.push(batch_accumulator.take_batch());
+                batch_accumulator.reset_after_flush();
             }
             Ok(ControlFlow::Continue(()))
         })?;
 
-        if !batcher.is_empty() {
-            batches.push(batcher.take_batch());
+        if !batch_accumulator.is_empty() {
+            batches.push(batch_accumulator.take_batch());
         }
 
         Ok(batches)
@@ -214,6 +281,17 @@ impl ScanBuilder<'_> {
         scan_raw_rows(self, f)
     }
 
+    fn scan_raw_rows_with_tap<F, T>(self, f: &mut F, tap: &mut T) -> Result<ScanStats>
+    where
+        F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
+        T: FnMut(u64, &[u8]),
+    {
+        scan_raw_rows(self, &mut |raw| {
+            tap(raw.row_index, raw.bytes);
+            f(raw)
+        })
+    }
+
     fn scan_rows<F>(self, f: &mut F) -> Result<ScanStats>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
@@ -238,6 +316,34 @@ impl ScanBuilder<'_> {
         })
     }
 
+    fn scan_rows_with_tap<F, T>(self, f: &mut F, tap: &mut T) -> Result<ScanStats>
+    where
+        F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
+        T: FnMut(u64, &[u8]),
+    {
+        if matches!(self.decode, DecodeMode::Raw) {
+            return Err(Error::unsupported(
+                "visit_rows does not support DecodeMode::Raw; use visit_raw_rows instead",
+            ));
+        }
+
+        let plan = RowDecodePlan::new(&self)?;
+        let mut owned_strings = Vec::new();
+        self.scan_raw_rows_with_tap(
+            &mut |raw| {
+                let planned = plan.plan_cells(raw.bytes, &mut owned_strings)?;
+                let cells = materialize_planned_cells(&planned, &owned_strings)?;
+                let row = RowView {
+                    row_index: raw.row_index,
+                    names: plan.names.as_ref(),
+                    cells: &cells,
+                };
+                f(row)
+            },
+            tap,
+        )
+    }
+
     fn scan_batches<F>(self, f: &mut F) -> Result<ScanStats>
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
@@ -259,6 +365,57 @@ impl ScanBuilder<'_> {
         let mut stop_after_current_batch = false;
 
         let mut stats = scan_row_bytes(self, &mut |row_index, bytes| {
+            batcher.push_row(row_index, bytes)?;
+            if batcher.is_full() {
+                let batch = batcher.take_batch();
+                match f(batch)? {
+                    ControlFlow::Continue(()) => {
+                        decode_batches = decode_batches.saturating_add(1);
+                        batcher.reset_after_flush();
+                    }
+                    ControlFlow::Break(()) => {
+                        decode_batches = decode_batches.saturating_add(1);
+                        stop_after_current_batch = true;
+                        return Ok(ControlFlow::Break(()));
+                    }
+                }
+            }
+            Ok(ControlFlow::Continue(()))
+        })?;
+
+        if !stop_after_current_batch && !batcher.is_empty() {
+            let batch = batcher.take_batch();
+            decode_batches = decode_batches.saturating_add(1);
+            let _ = f(batch)?;
+        }
+
+        stats.decode_batches = decode_batches;
+        Ok(stats)
+    }
+
+    fn scan_batches_with_tap<F, T>(self, f: &mut F, tap: &mut T) -> Result<ScanStats>
+    where
+        F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+        T: FnMut(u64, &[u8]),
+    {
+        if matches!(self.decode, DecodeMode::Raw) {
+            return Err(Error::unsupported(
+                "visit_batches does not support DecodeMode::Raw",
+            ));
+        }
+
+        let target_rows = resolve_batch_row_capacity(&self)?;
+        let capacity_hint_rows = effective_scan_row_capacity_hint(&self).min(target_rows);
+        let mut batcher = BatchAccumulator::new(
+            BatchDecodePlan::new(&self)?,
+            target_rows,
+            capacity_hint_rows,
+        );
+        let mut decode_batches = 0u64;
+        let mut stop_after_current_batch = false;
+
+        let mut stats = scan_row_bytes(self, &mut |row_index, bytes| {
+            tap(row_index, bytes);
             batcher.push_row(row_index, bytes)?;
             if batcher.is_full() {
                 let batch = batcher.take_batch();

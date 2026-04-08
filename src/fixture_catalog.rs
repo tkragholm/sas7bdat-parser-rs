@@ -1,3 +1,5 @@
+#![allow(clippy::cast_precision_loss)]
+
 use crate::{CellValue, Dataset, LogicalType, Projection, Result, RowSelection, ScanStats};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -41,6 +43,7 @@ pub struct FixtureProfile {
     pub page_count: u64,
     pub logical_types: LogicalTypeCounts,
     pub widths: WidthSummary,
+    pub temporal_formats: TemporalFormatSummary,
     pub sample: SampleSummary,
     pub tags: Vec<String>,
 }
@@ -62,6 +65,22 @@ pub struct WidthSummary {
     pub string_width_max: u32,
     pub numeric_width_sum: u64,
     pub numeric_width_max: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TemporalFormatSummary {
+    pub date_format_columns: usize,
+    pub datetime_format_columns: usize,
+    pub time_format_columns: usize,
+    pub date_formats: Vec<NamedCount>,
+    pub datetime_formats: Vec<NamedCount>,
+    pub time_formats: Vec<NamedCount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamedCount {
+    pub name: String,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -141,6 +160,7 @@ fn discover_path(path: &Path, paths: &mut Vec<PathBuf>) -> io::Result<()> {
     Ok(())
 }
 
+#[must_use]
 pub fn build_catalog(paths: &[PathBuf], sample_rows: usize) -> FixtureCatalog {
     let fixtures = paths
         .iter()
@@ -181,9 +201,16 @@ pub fn profile_fixture(path: &Path, sample_rows: usize) -> FixtureEntry {
 }
 
 fn profile_dataset(ds: &Dataset, sample_rows: usize) -> FixtureProfile {
+    let sample = sample_dataset(ds, sample_rows).unwrap_or_default();
+    profile_dataset_with_sample(ds, sample)
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn profile_dataset_with_sample(ds: &Dataset, sample: SampleSummary) -> FixtureProfile {
     let logical_types = logical_type_counts(ds);
     let widths = width_summary(ds);
-    let sample = sample_dataset(ds, sample_rows).unwrap_or_default();
+    let temporal_formats = temporal_format_summary(ds);
     let tags = classify_tags(ds, logical_types, sample);
     FixtureProfile {
         table_name: ds.metadata().table_name.clone(),
@@ -196,6 +223,7 @@ fn profile_dataset(ds: &Dataset, sample_rows: usize) -> FixtureProfile {
         page_count: ds.metadata().page_count,
         logical_types,
         widths,
+        temporal_formats,
         sample,
         tags,
     }
@@ -236,6 +264,57 @@ fn width_summary(ds: &Dataset) -> WidthSummary {
         }
     }
     widths
+}
+
+fn temporal_format_summary(ds: &Dataset) -> TemporalFormatSummary {
+    let mut summary = TemporalFormatSummary::default();
+    let mut date_formats = std::collections::BTreeMap::<String, usize>::new();
+    let mut datetime_formats = std::collections::BTreeMap::<String, usize>::new();
+    let mut time_formats = std::collections::BTreeMap::<String, usize>::new();
+
+    for column in ds.columns() {
+        let Some(format) = column.format.as_deref() else {
+            continue;
+        };
+        let cleaned = format.trim();
+        if cleaned.is_empty() {
+            continue;
+        }
+        match column.logical_type {
+            LogicalType::Date => {
+                summary.date_format_columns += 1;
+                *date_formats.entry(cleaned.to_owned()).or_default() += 1;
+            }
+            LogicalType::DateTime => {
+                summary.datetime_format_columns += 1;
+                *datetime_formats.entry(cleaned.to_owned()).or_default() += 1;
+            }
+            LogicalType::Time => {
+                summary.time_format_columns += 1;
+                *time_formats.entry(cleaned.to_owned()).or_default() += 1;
+            }
+            _ => {}
+        }
+    }
+
+    summary.date_formats = named_counts(date_formats);
+    summary.datetime_formats = named_counts(datetime_formats);
+    summary.time_formats = named_counts(time_formats);
+    summary
+}
+
+fn named_counts(values: std::collections::BTreeMap<String, usize>) -> Vec<NamedCount> {
+    let mut values: Vec<NamedCount> = values
+        .into_iter()
+        .map(|(name, count)| NamedCount { name, count })
+        .collect();
+    values.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    values
 }
 
 fn sample_dataset(ds: &Dataset, sample_rows: usize) -> Result<SampleSummary> {
@@ -450,7 +529,7 @@ fn content_tag(ds: &Dataset, logical_types: LogicalTypeCounts) -> String {
 }
 
 fn source_group(path: &Path) -> String {
-    let mut iter = path.components().map(|component| component.as_os_str());
+    let mut iter = path.components().map(std::path::Component::as_os_str);
     while let Some(component) = iter.next() {
         if component == "raw_data" {
             return iter.next().map_or_else(
@@ -465,7 +544,8 @@ fn source_group(path: &Path) -> String {
     )
 }
 
-pub fn summarize_scan_stats(stats: &ScanStats) -> ScanStatsSummary {
+#[must_use]
+pub const fn summarize_scan_stats(stats: &ScanStats) -> ScanStatsSummary {
     ScanStatsSummary {
         rows_seen: stats.rows_seen,
         rows_emitted: stats.rows_emitted,
@@ -492,6 +572,7 @@ pub struct ScanStatsSummary {
     pub decode_batches: u64,
 }
 
+#[must_use]
 pub fn build_projection(ds: &Dataset, preset: ProjectionPreset) -> Option<Projection> {
     match preset {
         ProjectionPreset::Full => None,
@@ -580,6 +661,7 @@ pub enum ProjectionPreset {
 }
 
 impl ProjectionPreset {
+    #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "full" => Some(Self::Full),

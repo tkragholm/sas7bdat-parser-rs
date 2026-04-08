@@ -1,4 +1,10 @@
-use super::*;
+#![allow(clippy::needless_pass_by_value, clippy::option_if_let_else)]
+
+use super::{
+    Arc, ControlFlow, Cursor, Dataset, Error, File, FileSource, PageDescriptor, RawRow, Result,
+    RowSelection, RowSpan, RowSpanKind, ScanBuilder, ScanStats, Seek, SeekFrom, decompress_row,
+};
+use std::io::Read;
 pub(super) fn scan_raw_rows<F>(builder: ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
 where
     F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
@@ -48,6 +54,10 @@ where
     let mut stats = ScanStats::default();
     let mut page = vec![0u8; plan.page_size];
     let mut decompressed_row = Vec::new();
+    let total_pages = u64::try_from(builder.ds.descriptors.pages.len()).unwrap_or(u64::MAX);
+    let estimated_total_bytes = u64::try_from(plan.page_size)
+        .unwrap_or(u64::MAX)
+        .saturating_mul(total_pages);
 
     for descriptor in builder.ds.descriptors.pages.iter().copied() {
         if plan.should_stop(&stats) {
@@ -97,6 +107,8 @@ where
                 }
             }
         }
+
+        emit_progress(&builder, &stats, total_pages, estimated_total_bytes);
     }
 
     Ok(stats)
@@ -126,6 +138,10 @@ where
 
     let mut stats = ScanStats::default();
     let mut decompressed_row = Vec::new();
+    let total_pages = u64::try_from(builder.ds.descriptors.pages.len()).unwrap_or(u64::MAX);
+    let estimated_total_bytes = u64::try_from(plan.page_size)
+        .unwrap_or(u64::MAX)
+        .saturating_mul(total_pages);
 
     for descriptor in builder.ds.descriptors.pages.iter().copied() {
         if plan.should_stop(&stats) {
@@ -177,9 +193,30 @@ where
                 }
             }
         }
+
+        emit_progress(&builder, &stats, total_pages, estimated_total_bytes);
     }
 
     Ok(stats)
+}
+
+fn emit_progress(
+    builder: &ScanBuilder<'_>,
+    stats: &ScanStats,
+    total_pages: u64,
+    estimated_total_bytes: u64,
+) {
+    if let Some(observer) = &builder.progress {
+        observer(super::ScanProgress {
+            pages_seen: stats.pages_seen,
+            total_pages,
+            raw_bytes_read: stats.raw_bytes_read,
+            estimated_total_bytes,
+            compressed_pages: stats.compressed_pages,
+            rows_seen: stats.rows_seen,
+            rows_emitted: stats.rows_emitted,
+        });
+    }
 }
 
 pub(super) fn page_slice<'a>(

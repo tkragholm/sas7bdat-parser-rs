@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation, clippy::needless_pass_by_value)]
+
 use crate::{
     encoding::resolve_encoding,
     error::{Error, MetadataError, Result},
@@ -152,7 +154,7 @@ impl MetadataState {
     }
 }
 
-pub(crate) fn parse_layout<R: Read + Seek>(
+pub fn parse_layout<R: Read + Seek>(
     reader: &mut R,
     header: HeaderInfo,
     mut metadata: DatasetMetadata,

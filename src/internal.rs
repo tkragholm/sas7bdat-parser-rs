@@ -8,20 +8,20 @@ use memmap2::Mmap;
 use std::{path::PathBuf, sync::Arc};
 
 #[derive(Debug)]
-pub(crate) enum FileSource {
+pub enum FileSource {
     Path(PathBuf),
     Bytes(Arc<[u8]>),
     Mmap(Arc<Mmap>),
 }
 
 #[derive(Debug)]
-pub(crate) struct FileInner {
+pub struct FileInner {
     pub source: FileSource,
     pub options: OpenOptions,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct LayoutPlan {
+pub struct LayoutPlan {
     pub columns: Vec<ColumnMeta>,
     pub header: HeaderInfo,
     pub row_len: u32,
@@ -31,7 +31,7 @@ pub(crate) struct LayoutPlan {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PageDescriptorTable {
+pub struct PageDescriptorTable {
     pub pages: Box<[PageDescriptor]>,
     pub row_spans: Box<[RowSpan]>,
     pub total_candidate_rows: u64,
@@ -47,7 +47,7 @@ impl PageDescriptorTable {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PageDescriptor {
+pub struct PageDescriptor {
     pub page_index: u64,
     pub row_base: u64,
     pub row_count: u32,
@@ -58,21 +58,21 @@ pub(crate) struct PageDescriptor {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct RowSpan {
+pub struct RowSpan {
     pub offset: u32,
     pub len: u32,
     pub kind: RowSpanKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum RowSpanKind {
+pub enum RowSpanKind {
     #[default]
     Borrowed,
     Compressed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum PageExecClass {
+pub enum PageExecClass {
     #[default]
     FusedContiguousUncompressed,
     IndexedPointerRows,
@@ -81,13 +81,13 @@ pub(crate) enum PageExecClass {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ProjectionPlan {
+pub struct ProjectionPlan {
     pub columns: Box<[ProjectedColumnPlan]>,
     pub max_end: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ProjectedColumnPlan {
+pub struct ProjectedColumnPlan {
     pub index: usize,
     pub offset: u32,
     pub width: u32,
@@ -96,7 +96,7 @@ pub(crate) struct ProjectedColumnPlan {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct HeaderInfo {
+pub struct HeaderInfo {
     pub endianness: crate::metadata::Endianness,
     pub uses_u64_pointers: bool,
     pub page_size: u32,
@@ -111,19 +111,19 @@ pub(crate) struct HeaderInfo {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct KernelSet;
+pub struct KernelSet;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PageSource;
+pub struct PageSource;
 
 #[derive(Debug, Clone)]
-pub(crate) struct SmallCommandBlock<const N: usize = 16> {
+pub struct SmallCommandBlock<const N: usize = 16> {
     pub len: u8,
     pub ops: [SmallOp; N],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SmallOp {
+pub enum SmallOp {
     Fill { byte: u8, len: u16 },
     Literal { src_off: u32, len: u16 },
     CopyBackref { back: u16, len: u16 },

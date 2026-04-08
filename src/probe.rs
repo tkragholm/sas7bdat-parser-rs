@@ -1,3 +1,10 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::needless_pass_by_value
+)]
+
 use crate::{
     error::{Error, HeaderError, Result, UnsupportedError},
     internal::HeaderInfo,
@@ -37,9 +44,7 @@ const SAS7BCAT_MAGIC_NUMBER: [u8; 32] = [
     0xB3, 0x14, 0x11, 0xCF, 0xBD, 0x92, 0x08, 0x00, 0x09, 0xC7, 0x31, 0x8C, 0x18, 0x1F, 0x10, 0x11,
 ];
 
-pub(crate) fn probe_header<R: Read + Seek>(
-    reader: &mut R,
-) -> Result<(HeaderInfo, DatasetMetadata)> {
+pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, DatasetMetadata)> {
     let mut start_buf = [0u8; SAS_HEADER_START_SIZE];
     reader.read_exact(&mut start_buf).map_err(io_header_error)?;
 

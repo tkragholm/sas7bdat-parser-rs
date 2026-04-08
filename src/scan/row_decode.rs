@@ -1,4 +1,22 @@
-use super::*;
+#![allow(
+    clippy::inline_always,
+    clippy::items_after_statements,
+    clippy::match_same_arms,
+    clippy::missing_errors_doc,
+    clippy::option_if_let_else,
+    clippy::unnecessary_wraps,
+    clippy::unused_self
+)]
+
+use super::{
+    Arc, CompiledColumnPlan, CompiledDecodeKernel, DecodeMode, Encoding, Endianness, Error,
+    OwnedCellMaterializationKind, Result, SasDate, SasDateTime, SasTime, ScanBuilder,
+    StringDecodeOptions, UTF_8, Utf8ValidationMode, compile_column_plan,
+    compile_compiled_projection_column_plan, compile_owned_materialization_kind,
+    compile_string_decode_kernel, decode_numeric_cell, maybe_fix_mojibake,
+    mojibake_fix_maybe_needed_for_encoded_bytes, numeric_bits, resolve_encoding,
+    trim_and_classify_ascii, try_i32_from_f64, try_i64_from_f64,
+};
 #[derive(Debug)]
 pub(super) struct RowDecodePlan {
     pub(super) columns: Vec<CompiledColumnPlan>,
@@ -473,7 +491,9 @@ impl RowDecodePlan {
         let slice = self.slice_in_bounds(row, column);
         match kind {
             OwnedCellMaterializationKind::Utf8 => self.materialize_owned_string_typed(slice),
-            OwnedCellMaterializationKind::RawBytes => Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec())),
+            OwnedCellMaterializationKind::RawBytes => {
+                Ok(crate::row::OwnedCellValue::Bytes(slice.to_vec()))
+            }
             OwnedCellMaterializationKind::Date => Ok(self.materialize_owned_date(slice)),
             OwnedCellMaterializationKind::DateAsNumeric
             | OwnedCellMaterializationKind::NumericTyped
@@ -576,10 +596,7 @@ impl RowDecodePlan {
         }
     }
 
-    pub(super) fn materialize_owned_datetime(
-        &self,
-        slice: &[u8],
-    ) -> crate::row::OwnedCellValue {
+    pub(super) fn materialize_owned_datetime(&self, slice: &[u8]) -> crate::row::OwnedCellValue {
         match decode_numeric_cell(slice, self.endianness) {
             None => crate::row::OwnedCellValue::Null,
             Some(number) => {
@@ -637,20 +654,14 @@ impl RowDecodePlan {
         if slice.is_empty() {
             return crate::row::OwnedCellValue::Null;
         }
-        crate::row::OwnedCellValue::Float64(f64::from_bits(numeric_bits(
-            slice,
-            self.endianness,
-        )))
+        crate::row::OwnedCellValue::Float64(f64::from_bits(numeric_bits(slice, self.endianness)))
     }
 
     pub(super) fn plan_numeric_lossless<'row>(&self, slice: &[u8]) -> PlannedCell<'row> {
         if slice.is_empty() {
             return PlannedCell::Null;
         }
-        PlannedCell::Float64(f64::from_bits(numeric_bits(
-            slice,
-            self.endianness,
-        )))
+        PlannedCell::Float64(f64::from_bits(numeric_bits(slice, self.endianness)))
     }
 }
 

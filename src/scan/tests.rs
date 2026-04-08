@@ -1,5 +1,5 @@
 use super::{
-    BatchDecodePlan, DirectUtf8OwnedMode, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder,
+    BatchDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder, batch::DirectUtf8OwnedMode,
     trim_and_classify_ascii,
 };
 use crate::{

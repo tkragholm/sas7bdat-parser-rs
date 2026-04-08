@@ -1,3 +1,11 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::missing_const_for_fn,
+    clippy::too_many_lines
+)]
+
+use sas7bdat_profiler::init_profiler_runtime;
 use sas7bdat_simd::{Dataset, LogicalType, RowSelection};
 use serde::Serialize;
 use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
@@ -76,6 +84,7 @@ struct PrintableWidthBucket {
 }
 
 fn main() -> ExitCode {
+    init_profiler_runtime();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
@@ -128,7 +137,9 @@ fn run() -> std::result::Result<(), String> {
     let sample_rows = sample_rows.min(ds.metadata().row_count as usize);
     let projection = string_columns
         .iter()
-        .fold(ds.projection(), |builder, (idx, _, _)| builder.column_idx(*idx))
+        .fold(ds.projection(), |builder, (idx, _, _)| {
+            builder.column_idx(*idx)
+        })
         .build()
         .map_err(|err| err.to_string())?;
 
@@ -325,6 +336,6 @@ fn next_value(
 
 fn print_usage() {
     eprintln!(
-        "usage: cargo run --bin fixture_string_profile -- --fixture PATH [--sample-rows N] [--top N]"
+        "usage: cargo run -p sas7bdat-profiler --bin fixture_string_profile -- --fixture PATH [--sample-rows N] [--top N]"
     );
 }

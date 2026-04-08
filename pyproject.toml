@@ -3,9 +3,10 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "sas7bdat-simd-tools"
+name = "cdef-sas7bdat-corpus-profiler"
 version = "0.1.0"
-description = "Server-friendly binary tools for profiling SAS7BDAT corpora"
+description = "Tool for profiling SAS7BDAT corpora"
+readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
   "Programming Language :: Python",
@@ -16,3 +17,4 @@ classifiers = [
 
 [tool.maturin]
 bindings = "bin"
+manifest-path = "profiler/Cargo.toml"

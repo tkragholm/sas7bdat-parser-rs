@@ -1,4 +1,8 @@
-use super::*;
+use super::{Encoding, MojibakePolicy, Simd, SimdPartialEq, SimdUint, TrimmedString};
+
+const SPACES_HEAD_12: u64 = u64::from_ne_bytes([b' '; 8]);
+const SPACES_TAIL_12: u32 = u32::from_ne_bytes([b' '; 4]);
+
 #[inline]
 pub(super) fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
     let mut end = slice.len();
@@ -36,16 +40,13 @@ pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn is_all_space_or_nul_12(slice: &[u8]) -> bool {
     debug_assert_eq!(slice.len(), 12);
     let head = u64::from_ne_bytes(slice[..8].try_into().expect("fixed-width head"));
     let tail = u32::from_ne_bytes(slice[8..12].try_into().expect("fixed-width tail"));
 
-    const SPACES_HEAD: u64 = u64::from_ne_bytes([b' '; 8]);
-    const SPACES_TAIL: u32 = u32::from_ne_bytes([b' '; 4]);
-
-    (head == 0 && tail == 0) || (head == SPACES_HEAD && tail == SPACES_TAIL)
+    (head == 0 && tail == 0) || (head == SPACES_HEAD_12 && tail == SPACES_TAIL_12)
 }
 
 #[inline(always)]

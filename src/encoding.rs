@@ -1,6 +1,6 @@
 use encoding_rs::{Encoding, UTF_8};
 
-pub(crate) fn resolve_encoding(label: Option<&str>) -> &'static Encoding {
+pub fn resolve_encoding(label: Option<&str>) -> &'static Encoding {
     label.and_then(resolve_label).unwrap_or(UTF_8)
 }
 

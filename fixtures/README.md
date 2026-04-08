@@ -21,10 +21,10 @@ validation or benchmarks.
   Current pinned regressions include both uncompressed and compressed real files such as `charset_utf8.sas7bdat`, `54-cookie.sas7bdat`, `54-class.sas7bdat`, `test2.sas7bdat`, and `max_sas_date.sas7bdat`.
   The fixture suite also has a dedicated compressed-corpus smoke pass so compressed datasets are exercised as a first-class runtime path.
 - `benches/scan_hotpaths.rs` uses a smaller set of local fixtures for repeatable Criterion runs and now includes both the larger compressed `raw_data/ahs2013/topical.sas7bdat` case and the larger uncompressed `raw_data/ahs2013/homimp.sas7bdat` case so the suite is not biased toward tiny files.
-- `src/bin/fixture_catalog.rs` builds a local JSON catalog of the available fixture corpus, including the AHS datasets plus the `csharp`, `other`, `pandas`, `principlesofeco`, and `readstat` subcorpora. The catalog records metadata, sampled content features, and derived tags such as `compressed`, `string-heavy`, `benchmark-standard`, or `benchmark-macro`.
-- `src/bin/corpus_profile.rs` is the server-oriented version of the catalog workflow. It walks arbitrary input roots, emits one JSON report for the whole corpus, and adds aggregate summaries such as compression counts, encoding counts, tag counts, and top files by size, rows, columns, and string columns.
-- `src/bin/fixture_profile.rs` runs one fixture in a selected scan mode (`raw_rows`, `typed_rows`, `typed_batches`, etc.) and emits structured timing plus parser stats. This is intended to be wrapped by established OS tools for memory and CPU inspection.
-- `src/bin/fixture_string_profile.rs` samples string columns for one fixture and reports width buckets plus the densest and emptiest string columns. This is useful when deciding whether a large string workload is dominated by dense identifiers, low-cardinality categoricals, or mostly-empty fixed-width columns.
+- `profiler/src/bin/fixture_catalog.rs` builds a local JSON catalog of the available fixture corpus, including the AHS datasets plus the `csharp`, `other`, `pandas`, `principlesofeco`, and `readstat` subcorpora. The catalog records metadata, sampled content features, and derived tags such as `compressed`, `string-heavy`, `benchmark-standard`, or `benchmark-macro`.
+- `profiler/src/bin/corpus_profile.rs` is the server-oriented version of the catalog workflow. It walks arbitrary input roots, emits one JSON report for the whole corpus, and adds aggregate summaries such as compression counts, encoding counts, tag counts, and top files by size, rows, columns, and string columns.
+- `profiler/src/bin/fixture_profile.rs` runs one fixture in a selected scan mode (`raw_rows`, `typed_rows`, `typed_batches`, etc.) and emits structured timing plus parser stats. This is intended to be wrapped by established OS tools for memory and CPU inspection.
+- `profiler/src/bin/fixture_string_profile.rs` samples string columns for one fixture and reports width buckets plus the densest and emptiest string columns. This is useful when deciding whether a large string workload is dominated by dense identifiers, low-cardinality categoricals, or mostly-empty fixed-width columns.
 - In practice, `fixture_profile` is now the preferred tool for large file-backed workload decisions, backend comparisons, RSS checks, and one-off fixture studies. Criterion remains the primary tool for curated, repeatable hot-path suites over the pinned benchmark set.
 - The root `justfile` is the main entrypoint for this workflow:
   - `just catalog` generates `fixtures/fixture_catalog.local.json`
@@ -82,7 +82,7 @@ leave that as shell-style argument passthrough.
 
 Examples:
 
-- `cargo run --release --bin corpus_profile -- /data/sas7bdat --sample-rows 512 --out corpus-profile.json`
+- `cargo run --release -p sas7bdat-profiler --bin corpus_profile -- /data/sas7bdat --sample-rows 512 --out corpus-profile.json`
 - `just bench-standard full 2`
 - `just bench-compressed full 3`
 - `just bench-string-heavy strings 2`

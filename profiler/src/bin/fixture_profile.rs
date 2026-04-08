@@ -1,3 +1,6 @@
+#![allow(clippy::cast_precision_loss, clippy::too_many_lines)]
+
+use sas7bdat_profiler::init_profiler_runtime;
 use sas7bdat_simd::{
     BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions,
     fixture_catalog::{ProjectionPreset, ScanStatsSummary, build_projection, summarize_scan_stats},
@@ -64,6 +67,7 @@ const fn mode_name(mode: ProfileMode) -> &'static str {
 }
 
 fn main() -> ExitCode {
+    init_profiler_runtime();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
@@ -237,6 +241,6 @@ fn parse_io_backend(value: &str) -> Option<IoBackendPreference> {
 
 fn print_usage() {
     eprintln!(
-        "usage: cargo run --bin fixture_profile -- --fixture PATH --mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches [--projection full|numeric|strings|mixed] [--repeat N] [--limit N] [--batch-rows N] [--io-backend auto|mmap-preferred|buffered-preferred|buffered-only]"
+        "usage: cargo run -p sas7bdat-profiler --bin fixture_profile -- --fixture PATH --mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches [--projection full|numeric|strings|mixed] [--repeat N] [--limit N] [--batch-rows N] [--io-backend auto|mmap-preferred|buffered-preferred|buffered-only]"
     );
 }

@@ -37,7 +37,7 @@ pub use options::{
 };
 pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};
 pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
-pub use scan::{BatchSink, RawRowSink, RowSink, ScanBuilder, ScanStats};
+pub use scan::{BatchSink, RawRowSink, RowSink, ScanBuilder, ScanProgress, ScanStats};
 
 #[allow(unused_imports)]
 pub(crate) use internal::{

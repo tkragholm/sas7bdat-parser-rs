@@ -1,3 +1,9 @@
+#![allow(
+    clippy::float_cmp,
+    clippy::needless_pass_by_value,
+    clippy::unreadable_literal
+)]
+
 use sas7bdat_simd::{BatchHint, Dataset, OwnedCellValue, OwnedColumnBuffer};
 use std::{
     env,

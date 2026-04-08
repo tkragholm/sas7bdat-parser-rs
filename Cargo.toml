@@ -3,6 +3,10 @@ name = "sas7bdat-simd"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["profiler"]
+resolver = "2"
+
 [dependencies]
 encoding_rs = "0.8"
 memchr = "2.8"
@@ -24,3 +28,15 @@ harness = false
 [[bench]]
 name = "backend_matrix"
 harness = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 8
+opt-level = 3
+panic = "abort"
+
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

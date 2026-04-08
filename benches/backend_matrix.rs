@@ -1,7 +1,7 @@
+#![allow(clippy::needless_pass_by_value)]
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use sas7bdat_simd::{
-    BatchHint, Dataset, IoBackendPreference, OpenOptions, Projection,
-};
+use sas7bdat_simd::{BatchHint, Dataset, IoBackendPreference, OpenOptions, Projection};
 use std::{hint::black_box, path::PathBuf};
 
 fn fixture_path(relative: &str) -> PathBuf {
@@ -51,7 +51,11 @@ fn bench_string_batches(
         let Some(dataset) = open_dataset(relative, io_backend) else {
             continue;
         };
-        let Ok(projection) = dataset.projection().columns(columns.iter().copied()).build() else {
+        let Ok(projection) = dataset
+            .projection()
+            .columns(columns.iter().copied())
+            .build()
+        else {
             continue;
         };
         bench_projected_batches(
@@ -85,7 +89,11 @@ fn bench_numeric_batches(
         let Some(dataset) = open_dataset(relative, io_backend) else {
             continue;
         };
-        let Ok(projection) = dataset.projection().columns(columns.iter().copied()).build() else {
+        let Ok(projection) = dataset
+            .projection()
+            .columns(columns.iter().copied())
+            .build()
+        else {
             continue;
         };
         bench_projected_batches(
@@ -118,19 +126,22 @@ fn bench_raw_rows(
         let Some(dataset) = open_dataset(relative, io_backend) else {
             continue;
         };
-        group.bench_function(BenchmarkId::new("raw_rows", backend_label(io_backend)), |b| {
-            b.iter(|| {
-                let stats = dataset
-                    .scan()
-                    .visit_raw_rows(|row| {
-                        black_box(row.row_index);
-                        black_box(row.bytes.len());
-                        Ok(std::ops::ControlFlow::Continue(()))
-                    })
-                    .expect("backend raw scan");
-                black_box(stats.rows_emitted);
-            });
-        });
+        group.bench_function(
+            BenchmarkId::new("raw_rows", backend_label(io_backend)),
+            |b| {
+                b.iter(|| {
+                    let stats = dataset
+                        .scan()
+                        .visit_raw_rows(|row| {
+                            black_box(row.row_index);
+                            black_box(row.bytes.len());
+                            Ok(std::ops::ControlFlow::Continue(()))
+                        })
+                        .expect("backend raw scan");
+                    black_box(stats.rows_emitted);
+                });
+            },
+        );
     }
 
     group.finish();
@@ -156,19 +167,26 @@ fn bench_typed_rows(
         let Some(dataset) = open_dataset(relative, io_backend) else {
             continue;
         };
-        let Ok(projection) = dataset.projection().columns(columns.iter().copied()).build() else {
+        let Ok(projection) = dataset
+            .projection()
+            .columns(columns.iter().copied())
+            .build()
+        else {
             continue;
         };
-        group.bench_function(BenchmarkId::new("typed_rows", backend_label(io_backend)), |b| {
-            b.iter(|| {
-                let rows = dataset
-                    .scan()
-                    .with_projection(&projection)
-                    .collect_rows()
-                    .expect("backend typed rows");
-                black_box(rows.len());
-            });
-        });
+        group.bench_function(
+            BenchmarkId::new("typed_rows", backend_label(io_backend)),
+            |b| {
+                b.iter(|| {
+                    let rows = dataset
+                        .scan()
+                        .with_projection(&projection)
+                        .collect_rows()
+                        .expect("backend typed rows");
+                    black_box(rows.len());
+                });
+            },
+        );
     }
 
     group.finish();
@@ -218,7 +236,9 @@ fn backend_matrix(c: &mut Criterion) {
         c,
         "backend_topical_string_batches",
         "raw_data/ahs2013/topical.sas7bdat",
-        &["CONTROL", "EABAN", "EBARCL", "PTBANK", "PTENTMNT", "PTGROCER"],
+        &[
+            "CONTROL", "EABAN", "EBARCL", "PTBANK", "PTENTMNT", "PTGROCER",
+        ],
         &io_backends,
     );
 }

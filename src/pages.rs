@@ -1,3 +1,11 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::float_cmp,
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    clippy::trivially_copy_pass_by_ref
+)]
+
 use crate::{
     error::{CorruptionError, Error, Result},
     internal::{
@@ -45,16 +53,7 @@ struct DescriptorInputs {
     row_base: u64,
 }
 
-#[derive(Clone, Copy)]
-struct PointerRowSpanContext {
-    row_len: u32,
-    remaining_rows: u64,
-    row_span_start: u32,
-    target_rows: Option<u64>,
-    kind: RowSpanKind,
-}
-
-pub(crate) fn compile_page_descriptors<R: Read + Seek>(
+pub fn compile_page_descriptors<R: Read + Seek>(
     reader: &mut R,
     layout: &LayoutPlan,
 ) -> Result<PageDescriptorTable> {
@@ -129,6 +128,17 @@ fn classify_descriptor(
         subheader_count,
         row_base,
     } = inputs;
+    if (page_type & SAS_PAGE_TYPE_COMP) != 0 {
+        return Ok(PageDescriptor {
+            page_index,
+            row_base,
+            row_count: 0,
+            data_start: 0,
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::MetadataOrEmpty,
+        });
+    }
     let kind = classify_page(page_type);
     let data_like = matches!(
         kind,
@@ -336,18 +346,26 @@ fn classify_indexed_descriptor(
                 if pointer.is_compressed_data
                     && !signature_is_recognized(parse_subheader_signature(header, data))
                 {
-                    push_row_spans_from_pointer(
-                        row_spans,
-                        data,
-                        pointer.offset,
-                        PointerRowSpanContext {
-                            row_len: layout.row_len,
-                            remaining_rows,
-                            row_span_start,
-                            target_rows,
+                    if pointer.length != usize::try_from(layout.row_len).unwrap_or(usize::MAX) {
+                        return Err(page_corruption(
+                            "compressed-data pointer row width mismatch",
+                        ));
+                    }
+                    let produced = u64::from(
+                        u32::try_from(row_spans.len())
+                            .unwrap_or(u32::MAX)
+                            .saturating_sub(row_span_start),
+                    );
+                    if produced < remaining_rows
+                        && target_rows.is_none_or(|target| produced < target)
+                    {
+                        row_spans.push(RowSpan {
+                            offset: u32::try_from(pointer.offset)
+                                .map_err(|_| page_corruption("borrowed row offset exceeds u32"))?,
+                            len: layout.row_len,
                             kind: RowSpanKind::Borrowed,
-                        },
-                    )?;
+                        });
+                    }
                 }
             }
             1 => {}
@@ -490,50 +508,6 @@ fn classify_indexed_descriptor(
     })
 }
 
-fn push_row_spans_from_pointer(
-    row_spans: &mut Vec<RowSpan>,
-    data: &[u8],
-    offset: usize,
-    context: PointerRowSpanContext,
-) -> Result<()> {
-    let PointerRowSpanContext {
-        row_len,
-        remaining_rows,
-        row_span_start,
-        target_rows,
-        kind,
-    } = context;
-    let row_len =
-        usize::try_from(row_len).map_err(|_| page_corruption("row length exceeds usize"))?;
-    if row_len == 0 {
-        return Ok(());
-    }
-    let mut local_offset = offset;
-    let mut remaining = data.len();
-    while remaining >= row_len {
-        let produced = u64::from(
-            u32::try_from(row_spans.len())
-                .unwrap_or(u32::MAX)
-                .saturating_sub(row_span_start),
-        );
-        if produced >= remaining_rows {
-            break;
-        }
-        if target_rows.is_some_and(|target| produced >= target) {
-            break;
-        }
-        row_spans.push(RowSpan {
-            offset: u32::try_from(local_offset)
-                .map_err(|_| page_corruption("row span offset exceeds u32"))?,
-            len: u32::try_from(row_len).unwrap_or(u32::MAX),
-            kind,
-        });
-        local_offset = local_offset.saturating_add(row_len);
-        remaining -= row_len;
-    }
-    Ok(())
-}
-
 fn push_contiguous_row_spans(
     row_spans: &mut Vec<RowSpan>,
     data_start: u32,
@@ -589,12 +563,40 @@ fn contiguous_data_start(
     {
         let start = usize::try_from(data_start).unwrap_or(0);
         let word = u32::from_le_bytes(page[start..start + 4].try_into().unwrap_or([0; 4]));
-        if word == 0 || word == 0x2020_2020 {
+        if word == 0 || word == 0x2020_2020 || !is_stattransfer_release(&header.release) {
             data_start = data_start.saturating_add(4);
         }
     }
 
     u32::try_from(data_start).map_err(|_| page_corruption("page data start exceeds u32"))
+}
+
+fn is_stattransfer_release(release: &str) -> bool {
+    let bytes = release.as_bytes();
+    if bytes.len() != 8 || bytes[1] != b'.' || (bytes[6] != b'M' && bytes[6] != b'J') {
+        return false;
+    }
+
+    let major = match bytes[0] {
+        b'1'..=b'9' => u16::from(bytes[0] - b'0'),
+        b'V' => 9,
+        _ => return false,
+    };
+
+    let minor = match std::str::from_utf8(&bytes[2..6])
+        .ok()
+        .and_then(|digits| digits.parse::<u16>().ok())
+    {
+        Some(minor) => minor,
+        None => return false,
+    };
+
+    let revision = match bytes[7] {
+        b'0'..=b'9' => u16::from(bytes[7] - b'0'),
+        _ => return false,
+    };
+
+    (major == 8 || major == 9) && minor == 0 && revision == 0
 }
 
 const fn classify_page(page_type: u16) -> PageKind {
@@ -722,7 +724,10 @@ fn page_io_error(err: std::io::Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MIX, compile_page_descriptors};
+    use super::{
+        SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MIX, compile_page_descriptors, contiguous_data_start,
+        is_stattransfer_release,
+    };
     use crate::{
         internal::{HeaderInfo, LayoutPlan, PageExecClass, RowSpanKind},
         metadata::{CompressionKind, Endianness},
@@ -814,6 +819,51 @@ mod tests {
         assert_eq!(descriptors.pages[0].row_count, 1);
         assert_eq!(descriptors.pages[0].row_span_count, 1);
         assert_eq!(descriptors.row_spans[0].kind, RowSpanKind::Compressed);
+    }
+
+    #[test]
+    fn skips_pages_with_comp_mask_bit_set_before_pointer_decode() {
+        let mut page = vec![0u8; 64];
+        let page_type = 0x1000u16;
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
+        page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
+        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+        page[24..28].copy_from_slice(&40u32.to_le_bytes());
+        page[28..32].copy_from_slice(&4u32.to_le_bytes());
+        page[32] = 88;
+        page[33] = 1;
+
+        let layout = simple_layout(64, 1, 4, 1);
+        let mut cursor = Cursor::new(page);
+        let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
+
+        assert_eq!(descriptors.pages.len(), 1);
+        assert_eq!(
+            descriptors.pages[0].exec_class,
+            PageExecClass::MetadataOrEmpty
+        );
+        assert_eq!(descriptors.pages[0].row_count, 0);
+        assert!(descriptors.row_spans.is_empty());
+    }
+
+    #[test]
+    fn mix_page_skips_hidden_padding_for_non_stattransfer_release() {
+        let mut page = vec![0u8; 64];
+        page[36..40].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+        let mut layout = simple_layout(64, 1, 4, 1);
+        layout.header.release = "9.0401M3".to_owned();
+
+        let data_start =
+            contiguous_data_start(&layout, &page, super::PageKind::Mix, 1).expect("data start");
+
+        assert_eq!(data_start, 40);
+    }
+
+    #[test]
+    fn stattransfer_release_detection_matches_reference_rule() {
+        assert!(is_stattransfer_release("V.0000M0"));
+        assert!(is_stattransfer_release("9.0000M0"));
+        assert!(!is_stattransfer_release("9.0401M3"));
     }
 
     fn simple_layout(page_size: u32, page_count: u64, row_len: u32, total_rows: u64) -> LayoutPlan {

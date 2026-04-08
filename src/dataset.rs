@@ -28,10 +28,18 @@ pub struct Dataset {
 }
 
 impl Dataset {
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or its SAS7BDAT
+    /// structure cannot be parsed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with(path, OpenOptions::default())
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened, mapped, or its
+    /// SAS7BDAT structure cannot be parsed.
     pub fn open_with(path: impl AsRef<Path>, options: OpenOptions) -> Result<Self> {
         let path = path.as_ref();
         let _meta = fs::metadata(path).map_err(|err| {
@@ -46,15 +54,19 @@ impl Dataset {
                 message: err.to_string(),
             })
         })?;
-        if should_try_mmap(options.io_backend) {
-            if let Some(mmap) = try_map_file(path, &file)? {
-                return Self::from_mmap(mmap, options);
-            }
+        if should_try_mmap(options.io_backend)
+            && let Some(mmap) = try_map_file(path, &file)?
+        {
+            return Self::from_mmap(mmap, options);
         }
 
         Self::from_buffered_file(path, file, options)
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the provided bytes do not contain a valid
+    /// SAS7BDAT payload.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let bytes = Arc::<[u8]>::from(bytes);
         let mut cursor = Cursor::new(&*bytes);

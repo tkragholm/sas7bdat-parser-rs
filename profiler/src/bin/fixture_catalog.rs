@@ -1,7 +1,9 @@
+use sas7bdat_profiler::init_profiler_runtime;
 use sas7bdat_simd::fixture_catalog::{build_catalog, discover_fixture_paths};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 fn main() -> ExitCode {
+    init_profiler_runtime();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
@@ -65,6 +67,6 @@ fn run() -> std::result::Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "usage: cargo run --bin fixture_catalog -- [paths...] [--sample-rows N] [--out PATH]"
+        "usage: cargo run -p sas7bdat-profiler --bin fixture_catalog -- [paths...] [--sample-rows N] [--out PATH]"
     );
 }

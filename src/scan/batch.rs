@@ -1,4 +1,23 @@
-use super::*;
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::inline_always,
+    clippy::match_same_arms,
+    clippy::missing_errors_doc,
+    clippy::option_if_let_else,
+    clippy::too_many_lines,
+    clippy::unnecessary_wraps,
+    clippy::used_underscore_binding
+)]
+
+use super::{
+    ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
+    DecodedUtf8BatchValue, Error, NumericTileMode, OwnedColumnBuffer, OwnedColumnarBatch,
+    PlannedCell, Result, RowDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime,
+    SasTime, ScanBuilder, StringDecodeKernel, TrimmedString, decode_numeric_cell,
+    decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column, numeric_bits_is_missing,
+    staged_numeric_raw_bits_from_planned_cell, trim_and_classify_ascii, try_i32_from_f64,
+    try_i64_from_f64,
+};
 #[derive(Debug)]
 pub(super) struct BatchDecodePlan {
     pub(super) row_plan: RowDecodePlan,
@@ -1014,10 +1033,10 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                         utf8_decode_scratch,
                     )? {
                     DecodedUtf8BatchValue::Borrowed(bytes) => {
-                        push_variable_valid(offsets, data, valid, bytes)?
+                        push_variable_valid(offsets, data, valid, bytes)?;
                     }
                     DecodedUtf8BatchValue::Scratch => {
-                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?
+                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
                     }
                 },
                 StringDecodeKernel::EncodedStrict => match row_plan
@@ -1026,10 +1045,10 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                         utf8_decode_scratch,
                     )? {
                     DecodedUtf8BatchValue::Borrowed(bytes) => {
-                        push_variable_valid(offsets, data, valid, bytes)?
+                        push_variable_valid(offsets, data, valid, bytes)?;
                     }
                     DecodedUtf8BatchValue::Scratch => {
-                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?
+                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
                     }
                 },
                 StringDecodeKernel::EncodedLenient => match row_plan
@@ -1038,10 +1057,10 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                         utf8_decode_scratch,
                     )? {
                     DecodedUtf8BatchValue::Borrowed(bytes) => {
-                        push_variable_valid(offsets, data, valid, bytes)?
+                        push_variable_valid(offsets, data, valid, bytes)?;
                     }
                     DecodedUtf8BatchValue::Scratch => {
-                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?
+                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
                     }
                 },
             }
@@ -1194,7 +1213,7 @@ pub(super) fn compile_batch_column_families(
             (CompiledDecodeKernel::Utf8, ColumnMaterializationKind::Utf8)
                 if enable_single_byte_utf8 && column.width == 1 =>
             {
-                families.direct_utf8_single_byte.push(idx)
+                families.direct_utf8_single_byte.push(idx);
             }
             (
                 CompiledDecodeKernel::Integer
@@ -1214,7 +1233,7 @@ pub(super) fn compile_batch_column_families(
                 | ColumnMaterializationKind::Time,
             ) => families.direct_numeric.push(idx),
             (CompiledDecodeKernel::RawBytes, ColumnMaterializationKind::RawBytes) => {
-                families.direct_raw_bytes.push(idx)
+                families.direct_raw_bytes.push(idx);
             }
             (CompiledDecodeKernel::Utf8, ColumnMaterializationKind::Utf8) => match string_kernel {
                 StringDecodeKernel::Utf8Strict => families.direct_utf8_borrowed.push(idx),

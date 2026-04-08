@@ -1,3 +1,10 @@
+#![allow(
+    clippy::map_unwrap_or,
+    clippy::needless_pass_by_value,
+    clippy::uninlined_format_args,
+    clippy::unnecessary_debug_formatting
+)]
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use sas7bdat_simd::{
     BatchHint, Dataset, Projection, RowSelection,
