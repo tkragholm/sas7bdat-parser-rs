@@ -1,13 +1,3 @@
-#![allow(
-    clippy::inline_always,
-    clippy::items_after_statements,
-    clippy::match_same_arms,
-    clippy::missing_errors_doc,
-    clippy::option_if_let_else,
-    clippy::unnecessary_wraps,
-    clippy::unused_self
-)]
-
 use super::{
     Arc, CompiledColumnPlan, CompiledDecodeKernel, DecodeMode, Encoding, Endianness, Error,
     OwnedCellMaterializationKind, Result, SasDate, SasDateTime, SasTime, ScanBuilder,
@@ -88,9 +78,8 @@ impl RowDecodePlan {
                     .columns
                     .iter()
                     .map(|column| compile_compiled_projection_column_plan(builder, column))
-                    .collect::<Result<Vec<_>>>()?,
-                usize::try_from(projection.inner.max_end)
-                    .map_err(|_| Error::unsupported("projection max end exceeds platform usize"))?,
+                    .collect::<Vec<_>>(),
+                usize::from(projection.inner.max_end),
             )
         } else {
             let columns = builder

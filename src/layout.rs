@@ -1,10 +1,9 @@
-#![allow(clippy::cast_possible_truncation, clippy::needless_pass_by_value)]
-
 use crate::{
     encoding::resolve_encoding,
-    error::{Error, MetadataError, Result},
+    error::{Error, Result},
     internal::{HeaderInfo, LayoutPlan},
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
+    types::RowLength,
 };
 use encoding_rs::{Encoding, UTF_8};
 use std::{
@@ -171,7 +170,7 @@ pub fn parse_layout<R: Read + Seek>(
             .seek(SeekFrom::Start(page_offset))
             .map_err(metadata_io_error)?;
 
-        let mut page = vec![0u8; header.page_size as usize];
+        let mut page = vec![0u8; usize::from(header.page_size)];
         reader.read_exact(&mut page).map_err(metadata_io_error)?;
 
         let page_type = read_u16(
@@ -244,7 +243,7 @@ pub fn parse_layout<R: Read + Seek>(
         LayoutPlan {
             columns,
             header,
-            row_len: row_info.row_length,
+            row_len: RowLength::from(row_info.row_length),
             total_rows: row_info.total_rows,
             compression,
             rows_per_page: row_info.rows_per_page,
@@ -668,13 +667,9 @@ fn get_range<'a>(bytes: &'a [u8], start: usize, end: usize, what: &str) -> Resul
 }
 
 fn metadata_io_error(err: std::io::Error) -> Error {
-    Error::Metadata(MetadataError {
-        message: err.to_string(),
-    })
+    Error::metadata_corruption(err.to_string())
 }
 
 fn metadata_error(message: impl Into<String>) -> Error {
-    Error::Metadata(MetadataError {
-        message: message.into(),
-    })
+    Error::metadata_corruption(message)
 }

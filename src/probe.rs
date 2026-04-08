@@ -1,10 +1,3 @@
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::needless_pass_by_value
-)]
-
 use crate::{
     error::{Error, HeaderError, Result, UnsupportedError},
     internal::HeaderInfo,
@@ -51,13 +44,15 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
     let header_start = HeaderStart::from_bytes(start_buf);
     let is_catalog = header_start.magic == SAS7BCAT_MAGIC_NUMBER;
     if header_start.magic != SAS7BDAT_MAGIC_NUMBER && !is_catalog {
-        return Err(header_error("unrecognized SAS magic number"));
+        let mut magic = [0u8; 4];
+        magic.copy_from_slice(&header_start.magic[12..16]);
+        return Err(Error::Header(HeaderError::InvalidMagic(magic)));
     }
 
     let endianness = match header_start.endian {
         SAS_ENDIAN_BIG => Endianness::Big,
         SAS_ENDIAN_LITTLE => Endianness::Little,
-        _ => return Err(header_error("unsupported endian flag in header")),
+        _ => return Err(Error::Header(HeaderError::UnexpectedEndianness)),
     };
 
     let uses_u64_pointers = header_start.a2 == SAS_ALIGNMENT_OFFSET_4;
@@ -103,7 +98,7 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
     let info = HeaderInfo {
         endianness,
         uses_u64_pointers,
-        page_size,
+        page_size: crate::types::PageSize(page_size),
         page_count,
         page_header_size: if uses_u64_pointers {
             SAS_PAGE_HEADER_SIZE_64BIT
@@ -130,7 +125,7 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
         page_size,
         page_count,
         row_count: 0,
-        row_len: 0,
+        row_len: crate::types::RowLength(0).into(),
         compression: CompressionKind::None,
         created_at,
         modified_at,
@@ -331,15 +326,11 @@ fn system_time_from_unix_seconds(seconds: f64) -> Option<SystemTime> {
 }
 
 fn io_header_error(err: std::io::Error) -> Error {
-    Error::Header(HeaderError {
-        message: err.to_string(),
-    })
+    Error::header_corruption(err.to_string())
 }
 
 fn header_error(message: impl Into<String>) -> Error {
-    Error::Header(HeaderError {
-        message: message.into(),
-    })
+    Error::header_corruption(message)
 }
 
 const fn lookup_encoding(code: u8) -> Option<&'static str> {
@@ -445,7 +436,7 @@ mod tests {
 
         assert_header(&header);
         assert_eq!(metadata.endianness, Endianness::Little);
-        assert_eq!(metadata.page_size, 4096);
+        assert_eq!(metadata.page_size, u32::from(crate::types::PageSize(4096)));
         assert_eq!(metadata.page_count, 1);
         assert_eq!(metadata.table_name.as_deref(), Some("TEST_TABLE"));
         assert_eq!(metadata.encoding.as_deref(), Some("UTF-8"));
@@ -458,7 +449,7 @@ mod tests {
         let mut cursor = Cursor::new(bytes);
         let err = probe_header(&mut cursor).expect_err("bad magic should fail");
         let msg = err.to_string();
-        assert!(msg.contains("unrecognized SAS magic number"));
+        assert!(msg.contains("invalid magic"));
     }
 
     #[test]
@@ -493,7 +484,7 @@ mod tests {
     fn assert_header(header: &HeaderInfo) {
         assert_eq!(header.endianness, Endianness::Little);
         assert!(!header.uses_u64_pointers);
-        assert_eq!(header.page_size, 4096);
+        assert_eq!(header.page_size, crate::types::PageSize(4096));
         assert_eq!(header.page_count, 1);
         assert_eq!(header.page_header_size, 24);
         assert_eq!(header.subheader_pointer_size, 12);

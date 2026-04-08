@@ -131,14 +131,14 @@ impl OwnedColumnBuffer {
 
 #[derive(Debug, Clone)]
 pub struct ColumnarBatch<'a> {
-    pub row_base: u64,
+    pub row_base: crate::types::RowIndex,
     pub row_count: usize,
     pub columns: &'a [ColumnBuffer<'a>],
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct OwnedColumnarBatch {
-    pub row_base: u64,
+    pub row_base: crate::types::RowIndex,
     pub row_count: usize,
     pub columns: Vec<OwnedColumnBuffer>,
 }

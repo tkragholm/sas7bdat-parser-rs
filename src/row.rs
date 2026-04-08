@@ -26,24 +26,25 @@ pub enum OwnedCellValue {
     Time(SasTime),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawRow<'a> {
-    pub row_index: u64,
+    pub row_index: crate::types::RowIndex,
     pub bytes: &'a [u8],
 }
 
 #[derive(Debug, Clone)]
 pub struct RowView<'a> {
-    pub(crate) row_index: u64,
+    pub(crate) row_index: crate::types::RowIndex,
     pub(crate) names: &'a [String],
     pub(crate) cells: &'a [CellValue<'a>],
 }
 
 impl<'a> RowView<'a> {
     #[must_use]
-    pub const fn row_index(&self) -> u64 {
+    pub const fn row_index(&self) -> crate::types::RowIndex {
         self.row_index
     }
+
 
     #[must_use]
     pub const fn len(&self) -> usize {
@@ -75,7 +76,7 @@ impl<'a> RowView<'a> {
 
 #[derive(Debug, Clone, Default)]
 pub struct OwnedRow {
-    pub row_index: u64,
+    pub row_index: crate::types::RowIndex,
     pub cells: Vec<OwnedCellValue>,
 }
 

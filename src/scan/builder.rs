@@ -1,10 +1,3 @@
-#![allow(
-    clippy::inline_always,
-    clippy::missing_errors_doc,
-    clippy::needless_pass_by_value,
-    clippy::used_underscore_binding
-)]
-
 use super::{
     BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch,
     ControlFlow, Dataset, DecodeMode, Error, OrderingMode, OwnedColumnarBatch, OwnedRow,
@@ -14,7 +7,6 @@ use super::{
     materialize_planned_cells, resolve_batch_row_capacity, scan_raw_rows, scan_row_bytes,
 };
 pub struct ScanBuilder<'a> {
-    #[allow(dead_code)]
     pub(crate) ds: &'a Dataset,
     pub(crate) projection: Option<&'a Projection>,
     pub(crate) decode: DecodeMode,
@@ -242,7 +234,7 @@ impl<'a> ScanBuilder<'a> {
         );
 
         let _stats = scan_row_bytes(self, &mut |row_index, bytes| {
-            batch_accumulator.push_row(row_index, bytes)?;
+            batch_accumulator.push_row(row_index.into(), bytes)?;
             if batch_accumulator.is_full() {
                 batches.push(batch_accumulator.take_batch());
                 batch_accumulator.reset_after_flush();
@@ -270,7 +262,6 @@ impl<'a> ScanBuilder<'a> {
     }
 }
 
-#[allow(dead_code)]
 const fn _keep_type_imports_alive<'a>(_columns: &'a [ColumnBuffer<'a>], _dataset: &'a Dataset) {}
 
 impl ScanBuilder<'_> {
@@ -287,7 +278,7 @@ impl ScanBuilder<'_> {
         T: FnMut(u64, &[u8]),
     {
         scan_raw_rows(self, &mut |raw| {
-            tap(raw.row_index, raw.bytes);
+            tap(raw.row_index.into(), raw.bytes);
             f(raw)
         })
     }
@@ -365,7 +356,7 @@ impl ScanBuilder<'_> {
         let mut stop_after_current_batch = false;
 
         let mut stats = scan_row_bytes(self, &mut |row_index, bytes| {
-            batcher.push_row(row_index, bytes)?;
+            batcher.push_row(row_index.into(), bytes)?;
             if batcher.is_full() {
                 let batch = batcher.take_batch();
                 match f(batch)? {
@@ -415,8 +406,8 @@ impl ScanBuilder<'_> {
         let mut stop_after_current_batch = false;
 
         let mut stats = scan_row_bytes(self, &mut |row_index, bytes| {
-            tap(row_index, bytes);
-            batcher.push_row(row_index, bytes)?;
+            tap(row_index.into(), bytes);
+            batcher.push_row(row_index.into(), bytes)?;
             if batcher.is_full() {
                 let batch = batcher.take_batch();
                 match f(batch)? {

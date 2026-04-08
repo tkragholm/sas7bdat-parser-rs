@@ -19,11 +19,9 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub struct Dataset {
-    #[allow(dead_code)]
     pub(crate) file: Arc<FileInner>,
     pub(crate) metadata: Arc<DatasetMetadata>,
     pub(crate) layout: Arc<LayoutPlan>,
-    #[allow(dead_code)]
     pub(crate) descriptors: Arc<PageDescriptorTable>,
 }
 

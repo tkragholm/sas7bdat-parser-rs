@@ -1,5 +1,3 @@
-#![allow(clippy::missing_errors_doc)]
-
 use crate::{
     dataset::Dataset,
     error::{Error, ProjectionError, Result},
@@ -24,10 +22,8 @@ pub struct ProjectedColumnMeta {
 
 #[derive(Debug, Clone)]
 pub struct Projection {
-    #[allow(dead_code)]
     pub(crate) inner: Arc<ProjectionPlan>,
     pub(crate) columns: Arc<[ProjectedColumnMeta]>,
-    #[allow(dead_code)]
     pub(crate) names: Arc<[String]>,
 }
 
@@ -166,7 +162,7 @@ impl<'a> ProjectionBuilder<'a> {
             .iter()
             .map(|column| column.end)
             .max()
-            .unwrap_or(0);
+            .unwrap_or(crate::types::ByteOffset(0));
 
         Ok(Projection {
             inner: Arc::new(ProjectionPlan {
@@ -200,10 +196,10 @@ fn compile_projected_column_plan(column: &ColumnMeta, index: usize) -> Result<Pr
             })
         })?;
     Ok(ProjectedColumnPlan {
-        index,
-        offset: column.offset,
+        index: crate::types::ColumnIndex(index),
+        offset: crate::types::ByteOffset(column.offset),
         width: column.physical_width,
-        end,
+        end: crate::types::ByteOffset(end),
         logical_type: column.logical_type,
     })
 }

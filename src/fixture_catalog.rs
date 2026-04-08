@@ -1,5 +1,3 @@
-#![allow(clippy::cast_precision_loss)]
-
 use crate::{CellValue, Dataset, LogicalType, Projection, Result, RowSelection, ScanStats};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -326,7 +324,10 @@ fn sample_dataset(ds: &Dataset, sample_rows: usize) -> Result<SampleSummary> {
     let mut sample = SampleSummary::default();
     let columns = ds.columns().to_vec();
     for (start, end) in windows {
-        let selection = RowSelection::Range { start, end };
+        let selection = RowSelection::Range {
+            start: crate::types::RowIndex(start),
+            end: crate::types::RowIndex(end),
+        };
         let stats = ds.scan().select(selection).visit_rows(|row| {
             sample.rows_sampled += 1;
             for (column, cell) in columns.iter().zip(row.iter()) {

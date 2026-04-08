@@ -88,19 +88,17 @@ pub(super) fn compile_column_plan(
 pub(super) fn compile_compiled_projection_column_plan(
     builder: &ScanBuilder<'_>,
     column: &ProjectedColumnPlan,
-) -> Result<CompiledColumnPlan> {
-    Ok(CompiledColumnPlan {
-        start: usize::try_from(column.offset)
-            .map_err(|_| Error::unsupported("projection column offset exceeds platform usize"))?,
-        end: usize::try_from(column.end)
-            .map_err(|_| Error::unsupported("projection column end exceeds platform usize"))?,
+) -> CompiledColumnPlan {
+    CompiledColumnPlan {
+        start: usize::from(column.offset),
+        end: usize::from(column.end),
         width: column.width,
         kernel: compile_decode_kernel(builder, column.logical_type),
         numeric_tile: compile_numeric_tile_mode(
             compile_decode_kernel(builder, column.logical_type),
             column.width,
         ),
-    })
+    }
 }
 
 pub(super) const fn compile_numeric_tile_mode(
@@ -210,8 +208,7 @@ pub(super) fn resolve_batch_row_capacity(builder: &ScanBuilder<'_>) -> Result<us
     match builder.batch_hint {
         BatchHint::Rows(rows) => Ok(rows.max(1)),
         BatchHint::Bytes(bytes) => {
-            let row_len = usize::try_from(builder.ds.layout.row_len)
-                .map_err(|_| Error::unsupported("row length exceeds platform usize"))?;
+            let row_len = usize::from(builder.ds.layout.row_len);
             Ok((bytes / row_len.max(1)).max(1))
         }
         BatchHint::Auto => {
@@ -226,8 +223,8 @@ pub(super) fn effective_scan_row_capacity_hint(builder: &ScanBuilder<'_>) -> usi
     let total_rows = match builder.row_selection {
         RowSelection::All => builder.ds.metadata.row_count,
         RowSelection::Range { start, end } => {
-            let end = end.min(builder.ds.metadata.row_count);
-            let start = start.min(end);
+            let end = u64::from(end).min(builder.ds.metadata.row_count);
+            let start = u64::from(start).min(end);
             end.saturating_sub(start)
         }
     };

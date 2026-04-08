@@ -21,6 +21,8 @@ pub use columnar::{
     BytesBuffer, ColumnBuffer, ColumnarBatch, OwnedColumnBuffer, OwnedColumnarBatch,
     PrimitiveBuffer, Utf8Buffer, Utf8Dictionary,
 };
+pub mod types;
+
 pub use dataset::Dataset;
 pub use error::{
     CompressionError, CorruptionError, DecodeError, Error, HeaderError, IoError, MetadataError,
@@ -39,8 +41,3 @@ pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};
 pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
 pub use scan::{BatchSink, RawRowSink, RowSink, ScanBuilder, ScanProgress, ScanStats};
 
-#[allow(unused_imports)]
-pub(crate) use internal::{
-    FileInner, KernelSet, LayoutPlan, PageDescriptorTable, PageExecClass, PageSource,
-    ProjectionPlan, SmallCommandBlock,
-};

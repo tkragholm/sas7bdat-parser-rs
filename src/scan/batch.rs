@@ -1,14 +1,3 @@
-#![allow(
-    clippy::cast_precision_loss,
-    clippy::inline_always,
-    clippy::match_same_arms,
-    clippy::missing_errors_doc,
-    clippy::option_if_let_else,
-    clippy::too_many_lines,
-    clippy::unnecessary_wraps,
-    clippy::used_underscore_binding
-)]
-
 use super::{
     ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
     DecodedUtf8BatchValue, Error, NumericTileMode, OwnedColumnBuffer, OwnedColumnarBatch,
@@ -388,7 +377,7 @@ impl BatchAccumulator {
         self.row_base = None;
         self.row_count = 0;
         OwnedColumnarBatch {
-            row_base,
+            row_base: crate::types::RowIndex(row_base),
             row_count,
             columns,
         }

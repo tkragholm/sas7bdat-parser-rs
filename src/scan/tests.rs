@@ -22,7 +22,7 @@ fn raw_scan_visits_rows_from_fused_pages() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 3,
-            row_len: 4,
+            row_len: crate::types::RowLength(4).into(),
             compression: CompressionKind::None,
             ..DatasetMetadata::default()
         }),
@@ -31,7 +31,7 @@ fn raw_scan_visits_rows_from_fused_pages() {
             header: HeaderInfo {
                 endianness: Endianness::Little,
                 uses_u64_pointers: false,
-                page_size: 64,
+                page_size: crate::types::PageSize(64),
                 page_count: 2,
                 page_header_size: 24,
                 subheader_pointer_size: 12,
@@ -41,7 +41,7 @@ fn raw_scan_visits_rows_from_fused_pages() {
                 release: String::new(),
                 is_catalog: false,
             },
-            row_len: 4,
+            row_len: crate::types::RowLength(4),
             total_rows: 3,
             compression: CompressionKind::None,
             rows_per_page: 1,
@@ -54,7 +54,7 @@ fn raw_scan_visits_rows_from_fused_pages() {
                     header: HeaderInfo {
                         endianness: Endianness::Little,
                         uses_u64_pointers: false,
-                        page_size: 64,
+                        page_size: crate::types::PageSize(64),
                         page_count: 2,
                         page_header_size: 24,
                         subheader_pointer_size: 12,
@@ -64,7 +64,7 @@ fn raw_scan_visits_rows_from_fused_pages() {
                         release: String::new(),
                         is_catalog: false,
                     },
-                    row_len: 4,
+                    row_len: crate::types::RowLength(4),
                     total_rows: 3,
                     compression: CompressionKind::None,
                     rows_per_page: 1,
@@ -76,7 +76,7 @@ fn raw_scan_visits_rows_from_fused_pages() {
 
     let mut rows = Vec::new();
     let stats = ScanBuilder::new(&ds)
-        .select(crate::RowSelection::Range { start: 1, end: 3 })
+        .select(crate::RowSelection::Range { start: crate::types::RowIndex(1), end: crate::types::RowIndex(3) })
         .visit_raw_rows(|row| {
             rows.push((row.row_index, row.bytes.to_vec()));
             Ok(ControlFlow::Continue(()))
@@ -84,8 +84,8 @@ fn raw_scan_visits_rows_from_fused_pages() {
         .expect("scan succeeds");
 
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0], (1, b"EFGH".to_vec()));
-    assert_eq!(rows[1], (2, b"IJKL".to_vec()));
+    assert_eq!(rows[0], (crate::types::RowIndex(1), b"EFGH".to_vec()));
+    assert_eq!(rows[1], (crate::types::RowIndex(2), b"IJKL".to_vec()));
     assert_eq!(stats.rows_seen, 3);
     assert_eq!(stats.rows_emitted, 2);
     assert_eq!(stats.fused_pages, 2);
@@ -106,7 +106,7 @@ fn raw_scan_decompresses_rle_rows() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -116,7 +116,7 @@ fn raw_scan_decompresses_rle_rows() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 4,
+        row_len: crate::types::RowLength(4),
         total_rows: 1,
         compression: CompressionKind::Row,
         rows_per_page: 1,
@@ -128,7 +128,7 @@ fn raw_scan_decompresses_rle_rows() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 4,
+            row_len: crate::types::RowLength(4).into(),
             compression: CompressionKind::Row,
             ..DatasetMetadata::default()
         }),
@@ -149,7 +149,7 @@ fn raw_scan_decompresses_rle_rows() {
             Ok(ControlFlow::Continue(()))
         })
         .expect("compressed raw scan");
-    assert_eq!(rows, vec![(0, b"AAAA".to_vec())]);
+    assert_eq!(rows, vec![(crate::types::RowIndex(0), b"AAAA".to_vec())]);
     assert_eq!(stats.compressed_pages, 1);
     assert_eq!(stats.row_bytes_materialized, 4);
 }
@@ -162,7 +162,7 @@ fn raw_scan_visits_rows_from_indexed_pointer_pages() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -172,7 +172,7 @@ fn raw_scan_visits_rows_from_indexed_pointer_pages() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 4,
+        row_len: crate::types::RowLength(4),
         total_rows: 2,
         compression: CompressionKind::None,
         rows_per_page: 2,
@@ -184,7 +184,7 @@ fn raw_scan_visits_rows_from_indexed_pointer_pages() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 2,
-            row_len: 4,
+            row_len: crate::types::RowLength(4).into(),
             compression: CompressionKind::None,
             ..DatasetMetadata::default()
         }),
@@ -206,7 +206,7 @@ fn raw_scan_visits_rows_from_indexed_pointer_pages() {
         })
         .expect("scan succeeds");
 
-    assert_eq!(rows, vec![(0, b"ABCD".to_vec()), (1, b"EFGH".to_vec())]);
+    assert_eq!(rows, vec![(crate::types::RowIndex(0), b"ABCD".to_vec()), (crate::types::RowIndex(1), b"EFGH".to_vec())]);
     assert_eq!(stats.indexed_pages, 1);
     assert_eq!(stats.rows_emitted, 2);
 }
@@ -219,7 +219,7 @@ fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -229,7 +229,7 @@ fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 4,
+        row_len: crate::types::RowLength(4),
         total_rows: 2,
         compression: CompressionKind::None,
         rows_per_page: 2,
@@ -241,7 +241,7 @@ fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 2,
-            row_len: 4,
+            row_len: crate::types::RowLength(4).into(),
             compression: CompressionKind::None,
             ..DatasetMetadata::default()
         }),
@@ -263,7 +263,7 @@ fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
         })
         .expect("scan succeeds");
 
-    assert_eq!(rows, vec![(0, b"WXYZ".to_vec()), (1, b"ABCD".to_vec())]);
+    assert_eq!(rows, vec![(crate::types::RowIndex(0), b"WXYZ".to_vec()), (crate::types::RowIndex(1), b"ABCD".to_vec())]);
     assert_eq!(stats.indexed_pages, 1);
     assert_eq!(stats.rows_emitted, 2);
 }
@@ -301,7 +301,7 @@ fn typed_row_scan_decodes_projected_cells() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -311,7 +311,7 @@ fn typed_row_scan_decodes_projected_cells() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -323,7 +323,7 @@ fn typed_row_scan_decodes_projected_cells() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -394,7 +394,7 @@ fn typed_lossless_rows_preserve_numeric_bits_and_string_bytes() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -404,7 +404,7 @@ fn typed_lossless_rows_preserve_numeric_bits_and_string_bytes() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 11,
+        row_len: crate::types::RowLength(11),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -416,7 +416,7 @@ fn typed_lossless_rows_preserve_numeric_bits_and_string_bytes() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 11,
+            row_len: crate::types::RowLength(11).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -474,7 +474,7 @@ fn collect_rows_materializes_owned_values() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -484,7 +484,7 @@ fn collect_rows_materializes_owned_values() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -496,7 +496,7 @@ fn collect_rows_materializes_owned_values() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -552,7 +552,7 @@ fn collect_batches_materializes_columnar_values() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -562,7 +562,7 @@ fn collect_batches_materializes_columnar_values() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 2,
         compression: CompressionKind::None,
         rows_per_page: 2,
@@ -574,7 +574,7 @@ fn collect_batches_materializes_columnar_values() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 2,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -594,7 +594,7 @@ fn collect_batches_materializes_columnar_values() {
         .collect_batches()
         .expect("columnar batches");
     assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].row_base, 0);
+    assert_eq!(batches[0].row_base, crate::types::RowIndex(0));
     assert_eq!(batches[0].row_count, 2);
 
     match &batches[0].columns[0] {
@@ -661,7 +661,7 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -671,7 +671,7 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 16,
+        row_len: crate::types::RowLength(16),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -683,7 +683,7 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 16,
+            row_len: crate::types::RowLength(16).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -752,7 +752,7 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -762,7 +762,7 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -774,7 +774,7 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -835,7 +835,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -845,7 +845,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -857,7 +857,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -925,7 +925,7 @@ fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_s
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -935,7 +935,7 @@ fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_s
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 9,
+        row_len: crate::types::RowLength(9),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -947,7 +947,7 @@ fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_s
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 9,
+            row_len: crate::types::RowLength(9).into(),
             compression: CompressionKind::None,
             encoding: Some("ISO-8859-1".to_owned()),
             ..DatasetMetadata::default()
@@ -1010,7 +1010,7 @@ fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -1020,7 +1020,7 @@ fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 9,
+        row_len: crate::types::RowLength(9),
         total_rows: 1,
         compression: CompressionKind::Row,
         rows_per_page: 1,
@@ -1032,7 +1032,7 @@ fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 9,
+            row_len: crate::types::RowLength(9).into(),
             compression: CompressionKind::Row,
             encoding: Some("ISO-8859-1".to_owned()),
             ..DatasetMetadata::default()
@@ -1086,7 +1086,7 @@ fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -1096,7 +1096,7 @@ fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -1108,7 +1108,7 @@ fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("WINDOWS-1252".to_owned()),
             ..DatasetMetadata::default()
@@ -1158,7 +1158,7 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -1168,7 +1168,7 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -1180,7 +1180,7 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("WINDOWS-1252".to_owned()),
             ..DatasetMetadata::default()
@@ -1242,7 +1242,7 @@ fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -1252,7 +1252,7 @@ fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -1264,7 +1264,7 @@ fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -1324,7 +1324,7 @@ fn collect_batches_typed_lossless_uses_f64_and_raw_bytes() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -1334,7 +1334,7 @@ fn collect_batches_typed_lossless_uses_f64_and_raw_bytes() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 1,
         compression: CompressionKind::None,
         rows_per_page: 1,
@@ -1346,7 +1346,7 @@ fn collect_batches_typed_lossless_uses_f64_and_raw_bytes() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -1407,7 +1407,7 @@ fn collect_batches_staged_f64_preserves_missing_validity() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -1417,7 +1417,7 @@ fn collect_batches_staged_f64_preserves_missing_validity() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 8,
+        row_len: crate::types::RowLength(8),
         total_rows: 2,
         compression: CompressionKind::None,
         rows_per_page: 2,
@@ -1429,7 +1429,7 @@ fn collect_batches_staged_f64_preserves_missing_validity() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 2,
-            row_len: 8,
+            row_len: crate::types::RowLength(8).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -1487,7 +1487,7 @@ fn visit_batches_streams_projected_columnar_views() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -1497,7 +1497,7 @@ fn visit_batches_streams_projected_columnar_views() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 12,
+        row_len: crate::types::RowLength(12),
         total_rows: 2,
         compression: CompressionKind::None,
         rows_per_page: 2,
@@ -1509,7 +1509,7 @@ fn visit_batches_streams_projected_columnar_views() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 2,
-            row_len: 12,
+            row_len: crate::types::RowLength(12).into(),
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()
@@ -1542,8 +1542,8 @@ fn visit_batches_streams_projected_columnar_views() {
     assert_eq!(
         seen,
         vec![
-            (0, 1, vec!["ABCD".to_owned()]),
-            (1, 1, vec!["EF".to_owned()]),
+            (crate::types::RowIndex(0), 1, vec!["ABCD".to_owned()]),
+            (crate::types::RowIndex(1), 1, vec!["EF".to_owned()]),
         ]
     );
     assert_eq!(stats.decode_batches, 2);
@@ -1566,7 +1566,7 @@ fn collect_rows_decodes_compressed_string_rows() {
         header: HeaderInfo {
             endianness: Endianness::Little,
             uses_u64_pointers: false,
-            page_size: 64,
+            page_size: crate::types::PageSize(64),
             page_count: 1,
             page_header_size: 24,
             subheader_pointer_size: 12,
@@ -1576,7 +1576,7 @@ fn collect_rows_decodes_compressed_string_rows() {
             release: String::new(),
             is_catalog: false,
         },
-        row_len: 4,
+        row_len: crate::types::RowLength(4),
         total_rows: 1,
         compression: CompressionKind::Row,
         rows_per_page: 1,
@@ -1588,7 +1588,7 @@ fn collect_rows_decodes_compressed_string_rows() {
         }),
         metadata: Arc::new(DatasetMetadata {
             row_count: 1,
-            row_len: 4,
+            row_len: crate::types::RowLength(4).into(),
             compression: CompressionKind::Row,
             encoding: Some("UTF-8".to_owned()),
             ..DatasetMetadata::default()

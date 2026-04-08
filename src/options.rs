@@ -132,5 +132,8 @@ pub enum BatchHint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowSelection {
     All,
-    Range { start: u64, end: u64 },
+    Range {
+        start: crate::types::RowIndex,
+        end: crate::types::RowIndex,
+    },
 }

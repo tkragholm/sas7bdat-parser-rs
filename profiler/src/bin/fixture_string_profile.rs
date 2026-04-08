@@ -1,10 +1,3 @@
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::missing_const_for_fn,
-    clippy::too_many_lines
-)]
-
 use sas7bdat_profiler::init_profiler_runtime;
 use sas7bdat_simd::{Dataset, LogicalType, RowSelection};
 use serde::Serialize;

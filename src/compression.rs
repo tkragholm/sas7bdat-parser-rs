@@ -1,5 +1,3 @@
-#![allow(clippy::missing_errors_doc)]
-
 use crate::{
     error::{CompressionError, Error, Result},
     internal::{SmallCommandBlock, SmallOp},

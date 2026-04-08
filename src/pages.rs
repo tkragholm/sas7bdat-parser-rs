@@ -1,16 +1,9 @@
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::float_cmp,
-    clippy::needless_pass_by_value,
-    clippy::too_many_lines,
-    clippy::trivially_copy_pass_by_ref
-)]
-
 use crate::{
-    error::{CorruptionError, Error, Result},
+    error::{Error, Result},
     internal::{
         LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass, RowSpan, RowSpanKind,
     },
+    types::{ByteOffset, PageIndex, RowIndex},
 };
 use std::io::{Read, Seek, SeekFrom};
 
@@ -58,19 +51,19 @@ pub fn compile_page_descriptors<R: Read + Seek>(
     layout: &LayoutPlan,
 ) -> Result<PageDescriptorTable> {
     let header = &layout.header;
-    if header.page_header_size > header.page_size {
+    if header.page_header_size > u32::from(header.page_size) {
         return Err(page_corruption(
             "page header size exceeds configured page size",
         ));
     }
-    if layout.row_len == 0 {
+    if u32::from(layout.row_len) == 0 {
         return Ok(PageDescriptorTable::default());
     }
 
     let mut descriptors = Vec::with_capacity(header.page_count as usize);
     let mut row_spans = Vec::new();
     let mut row_base = 0u64;
-    let mut page = vec![0u8; header.page_size as usize];
+    let mut page = vec![0u8; usize::from(header.page_size)];
 
     for page_index in 0..header.page_count {
         let page_offset = header.data_offset + page_index * u64::from(header.page_size);
@@ -130,10 +123,10 @@ fn classify_descriptor(
     } = inputs;
     if (page_type & SAS_PAGE_TYPE_COMP) != 0 {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: PageExecClass::MetadataOrEmpty,
@@ -147,10 +140,10 @@ fn classify_descriptor(
         && matches!(kind, PageKind::Meta | PageKind::Meta2));
     if !data_like {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: match kind {
@@ -162,10 +155,10 @@ fn classify_descriptor(
 
     if layout.compression != crate::metadata::CompressionKind::None && subheader_count == 0 {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: PageExecClass::IndexedCompressedRows,
@@ -175,10 +168,10 @@ fn classify_descriptor(
     let remaining_rows = layout.total_rows.saturating_sub(row_base);
     if remaining_rows == 0 {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: PageExecClass::MetadataOrEmpty,
@@ -203,10 +196,10 @@ fn classify_descriptor(
     let page_len = u64::try_from(page.len()).unwrap_or(u64::MAX);
     if u64::from(data_start) >= page_len {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: PageExecClass::MetadataOrEmpty,
@@ -216,10 +209,10 @@ fn classify_descriptor(
     let row_len = u64::from(layout.row_len);
     if row_len == 0 {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: PageExecClass::MetadataOrEmpty,
@@ -230,10 +223,10 @@ fn classify_descriptor(
     let possible_rows = available / row_len;
     if possible_rows == 0 {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: PageExecClass::MetadataOrEmpty,
@@ -264,10 +257,10 @@ fn classify_descriptor(
     let row_count = u32::try_from(rows_to_take).unwrap_or(u32::MAX);
     if row_count == 0 {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: PageExecClass::MetadataOrEmpty,
@@ -275,17 +268,16 @@ fn classify_descriptor(
     }
 
     Ok(PageDescriptor {
-        page_index,
-        row_base,
+        page_index: PageIndex::from(page_index),
+        row_base: RowIndex::from(row_base),
         row_count,
-        data_start,
+        data_start: ByteOffset::from(data_start),
         row_span_start: 0,
         row_span_count: 0,
         exec_class: PageExecClass::FusedContiguousUncompressed,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn classify_indexed_descriptor(
     layout: &LayoutPlan,
     page: &[u8],
@@ -346,8 +338,7 @@ fn classify_indexed_descriptor(
                 if pointer.is_compressed_data
                     && !signature_is_recognized(parse_subheader_signature(header, data))
                 {
-                    let row_len = usize::try_from(layout.row_len)
-                        .map_err(|_| page_corruption("row length exceeds usize"))?;
+                    let row_len = usize::from(layout.row_len);
                     let mut local_offset = pointer.offset;
                     let mut remaining = pointer.length;
                     while remaining >= row_len {
@@ -362,9 +353,12 @@ fn classify_indexed_descriptor(
                             break;
                         }
                         row_spans.push(RowSpan {
-                            offset: u32::try_from(local_offset)
-                                .map_err(|_| page_corruption("borrowed row offset exceeds u32"))?,
-                            len: layout.row_len,
+                            offset: ByteOffset::from(
+                                u32::try_from(local_offset).map_err(|_| {
+                                    page_corruption("borrowed row offset exceeds u32")
+                                })?,
+                            ),
+                            len: u32::from(layout.row_len),
                             kind: RowSpanKind::Borrowed,
                         });
                         local_offset = local_offset.saturating_add(row_len);
@@ -381,8 +375,11 @@ fn classify_indexed_descriptor(
                 );
                 if produced < remaining_rows && target_rows.is_none_or(|target| produced < target) {
                     row_spans.push(RowSpan {
-                        offset: u32::try_from(pointer.offset)
-                            .map_err(|_| page_corruption("compressed row offset exceeds u32"))?,
+                        offset: ByteOffset::from(
+                            u32::try_from(pointer.offset).map_err(|_| {
+                                page_corruption("compressed row offset exceeds u32")
+                            })?,
+                        ),
                         len: u32::try_from(pointer.length)
                             .map_err(|_| page_corruption("compressed row length exceeds u32"))?,
                         kind: RowSpanKind::Compressed,
@@ -432,7 +429,7 @@ fn classify_indexed_descriptor(
         push_contiguous_row_spans(
             row_spans,
             data_start,
-            layout.row_len,
+            u32::from(layout.row_len),
             rows_to_take - produced_rows,
         )?;
     }
@@ -449,10 +446,10 @@ fn classify_indexed_descriptor(
             .flatten()
             .any(|span| span.kind == RowSpanKind::Compressed);
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: row_span_count,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start,
             row_span_count,
             exec_class: if has_compressed_spans {
@@ -465,10 +462,10 @@ fn classify_indexed_descriptor(
 
     if row_len == 0 || available < row_len {
         return Ok(PageDescriptor {
-            page_index,
-            row_base,
+            page_index: PageIndex::from(page_index),
+            row_base: RowIndex::from(row_base),
             row_count: 0,
-            data_start: 0,
+            data_start: ByteOffset::from(0),
             row_span_start: 0,
             row_span_count: 0,
             exec_class: PageExecClass::MetadataOrEmpty,
@@ -502,10 +499,14 @@ fn classify_indexed_descriptor(
         PageExecClass::FusedContiguousUncompressed
     };
     Ok(PageDescriptor {
-        page_index,
-        row_base,
+        page_index: PageIndex::from(page_index),
+        row_base: RowIndex::from(row_base),
         row_count,
-        data_start: if row_count == 0 { 0 } else { data_start },
+        data_start: if row_count == 0 {
+            ByteOffset::from(0)
+        } else {
+            ByteOffset::from(data_start)
+        },
         row_span_start: 0,
         row_span_count: 0,
         exec_class,
@@ -524,8 +525,10 @@ fn push_contiguous_row_spans(
         .map_err(|_| page_corruption("contiguous row offset exceeds usize"))?;
     for _ in 0..row_count {
         row_spans.push(RowSpan {
-            offset: u32::try_from(offset)
-                .map_err(|_| page_corruption("contiguous row offset exceeds u32"))?,
+            offset: ByteOffset::from(
+                u32::try_from(offset)
+                    .map_err(|_| page_corruption("contiguous row offset exceeds u32"))?,
+            ),
             len: row_len,
             kind: RowSpanKind::Borrowed,
         });
@@ -716,9 +719,7 @@ const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 
 }
 
 fn page_corruption(message: impl Into<String>) -> Error {
-    Error::Corruption(CorruptionError {
-        message: message.into(),
-    })
+    Error::page_corruption(message)
 }
 
 fn page_io_error(err: std::io::Error) -> Error {
@@ -752,9 +753,9 @@ mod tests {
 
         let first = descriptors.pages[0];
         assert_eq!(first.exec_class, PageExecClass::FusedContiguousUncompressed);
-        assert_eq!(first.row_base, 0);
+        assert_eq!(first.row_base, crate::types::RowIndex(0));
         assert_eq!(first.row_count, 2);
-        assert_eq!(first.data_start, 24);
+        assert_eq!(first.data_start, crate::types::ByteOffset(24));
         assert_eq!(first.row_span_count, 0);
 
         let second = descriptors.pages[1];
@@ -762,9 +763,9 @@ mod tests {
             second.exec_class,
             PageExecClass::FusedContiguousUncompressed
         );
-        assert_eq!(second.row_base, 2);
+        assert_eq!(second.row_base, crate::types::RowIndex(2));
         assert_eq!(second.row_count, 1);
-        assert_eq!(second.data_start, 24);
+        assert_eq!(second.data_start, crate::types::ByteOffset(24));
         assert_eq!(second.row_span_count, 0);
     }
 
@@ -783,7 +784,10 @@ mod tests {
         assert_eq!(descriptors.pages[0].row_count, 1);
         assert_eq!(descriptors.pages[0].row_span_count, 1);
         assert_eq!(descriptors.row_spans.len(), 1);
-        assert_eq!(descriptors.row_spans[0].offset, 40);
+        assert_eq!(
+            descriptors.row_spans[0].offset,
+            crate::types::ByteOffset(40)
+        );
         assert_eq!(descriptors.row_spans[0].len, 4);
         assert_eq!(descriptors.row_spans[0].kind, RowSpanKind::Borrowed);
     }
@@ -875,7 +879,7 @@ mod tests {
             header: HeaderInfo {
                 endianness: Endianness::Little,
                 uses_u64_pointers: false,
-                page_size,
+                page_size: crate::types::PageSize(page_size),
                 page_count,
                 page_header_size: 24,
                 subheader_pointer_size: 12,
@@ -885,7 +889,7 @@ mod tests {
                 release: String::new(),
                 is_catalog: false,
             },
-            row_len,
+            row_len: crate::types::RowLength(row_len),
             total_rows,
             compression: CompressionKind::None,
             rows_per_page: 1,

@@ -1,10 +1,10 @@
-#![allow(clippy::needless_pass_by_value, clippy::option_if_let_else)]
-
 use super::{
     Arc, ControlFlow, Cursor, Dataset, Error, File, FileSource, PageDescriptor, RawRow, Result,
     RowSelection, RowSpan, RowSpanKind, ScanBuilder, ScanStats, Seek, SeekFrom, decompress_row,
 };
+use crate::types::{PageIndex, RowIndex};
 use std::io::Read;
+
 pub(super) fn scan_raw_rows<F>(builder: ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
 where
     F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
@@ -16,7 +16,7 @@ where
 
 pub(super) fn scan_row_bytes<F>(builder: ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
 where
-    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
+    F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
     match &builder.ds.file.source {
         FileSource::Bytes(bytes) => scan_row_bytes_in_memory(builder, bytes.as_ref(), f),
@@ -35,9 +35,9 @@ pub(super) fn scan_row_bytes_with_reader<R, F>(
 ) -> Result<ScanStats>
 where
     R: Read + Seek,
-    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
+    F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
-    let plan = RawScanPlan::compile(&builder)?;
+    let plan = RawScanPlan::compile(&builder);
     if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
@@ -120,9 +120,9 @@ pub(super) fn scan_row_bytes_in_memory<F>(
     f: &mut F,
 ) -> Result<ScanStats>
 where
-    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
+    F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
-    let plan = RawScanPlan::compile(&builder)?;
+    let plan = RawScanPlan::compile(&builder);
     if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
@@ -246,12 +246,10 @@ pub(super) struct RawScanPlan {
 }
 
 impl RawScanPlan {
-    fn compile(builder: &ScanBuilder<'_>) -> Result<Self> {
-        let row_len = usize::try_from(builder.ds.layout.row_len)
-            .map_err(|_| Error::unsupported("row length exceeds platform usize"))?;
-        let page_size = usize::try_from(builder.ds.layout.header.page_size)
-            .map_err(|_| Error::unsupported("page size exceeds platform usize"))?;
-        Ok(Self {
+    fn compile(builder: &ScanBuilder<'_>) -> Self {
+        let row_len = usize::from(builder.ds.layout.row_len);
+        let page_size = usize::from(builder.ds.layout.header.page_size);
+        Self {
             row_len,
             page_size,
             page_stride: u64::from(builder.ds.layout.header.page_size),
@@ -259,7 +257,7 @@ impl RawScanPlan {
             compression: builder.ds.layout.compression,
             row_limit: builder.row_limit,
             row_selection: builder.row_selection,
-        })
+        }
     }
 
     fn should_stop(self, stats: &ScanStats) -> bool {
@@ -267,19 +265,23 @@ impl RawScanPlan {
             .is_some_and(|limit| stats.rows_emitted >= limit)
     }
 
-    const fn page_offset(self, page_index: u64) -> u64 {
-        self.data_offset + page_index * self.page_stride
+    const fn page_offset(self, page_index: PageIndex) -> u64 {
+        self.data_offset + page_index.0 * self.page_stride
     }
 }
 
-pub(super) fn row_selected(selection: RowSelection, row_index: u64) -> bool {
+pub(super) fn row_selected(selection: RowSelection, row_index: RowIndex) -> bool {
     match selection {
         RowSelection::All => true,
         RowSelection::Range { start, end } => (start..end).contains(&row_index),
     }
 }
 
-pub(super) fn prepare_row_visit(plan: &RawScanPlan, stats: &mut ScanStats, row_index: u64) -> bool {
+pub(super) fn prepare_row_visit(
+    plan: &RawScanPlan,
+    stats: &mut ScanStats,
+    row_index: RowIndex,
+) -> bool {
     stats.rows_seen = stats.rows_seen.saturating_add(1);
     if !row_selected(plan.row_selection, row_index) {
         return false;
@@ -342,10 +344,9 @@ pub(super) fn emit_contiguous_rows<F>(
     f: &mut F,
 ) -> Result<bool>
 where
-    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
+    F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
-    let data_start = usize::try_from(descriptor.data_start)
-        .map_err(|_| Error::unsupported("row data start exceeds platform usize"))?;
+    let data_start = usize::from(descriptor.data_start);
     for row_offset in 0..descriptor.row_count {
         let row_index = descriptor.row_base + u64::from(row_offset);
         if !prepare_row_visit(plan, stats, row_index) {
@@ -383,7 +384,7 @@ pub(super) fn emit_indexed_rows<F>(
     f: &mut F,
 ) -> Result<bool>
 where
-    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
+    F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
     for (span_index, span) in spans.iter().enumerate() {
         let row_index = descriptor.row_base + u64::try_from(span_index).unwrap_or(u64::MAX);
@@ -391,8 +392,7 @@ where
             continue;
         }
 
-        let start = usize::try_from(span.offset)
-            .map_err(|_| Error::unsupported("row span offset exceeds platform usize"))?;
+        let start = usize::from(span.offset);
         let len = usize::try_from(span.len)
             .map_err(|_| Error::unsupported("row span length exceeds platform usize"))?;
         let end = start

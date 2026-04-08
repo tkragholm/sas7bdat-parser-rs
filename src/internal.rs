@@ -1,8 +1,7 @@
-#![allow(dead_code)]
-
 use crate::{
     metadata::{ColumnMeta, CompressionKind, LogicalType},
     options::OpenOptions,
+    types::{ByteOffset, ColumnIndex, PageIndex, PageSize, RowIndex, RowLength},
 };
 use memmap2::Mmap;
 use std::{path::PathBuf, sync::Arc};
@@ -24,7 +23,7 @@ pub struct FileInner {
 pub struct LayoutPlan {
     pub columns: Vec<ColumnMeta>,
     pub header: HeaderInfo,
-    pub row_len: u32,
+    pub row_len: RowLength,
     pub total_rows: u64,
     pub compression: CompressionKind,
     pub rows_per_page: u64,
@@ -48,10 +47,10 @@ impl PageDescriptorTable {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PageDescriptor {
-    pub page_index: u64,
-    pub row_base: u64,
+    pub page_index: PageIndex,
+    pub row_base: RowIndex,
     pub row_count: u32,
-    pub data_start: u32,
+    pub data_start: ByteOffset,
     pub row_span_start: u32,
     pub row_span_count: u32,
     pub exec_class: PageExecClass,
@@ -59,7 +58,7 @@ pub struct PageDescriptor {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RowSpan {
-    pub offset: u32,
+    pub offset: ByteOffset,
     pub len: u32,
     pub kind: RowSpanKind,
 }
@@ -83,15 +82,15 @@ pub enum PageExecClass {
 #[derive(Debug, Clone, Default)]
 pub struct ProjectionPlan {
     pub columns: Box<[ProjectedColumnPlan]>,
-    pub max_end: u32,
+    pub max_end: ByteOffset,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProjectedColumnPlan {
-    pub index: usize,
-    pub offset: u32,
+    pub index: ColumnIndex,
+    pub offset: ByteOffset,
     pub width: u32,
-    pub end: u32,
+    pub end: ByteOffset,
     pub logical_type: LogicalType,
 }
 
@@ -99,7 +98,7 @@ pub struct ProjectedColumnPlan {
 pub struct HeaderInfo {
     pub endianness: crate::metadata::Endianness,
     pub uses_u64_pointers: bool,
-    pub page_size: u32,
+    pub page_size: PageSize,
     pub page_count: u64,
     pub page_header_size: u32,
     pub subheader_pointer_size: u32,
