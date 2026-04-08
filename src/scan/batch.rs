@@ -1108,7 +1108,7 @@ fn append_windows_1252_single_byte_utf8(
     byte: u8,
     strict: bool,
 ) -> Result<()> {
-    let codepoint = windows_1252_single_byte_to_codepoint(byte).unwrap_or_else(|| {
+    let codepoint = windows_1252_single_byte_to_codepoint(byte).unwrap_or({
         if strict {
             0
         } else {
