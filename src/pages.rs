@@ -346,25 +346,29 @@ fn classify_indexed_descriptor(
                 if pointer.is_compressed_data
                     && !signature_is_recognized(parse_subheader_signature(header, data))
                 {
-                    if pointer.length != usize::try_from(layout.row_len).unwrap_or(usize::MAX) {
-                        return Err(page_corruption(
-                            "compressed-data pointer row width mismatch",
-                        ));
-                    }
-                    let produced = u64::from(
-                        u32::try_from(row_spans.len())
-                            .unwrap_or(u32::MAX)
-                            .saturating_sub(row_span_start),
-                    );
-                    if produced < remaining_rows
-                        && target_rows.is_none_or(|target| produced < target)
-                    {
+                    let row_len = usize::try_from(layout.row_len)
+                        .map_err(|_| page_corruption("row length exceeds usize"))?;
+                    let mut local_offset = pointer.offset;
+                    let mut remaining = pointer.length;
+                    while remaining >= row_len {
+                        let produced = u64::from(
+                            u32::try_from(row_spans.len())
+                                .unwrap_or(u32::MAX)
+                                .saturating_sub(row_span_start),
+                        );
+                        if produced >= remaining_rows
+                            || target_rows.is_some_and(|target| produced >= target)
+                        {
+                            break;
+                        }
                         row_spans.push(RowSpan {
-                            offset: u32::try_from(pointer.offset)
+                            offset: u32::try_from(local_offset)
                                 .map_err(|_| page_corruption("borrowed row offset exceeds u32"))?,
                             len: layout.row_len,
                             kind: RowSpanKind::Borrowed,
                         });
+                        local_offset = local_offset.saturating_add(row_len);
+                        remaining = remaining.saturating_sub(row_len);
                     }
                 }
             }
