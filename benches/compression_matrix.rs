@@ -72,6 +72,70 @@ fn compression_matrix(c: &mut Criterion) {
     if let Some(dataset) = load_dataset("raw_data/ahs2013/topical.sas7bdat") {
         bench_case(c, "compressed_wide_string_topical", &dataset);
     }
+
+    if let Some(dataset) = load_dataset("raw_data/principlesofeco/nls.sas7bdat") {
+        bench_case(c, "windows1252_local_nls", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset("raw_data/principlesofeco/ces.sas7bdat") {
+        bench_case(c, "windows1252_local_ces", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset("raw_data/principlesofeco/nels.sas7bdat") {
+        bench_case(c, "windows1252_local_nels", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset("raw_data/principlesofeco/figurec_3.sas7bdat") {
+        bench_case(c, "windows1252_local_figurec_3", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset("raw_data/principlesofeco/nls_panel.sas7bdat") {
+        bench_case(c, "windows1252_local_nls_panel", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset("raw_data/principlesofeco/crime.sas7bdat") {
+        bench_case(c, "windows1252_local_crime", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset("raw_data/pandas/test_meta2_page.sas7bdat") {
+        bench_case(c, "windows1252_local_test_meta2_page", &dataset);
+    }
+
+    if let Some(dataset) =
+        load_dataset("apnorc-ap-votecast-public-use-file/AP_VOTECAST_2018_DATA.sas7bdat")
+    {
+        bench_case(c, "windows1252_real_corpus_ap_votecast_2018", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset(
+        "healthdatany-hb5k-887e/original/NYSDOH_BRFSS_SurveyData_2010.sas7bdat",
+    ) {
+        bench_case(c, "windows1252_real_corpus_nysdoh_brfss_2010", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset(
+        "epa-modeling-tribal-exposures/original/tribal fish HG paper data/hg_all.sas7bdat",
+    ) {
+        bench_case(c, "windows1252_real_corpus_epa_hg_all", &dataset);
+    }
+
+    if let Some(dataset) = load_dataset(
+        "epa-modeling-tribal-exposures/original/tribal fish HG paper data/lake_pcb_ug_kg.sas7bdat",
+    ) {
+        bench_case(c, "windows1252_real_corpus_epa_lake_pcb", &dataset);
+    }
+
+    if let Some(dataset) =
+        load_dataset("education-edu-demog-and-geog-estimate/GRF14/grf14_lea_blkgrp.sas7bdat")
+    {
+        bench_case(c, "windows1252_real_corpus_grf14_blkgrp", &dataset);
+    }
+
+    if let Some(dataset) =
+        load_dataset("education-edu-demog-and-geog-estimate/GRF15/grf15_lea_blkgrp.sas7bdat")
+    {
+        bench_case(c, "windows1252_real_corpus_grf15_blkgrp", &dataset);
+    }
 }
 
 criterion_group!(benches, compression_matrix);

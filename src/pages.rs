@@ -46,6 +46,16 @@ struct DescriptorInputs {
     row_base: u64,
 }
 
+#[derive(Clone, Copy)]
+struct IndexedDescriptorInputs {
+    page_index: u64,
+    kind: PageKind,
+    page_row_count: u64,
+    subheader_count: u64,
+    row_base: u64,
+    remaining_rows: u64,
+}
+
 pub fn compile_page_descriptors<R: Read + Seek>(
     reader: &mut R,
     layout: &LayoutPlan,
@@ -185,12 +195,14 @@ fn classify_descriptor(
         return classify_indexed_descriptor(
             layout,
             page,
-            page_index,
-            kind,
-            page_row_count,
-            subheader_count,
-            row_base,
-            remaining_rows,
+            IndexedDescriptorInputs {
+                page_index,
+                kind,
+                page_row_count,
+                subheader_count,
+                row_base,
+                remaining_rows,
+            },
             row_spans,
         );
     }
@@ -288,14 +300,18 @@ fn classify_descriptor(
 fn classify_indexed_descriptor(
     layout: &LayoutPlan,
     page: &[u8],
-    page_index: u64,
-    kind: PageKind,
-    page_row_count: u64,
-    subheader_count: u64,
-    row_base: u64,
-    remaining_rows: u64,
+    inputs: IndexedDescriptorInputs,
     row_spans: &mut Vec<RowSpan>,
 ) -> Result<PageDescriptor> {
+    let IndexedDescriptorInputs {
+        page_index,
+        kind,
+        page_row_count,
+        subheader_count,
+        row_base,
+        remaining_rows,
+    } = inputs;
+
     let header = &layout.header;
     let pointer_size = usize::try_from(header.subheader_pointer_size)
         .map_err(|_| page_corruption("pointer size exceeds usize"))?;

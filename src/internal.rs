@@ -14,6 +14,7 @@ pub enum FileSource {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FileInner {
     pub source: FileSource,
     pub options: OpenOptions,
@@ -38,6 +39,7 @@ pub struct PageDescriptorTable {
 
 impl PageDescriptorTable {
     #[must_use]
+    #[allow(dead_code)]
     pub fn has_non_fused_pages(&self) -> bool {
         self.pages
             .iter()
@@ -86,6 +88,7 @@ pub struct ProjectionPlan {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct ProjectedColumnPlan {
     pub index: ColumnIndex,
     pub offset: ByteOffset,
@@ -95,6 +98,7 @@ pub struct ProjectedColumnPlan {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct HeaderInfo {
     pub endianness: crate::metadata::Endianness,
     pub uses_u64_pointers: bool,
@@ -110,9 +114,11 @@ pub struct HeaderInfo {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct KernelSet;
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct PageSource;
 
 #[derive(Debug, Clone)]

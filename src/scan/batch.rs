@@ -8,6 +8,7 @@ use super::{
     decode_numeric_cell, decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column,
     numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_ascii,
 };
+use encoding_rs::WINDOWS_1252;
 #[derive(Debug)]
 pub(super) struct BatchDecodePlan {
     pub(super) row_plan: RowDecodePlan,
@@ -160,6 +161,16 @@ impl BatchAccumulator {
                     capacity_hint_rows,
                     column.width,
                     column.numeric_tile,
+                    if matches!(column.kernel, CompiledDecodeKernel::Utf8)
+                        && matches!(
+                            plan.row_plan.string_kernel,
+                            StringDecodeKernel::EncodedStrict
+                                | StringDecodeKernel::EncodedLenient
+                        ) {
+                        2
+                    } else {
+                        1
+                    },
                 )
             })
             .collect();
@@ -397,6 +408,16 @@ impl BatchAccumulator {
                     self.capacity_hint_rows,
                     column.width,
                     column.numeric_tile,
+                    if matches!(column.kernel, CompiledDecodeKernel::Utf8)
+                        && matches!(
+                            self.plan.row_plan.string_kernel,
+                            StringDecodeKernel::EncodedStrict
+                                | StringDecodeKernel::EncodedLenient
+                        ) {
+                        2
+                    } else {
+                        1
+                    },
                 )
             })
             .collect();
@@ -411,9 +432,12 @@ impl OwnedBatchColumnBuilder {
         target_rows: usize,
         width_hint: u32,
         numeric_tile: Option<NumericTileMode>,
+        utf8_data_capacity_multiplier: usize,
     ) -> Self {
-        let variable_capacity =
+        let base_variable_capacity =
             target_rows.saturating_mul(usize::try_from(width_hint).unwrap_or(0));
+        let utf8_variable_capacity =
+            base_variable_capacity.saturating_mul(utf8_data_capacity_multiplier.max(1));
         match kind {
             ColumnMaterializationKind::I32 => Self::I32 {
                 values: Vec::with_capacity(target_rows),
@@ -441,12 +465,12 @@ impl OwnedBatchColumnBuilder {
             },
             ColumnMaterializationKind::Utf8 => Self::Utf8 {
                 offsets: Vec::with_capacity(target_rows.saturating_add(1)),
-                data: Vec::with_capacity(variable_capacity),
+                data: Vec::with_capacity(utf8_variable_capacity),
                 valid: None,
             },
             ColumnMaterializationKind::RawBytes => Self::RawBytes {
                 offsets: Vec::with_capacity(target_rows.saturating_add(1)),
-                data: Vec::with_capacity(variable_capacity),
+                data: Vec::with_capacity(base_variable_capacity),
                 valid: None,
             },
         }
@@ -996,6 +1020,22 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                 return Ok(true);
             }
 
+            if row_plan.encoding == WINDOWS_1252
+                && matches!(
+                    row_plan.string_kernel,
+                    StringDecodeKernel::EncodedStrict | StringDecodeKernel::EncodedLenient
+                )
+            {
+                append_windows_1252_single_byte_utf8(
+                    offsets,
+                    data,
+                    valid,
+                    byte,
+                    matches!(row_plan.string_kernel, StringDecodeKernel::EncodedStrict),
+                )?;
+                return Ok(true);
+            }
+
             let trimmed = TrimmedString {
                 bytes: slice,
                 is_ascii: false,
@@ -1057,6 +1097,74 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
             Ok(true)
         }
         _ => Ok(false),
+    }
+}
+
+#[inline(always)]
+fn append_windows_1252_single_byte_utf8(
+    offsets: &mut Vec<u32>,
+    data: &mut Vec<u8>,
+    valid: &mut Option<Vec<u8>>,
+    byte: u8,
+    strict: bool,
+) -> Result<()> {
+    let codepoint = windows_1252_single_byte_to_codepoint(byte).unwrap_or_else(|| {
+        if strict {
+            0
+        } else {
+            0xFFFD
+        }
+    });
+    if strict && codepoint == 0 {
+        return Err(Error::Decode(crate::error::DecodeError {
+            message: "string decode failed under strict validation".to_owned(),
+        }));
+    }
+
+    let scalar = char::from_u32(codepoint).ok_or_else(|| {
+        Error::unsupported("windows-1252 single-byte decode produced invalid scalar")
+    })?;
+    let mut scratch = [0_u8; 4];
+    let encoded = scalar.encode_utf8(&mut scratch);
+    push_variable_valid(offsets, data, valid, encoded.as_bytes())
+}
+
+#[inline(always)]
+const fn windows_1252_single_byte_to_codepoint(byte: u8) -> Option<u32> {
+    match byte {
+        0x80 => Some(0x20AC),
+        0x81 => None,
+        0x82 => Some(0x201A),
+        0x83 => Some(0x0192),
+        0x84 => Some(0x201E),
+        0x85 => Some(0x2026),
+        0x86 => Some(0x2020),
+        0x87 => Some(0x2021),
+        0x88 => Some(0x02C6),
+        0x89 => Some(0x2030),
+        0x8A => Some(0x0160),
+        0x8B => Some(0x2039),
+        0x8C => Some(0x0152),
+        0x8D => None,
+        0x8E => Some(0x017D),
+        0x8F => None,
+        0x90 => None,
+        0x91 => Some(0x2018),
+        0x92 => Some(0x2019),
+        0x93 => Some(0x201C),
+        0x94 => Some(0x201D),
+        0x95 => Some(0x2022),
+        0x96 => Some(0x2013),
+        0x97 => Some(0x2014),
+        0x98 => Some(0x02DC),
+        0x99 => Some(0x2122),
+        0x9A => Some(0x0161),
+        0x9B => Some(0x203A),
+        0x9C => Some(0x0153),
+        0x9D => None,
+        0x9E => Some(0x017E),
+        0x9F => Some(0x0178),
+        _ => Some(byte as u32),
     }
 }
 

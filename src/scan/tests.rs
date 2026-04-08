@@ -1630,6 +1630,146 @@ fn collect_rows_decodes_compressed_string_rows() {
     ));
 }
 
+#[test]
+fn collect_batches_decodes_windows1252_single_byte_compressed_row() {
+    let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, 0x96], 64, 4));
+    let layout = LayoutPlan {
+        columns: vec![ColumnMeta {
+            index: 0,
+            name: "txt".to_owned(),
+            logical_type: LogicalType::String,
+            physical_width: 1,
+            offset: 0,
+            label: None,
+            format: None,
+        }],
+        header: HeaderInfo {
+            endianness: Endianness::Little,
+            uses_u64_pointers: false,
+            page_size: crate::types::PageSize(64),
+            page_count: 1,
+            page_header_size: 24,
+            subheader_pointer_size: 12,
+            subheader_signature_size: 4,
+            data_offset: 0,
+            header_size: 0,
+            release: String::new(),
+            is_catalog: false,
+        },
+        row_len: crate::types::RowLength(4),
+        total_rows: 1,
+        compression: CompressionKind::Row,
+        rows_per_page: 1,
+    };
+    let ds = Dataset {
+        file: Arc::new(FileInner {
+            source: FileSource::Bytes(Arc::clone(&bytes)),
+            options: OpenOptions::default(),
+        }),
+        metadata: Arc::new(DatasetMetadata {
+            row_count: 1,
+            row_len: crate::types::RowLength(4).into(),
+            compression: CompressionKind::Row,
+            encoding: Some("WINDOWS-1252".to_owned()),
+            ..DatasetMetadata::default()
+        }),
+        layout: Arc::new(layout.clone()),
+        descriptors: Arc::new(
+            crate::pages::compile_page_descriptors(
+                &mut std::io::Cursor::new(bytes.as_ref()),
+                &layout,
+            )
+            .expect("descriptors"),
+        ),
+    };
+
+    let batches = ScanBuilder::new(&ds)
+        .with_string_options(crate::StringDecodeOptions {
+            utf8_validation: crate::Utf8ValidationMode::Strict,
+            ..crate::StringDecodeOptions::default()
+        })
+        .with_batch_hint(crate::BatchHint::Rows(1))
+        .collect_batches()
+        .expect("typed compressed batches");
+    assert_eq!(batches.len(), 1);
+    match &batches[0].columns[0] {
+        OwnedColumnBuffer::Utf8 {
+            offsets,
+            data,
+            valid,
+        } => {
+            assert_eq!(offsets, &vec![0, 3]);
+            assert_eq!(data, &[0xE2, 0x80, 0x93]);
+            assert!(valid.is_none());
+        }
+        other => panic!("unexpected utf8 batch column: {other:?}"),
+    }
+}
+
+#[test]
+fn collect_batches_windows1252_single_byte_strict_rejects_undefined() {
+    let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, 0x81], 64, 4));
+    let layout = LayoutPlan {
+        columns: vec![ColumnMeta {
+            index: 0,
+            name: "txt".to_owned(),
+            logical_type: LogicalType::String,
+            physical_width: 1,
+            offset: 0,
+            label: None,
+            format: None,
+        }],
+        header: HeaderInfo {
+            endianness: Endianness::Little,
+            uses_u64_pointers: false,
+            page_size: crate::types::PageSize(64),
+            page_count: 1,
+            page_header_size: 24,
+            subheader_pointer_size: 12,
+            subheader_signature_size: 4,
+            data_offset: 0,
+            header_size: 0,
+            release: String::new(),
+            is_catalog: false,
+        },
+        row_len: crate::types::RowLength(4),
+        total_rows: 1,
+        compression: CompressionKind::Row,
+        rows_per_page: 1,
+    };
+    let ds = Dataset {
+        file: Arc::new(FileInner {
+            source: FileSource::Bytes(Arc::clone(&bytes)),
+            options: OpenOptions::default(),
+        }),
+        metadata: Arc::new(DatasetMetadata {
+            row_count: 1,
+            row_len: crate::types::RowLength(4).into(),
+            compression: CompressionKind::Row,
+            encoding: Some("WINDOWS-1252".to_owned()),
+            ..DatasetMetadata::default()
+        }),
+        layout: Arc::new(layout.clone()),
+        descriptors: Arc::new(
+            crate::pages::compile_page_descriptors(
+                &mut std::io::Cursor::new(bytes.as_ref()),
+                &layout,
+            )
+            .expect("descriptors"),
+        ),
+    };
+
+    let err = ScanBuilder::new(&ds)
+        .with_string_options(crate::StringDecodeOptions {
+            utf8_validation: crate::Utf8ValidationMode::Strict,
+            ..crate::StringDecodeOptions::default()
+        })
+        .with_batch_hint(crate::BatchHint::Rows(1))
+        .collect_batches()
+        .expect_err("strict windows-1252 should fail on undefined byte");
+    assert!(err.to_string().contains("strict validation"));
+}
+
 fn make_pages() -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend(make_page(0x0100, 2, 0, &[b"ABCD", b"EFGH"], 64));

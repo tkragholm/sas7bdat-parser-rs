@@ -3,9 +3,9 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "cdef-sas7bdat-corpus-profiler"
+name = "marys-cdef-sas7bdat-profiler-tkragholm"
 version = "0.1.0"
-description = "Tool for profiling SAS7BDAT corpora"
+description = "Tools for profiling SAS7BDAT corpora"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
