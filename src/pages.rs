@@ -153,7 +153,10 @@ fn classify_descriptor(
         });
     }
 
-    if layout.compression != crate::metadata::CompressionKind::None && subheader_count == 0 {
+    if layout.compression != crate::metadata::CompressionKind::None
+        && subheader_count == 0
+        && !matches!(kind, PageKind::Data)
+    {
         return Ok(PageDescriptor {
             page_index: PageIndex::from(page_index),
             row_base: RowIndex::from(row_base),
@@ -178,7 +181,7 @@ fn classify_descriptor(
         });
     }
 
-    if subheader_count != 0 {
+    if subheader_count != 0 && !matches!(kind, PageKind::Data) {
         return classify_indexed_descriptor(
             layout,
             page,
@@ -192,7 +195,11 @@ fn classify_descriptor(
         );
     }
 
-    let data_start = contiguous_data_start(layout, page, kind, subheader_count)?;
+    let data_start = if matches!(kind, PageKind::Data) {
+        layout.header.page_header_size
+    } else {
+        contiguous_data_start(layout, page, kind, subheader_count)?
+    };
     let page_len = u64::try_from(page.len()).unwrap_or(u64::MAX);
     if u64::from(data_start) >= page_len {
         return Ok(PageDescriptor {
@@ -918,7 +925,7 @@ mod tests {
 
     fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
         let mut page = vec![0u8; page_size];
-        page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_DATA.to_le_bytes());
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_MIX.to_le_bytes());
         page[(24 - 6)..(24 - 4)].copy_from_slice(&(rows.len() as u16).to_le_bytes());
         page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
 
@@ -939,7 +946,7 @@ mod tests {
 
     fn make_compressed_page(compressed: &[u8], page_size: usize) -> Vec<u8> {
         let mut page = vec![0u8; page_size];
-        page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_DATA.to_le_bytes());
+        page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_MIX.to_le_bytes());
         page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
         page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
 

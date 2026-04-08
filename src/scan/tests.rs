@@ -1659,7 +1659,7 @@ fn make_page(
 
 fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0100u16.to_le_bytes());
+    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0200u16.to_le_bytes());
     page[(24 - 6)..(24 - 4)]
         .copy_from_slice(&u16::try_from(rows.len()).expect("rows").to_le_bytes());
     page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
@@ -1685,7 +1685,7 @@ fn make_mixed_pointer_page(
     page_size: usize,
 ) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0100u16.to_le_bytes());
+    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0200u16.to_le_bytes());
     page[(24 - 6)..(24 - 4)].copy_from_slice(&2u16.to_le_bytes());
     page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
 
@@ -1710,7 +1710,7 @@ fn make_numeric_text_row(number: f64, text: [u8; 4]) -> Vec<u8> {
 
 fn make_compressed_page(compressed: &[u8], page_size: usize, compression_flag: u8) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0100u16.to_le_bytes());
+    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0200u16.to_le_bytes());
     page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
     page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
 
