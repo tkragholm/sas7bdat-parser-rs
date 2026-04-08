@@ -22,7 +22,7 @@ fn open_dataset(relative: &str, io_backend: IoBackendPreference) -> Option<Datas
     .ok()
 }
 
-fn backend_label(io_backend: IoBackendPreference) -> &'static str {
+const fn backend_label(io_backend: IoBackendPreference) -> &'static str {
     match io_backend {
         IoBackendPreference::Auto => "auto",
         IoBackendPreference::MmapPreferred => "mmap_preferred",

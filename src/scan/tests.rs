@@ -213,7 +213,7 @@ fn raw_scan_visits_rows_from_indexed_pointer_pages() {
 
 #[test]
 fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
-    let bytes = Arc::<[u8]>::from(make_mixed_pointer_page(b"WXYZ", b"ABCD", 64));
+    let bytes = Arc::<[u8]>::from(make_mixed_pointer_page(*b"WXYZ", *b"ABCD", 64));
     let layout = LayoutPlan {
         columns: Vec::new(),
         header: HeaderInfo {
@@ -274,7 +274,7 @@ fn typed_row_scan_decodes_projected_cells() {
         0x0100,
         1,
         0,
-        &[&make_numeric_text_row(42.0, b"ABCD")],
+        &[&make_numeric_text_row(42.0, *b"ABCD")],
         64,
     ));
     let layout = LayoutPlan {
@@ -448,7 +448,7 @@ fn typed_lossless_rows_preserve_numeric_bits_and_string_bytes() {
 
 #[test]
 fn collect_rows_materializes_owned_values() {
-    let row = make_numeric_text_row(7.0, b"ZX  ");
+    let row = make_numeric_text_row(7.0, *b"ZX  ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -525,8 +525,8 @@ fn collect_rows_materializes_owned_values() {
 
 #[test]
 fn collect_batches_materializes_columnar_values() {
-    let row_a = make_numeric_text_row(1.5, b"AA  ");
-    let row_b = make_numeric_text_row(2.0, b"BBBB");
+    let row_a = make_numeric_text_row(1.5, *b"AA  ");
+    let row_b = make_numeric_text_row(2.0, *b"BBBB");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 2, 0, &[&row_a, &row_b], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -726,7 +726,7 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
 
 #[test]
 fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
-    let row = make_numeric_text_row(42.0, b"ZX  ");
+    let row = make_numeric_text_row(42.0, *b"ZX  ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -809,7 +809,7 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
 
 #[test]
 fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
-    let row = make_numeric_text_row(1.0, b"pear");
+    let row = make_numeric_text_row(1.0, *b"pear");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -1060,7 +1060,7 @@ fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
 
 #[test]
 fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
-    let row = make_numeric_text_row(1.0, b"pear");
+    let row = make_numeric_text_row(1.0, *b"pear");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -1132,7 +1132,7 @@ fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
 
 #[test]
 fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
-    let row = make_numeric_text_row(1.0, b"pear");
+    let row = make_numeric_text_row(1.0, *b"pear");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -1216,7 +1216,7 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
 
 #[test]
 fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
-    let row = make_numeric_text_row(1.5, b"INT ");
+    let row = make_numeric_text_row(1.5, *b"INT ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -1280,7 +1280,7 @@ fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
     };
 
     let rows = ScanBuilder::new(&ds).collect_rows().expect("rows");
-    assert!(matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if value == 1.5));
+    assert!(matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if (value - 1.5).abs() < f64::EPSILON));
 
     let batches = ScanBuilder::new(&ds)
         .with_batch_hint(crate::BatchHint::Rows(1))
@@ -1298,7 +1298,7 @@ fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
 
 #[test]
 fn collect_batches_typed_lossless_uses_f64_and_raw_bytes() {
-    let row = make_numeric_text_row(42.0, b"ZX  ");
+    let row = make_numeric_text_row(42.0, *b"ZX  ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -1460,8 +1460,8 @@ fn collect_batches_staged_f64_preserves_missing_validity() {
 
 #[test]
 fn visit_batches_streams_projected_columnar_views() {
-    let row_a = make_numeric_text_row(10.0, b"ABCD");
-    let row_b = make_numeric_text_row(20.0, b"EF  ");
+    let row_a = make_numeric_text_row(10.0, *b"ABCD");
+    let row_b = make_numeric_text_row(20.0, *b"EF  ");
     let bytes = Arc::<[u8]>::from(make_pointer_page(&[&row_a, &row_b], 64));
     let layout = LayoutPlan {
         columns: vec![
@@ -1643,7 +1643,7 @@ fn make_page(
 fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
     page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0100u16.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&(rows.len() as u16).to_le_bytes());
+    page[(24 - 6)..(24 - 4)].copy_from_slice(&u16::try_from(rows.len()).expect("rows").to_le_bytes());
     page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
 
     let data_offset = 40u32;
@@ -1662,8 +1662,8 @@ fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
 }
 
 fn make_mixed_pointer_page(
-    pointer_row: &[u8; 4],
-    contiguous_row: &[u8; 4],
+    pointer_row: [u8; 4],
+    contiguous_row: [u8; 4],
     page_size: usize,
 ) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
@@ -1677,16 +1677,16 @@ fn make_mixed_pointer_page(
     page[32] = 0;
     page[33] = 1;
 
-    page[40..44].copy_from_slice(contiguous_row);
+    page[40..44].copy_from_slice(&contiguous_row);
     let start = usize::try_from(pointer_data_offset).unwrap_or(0);
-    page[start..start + 4].copy_from_slice(pointer_row);
+    page[start..start + 4].copy_from_slice(&pointer_row);
     page
 }
 
-fn make_numeric_text_row(number: f64, text: &[u8; 4]) -> Vec<u8> {
+fn make_numeric_text_row(number: f64, text: [u8; 4]) -> Vec<u8> {
     let mut row = Vec::with_capacity(12);
     row.extend_from_slice(&number.to_le_bytes());
-    row.extend_from_slice(text);
+    row.extend_from_slice(&text);
     row
 }
 

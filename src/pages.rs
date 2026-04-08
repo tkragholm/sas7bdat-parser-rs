@@ -587,12 +587,11 @@ fn is_stattransfer_release(release: &str) -> bool {
         _ => return false,
     };
 
-    let minor = match std::str::from_utf8(&bytes[2..6])
+    let Some(minor) = std::str::from_utf8(&bytes[2..6])
         .ok()
         .and_then(|digits| digits.parse::<u16>().ok())
-    {
-        Some(minor) => minor,
-        None => return false,
+    else {
+        return false;
     };
 
     let revision = match bytes[7] {

@@ -14,7 +14,7 @@ fn load_dataset(relative: &str) -> Option<Dataset> {
     Dataset::from_bytes(bytes).ok()
 }
 
-fn bench_case(c: &mut Criterion, name: &str, dataset: Dataset) {
+fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Elements(dataset.metadata().row_count));
 
@@ -58,19 +58,19 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: Dataset) {
 
 fn compression_matrix(c: &mut Criterion) {
     if let Some(dataset) = load_dataset("raw_data/csharp/54-class.sas7bdat") {
-        bench_case(c, "compressed_narrow_mixed_54_class", dataset);
+        bench_case(c, "compressed_narrow_mixed_54_class", &dataset);
     }
 
     if let Some(dataset) = load_dataset("raw_data/pandas/max_sas_date.sas7bdat") {
-        bench_case(c, "compressed_narrow_temporal_max_sas_date", dataset);
+        bench_case(c, "compressed_narrow_temporal_max_sas_date", &dataset);
     }
 
     if let Some(dataset) = load_dataset("raw_data/pandas/test2.sas7bdat") {
-        bench_case(c, "compressed_wide_mixed_test2", dataset);
+        bench_case(c, "compressed_wide_mixed_test2", &dataset);
     }
 
     if let Some(dataset) = load_dataset("raw_data/ahs2013/topical.sas7bdat") {
-        bench_case(c, "compressed_wide_string_topical", dataset);
+        bench_case(c, "compressed_wide_string_topical", &dataset);
     }
 }
 
