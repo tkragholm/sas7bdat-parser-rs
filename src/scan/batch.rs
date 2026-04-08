@@ -164,9 +164,9 @@ impl BatchAccumulator {
                     if matches!(column.kernel, CompiledDecodeKernel::Utf8)
                         && matches!(
                             plan.row_plan.string_kernel,
-                            StringDecodeKernel::EncodedStrict
-                                | StringDecodeKernel::EncodedLenient
-                        ) {
+                            StringDecodeKernel::EncodedStrict | StringDecodeKernel::EncodedLenient
+                        )
+                    {
                         2
                     } else {
                         1
@@ -194,39 +194,13 @@ impl BatchAccumulator {
         self.row_count >= self.target_rows
     }
 
-    pub(super) fn push_row(&mut self, row_index: u64, row: &[u8]) -> Result<()> {
-        if self.row_base.is_none() {
-            self.row_base = Some(row_index);
-        }
-
-        self.plan.row_plan.validate_row_bounds(row)?;
-        if self.plan.all_columns_staged_numeric {
-            for &idx in &self.plan.families.staged_numeric {
-                let batch_column = &mut self.columns[idx];
-                let column = &self.plan.row_plan.columns[idx];
-                let slice = self.plan.row_plan.slice_in_bounds(row, column);
-                let raw = decode_numeric_raw_bits_or_missing(slice, self.plan.row_plan.endianness);
-                let appended = batch_column.append_staged_numeric_bits_fast(raw)?;
-                debug_assert!(appended, "compiled staged numeric batch must match builder");
-                if !appended {
-                    return Err(Error::unsupported(
-                        "compiled staged numeric batch plan did not match column builder",
-                    ));
-                }
-            }
-            self.row_count += 1;
-            return Ok(());
-        }
-
-        if self.plan.needs_owned_string_scratch {
-            self.owned_strings.clear();
-        }
+    fn push_all_staged_numeric(&mut self, row: &[u8]) -> Result<()> {
         for &idx in &self.plan.families.staged_numeric {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
-            let slice = self.plan.row_plan.slice_in_bounds(row, column);
+            let slice = RowDecodePlan::slice_in_bounds(row, column);
             let raw = decode_numeric_raw_bits_or_missing(slice, self.plan.row_plan.endianness);
-            let appended = batch_column.append_staged_numeric_bits_fast(raw)?;
+            let appended = batch_column.append_staged_numeric_bits_fast(raw);
             debug_assert!(appended, "compiled staged numeric batch must match builder");
             if !appended {
                 return Err(Error::unsupported(
@@ -234,12 +208,32 @@ impl BatchAccumulator {
                 ));
             }
         }
+        Ok(())
+    }
 
+    fn push_staged_numeric_family(&mut self, row: &[u8]) -> Result<()> {
+        for &idx in &self.plan.families.staged_numeric {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let slice = RowDecodePlan::slice_in_bounds(row, column);
+            let raw = decode_numeric_raw_bits_or_missing(slice, self.plan.row_plan.endianness);
+            let appended = batch_column.append_staged_numeric_bits_fast(raw);
+            debug_assert!(appended, "compiled staged numeric batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled staged numeric batch plan did not match column builder",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn push_direct_numeric_family(&mut self, row: &[u8]) -> Result<()> {
         for &idx in &self.plan.families.direct_numeric {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
             let appended =
-                append_direct_numeric_batch_column(&self.plan.row_plan, batch_column, column, row)?;
+                append_direct_numeric_batch_column(&self.plan.row_plan, batch_column, column, row);
             debug_assert!(appended, "compiled direct numeric batch must match builder");
             if !appended {
                 return Err(Error::unsupported(
@@ -247,7 +241,10 @@ impl BatchAccumulator {
                 ));
             }
         }
+        Ok(())
+    }
 
+    fn push_direct_raw_bytes_family(&mut self, row: &[u8]) -> Result<()> {
         for &idx in &self.plan.families.direct_raw_bytes {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -264,7 +261,10 @@ impl BatchAccumulator {
                 ));
             }
         }
+        Ok(())
+    }
 
+    fn push_direct_utf8_single_byte_family(&mut self, row: &[u8]) -> Result<()> {
         if self.plan.use_single_byte_utf8_family {
             for &idx in &self.plan.families.direct_utf8_single_byte {
                 let batch_column = &mut self.columns[idx];
@@ -287,7 +287,10 @@ impl BatchAccumulator {
                 }
             }
         }
+        Ok(())
+    }
 
+    fn push_direct_utf8_borrowed_family(&mut self, row: &[u8]) -> Result<()> {
         for &idx in &self.plan.families.direct_utf8_borrowed {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -304,7 +307,10 @@ impl BatchAccumulator {
                 ));
             }
         }
+        Ok(())
+    }
 
+    fn push_direct_utf8_owned_family(&mut self, row: &[u8]) -> Result<()> {
         match self.plan.direct_utf8_owned_mode {
             Some(DirectUtf8OwnedMode::Utf8Lenient) => {
                 for &idx in &self.plan.families.direct_utf8_owned {
@@ -365,7 +371,10 @@ impl BatchAccumulator {
             }
             None => {}
         }
+        Ok(())
+    }
 
+    fn push_fallback_family(&mut self, row: &[u8]) -> Result<()> {
         for &idx in &self.plan.families.fallback {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -375,6 +384,34 @@ impl BatchAccumulator {
                     .plan_cell_in_bounds(row, column, &mut self.owned_strings)?;
             batch_column.append(cell, &self.owned_strings)?;
         }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn push_row(&mut self, row_index: u64, row: &[u8]) -> Result<()> {
+        if self.row_base.is_none() {
+            self.row_base = Some(row_index);
+        }
+
+        self.plan.row_plan.validate_row_bounds(row)?;
+        if self.plan.all_columns_staged_numeric {
+            self.push_all_staged_numeric(row)?;
+            self.row_count += 1;
+            return Ok(());
+        }
+
+        if self.plan.needs_owned_string_scratch {
+            self.owned_strings.clear();
+        }
+
+        self.push_staged_numeric_family(row)?;
+        self.push_direct_numeric_family(row)?;
+        self.push_direct_raw_bytes_family(row)?;
+        self.push_direct_utf8_single_byte_family(row)?;
+        self.push_direct_utf8_borrowed_family(row)?;
+        self.push_direct_utf8_owned_family(row)?;
+        self.push_fallback_family(row)?;
+
         self.row_count += 1;
         Ok(())
     }
@@ -411,9 +448,9 @@ impl BatchAccumulator {
                     if matches!(column.kernel, CompiledDecodeKernel::Utf8)
                         && matches!(
                             self.plan.row_plan.string_kernel,
-                            StringDecodeKernel::EncodedStrict
-                                | StringDecodeKernel::EncodedLenient
-                        ) {
+                            StringDecodeKernel::EncodedStrict | StringDecodeKernel::EncodedLenient
+                        )
+                    {
                         2
                     } else {
                         1
@@ -501,16 +538,16 @@ impl OwnedBatchColumnBuilder {
         self
     }
 
-    pub(super) fn append_integer_fast(&mut self, number: Option<f64>) -> Result<bool> {
+    pub(super) fn append_integer_fast(&mut self, number: Option<f64>) -> bool {
         match self {
             Self::I32 { values, valid } => match classify_typed_numeric_value(number, true) {
                 TypedNumericValue::Null => {
                     push_primitive_null(values, valid, 0);
-                    Ok(true)
+                    true
                 }
                 TypedNumericValue::Int32(value32) => {
                     push_primitive_valid(values, valid, value32);
-                    Ok(true)
+                    true
                 }
                 TypedNumericValue::Int64(_) | TypedNumericValue::Float64(_) => {
                     self.widen_integer_to_f64();
@@ -520,15 +557,15 @@ impl OwnedBatchColumnBuilder {
             Self::I64 { values, valid } => match classify_typed_numeric_value(number, false) {
                 TypedNumericValue::Null => {
                     push_primitive_null(values, valid, 0);
-                    Ok(true)
+                    true
                 }
                 TypedNumericValue::Int32(value32) => {
                     push_primitive_valid(values, valid, i64::from(value32));
-                    Ok(true)
+                    true
                 }
                 TypedNumericValue::Int64(value64) => {
                     push_primitive_valid(values, valid, value64);
-                    Ok(true)
+                    true
                 }
                 TypedNumericValue::Float64(_) => {
                     self.widen_integer_to_f64();
@@ -536,18 +573,18 @@ impl OwnedBatchColumnBuilder {
                 }
             },
             Self::F64 { .. } => self.append_f64_fast(number),
-            _ => Ok(false),
+            _ => false,
         }
     }
 
-    pub(super) fn append_f64_fast(&mut self, number: Option<f64>) -> Result<bool> {
+    pub(super) fn append_f64_fast(&mut self, number: Option<f64>) -> bool {
         match self {
             Self::F64 { values, valid } => {
                 match number {
                     None => push_primitive_null(values, valid, 0.0),
                     Some(value) => push_primitive_valid(values, valid, value),
                 }
-                Ok(true)
+                true
             }
             Self::StagedNumeric {
                 raw_bits,
@@ -557,14 +594,14 @@ impl OwnedBatchColumnBuilder {
                 let raw = number.map_or(SAS_NUMERIC_MISSING_SENTINEL, f64::to_bits);
                 *has_missing |= numeric_bits_is_missing(raw);
                 raw_bits.push(raw);
-                Ok(true)
+                true
             }
-            _ => Ok(false),
+            _ => false,
         }
     }
 
-    #[inline(always)]
-    pub(super) fn append_staged_numeric_bits_fast(&mut self, raw: u64) -> Result<bool> {
+    #[inline]
+    pub(super) fn append_staged_numeric_bits_fast(&mut self, raw: u64) -> bool {
         match self {
             Self::StagedNumeric {
                 raw_bits,
@@ -573,13 +610,13 @@ impl OwnedBatchColumnBuilder {
             } => {
                 *has_missing |= numeric_bits_is_missing(raw);
                 raw_bits.push(raw);
-                Ok(true)
+                true
             }
-            _ => Ok(false),
+            _ => false,
         }
     }
 
-    pub(super) fn append_date_fast(&mut self, number: Option<f64>) -> Result<bool> {
+    pub(super) fn append_date_fast(&mut self, number: Option<f64>) -> bool {
         match self {
             Self::Date { values, valid } => match classify_date_numeric_value(number) {
                 DateNumericValue::Null => {
@@ -590,11 +627,11 @@ impl OwnedBatchColumnBuilder {
                             days_since_sas_epoch: 0,
                         },
                     );
-                    Ok(true)
+                    true
                 }
                 DateNumericValue::Date(value) => {
                     push_primitive_valid(values, valid, value);
-                    Ok(true)
+                    true
                 }
                 DateNumericValue::Float64(_) => {
                     self.widen_temporal_to_f64();
@@ -602,11 +639,11 @@ impl OwnedBatchColumnBuilder {
                 }
             },
             Self::F64 { .. } => self.append_f64_fast(number),
-            _ => Ok(false),
+            _ => false,
         }
     }
 
-    pub(super) fn append_datetime_fast(&mut self, number: Option<f64>) -> Result<bool> {
+    pub(super) fn append_datetime_fast(&mut self, number: Option<f64>) -> bool {
         match self {
             Self::DateTime { values, valid } => match classify_datetime_numeric_value(number) {
                 DateTimeNumericValue::Null => {
@@ -617,11 +654,11 @@ impl OwnedBatchColumnBuilder {
                             seconds_since_sas_epoch: 0,
                         },
                     );
-                    Ok(true)
+                    true
                 }
                 DateTimeNumericValue::DateTime(value) => {
                     push_primitive_valid(values, valid, value);
-                    Ok(true)
+                    true
                 }
                 DateTimeNumericValue::Float64(_) => {
                     self.widen_temporal_to_f64();
@@ -629,11 +666,11 @@ impl OwnedBatchColumnBuilder {
                 }
             },
             Self::F64 { .. } => self.append_f64_fast(number),
-            _ => Ok(false),
+            _ => false,
         }
     }
 
-    pub(super) fn append_time_fast(&mut self, number: Option<f64>) -> Result<bool> {
+    pub(super) fn append_time_fast(&mut self, number: Option<f64>) -> bool {
         match self {
             Self::Time { values, valid } => match classify_time_numeric_value(number) {
                 TimeNumericValue::Null => {
@@ -644,11 +681,11 @@ impl OwnedBatchColumnBuilder {
                             seconds_since_midnight: 0,
                         },
                     );
-                    Ok(true)
+                    true
                 }
                 TimeNumericValue::Time(value) => {
                     push_primitive_valid(values, valid, value);
-                    Ok(true)
+                    true
                 }
                 TimeNumericValue::Float64(_) => {
                     self.widen_temporal_to_f64();
@@ -656,168 +693,217 @@ impl OwnedBatchColumnBuilder {
                 }
             },
             Self::F64 { .. } => self.append_f64_fast(number),
-            _ => Ok(false),
+            _ => false,
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(super) fn append(&mut self, cell: PlannedCell<'_>, owned_strings: &[String]) -> Result<()> {
         match self {
-            Self::I32 { values, valid } => match cell {
-                PlannedCell::Null => push_primitive_null(values, valid, 0),
-                PlannedCell::Int32(value) => push_primitive_valid(values, valid, value),
-                PlannedCell::Int64(value) => {
-                    if let Ok(value32) = i32::try_from(value) {
-                        push_primitive_valid(values, valid, value32);
-                    } else {
-                        self.widen_integer_to_f64();
-                        return self.append(PlannedCell::Int64(value), owned_strings);
-                    }
-                }
-                PlannedCell::Float64(value) => {
-                    match classify_typed_numeric_value(Some(value), true) {
-                        TypedNumericValue::Int32(value32) => {
+            Self::I32 { values, valid } => {
+                match cell {
+                    PlannedCell::Null => push_primitive_null(values, valid, 0),
+                    PlannedCell::Int32(value) => push_primitive_valid(values, valid, value),
+                    PlannedCell::Int64(value) => {
+                        if let Ok(value32) = i32::try_from(value) {
                             push_primitive_valid(values, valid, value32);
-                        }
-                        TypedNumericValue::Float64(_) | TypedNumericValue::Int64(_) => {
+                        } else {
                             self.widen_integer_to_f64();
-                            return self.append(PlannedCell::Float64(value), owned_strings);
+                            return self.append(PlannedCell::Int64(value), owned_strings);
                         }
-                        TypedNumericValue::Null => push_primitive_null(values, valid, 0),
                     }
-                }
-                other => return Err(unexpected_batch_cell("i32", other)),
-            },
-            Self::I64 { values, valid } => match cell {
-                PlannedCell::Null => push_primitive_null(values, valid, 0),
-                PlannedCell::Int32(value) => push_primitive_valid(values, valid, i64::from(value)),
-                PlannedCell::Int64(value) => push_primitive_valid(values, valid, value),
-                PlannedCell::Float64(value) => {
-                    match classify_typed_numeric_value(Some(value), false) {
-                        TypedNumericValue::Int32(value32) => {
-                            push_primitive_valid(values, valid, i64::from(value32));
+                    PlannedCell::Float64(value) => {
+                        match classify_typed_numeric_value(Some(value), true) {
+                            TypedNumericValue::Int32(value32) => {
+                                push_primitive_valid(values, valid, value32);
+                            }
+                            TypedNumericValue::Float64(_) | TypedNumericValue::Int64(_) => {
+                                self.widen_integer_to_f64();
+                                return self.append(PlannedCell::Float64(value), owned_strings);
+                            }
+                            TypedNumericValue::Null => push_primitive_null(values, valid, 0),
                         }
-                        TypedNumericValue::Int64(value64) => {
-                            push_primitive_valid(values, valid, value64);
-                        }
-                        TypedNumericValue::Float64(_) => {
-                            self.widen_integer_to_f64();
-                            return self.append(PlannedCell::Float64(value), owned_strings);
-                        }
-                        TypedNumericValue::Null => push_primitive_null(values, valid, 0),
                     }
+                    other => return Err(unexpected_batch_cell("i32", other)),
                 }
-                other => return Err(unexpected_batch_cell("i64", other)),
-            },
-            Self::F64 { values, valid } => match cell {
-                PlannedCell::Null => push_primitive_null(values, valid, 0.0),
-                PlannedCell::Int32(value) => push_primitive_valid(values, valid, f64::from(value)),
-                PlannedCell::Int64(value) => push_primitive_valid(values, valid, value as f64),
-                PlannedCell::Float64(value) => push_primitive_valid(values, valid, value),
-                other => return Err(unexpected_batch_cell("f64", other)),
-            },
+                Ok(())
+            }
+            Self::I64 { values, valid } => {
+                match cell {
+                    PlannedCell::Null => push_primitive_null(values, valid, 0),
+                    PlannedCell::Int32(value) => {
+                        push_primitive_valid(values, valid, i64::from(value));
+                    }
+                    PlannedCell::Int64(value) => push_primitive_valid(values, valid, value),
+                    PlannedCell::Float64(value) => {
+                        match classify_typed_numeric_value(Some(value), false) {
+                            TypedNumericValue::Int32(value32) => {
+                                push_primitive_valid(values, valid, i64::from(value32));
+                            }
+                            TypedNumericValue::Int64(value64) => {
+                                push_primitive_valid(values, valid, value64);
+                            }
+                            TypedNumericValue::Float64(_) => {
+                                self.widen_integer_to_f64();
+                                return self.append(PlannedCell::Float64(value), owned_strings);
+                            }
+                            TypedNumericValue::Null => push_primitive_null(values, valid, 0),
+                        }
+                    }
+                    other => return Err(unexpected_batch_cell("i64", other)),
+                }
+                Ok(())
+            }
+            Self::F64 { values, valid } => {
+                match cell {
+                    PlannedCell::Null => push_primitive_null(values, valid, 0.0),
+                    PlannedCell::Int32(value) => {
+                        push_primitive_valid(values, valid, f64::from(value));
+                    }
+                    PlannedCell::Int64(value) => {
+                        #[allow(clippy::cast_precision_loss)]
+                        let value_f64 = value as f64;
+                        push_primitive_valid(values, valid, value_f64);
+                    }
+                    PlannedCell::Float64(value) => push_primitive_valid(values, valid, value),
+                    other => return Err(unexpected_batch_cell("f64", other)),
+                }
+                Ok(())
+            }
             Self::StagedNumeric { raw_bits, .. } => {
                 raw_bits.push(staged_numeric_raw_bits_from_planned_cell(cell)?);
+                Ok(())
             }
             Self::Date { values, valid } => match cell {
-                PlannedCell::Null => push_primitive_null(
-                    values,
-                    valid,
-                    SasDate {
-                        days_since_sas_epoch: 0,
-                    },
-                ),
-                PlannedCell::Date(value) => push_primitive_valid(values, valid, value),
+                PlannedCell::Null => {
+                    push_primitive_null(
+                        values,
+                        valid,
+                        SasDate {
+                            days_since_sas_epoch: 0,
+                        },
+                    );
+                    Ok(())
+                }
+                PlannedCell::Date(value) => {
+                    push_primitive_valid(values, valid, value);
+                    Ok(())
+                }
                 PlannedCell::Int32(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Int32(value), owned_strings);
+                    self.append(PlannedCell::Int32(value), owned_strings)
                 }
                 PlannedCell::Int64(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Int64(value), owned_strings);
+                    self.append(PlannedCell::Int64(value), owned_strings)
                 }
                 PlannedCell::Float64(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Float64(value), owned_strings);
+                    self.append(PlannedCell::Float64(value), owned_strings)
                 }
-                other => return Err(unexpected_batch_cell("date", other)),
+                other => Err(unexpected_batch_cell("date", other)),
             },
             Self::DateTime { values, valid } => match cell {
-                PlannedCell::Null => push_primitive_null(
-                    values,
-                    valid,
-                    SasDateTime {
-                        seconds_since_sas_epoch: 0,
-                    },
-                ),
-                PlannedCell::DateTime(value) => push_primitive_valid(values, valid, value),
+                PlannedCell::Null => {
+                    push_primitive_null(
+                        values,
+                        valid,
+                        SasDateTime {
+                            seconds_since_sas_epoch: 0,
+                        },
+                    );
+                    Ok(())
+                }
+                PlannedCell::DateTime(value) => {
+                    push_primitive_valid(values, valid, value);
+                    Ok(())
+                }
                 PlannedCell::Int32(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Int32(value), owned_strings);
+                    self.append(PlannedCell::Int32(value), owned_strings)
                 }
                 PlannedCell::Int64(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Int64(value), owned_strings);
+                    self.append(PlannedCell::Int64(value), owned_strings)
                 }
                 PlannedCell::Float64(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Float64(value), owned_strings);
+                    self.append(PlannedCell::Float64(value), owned_strings)
                 }
-                other => return Err(unexpected_batch_cell("datetime", other)),
+                other => Err(unexpected_batch_cell("datetime", other)),
             },
             Self::Time { values, valid } => match cell {
-                PlannedCell::Null => push_primitive_null(
-                    values,
-                    valid,
-                    SasTime {
-                        seconds_since_midnight: 0,
-                    },
-                ),
-                PlannedCell::Time(value) => push_primitive_valid(values, valid, value),
+                PlannedCell::Null => {
+                    push_primitive_null(
+                        values,
+                        valid,
+                        SasTime {
+                            seconds_since_midnight: 0,
+                        },
+                    );
+                    Ok(())
+                }
+                PlannedCell::Time(value) => {
+                    push_primitive_valid(values, valid, value);
+                    Ok(())
+                }
                 PlannedCell::Int32(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Int32(value), owned_strings);
+                    self.append(PlannedCell::Int32(value), owned_strings)
                 }
                 PlannedCell::Int64(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Int64(value), owned_strings);
+                    self.append(PlannedCell::Int64(value), owned_strings)
                 }
                 PlannedCell::Float64(value) => {
                     self.widen_temporal_to_f64();
-                    return self.append(PlannedCell::Float64(value), owned_strings);
+                    self.append(PlannedCell::Float64(value), owned_strings)
                 }
-                other => return Err(unexpected_batch_cell("time", other)),
+                other => Err(unexpected_batch_cell("time", other)),
             },
             Self::Utf8 {
                 offsets,
                 data,
                 valid,
             } => match cell {
-                PlannedCell::Null => push_variable_null(offsets, data, valid),
+                PlannedCell::Null => {
+                    push_variable_null(offsets, data, valid);
+                    Ok(())
+                }
                 PlannedCell::StrBorrowed(value) => {
                     push_utf8_bytes_fast(offsets, data, valid, value.as_bytes())?;
+                    Ok(())
                 }
-                PlannedCell::StrOwned(index) => push_utf8_bytes_fast(
-                    offsets,
-                    data,
-                    valid,
-                    owned_strings
-                        .get(index)
-                        .ok_or_else(|| Error::unsupported("owned string index out of range"))?
-                        .as_bytes(),
-                )?,
-                other => return Err(unexpected_batch_cell("utf8", other)),
+                PlannedCell::StrOwned(index) => {
+                    push_utf8_bytes_fast(
+                        offsets,
+                        data,
+                        valid,
+                        owned_strings
+                            .get(index)
+                            .ok_or_else(|| Error::unsupported("owned string index out of range"))?
+                            .as_bytes(),
+                    )?;
+                    Ok(())
+                }
+                other => Err(unexpected_batch_cell("utf8", other)),
             },
             Self::RawBytes {
                 offsets,
                 data,
                 valid,
             } => match cell {
-                PlannedCell::Null => push_variable_null(offsets, data, valid),
-                PlannedCell::Bytes(value) => push_variable_valid(offsets, data, valid, value)?,
-                other => return Err(unexpected_batch_cell("raw-bytes", other)),
+                PlannedCell::Null => {
+                    push_variable_null(offsets, data, valid);
+                    Ok(())
+                }
+                PlannedCell::Bytes(value) => {
+                    push_variable_valid(offsets, data, valid, value)?;
+                    Ok(())
+                }
+                other => Err(unexpected_batch_cell("raw-bytes", other)),
             },
         }
-        Ok(())
     }
 
     pub(super) fn widen_temporal_to_f64(&mut self) {
@@ -838,14 +924,22 @@ impl OwnedBatchColumnBuilder {
             Self::DateTime { values, valid } => Self::F64 {
                 values: values
                     .into_iter()
-                    .map(|value| value.seconds_since_sas_epoch as f64)
+                    .map(|value| {
+                        #[allow(clippy::cast_precision_loss)]
+                        let v = value.seconds_since_sas_epoch as f64;
+                        v
+                    })
                     .collect(),
                 valid,
             },
             Self::Time { values, valid } => Self::F64 {
                 values: values
                     .into_iter()
-                    .map(|value| value.seconds_since_midnight as f64)
+                    .map(|value| {
+                        #[allow(clippy::cast_precision_loss)]
+                        let v = value.seconds_since_midnight as f64;
+                        v
+                    })
                     .collect(),
                 valid,
             },
@@ -867,7 +961,14 @@ impl OwnedBatchColumnBuilder {
                 valid,
             },
             Self::I64 { values, valid } => Self::F64 {
-                values: values.into_iter().map(|value| value as f64).collect(),
+                values: values
+                    .into_iter()
+                    .map(|value| {
+                        #[allow(clippy::cast_precision_loss)]
+                        let v = value as f64;
+                        v
+                    })
+                    .collect(),
                 valid,
             },
             other => other,
@@ -910,7 +1011,7 @@ impl OwnedBatchColumnBuilder {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn push_utf8_bytes_fast(
     offsets: &mut Vec<u32>,
     data: &mut Vec<u8>,
@@ -924,14 +1025,14 @@ fn push_utf8_bytes_fast(
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn append_direct_numeric_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
-) -> Result<bool> {
-    let slice = row_plan.slice_in_bounds(row, column);
+) -> bool {
+    let slice = RowDecodePlan::slice_in_bounds(row, column);
 
     if column.numeric_tile.is_some() {
         let raw = decode_numeric_raw_bits_or_missing(slice, row_plan.endianness);
@@ -943,14 +1044,11 @@ pub(super) fn append_direct_numeric_batch_column(
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_integer_fast(number)
         }
-        CompiledDecodeKernel::Float => {
-            let number = decode_numeric_cell(slice, row_plan.endianness);
-            batch_column.append_f64_fast(number)
-        }
-        CompiledDecodeKernel::DateAsNumeric
+        CompiledDecodeKernel::Float
+        | CompiledDecodeKernel::NumericLossless
+        | CompiledDecodeKernel::DateAsNumeric
         | CompiledDecodeKernel::DateTimeAsNumeric
-        | CompiledDecodeKernel::TimeAsNumeric
-        | CompiledDecodeKernel::NumericLossless => {
+        | CompiledDecodeKernel::TimeAsNumeric => {
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_f64_fast(number)
         }
@@ -966,18 +1064,18 @@ pub(super) fn append_direct_numeric_batch_column(
             let number = decode_numeric_cell(slice, row_plan.endianness);
             batch_column.append_time_fast(number)
         }
-        _ => Ok(false),
+        _ => false,
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn append_direct_raw_bytes_batch_column(
-    row_plan: &RowDecodePlan,
+    _row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
 ) -> Result<bool> {
-    let slice = row_plan.slice_in_bounds(row, column);
+    let slice = RowDecodePlan::slice_in_bounds(row, column);
     match batch_column {
         OwnedBatchColumnBuilder::RawBytes {
             offsets,
@@ -991,7 +1089,7 @@ pub(super) fn append_direct_raw_bytes_batch_column(
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn append_direct_utf8_single_byte_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
@@ -1061,7 +1159,7 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                     .decode_utf8_lenient_trimmed_bytes_for_batch_direct(
                         trimmed,
                         utf8_decode_scratch,
-                    )? {
+                    ) {
                     DecodedUtf8BatchValue::Borrowed(bytes) => {
                         push_variable_valid(offsets, data, valid, bytes)?;
                     }
@@ -1085,7 +1183,7 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                     .decode_encoded_lenient_trimmed_bytes_for_batch_direct(
                         trimmed,
                         utf8_decode_scratch,
-                    )? {
+                    ) {
                     DecodedUtf8BatchValue::Borrowed(bytes) => {
                         push_variable_valid(offsets, data, valid, bytes)?;
                     }
@@ -1100,7 +1198,7 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
     }
 }
 
-#[inline(always)]
+#[inline]
 fn append_windows_1252_single_byte_utf8(
     offsets: &mut Vec<u32>,
     data: &mut Vec<u8>,
@@ -1108,13 +1206,8 @@ fn append_windows_1252_single_byte_utf8(
     byte: u8,
     strict: bool,
 ) -> Result<()> {
-    let codepoint = windows_1252_single_byte_to_codepoint(byte).unwrap_or({
-        if strict {
-            0
-        } else {
-            0xFFFD
-        }
-    });
+    let codepoint =
+        windows_1252_single_byte_to_codepoint(byte).unwrap_or(if strict { 0 } else { 0xFFFD });
     if strict && codepoint == 0 {
         return Err(Error::Decode(crate::error::DecodeError {
             message: "string decode failed under strict validation".to_owned(),
@@ -1129,11 +1222,11 @@ fn append_windows_1252_single_byte_utf8(
     push_variable_valid(offsets, data, valid, encoded.as_bytes())
 }
 
-#[inline(always)]
+#[inline]
 const fn windows_1252_single_byte_to_codepoint(byte: u8) -> Option<u32> {
     match byte {
         0x80 => Some(0x20AC),
-        0x81 => None,
+        0x81 | 0x8D | 0x8F | 0x90 | 0x9D => None,
         0x82 => Some(0x201A),
         0x83 => Some(0x0192),
         0x84 => Some(0x201E),
@@ -1145,10 +1238,7 @@ const fn windows_1252_single_byte_to_codepoint(byte: u8) -> Option<u32> {
         0x8A => Some(0x0160),
         0x8B => Some(0x2039),
         0x8C => Some(0x0152),
-        0x8D => None,
         0x8E => Some(0x017D),
-        0x8F => None,
-        0x90 => None,
         0x91 => Some(0x2018),
         0x92 => Some(0x2019),
         0x93 => Some(0x201C),
@@ -1161,21 +1251,20 @@ const fn windows_1252_single_byte_to_codepoint(byte: u8) -> Option<u32> {
         0x9A => Some(0x0161),
         0x9B => Some(0x203A),
         0x9C => Some(0x0153),
-        0x9D => None,
         0x9E => Some(0x017E),
         0x9F => Some(0x0178),
         _ => Some(byte as u32),
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn append_direct_utf8_borrowed_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
 ) -> Result<bool> {
-    let slice = row_plan.slice_in_bounds(row, column);
+    let slice = RowDecodePlan::slice_in_bounds(row, column);
     match (column.kernel, batch_column) {
         (
             CompiledDecodeKernel::Utf8,
@@ -1193,7 +1282,7 @@ pub(super) fn append_direct_utf8_borrowed_batch_column(
     }
 }
 
-#[inline(always)]
+#[inline]
 fn append_direct_utf8_owned_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
@@ -1206,7 +1295,7 @@ fn append_direct_utf8_owned_batch_column(
         &'a mut String,
     ) -> Result<DecodedUtf8BatchValue<'a>>,
 ) -> Result<bool> {
-    let slice = row_plan.slice_in_bounds(row, column);
+    let slice = RowDecodePlan::slice_in_bounds(row, column);
     match (column.kernel, batch_column) {
         (
             CompiledDecodeKernel::Utf8,
@@ -1256,7 +1345,7 @@ pub(super) fn append_direct_utf8_lenient_batch_column(
         column,
         row,
         utf8_decode_scratch,
-        RowDecodePlan::decode_utf8_lenient_trimmed_bytes_for_batch_direct,
+        |p, t, s| Ok(p.decode_utf8_lenient_trimmed_bytes_for_batch_direct(t, s)),
     )
 }
 
@@ -1290,7 +1379,7 @@ pub(super) fn append_direct_encoded_lenient_batch_column(
         column,
         row,
         utf8_decode_scratch,
-        RowDecodePlan::decode_encoded_lenient_trimmed_bytes_for_batch_direct,
+        |p, t, s| Ok(p.decode_encoded_lenient_trimmed_bytes_for_batch_direct(t, s)),
     )
 }
 
@@ -1357,8 +1446,8 @@ pub(super) const fn column_materialization_kind(
                 ColumnMaterializationKind::I64
             }
         }
-        CompiledDecodeKernel::Float => ColumnMaterializationKind::F64,
-        CompiledDecodeKernel::NumericLossless
+        CompiledDecodeKernel::Float
+        | CompiledDecodeKernel::NumericLossless
         | CompiledDecodeKernel::DateAsNumeric
         | CompiledDecodeKernel::DateTimeAsNumeric
         | CompiledDecodeKernel::TimeAsNumeric => ColumnMaterializationKind::F64,
@@ -1374,7 +1463,7 @@ pub(super) fn borrow_column_buffers(columns: &[OwnedColumnBuffer]) -> Vec<Column
     columns.iter().map(OwnedColumnBuffer::as_borrowed).collect()
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn push_primitive_valid<T>(values: &mut Vec<T>, valid: &mut Option<Vec<u8>>, value: T) {
     values.push(value);
     if let Some(valid) = valid {
@@ -1382,7 +1471,7 @@ pub(super) fn push_primitive_valid<T>(values: &mut Vec<T>, valid: &mut Option<Ve
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn push_primitive_null<T: Copy>(
     values: &mut Vec<T>,
     valid: &mut Option<Vec<u8>>,
@@ -1395,7 +1484,7 @@ pub(super) fn push_primitive_null<T: Copy>(
     valid.as_mut().expect("validity initialized").push(0);
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn push_variable_valid(
     offsets: &mut Vec<u32>,
     data: &mut Vec<u8>,
@@ -1412,7 +1501,7 @@ pub(super) fn push_variable_valid(
     Ok(())
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn push_variable_valid_without_validity(
     offsets: &mut Vec<u32>,
     data: &mut Vec<u8>,
@@ -1428,7 +1517,7 @@ pub(super) fn push_variable_valid_without_validity(
     Ok(())
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn push_variable_null(
     offsets: &mut Vec<u32>,
     _data: &mut Vec<u8>,

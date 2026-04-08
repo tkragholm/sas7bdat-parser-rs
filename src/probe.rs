@@ -25,8 +25,6 @@ const SAS_PAGE_MIN_SIZE: u32 = 1024;
 const SAS_MAX_SIZE: u32 = 1 << 24;
 const SAS_PAGE_COUNT_MAX: u64 = 1 << 24;
 
-const SAS_EPOCH_OFFSET_SECONDS: i64 = -3653 * 86_400;
-
 const SAS7BDAT_MAGIC_NUMBER: [u8; 32] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC2, 0xEA, 0x81, 0x60,
     0xB3, 0x14, 0x11, 0xCF, 0xBD, 0x92, 0x08, 0x00, 0x09, 0xC7, 0x31, 0x8C, 0x18, 0x1F, 0x10, 0x11,
@@ -39,7 +37,7 @@ const SAS7BCAT_MAGIC_NUMBER: [u8; 32] = [
 
 pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, DatasetMetadata)> {
     let mut start_buf = [0u8; SAS_HEADER_START_SIZE];
-    reader.read_exact(&mut start_buf).map_err(io_header_error)?;
+    reader.read_exact(&mut start_buf).map_err(|e| io_header_error(&e))?;
 
     let header_start = HeaderStart::from_bytes(start_buf);
     let is_catalog = header_start.magic == SAS7BCAT_MAGIC_NUMBER;
@@ -65,7 +63,7 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
     if pad_alignment > 0 {
         reader
             .seek(SeekFrom::Current(i64::from(pad_alignment)))
-            .map_err(io_header_error)?;
+            .map_err(|e| io_header_error(&e))?;
     }
 
     let created_at = read_timestamp(reader, endianness)?;
@@ -78,10 +76,10 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
     let (header_size, page_size) = read_sizes(reader, endianness)?;
     let page_count = read_page_count(reader, uses_u64_pointers, endianness)?;
 
-    reader.seek(SeekFrom::Current(8)).map_err(io_header_error)?;
+    reader.seek(SeekFrom::Current(8)).map_err(|e| io_header_error(&e))?;
 
     let mut end_buf = [0u8; SAS_HEADER_END_SIZE];
-    reader.read_exact(&mut end_buf).map_err(io_header_error)?;
+    reader.read_exact(&mut end_buf).map_err(|e| io_header_error(&e))?;
     let header_end = HeaderEnd::from_bytes(end_buf);
     let release = header_end.release()?;
 
@@ -261,7 +259,7 @@ fn read_timestamp<R: Read>(reader: &mut R, endianness: Endianness) -> Result<f64
 
 fn read_u32<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u32> {
     let mut buf = [0u8; 4];
-    reader.read_exact(&mut buf).map_err(io_header_error)?;
+    reader.read_exact(&mut buf).map_err(|e| io_header_error(&e))?;
     Ok(match endianness {
         Endianness::Little => u32::from_le_bytes(buf),
         Endianness::Big => u32::from_be_bytes(buf),
@@ -270,7 +268,7 @@ fn read_u32<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u32> {
 
 fn read_u64<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u64> {
     let mut buf = [0u8; 8];
-    reader.read_exact(&mut buf).map_err(io_header_error)?;
+    reader.read_exact(&mut buf).map_err(|e| io_header_error(&e))?;
     Ok(match endianness {
         Endianness::Little => u64::from_le_bytes(buf),
         Endianness::Big => u64::from_be_bytes(buf),
@@ -279,7 +277,7 @@ fn read_u64<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u64> {
 
 fn read_f64<R: Read>(reader: &mut R, endianness: Endianness) -> Result<f64> {
     let mut buf = [0u8; 8];
-    reader.read_exact(&mut buf).map_err(io_header_error)?;
+    reader.read_exact(&mut buf).map_err(|e| io_header_error(&e))?;
     let bits = match endianness {
         Endianness::Little => u64::from_le_bytes(buf),
         Endianness::Big => u64::from_be_bytes(buf),
@@ -302,20 +300,36 @@ fn decode_padded_string(bytes: &[u8]) -> Option<String> {
 }
 
 fn convert_sas_time(time: f64, diff: f64) -> Option<SystemTime> {
-    let unix_seconds = SAS_EPOCH_OFFSET_SECONDS as f64 + (time - diff);
+    const SAS_EPOCH_OFFSET_F64: f64 = 315_532_800.0;
+    let unix_seconds = SAS_EPOCH_OFFSET_F64 + (time - diff);
     system_time_from_unix_seconds(unix_seconds)
 }
 
 fn system_time_from_unix_seconds(seconds: f64) -> Option<SystemTime> {
+    // i64 can exactly represent integers up to 2^63-1. 
+    // f64 can represent all integers up to 2^53.
+    // For timestamps, we are well within these bounds.
+    const I64_MIN_F64: f64 = -9_223_372_036_854_775_808.0;
+    const I64_MAX_F64: f64 = 9_223_372_036_854_775_807.0;
+
     if !seconds.is_finite() {
         return None;
     }
+
+    if !(I64_MIN_F64..=I64_MAX_F64).contains(&seconds) {
+        return None;
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
     let whole = seconds.trunc() as i64;
-    let nanos_f64 = (seconds.fract().abs() * 1_000_000_000.0).round();
+    let fract = seconds.fract().abs();
+    let nanos_f64 = (fract * 1_000_000_000.0).round();
     let nanos = if nanos_f64 >= 1_000_000_000.0 {
         999_999_999_u32
     } else {
-        nanos_f64 as u32
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let n = nanos_f64 as u32;
+        n
     };
     let duration = Duration::new(whole.unsigned_abs(), nanos);
     if whole >= 0 {
@@ -325,8 +339,8 @@ fn system_time_from_unix_seconds(seconds: f64) -> Option<SystemTime> {
     }
 }
 
-fn io_header_error(err: std::io::Error) -> Error {
-    Error::header_corruption(err.to_string())
+fn io_header_error(err: &std::io::Error) -> Error {
+    Error::metadata_corruption(err.to_string())
 }
 
 fn header_error(message: impl Into<String>) -> Error {

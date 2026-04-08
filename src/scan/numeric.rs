@@ -43,7 +43,7 @@ pub(super) fn decode_numeric_cell(slice: &[u8], endianness: Endianness) -> Optio
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn decode_numeric_raw_bits_or_missing(slice: &[u8], endianness: Endianness) -> u64 {
     if slice.is_empty() {
         SAS_NUMERIC_MISSING_SENTINEL
@@ -52,7 +52,7 @@ pub(super) fn decode_numeric_raw_bits_or_missing(slice: &[u8], endianness: Endia
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn numeric_bits(slice: &[u8], endianness: Endianness) -> u64 {
     debug_assert!(slice.len() <= 8);
     if slice.len() == 8 {
@@ -338,16 +338,28 @@ pub(super) fn staged_numeric_raw_bits_from_planned_cell(cell: PlannedCell<'_>) -
     match cell {
         PlannedCell::Null => Ok(SAS_NUMERIC_MISSING_SENTINEL),
         PlannedCell::Int32(value) => Ok(f64::from(value).to_bits()),
-        PlannedCell::Int64(value) => Ok((value as f64).to_bits()),
+        PlannedCell::Int64(value) => {
+            #[allow(clippy::cast_precision_loss)]
+            let v = value as f64;
+            Ok(v.to_bits())
+        }
         PlannedCell::Float64(value) => Ok(value.to_bits()),
         PlannedCell::Date(value) => Ok(f64::from(value.days_since_sas_epoch).to_bits()),
-        PlannedCell::DateTime(value) => Ok((value.seconds_since_sas_epoch as f64).to_bits()),
-        PlannedCell::Time(value) => Ok((value.seconds_since_midnight as f64).to_bits()),
-        other => Err(unexpected_batch_cell("staged-numeric", other)),
+        PlannedCell::DateTime(value) => {
+            #[allow(clippy::cast_precision_loss)]
+            let v = value.seconds_since_sas_epoch as f64;
+            Ok(v.to_bits())
+        }
+        PlannedCell::Time(value) => {
+            #[allow(clippy::cast_precision_loss)]
+            let v = value.seconds_since_midnight as f64;
+            Ok(v.to_bits())
+        }
+        other => Err(unexpected_batch_cell("staged numeric bits", other)),
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn numeric_bits_scalar_8(slice: &[u8], endianness: Endianness) -> u64 {
     let bytes: [u8; 8] = slice.try_into().expect("len == 8");
     match endianness {
@@ -360,20 +372,30 @@ pub(super) const NUMERIC_EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
 pub(super) const NUMERIC_FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
 pub(super) const SAS_NUMERIC_MISSING_SENTINEL: u64 = 0x7FF0_0000_0000_0001;
 
-#[inline(always)]
+#[inline]
 pub(super) const fn numeric_bits_is_missing(raw: u64) -> bool {
     (raw & NUMERIC_EXP_MASK) == NUMERIC_EXP_MASK && (raw & NUMERIC_FRACTION_MASK) != 0
 }
 
 pub(super) fn try_i64_from_f64(number: f64) -> Option<i64> {
+    // Constants for i64::MIN/MAX as f64. Note that i64::MAX (2^63 - 1)
+    // is not exactly representable in f64 (2^63 is).
+    #[allow(clippy::cast_precision_loss)]
+    const I64_MIN_F64: f64 = i64::MIN as f64;
+    #[allow(clippy::cast_precision_loss)]
+    const I64_MAX_F64: f64 = i64::MAX as f64;
+
     if !number.is_finite() {
         return None;
     }
-    if number < i64::MIN as f64 || number > i64::MAX as f64 {
+
+    if !(I64_MIN_F64..=I64_MAX_F64).contains(&number) {
         return None;
     }
+    #[allow(clippy::cast_possible_truncation)]
     let value = number as i64;
-    if value as f64 == number {
+    #[allow(clippy::cast_precision_loss)]
+    if (value as f64 - number).abs() < f64::EPSILON {
         Some(value)
     } else {
         None
@@ -402,39 +424,33 @@ pub(super) fn classify_typed_numeric_value(
 }
 
 pub(super) fn classify_date_numeric_value(number: Option<f64>) -> DateNumericValue {
-    match number {
-        None => DateNumericValue::Null,
-        Some(number) => match try_i32_from_f64(number) {
-            Some(days) => DateNumericValue::Date(SasDate {
+    number.map_or(DateNumericValue::Null, |number| {
+        try_i32_from_f64(number).map_or(DateNumericValue::Float64(number), |days| {
+            DateNumericValue::Date(SasDate {
                 days_since_sas_epoch: days,
-            }),
-            None => DateNumericValue::Float64(number),
-        },
-    }
+            })
+        })
+    })
 }
 
 pub(super) fn classify_datetime_numeric_value(number: Option<f64>) -> DateTimeNumericValue {
-    match number {
-        None => DateTimeNumericValue::Null,
-        Some(number) => match try_i64_from_f64(number) {
-            Some(seconds) => DateTimeNumericValue::DateTime(SasDateTime {
+    number.map_or(DateTimeNumericValue::Null, |number| {
+        try_i64_from_f64(number).map_or(DateTimeNumericValue::Float64(number), |seconds| {
+            DateTimeNumericValue::DateTime(SasDateTime {
                 seconds_since_sas_epoch: seconds,
-            }),
-            None => DateTimeNumericValue::Float64(number),
-        },
-    }
+            })
+        })
+    })
 }
 
 pub(super) fn classify_time_numeric_value(number: Option<f64>) -> TimeNumericValue {
-    match number {
-        None => TimeNumericValue::Null,
-        Some(number) => match try_i64_from_f64(number) {
-            Some(seconds) => TimeNumericValue::Time(SasTime {
+    number.map_or(TimeNumericValue::Null, |number| {
+        try_i64_from_f64(number).map_or(TimeNumericValue::Float64(number), |seconds| {
+            TimeNumericValue::Time(SasTime {
                 seconds_since_midnight: seconds,
-            }),
-            None => TimeNumericValue::Float64(number),
-        },
-    }
+            })
+        })
+    })
 }
 
 #[cfg(test)]
@@ -512,6 +528,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_precision_loss, clippy::float_cmp)]
     fn f64_precision_boundary_is_not_recovered_as_unrepresentable_integer() {
         let rounded = 9_007_199_254_740_993_i64 as f64;
         assert_eq!(rounded, 9_007_199_254_740_992.0);

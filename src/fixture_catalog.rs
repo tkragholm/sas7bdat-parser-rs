@@ -96,38 +96,50 @@ pub struct SampleSummary {
 
 impl SampleSummary {
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn avg_trimmed_string_len(self) -> f64 {
         if self.string_cells == 0 {
             0.0
         } else {
-            self.total_trimmed_string_len as f64 / self.string_cells as f64
+            let total = self.total_trimmed_string_len as f64;
+            let count = self.string_cells as f64;
+            total / count
         }
     }
 
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn empty_string_ratio(self) -> f64 {
         if self.string_cells == 0 {
             0.0
         } else {
-            self.empty_string_cells as f64 / self.string_cells as f64
+            let empty = self.empty_string_cells as f64;
+            let total = self.string_cells as f64;
+            empty / total
         }
     }
 
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn ascii_ratio(self) -> f64 {
         if self.string_cells == 0 {
             0.0
         } else {
-            self.ascii_string_cells as f64 / self.string_cells as f64
+            let ascii = self.ascii_string_cells as f64;
+            let total = self.string_cells as f64;
+            ascii / total
         }
     }
 
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn missing_numeric_ratio(self) -> f64 {
         if self.numeric_like_cells == 0 {
             0.0
         } else {
-            self.null_numeric_like_cells as f64 / self.numeric_like_cells as f64
+            let missing = self.null_numeric_like_cells as f64;
+            let total = self.numeric_like_cells as f64;
+            missing / total
         }
     }
 }
@@ -508,21 +520,22 @@ fn width_tag(ds: &Dataset) -> String {
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn content_tag(ds: &Dataset, logical_types: LogicalTypeCounts) -> String {
     let cols = ds.columns().len();
     if cols == 0 {
         return "empty".to_owned();
     }
-    let string_like = logical_types.string + logical_types.bytes;
-    let numeric_like = logical_types.integer
+    let string_like = (logical_types.string + logical_types.bytes) as f64;
+    let numeric_like = (logical_types.integer
         + logical_types.float
         + logical_types.date
         + logical_types.datetime
-        + logical_types.time;
+        + logical_types.time) as f64;
     let total = cols as f64;
-    if string_like as f64 / total >= 0.7 {
+    if string_like / total >= 0.7 {
         "string-heavy".to_owned()
-    } else if numeric_like as f64 / total >= 0.7 {
+    } else if numeric_like / total >= 0.7 {
         "numeric-heavy".to_owned()
     } else {
         "mixed".to_owned()
@@ -725,14 +738,15 @@ mod tests {
         assert_eq!(tags, "mixed");
     }
 
+    #[allow(clippy::cast_precision_loss)]
     fn content_tag_for_counts(counts: LogicalTypeCounts) -> String {
-        let string_like = counts.string + counts.bytes;
+        let string_like = (counts.string + counts.bytes) as f64;
         let numeric_like =
-            counts.integer + counts.float + counts.date + counts.datetime + counts.time;
+            (counts.integer + counts.float + counts.date + counts.datetime + counts.time) as f64;
         let total = string_like + numeric_like;
-        if string_like as f64 / total as f64 >= 0.7 {
+        if string_like / total >= 0.7 {
             "string-heavy".to_owned()
-        } else if numeric_like as f64 / total as f64 >= 0.7 {
+        } else if numeric_like / total >= 0.7 {
             "numeric-heavy".to_owned()
         } else {
             "mixed".to_owned()

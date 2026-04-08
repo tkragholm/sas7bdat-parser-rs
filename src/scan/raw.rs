@@ -5,7 +5,7 @@ use super::{
 use crate::types::{PageIndex, RowIndex};
 use std::io::Read;
 
-pub(super) fn scan_raw_rows<F>(builder: ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
+pub(super) fn scan_raw_rows<F>(builder: &ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
 where
     F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
 {
@@ -14,7 +14,7 @@ where
     })
 }
 
-pub(super) fn scan_row_bytes<F>(builder: ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
+pub(super) fn scan_row_bytes<F>(builder: &ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
 where
     F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
@@ -29,7 +29,7 @@ where
 }
 
 pub(super) fn scan_row_bytes_with_reader<R, F>(
-    builder: ScanBuilder<'_>,
+    builder: &ScanBuilder<'_>,
     reader: &mut R,
     f: &mut F,
 ) -> Result<ScanStats>
@@ -37,7 +37,7 @@ where
     R: Read + Seek,
     F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
-    let plan = RawScanPlan::compile(&builder);
+    let plan = RawScanPlan::compile(builder);
     if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
@@ -77,7 +77,7 @@ where
             crate::internal::PageExecClass::IndexedPointerRows => {
                 stats.indexed_pages = stats.indexed_pages.saturating_add(1);
                 load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
-                let spans = descriptor_spans(&builder, descriptor)?;
+                let spans = descriptor_spans(builder, descriptor)?;
                 if emit_indexed_rows(
                     &plan,
                     descriptor,
@@ -93,7 +93,7 @@ where
             crate::internal::PageExecClass::IndexedCompressedRows => {
                 stats.compressed_pages = stats.compressed_pages.saturating_add(1);
                 load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
-                let spans = descriptor_spans(&builder, descriptor)?;
+                let spans = descriptor_spans(builder, descriptor)?;
                 if emit_indexed_rows(
                     &plan,
                     descriptor,
@@ -108,21 +108,21 @@ where
             }
         }
 
-        emit_progress(&builder, &stats, total_pages, estimated_total_bytes);
+        emit_progress(builder, &stats, total_pages, estimated_total_bytes);
     }
 
     Ok(stats)
 }
 
 pub(super) fn scan_row_bytes_in_memory<F>(
-    builder: ScanBuilder<'_>,
+    builder: &ScanBuilder<'_>,
     file_bytes: &[u8],
     f: &mut F,
 ) -> Result<ScanStats>
 where
     F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
-    let plan = RawScanPlan::compile(&builder);
+    let plan = RawScanPlan::compile(builder);
     if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
@@ -164,7 +164,7 @@ where
             crate::internal::PageExecClass::MetadataOrEmpty => {}
             crate::internal::PageExecClass::IndexedPointerRows => {
                 stats.indexed_pages = stats.indexed_pages.saturating_add(1);
-                let spans = descriptor_spans(&builder, descriptor)?;
+                let spans = descriptor_spans(builder, descriptor)?;
                 if emit_indexed_rows(
                     &plan,
                     descriptor,
@@ -179,7 +179,7 @@ where
             }
             crate::internal::PageExecClass::IndexedCompressedRows => {
                 stats.compressed_pages = stats.compressed_pages.saturating_add(1);
-                let spans = descriptor_spans(&builder, descriptor)?;
+                let spans = descriptor_spans(builder, descriptor)?;
                 if emit_indexed_rows(
                     &plan,
                     descriptor,
@@ -194,7 +194,7 @@ where
             }
         }
 
-        emit_progress(&builder, &stats, total_pages, estimated_total_bytes);
+        emit_progress(builder, &stats, total_pages, estimated_total_bytes);
     }
 
     Ok(stats)
@@ -308,8 +308,8 @@ pub(super) fn load_descriptor_page<R: Read + Seek>(
 ) -> Result<()> {
     reader
         .seek(SeekFrom::Start(plan.page_offset(descriptor.page_index)))
-        .map_err(scan_io_error)?;
-    reader.read_exact(page).map_err(scan_io_error)?;
+        .map_err(|e| scan_io_error(&e))?;
+    reader.read_exact(page).map_err(|e| scan_io_error(&e))?;
     stats.raw_bytes_read = stats
         .raw_bytes_read
         .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
@@ -421,7 +421,7 @@ where
     Ok(false)
 }
 
-pub(super) fn scan_io_error(err: std::io::Error) -> Error {
+pub(super) fn scan_io_error(err: &std::io::Error) -> Error {
     Error::Io(crate::error::IoError {
         path: None,
         message: err.to_string(),

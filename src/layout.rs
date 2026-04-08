@@ -168,10 +168,10 @@ pub fn parse_layout<R: Read + Seek>(
         let page_offset = header.data_offset + page_index * u64::from(header.page_size);
         reader
             .seek(SeekFrom::Start(page_offset))
-            .map_err(metadata_io_error)?;
+            .map_err(|e| metadata_io_error(&e))?;
 
         let mut page = vec![0u8; usize::from(header.page_size)];
-        reader.read_exact(&mut page).map_err(metadata_io_error)?;
+        reader.read_exact(&mut page).map_err(|e| metadata_io_error(&e))?;
 
         let page_type = read_u16(
             header.endianness,
@@ -666,7 +666,7 @@ fn get_range<'a>(bytes: &'a [u8], start: usize, end: usize, what: &str) -> Resul
         .ok_or_else(|| metadata_error(format!("{what} exceeds bounds")))
 }
 
-fn metadata_io_error(err: std::io::Error) -> Error {
+fn metadata_io_error(err: &std::io::Error) -> Error {
     Error::metadata_corruption(err.to_string())
 }
 

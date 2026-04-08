@@ -101,47 +101,57 @@ impl<'a> ScanBuilder<'a> {
         self
     }
 
-    pub fn visit_raw_rows<F>(self, _f: F) -> Result<ScanStats>
+    /// # Errors
+    ///
+    /// Returns an error if the scan fails, such as due to I/O or decompression errors.
+    pub fn visit_raw_rows<F>(&self, mut f: F) -> Result<ScanStats>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
     {
-        let mut f = _f;
         self.scan_raw_rows(&mut f)
     }
 
     #[doc(hidden)]
-    pub fn visit_raw_rows_with_tap<F, T>(self, _f: F, tap: &mut T) -> Result<ScanStats>
+    /// # Errors
+    ///
+    /// Returns an error if the scan fails.
+    pub fn visit_raw_rows_with_tap<F, T>(&self, mut f: F, tap: &mut T) -> Result<ScanStats>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
     {
-        let mut f = _f;
         self.scan_raw_rows_with_tap(&mut f, tap)
     }
 
-    pub fn visit_rows<F>(self, _f: F) -> Result<ScanStats>
+    /// # Errors
+    ///
+    /// Returns an error if the scan or row decoding fails.
+    pub fn visit_rows<F>(&self, mut f: F) -> Result<ScanStats>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
     {
-        let mut f = _f;
         self.scan_rows(&mut f)
     }
 
     #[doc(hidden)]
-    pub fn visit_rows_with_tap<F, T>(self, _f: F, tap: &mut T) -> Result<ScanStats>
+    /// # Errors
+    ///
+    /// Returns an error if the scan or row decoding fails.
+    pub fn visit_rows_with_tap<F, T>(&self, mut f: F, tap: &mut T) -> Result<ScanStats>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
     {
-        let mut f = _f;
         self.scan_rows_with_tap(&mut f, tap)
     }
 
-    pub fn visit_batches<F>(self, _f: F) -> Result<ScanStats>
+    /// # Errors
+    ///
+    /// Returns an error if the scan or batch decoding fails.
+    pub fn visit_batches<F>(&self, mut f: F) -> Result<ScanStats>
     where
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
     {
-        let mut f = _f;
         self.scan_batches(&mut |batch| {
             let columns = borrow_column_buffers(&batch.columns);
             let batch = ColumnarBatch {
@@ -154,12 +164,14 @@ impl<'a> ScanBuilder<'a> {
     }
 
     #[doc(hidden)]
-    pub fn visit_batches_with_tap<F, T>(self, _f: F, tap: &mut T) -> Result<ScanStats>
+    /// # Errors
+    ///
+    /// Returns an error if the scan or batch decoding fails.
+    pub fn visit_batches_with_tap<F, T>(&self, mut f: F, tap: &mut T) -> Result<ScanStats>
     where
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
     {
-        let mut f = _f;
         self.scan_batches_with_tap(
             &mut |batch| {
                 let columns = borrow_column_buffers(&batch.columns);
@@ -174,14 +186,17 @@ impl<'a> ScanBuilder<'a> {
         )
     }
 
-    pub fn collect_rows(self) -> Result<Vec<OwnedRow>> {
+    /// # Errors
+    ///
+    /// Returns an error if the scan or row decoding fails.
+    pub fn collect_rows(&self) -> Result<Vec<OwnedRow>> {
         if matches!(self.decode, DecodeMode::Raw) {
             return Err(Error::unsupported(
                 "collect_rows does not support DecodeMode::Raw; use visit_raw_rows instead",
             ));
         }
 
-        let plan = RowDecodePlan::new(&self)?;
+        let plan = RowDecodePlan::new(self)?;
         let mut rows = Vec::with_capacity(usize::try_from(self.ds.metadata.row_count).unwrap_or(0));
         match plan.decode_mode {
             DecodeMode::Typed => {
@@ -215,20 +230,23 @@ impl<'a> ScanBuilder<'a> {
         Ok(rows)
     }
 
-    pub fn collect_batches(self) -> Result<Vec<OwnedColumnarBatch>> {
+    /// # Errors
+    ///
+    /// Returns an error if the scan or batch decoding fails.
+    pub fn collect_batches(&self) -> Result<Vec<OwnedColumnarBatch>> {
         if matches!(self.decode, DecodeMode::Raw) {
             return Err(Error::unsupported(
                 "collect_batches does not support DecodeMode::Raw",
             ));
         }
 
-        let target_rows = resolve_batch_row_capacity(&self)?;
-        let capacity_hint_rows = effective_scan_row_capacity_hint(&self).min(target_rows);
+        let target_rows = resolve_batch_row_capacity(self)?;
+        let capacity_hint_rows = effective_scan_row_capacity_hint(self).min(target_rows);
         let target_rows_u64 = u64::try_from(target_rows).unwrap_or(u64::MAX).max(1);
         let estimated_batches = self.ds.metadata.row_count.div_ceil(target_rows_u64);
         let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
         let mut batch_accumulator = BatchAccumulator::new(
-            BatchDecodePlan::new(&self)?,
+            BatchDecodePlan::new(self)?,
             target_rows,
             capacity_hint_rows,
         );
@@ -249,30 +267,39 @@ impl<'a> ScanBuilder<'a> {
         Ok(batches)
     }
 
-    pub fn write_raw_rows(self, _sink: &mut impl RawRowSink) -> Result<ScanStats> {
-        self.visit_raw_rows(|row| _sink.push(row))
+    /// # Errors
+    ///
+    /// Returns an error if the scan or sink fails.
+    pub fn write_raw_rows(&self, sink: &mut impl RawRowSink) -> Result<ScanStats> {
+        self.visit_raw_rows(|row| sink.push(row))
     }
 
-    pub fn write_rows(self, _sink: &mut impl RowSink) -> Result<ScanStats> {
-        self.visit_rows(|row| _sink.push(row))
+    /// # Errors
+    ///
+    /// Returns an error if the scan or sink fails.
+    pub fn write_rows(&self, sink: &mut impl RowSink) -> Result<ScanStats> {
+        self.visit_rows(|row| sink.push(row))
     }
 
-    pub fn write_batches(self, _sink: &mut impl BatchSink) -> Result<ScanStats> {
-        self.visit_batches(|batch| _sink.push(batch))
+    /// # Errors
+    ///
+    /// Returns an error if the scan or sink fails.
+    pub fn write_batches(&self, sink: &mut impl BatchSink) -> Result<ScanStats> {
+        self.visit_batches(|batch| sink.push(batch))
     }
 }
 
 const fn _keep_type_imports_alive<'a>(_columns: &'a [ColumnBuffer<'a>], _dataset: &'a Dataset) {}
 
 impl ScanBuilder<'_> {
-    fn scan_raw_rows<F>(self, f: &mut F) -> Result<ScanStats>
+    fn scan_raw_rows<F>(&self, f: &mut F) -> Result<ScanStats>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
     {
         scan_raw_rows(self, f)
     }
 
-    fn scan_raw_rows_with_tap<F, T>(self, f: &mut F, tap: &mut T) -> Result<ScanStats>
+    fn scan_raw_rows_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
@@ -283,7 +310,7 @@ impl ScanBuilder<'_> {
         })
     }
 
-    fn scan_rows<F>(self, f: &mut F) -> Result<ScanStats>
+    fn scan_rows<F>(&self, f: &mut F) -> Result<ScanStats>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
     {
@@ -293,7 +320,7 @@ impl ScanBuilder<'_> {
             ));
         }
 
-        let plan = RowDecodePlan::new(&self)?;
+        let plan = RowDecodePlan::new(self)?;
         let mut owned_strings = Vec::new();
         self.scan_raw_rows(&mut |raw| {
             let planned = plan.plan_cells(raw.bytes, &mut owned_strings)?;
@@ -307,7 +334,7 @@ impl ScanBuilder<'_> {
         })
     }
 
-    fn scan_rows_with_tap<F, T>(self, f: &mut F, tap: &mut T) -> Result<ScanStats>
+    fn scan_rows_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
@@ -318,7 +345,7 @@ impl ScanBuilder<'_> {
             ));
         }
 
-        let plan = RowDecodePlan::new(&self)?;
+        let plan = RowDecodePlan::new(self)?;
         let mut owned_strings = Vec::new();
         self.scan_raw_rows_with_tap(
             &mut |raw| {
@@ -335,7 +362,7 @@ impl ScanBuilder<'_> {
         )
     }
 
-    fn scan_batches<F>(self, f: &mut F) -> Result<ScanStats>
+    fn scan_batches<F>(&self, f: &mut F) -> Result<ScanStats>
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
@@ -345,10 +372,10 @@ impl ScanBuilder<'_> {
             ));
         }
 
-        let target_rows = resolve_batch_row_capacity(&self)?;
-        let capacity_hint_rows = effective_scan_row_capacity_hint(&self).min(target_rows);
+        let target_rows = resolve_batch_row_capacity(self)?;
+        let capacity_hint_rows = effective_scan_row_capacity_hint(self).min(target_rows);
         let mut batcher = BatchAccumulator::new(
-            BatchDecodePlan::new(&self)?,
+            BatchDecodePlan::new(self)?,
             target_rows,
             capacity_hint_rows,
         );
@@ -384,7 +411,7 @@ impl ScanBuilder<'_> {
         Ok(stats)
     }
 
-    fn scan_batches_with_tap<F, T>(self, f: &mut F, tap: &mut T) -> Result<ScanStats>
+    fn scan_batches_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
@@ -395,10 +422,10 @@ impl ScanBuilder<'_> {
             ));
         }
 
-        let target_rows = resolve_batch_row_capacity(&self)?;
-        let capacity_hint_rows = effective_scan_row_capacity_hint(&self).min(target_rows);
+        let target_rows = resolve_batch_row_capacity(self)?;
+        let capacity_hint_rows = effective_scan_row_capacity_hint(self).min(target_rows);
         let mut batcher = BatchAccumulator::new(
-            BatchDecodePlan::new(&self)?,
+            BatchDecodePlan::new(self)?,
             target_rows,
             capacity_hint_rows,
         );

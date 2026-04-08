@@ -60,42 +60,46 @@ pub(super) enum StringDecodeKernel {
 
 impl RowDecodePlan {
     pub(super) fn new(builder: &ScanBuilder<'_>) -> Result<Self> {
-        let names: Arc<[String]> = if let Some(projection) = builder.projection {
-            Arc::clone(&projection.names)
-        } else {
-            Arc::from(
-                builder
+        let names: Arc<[String]> = builder.projection.map_or_else(
+            || {
+                Arc::from(
+                    builder
+                        .ds
+                        .layout
+                        .columns
+                        .iter()
+                        .map(|column| column.name.clone())
+                        .collect::<Vec<_>>(),
+                )
+            },
+            |projection| Arc::clone(&projection.names),
+        );
+
+        let encoding = resolve_encoding(builder.ds.metadata.encoding.as_deref());
+        let (columns, max_end) = builder.projection.map_or_else(
+            || {
+                let columns = builder
                     .ds
                     .layout
                     .columns
                     .iter()
-                    .map(|column| column.name.clone())
-                    .collect::<Vec<_>>(),
-            )
-        };
-
-        let encoding = resolve_encoding(builder.ds.metadata.encoding.as_deref());
-        let (columns, max_end) = if let Some(projection) = builder.projection {
-            (
-                projection
-                    .inner
-                    .columns
-                    .iter()
-                    .map(|column| compile_compiled_projection_column_plan(builder, column))
-                    .collect::<Vec<_>>(),
-                usize::from(projection.inner.max_end),
-            )
-        } else {
-            let columns = builder
-                .ds
-                .layout
-                .columns
-                .iter()
-                .map(|column| compile_column_plan(builder, column))
-                .collect::<Result<Vec<_>>>()?;
-            let max_end = columns.iter().map(|column| column.end).max().unwrap_or(0);
-            (columns, max_end)
-        };
+                    .map(|column| compile_column_plan(builder, column))
+                    .collect::<Result<Vec<_>>>()?;
+                let max_end = columns.iter().map(|column| column.end).max().unwrap_or(0);
+                Ok((columns, max_end))
+            },
+            |projection| {
+                Ok((
+                    projection
+                        .inner
+                        .columns
+                        .iter()
+                        .map(|column| compile_compiled_projection_column_plan(builder, column))
+                        .collect::<Vec<_>>(),
+                    usize::from(projection.inner.max_end),
+                ))
+            },
+        )?;
         let owned_kinds = columns
             .iter()
             .map(|column| compile_owned_materialization_kind(column.kernel))
@@ -149,11 +153,7 @@ impl RowDecodePlan {
         Ok(())
     }
 
-    pub(super) fn slice_in_bounds<'row>(
-        &self,
-        row: &'row [u8],
-        column: &CompiledColumnPlan,
-    ) -> &'row [u8] {
+    pub(super) fn slice_in_bounds<'a>(row: &'a [u8], column: &CompiledColumnPlan) -> &'a [u8] {
         debug_assert!(row.len() >= column.end);
         &row[column.start..column.end]
     }
@@ -164,7 +164,7 @@ impl RowDecodePlan {
         column: &CompiledColumnPlan,
         owned_strings: &mut Vec<String>,
     ) -> Result<PlannedCell<'row>> {
-        let slice = self.slice_in_bounds(row, column);
+        let slice = Self::slice_in_bounds(row, column);
 
         match column.kernel {
             CompiledDecodeKernel::Utf8 => self.plan_string(slice, owned_strings),
@@ -172,11 +172,11 @@ impl RowDecodePlan {
             CompiledDecodeKernel::Date => Ok(self.plan_numeric_date(slice)),
             CompiledDecodeKernel::DateAsNumeric
             | CompiledDecodeKernel::Integer
-            | CompiledDecodeKernel::Float => self.plan_numeric_value(slice, column.width),
+            | CompiledDecodeKernel::Float
+            | CompiledDecodeKernel::DateTimeAsNumeric
+            | CompiledDecodeKernel::TimeAsNumeric => self.plan_numeric_value(slice, column.width),
             CompiledDecodeKernel::DateTime => Ok(self.plan_numeric_datetime(slice)),
-            CompiledDecodeKernel::DateTimeAsNumeric => self.plan_numeric_value(slice, column.width),
             CompiledDecodeKernel::Time => Ok(self.plan_numeric_time(slice)),
-            CompiledDecodeKernel::TimeAsNumeric => self.plan_numeric_value(slice, column.width),
             CompiledDecodeKernel::NumericLossless => Ok(self.plan_numeric_lossless(slice)),
         }
     }
@@ -212,7 +212,7 @@ impl RowDecodePlan {
         self.decode_trimmed_string(slice, owned_strings)
     }
 
-    #[inline(always)]
+    #[inline]
     pub(super) fn decode_string_bytes_for_batch_borrowed<'row>(
         &self,
         slice: &'row [u8],
@@ -243,29 +243,29 @@ impl RowDecodePlan {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub(super) fn decode_utf8_lenient_trimmed_bytes_for_batch_direct<'row>(
         &self,
         trimmed: TrimmedString<'row>,
         scratch: &mut String,
-    ) -> Result<DecodedUtf8BatchValue<'row>> {
+    ) -> DecodedUtf8BatchValue<'row> {
         let slice = trimmed.bytes;
         if slice.is_empty() || trimmed.is_ascii {
-            return Ok(DecodedUtf8BatchValue::Borrowed(slice));
+            return DecodedUtf8BatchValue::Borrowed(slice);
         }
 
         if std::str::from_utf8(slice).is_ok() {
-            Ok(DecodedUtf8BatchValue::Borrowed(slice))
+            DecodedUtf8BatchValue::Borrowed(slice)
         } else {
             *scratch = maybe_fix_mojibake(
                 slice.to_str_lossy().into_owned(),
                 self.string_options.mojibake_fix,
             );
-            Ok(DecodedUtf8BatchValue::Scratch)
+            DecodedUtf8BatchValue::Scratch
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub(super) fn decode_encoded_strict_trimmed_bytes_for_batch_direct<'row>(
         &self,
         trimmed: TrimmedString<'row>,
@@ -301,22 +301,20 @@ impl RowDecodePlan {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub(super) fn decode_encoded_lenient_trimmed_bytes_for_batch_direct<'row>(
         &self,
         trimmed: TrimmedString<'row>,
         scratch: &mut String,
-    ) -> Result<DecodedUtf8BatchValue<'row>> {
+    ) -> DecodedUtf8BatchValue<'row> {
         let slice = trimmed.bytes;
         if slice.is_empty() || trimmed.is_ascii {
-            return Ok(DecodedUtf8BatchValue::Borrowed(slice));
+            return DecodedUtf8BatchValue::Borrowed(slice);
         }
 
         let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
         match decoded {
-            std::borrow::Cow::Borrowed(value) => {
-                Ok(DecodedUtf8BatchValue::Borrowed(value.as_bytes()))
-            }
+            std::borrow::Cow::Borrowed(value) => DecodedUtf8BatchValue::Borrowed(value.as_bytes()),
             std::borrow::Cow::Owned(value) => {
                 *scratch = if mojibake_fix_maybe_needed_for_encoded_bytes(
                     self.encoding,
@@ -327,7 +325,7 @@ impl RowDecodePlan {
                 } else {
                     value
                 };
-                Ok(DecodedUtf8BatchValue::Scratch)
+                DecodedUtf8BatchValue::Scratch
             }
         }
     }
@@ -338,23 +336,24 @@ impl RowDecodePlan {
         owned_strings: &mut Vec<String>,
     ) -> Result<PlannedCell<'row>> {
         match self.string_kernel {
-            StringDecodeKernel::Utf8Strict => match std::str::from_utf8(slice) {
-                Ok(value) => Ok(PlannedCell::StrBorrowed(value)),
-                Err(_) => Err(Error::Decode(crate::error::DecodeError {
-                    message: "invalid UTF-8 in fixed-width string cell".to_owned(),
-                })),
-            },
-            StringDecodeKernel::Utf8Lenient => {
-                if let Ok(value) = std::str::from_utf8(slice) {
-                    Ok(PlannedCell::StrBorrowed(value))
-                } else {
+            StringDecodeKernel::Utf8Strict => std::str::from_utf8(slice).map_or_else(
+                |_| {
+                    Err(Error::Decode(crate::error::DecodeError {
+                        message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+                    }))
+                },
+                |value| Ok(PlannedCell::StrBorrowed(value)),
+            ),
+            StringDecodeKernel::Utf8Lenient => std::str::from_utf8(slice).map_or_else(
+                |_| {
                     owned_strings.push(maybe_fix_mojibake(
                         slice.to_str_lossy().into_owned(),
                         self.string_options.mojibake_fix,
                     ));
                     Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
-                }
-            }
+                },
+                |value| Ok(PlannedCell::StrBorrowed(value)),
+            ),
             StringDecodeKernel::EncodedStrict => {
                 let (decoded, had_errors) = self.encoding.decode_without_bom_handling(slice);
                 if had_errors {
@@ -457,7 +456,7 @@ impl RowDecodePlan {
         column: &CompiledColumnPlan,
         kind: OwnedCellMaterializationKind,
     ) -> Result<crate::row::OwnedCellValue> {
-        let slice = self.slice_in_bounds(row, column);
+        let slice = Self::slice_in_bounds(row, column);
         match kind {
             OwnedCellMaterializationKind::Utf8 => self.materialize_owned_string_typed(slice),
             OwnedCellMaterializationKind::RawBytes => {

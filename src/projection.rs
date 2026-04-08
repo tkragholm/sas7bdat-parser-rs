@@ -97,6 +97,9 @@ impl<'a> ProjectionBuilder<'a> {
         self
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the projection cannot be built, such as if no columns are available.
     pub fn build(self) -> Result<Projection> {
         let available = self.ds.columns();
         if available.is_empty() {
