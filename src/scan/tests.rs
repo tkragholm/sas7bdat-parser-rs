@@ -68,6 +68,20 @@ fn raw_scan_decompresses_rle_rows() {
     assert_eq!(stats.row_bytes_materialized, 4);
 }
 
+fn check_raw_scan(ds: &crate::dataset::Dataset, expected_rows: &[(crate::types::RowIndex, Vec<u8>)]) {
+    let mut rows = Vec::new();
+    let stats = ScanBuilder::new(ds)
+        .visit_raw_rows(|row| {
+            rows.push((row.row_index, row.bytes.to_vec()));
+            Ok(ControlFlow::Continue(()))
+        })
+        .expect("scan succeeds");
+
+    assert_eq!(rows, expected_rows);
+    assert_eq!(stats.indexed_pages, 1);
+    assert_eq!(stats.rows_emitted, u64::try_from(expected_rows.len()).unwrap());
+}
+
 #[test]
 fn raw_scan_visits_rows_from_indexed_pointer_pages() {
     let bytes = Arc::<[u8]>::from(make_pointer_page(&[b"ABCD", b"EFGH"], 64));
@@ -77,23 +91,13 @@ fn raw_scan_visits_rows_from_indexed_pointer_pages() {
         .with_rows_per_page(2)
         .build();
 
-    let mut rows = Vec::new();
-    let stats = ScanBuilder::new(&ds)
-        .visit_raw_rows(|row| {
-            rows.push((row.row_index, row.bytes.to_vec()));
-            Ok(ControlFlow::Continue(()))
-        })
-        .expect("scan succeeds");
-
-    assert_eq!(
-        rows,
-        vec![
+    check_raw_scan(
+        &ds,
+        &[
             (crate::types::RowIndex(0), b"ABCD".to_vec()),
-            (crate::types::RowIndex(1), b"EFGH".to_vec())
-        ]
+            (crate::types::RowIndex(1), b"EFGH".to_vec()),
+        ],
     );
-    assert_eq!(stats.indexed_pages, 1);
-    assert_eq!(stats.rows_emitted, 2);
 }
 
 #[test]
@@ -105,23 +109,13 @@ fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
         .with_rows_per_page(2)
         .build();
 
-    let mut rows = Vec::new();
-    let stats = ScanBuilder::new(&ds)
-        .visit_raw_rows(|row| {
-            rows.push((row.row_index, row.bytes.to_vec()));
-            Ok(ControlFlow::Continue(()))
-        })
-        .expect("scan succeeds");
-
-    assert_eq!(
-        rows,
-        vec![
+    check_raw_scan(
+        &ds,
+        &[
             (crate::types::RowIndex(0), b"WXYZ".to_vec()),
-            (crate::types::RowIndex(1), b"ABCD".to_vec())
-        ]
+            (crate::types::RowIndex(1), b"ABCD".to_vec()),
+        ],
     );
-    assert_eq!(stats.indexed_pages, 1);
-    assert_eq!(stats.rows_emitted, 2);
 }
 
 #[test]
@@ -355,8 +349,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
     assert!(!plan.needs_owned_string_scratch);
 }
 
-#[test]
-fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_scan() {
+fn make_single_byte_test_dataset(compression: CompressionKind) -> crate::dataset::Dataset {
     let row = {
         let mut row = [0u8; 9];
         row[..8].copy_from_slice(&1.0f64.to_bits().to_le_bytes());
@@ -364,12 +357,18 @@ fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_s
         row
     };
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let ds = MockDatasetBuilder::new(bytes)
+    MockDatasetBuilder::new(bytes)
         .with_column("num", LogicalType::Float, 8, 0)
         .with_column("code", LogicalType::String, 1, 8)
         .with_row_len(9)
+        .with_compression(compression)
         .with_encoding(Some("ISO-8859-1".to_owned()))
-        .build();
+        .build()
+}
+
+#[test]
+fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_scan() {
+    let ds = make_single_byte_test_dataset(CompressionKind::None);
 
     let plan =
         BatchDecodePlan::new(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)))
@@ -388,20 +387,7 @@ fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_s
 
 #[test]
 fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
-    let row = {
-        let mut row = [0u8; 9];
-        row[..8].copy_from_slice(&1.0f64.to_bits().to_le_bytes());
-        row[8] = b'B';
-        row
-    };
-    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let ds = MockDatasetBuilder::new(bytes)
-        .with_column("num", LogicalType::Float, 8, 0)
-        .with_column("code", LogicalType::String, 1, 8)
-        .with_row_len(9)
-        .with_compression(CompressionKind::Row)
-        .with_encoding(Some("ISO-8859-1".to_owned()))
-        .build();
+    let ds = make_single_byte_test_dataset(CompressionKind::Row);
 
     let plan =
         BatchDecodePlan::new(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)))
@@ -414,16 +400,20 @@ fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
     assert!(plan.families.fallback.is_empty());
 }
 
-#[test]
-fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
+fn make_ascii_test_dataset() -> crate::dataset::Dataset {
     let row = make_numeric_text_row(1.0, *b"pear");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let ds = MockDatasetBuilder::new(bytes)
+    MockDatasetBuilder::new(bytes)
         .with_column("num", LogicalType::Float, 8, 0)
         .with_column("txt", LogicalType::String, 4, 8)
         .with_row_len(12)
         .with_encoding(Some("WINDOWS-1252".to_owned()))
-        .build();
+        .build()
+}
+
+#[test]
+fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
+    let ds = make_ascii_test_dataset();
 
     let rows = ScanBuilder::new(&ds).collect_rows().expect("rows");
     assert!(matches!(
@@ -434,14 +424,7 @@ fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
 
 #[test]
 fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
-    let row = make_numeric_text_row(1.0, *b"pear");
-    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let ds = MockDatasetBuilder::new(bytes)
-        .with_column("num", LogicalType::Float, 8, 0)
-        .with_column("txt", LogicalType::String, 4, 8)
-        .with_row_len(12)
-        .with_encoding(Some("WINDOWS-1252".to_owned()))
-        .build();
+    let ds = make_ascii_test_dataset();
 
     let batches = ScanBuilder::new(&ds)
         .with_batch_hint(crate::BatchHint::Rows(1))

@@ -780,14 +780,7 @@ mod tests {
         assert_eq!(descriptors.row_spans[0].kind, RowSpanKind::Borrowed);
     }
 
-    #[test]
-    fn marks_compressed_pointer_pages_as_compressed() {
-        let bytes = make_compressed_page(&[0xC1u8, b'A'], 64, 4);
-        let mut layout = simple_layout(64, 1, 4, 1);
-        layout.compression = CompressionKind::Row;
-        let mut cursor = Cursor::new(bytes);
-        let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
-
+    fn assert_compressed_page_descriptors(descriptors: &crate::internal::PageDescriptorTable) {
         assert_eq!(descriptors.pages.len(), 1);
         assert_eq!(
             descriptors.pages[0].exec_class,
@@ -799,6 +792,17 @@ mod tests {
     }
 
     #[test]
+    fn marks_compressed_pointer_pages_as_compressed() {
+        let bytes = make_compressed_page(&[0xC1u8, b'A'], 64, 4);
+        let mut layout = simple_layout(64, 1, 4, 1);
+        layout.compression = CompressionKind::Row;
+        let mut cursor = Cursor::new(bytes);
+        let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
+
+        assert_compressed_page_descriptors(&descriptors);
+    }
+
+    #[test]
     fn compressed_meta_pages_compile_row_spans() {
         let bytes = make_compressed_meta_page(&[0xC1u8, b'A'], 64);
         let mut layout = simple_layout(64, 1, 4, 1);
@@ -806,14 +810,7 @@ mod tests {
         let mut cursor = Cursor::new(bytes);
         let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
 
-        assert_eq!(descriptors.pages.len(), 1);
-        assert_eq!(
-            descriptors.pages[0].exec_class,
-            PageExecClass::IndexedCompressedRows
-        );
-        assert_eq!(descriptors.pages[0].row_count, 1);
-        assert_eq!(descriptors.pages[0].row_span_count, 1);
-        assert_eq!(descriptors.row_spans[0].kind, RowSpanKind::Compressed);
+        assert_compressed_page_descriptors(&descriptors);
     }
 
     #[test]
