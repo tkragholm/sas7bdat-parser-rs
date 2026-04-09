@@ -2,6 +2,7 @@ use super::{Encoding, MojibakePolicy, Simd, SimdPartialEq, SimdUint, TrimmedStri
 
 const SPACES_HEAD_12: u64 = u64::from_ne_bytes([b' '; 8]);
 const SPACES_TAIL_12: u32 = u32::from_ne_bytes([b' '; 4]);
+const ASCII_HIGH_BITS_8: u64 = 0x8080_8080_8080_8080;
 
 #[inline]
 pub(super) fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
@@ -26,10 +27,10 @@ pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
     }
 
     if slice.len() < 64 {
-        let trimmed = trim_trailing_space_or_nul(slice);
+        let trimmed = trim_trailing_space_or_nul_word(slice);
         return TrimmedString {
             bytes: trimmed,
-            is_ascii: trimmed.is_ascii(),
+            is_ascii: is_ascii_word(trimmed),
         };
     }
 
@@ -47,6 +48,37 @@ fn is_all_space_or_nul_12(slice: &[u8]) -> bool {
     let tail = u32::from_ne_bytes(slice[8..12].try_into().expect("fixed-width tail"));
 
     (head == 0 && tail == 0) || (head == SPACES_HEAD_12 && tail == SPACES_TAIL_12)
+}
+
+#[inline]
+fn all_space_or_nul_8(chunk: &[u8]) -> bool {
+    debug_assert_eq!(chunk.len(), 8);
+    let word = u64::from_ne_bytes(chunk.try_into().expect("8-byte chunk"));
+    (word & !SPACES_HEAD_12) == 0
+}
+
+#[inline]
+fn trim_trailing_space_or_nul_word(slice: &[u8]) -> &[u8] {
+    let mut end = slice.len();
+    while end >= 8 {
+        let start = end - 8;
+        let chunk = &slice[start..end];
+        if all_space_or_nul_8(chunk) {
+            end = start;
+            continue;
+        }
+
+        let mut i = end;
+        while i > start {
+            let byte = slice[i - 1];
+            if byte != b' ' && byte != 0 {
+                return &slice[..i];
+            }
+            i -= 1;
+        }
+        end = start;
+    }
+    trim_trailing_space_or_nul(&slice[..end])
 }
 
 #[inline(always)]
@@ -90,6 +122,18 @@ pub(super) fn is_ascii_simd(slice: &[u8]) -> bool {
     for chunk in &mut chunks {
         let lanes = U8x64::from_slice(chunk);
         if (lanes & high_bits).reduce_or() != 0 {
+            return false;
+        }
+    }
+    chunks.remainder().is_ascii()
+}
+
+#[inline]
+fn is_ascii_word(slice: &[u8]) -> bool {
+    let mut chunks = slice.chunks_exact(8);
+    for chunk in &mut chunks {
+        let word = u64::from_ne_bytes(chunk.try_into().expect("8-byte chunk"));
+        if (word & ASCII_HIGH_BITS_8) != 0 {
             return false;
         }
     }

@@ -54,6 +54,16 @@ Completed:
   - NYYTS 2018: ~6.6% faster,
   - NYSDOH BRFSS 2018: ~4.4% faster.
 
+7. Added 8-byte word path for short-string trim/classify (`8..63` bytes).
+- Updated small-string branch in `trim_and_classify_ascii` to use:
+  - `trim_trailing_space_or_nul_word` (8-byte tail chunks),
+  - `is_ascii_word` (8-byte high-bit checks).
+- Important tuning note:
+  - Initial implementation using per-byte `iter().all(...)` for 8-byte trim checks regressed and
+    was replaced with a pure bitwise test: `(word & !SPACES_HEAD_12) == 0`.
+- On top3 typed-batches, the tuned variant showed improvement on the two NYYTS files and
+  near-noise movement on BRFSS (monitor for run-to-run variance).
+
 ## Key learnings
 
 1. Numeric routing dominates cost and opportunity.
@@ -67,6 +77,7 @@ Completed:
 - Two attempted follow-up experiments were explicitly reverted after top3 regressions.
 - Keep strict loop: implement -> profile -> benchmark -> keep/revert.
 - Example: direct owned-UTF8 dispatch simplification regressed all top3 fixtures and was reverted.
+- Example: first 8-byte short-string trim draft regressed; bitwise-only refinement recovered.
 
 4. Bitflags are the right state representation for this planner.
 - Plan states are not globally mutually exclusive; mixed-family schemas are common.
