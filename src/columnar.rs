@@ -40,42 +40,58 @@ pub enum ColumnBuffer<'a> {
     RawBytes(BytesBuffer<'a>),
 }
 
-#[derive(Debug, Clone)]
-pub enum OwnedColumnBuffer {
-    I32 {
-        values: Vec<i32>,
-        valid: Option<Vec<u8>>,
-    },
-    I64 {
-        values: Vec<i64>,
-        valid: Option<Vec<u8>>,
-    },
-    F64 {
-        values: Vec<f64>,
-        valid: Option<Vec<u8>>,
-    },
-    Date {
-        values: Vec<SasDate>,
-        valid: Option<Vec<u8>>,
-    },
-    DateTime {
-        values: Vec<SasDateTime>,
-        valid: Option<Vec<u8>>,
-    },
-    Time {
-        values: Vec<SasTime>,
-        valid: Option<Vec<u8>>,
-    },
-    Utf8 {
-        offsets: Vec<u32>,
-        data: Vec<u8>,
-        valid: Option<Vec<u8>>,
-    },
-    RawBytes {
-        offsets: Vec<u32>,
-        data: Vec<u8>,
-        valid: Option<Vec<u8>>,
-    },
+#[macro_export]
+macro_rules! define_owned_column_enum {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $($extra_variant:ident { $($extra_field:ident : $extra_type:ty),* $(,)? }),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $name {
+            I32 {
+                values: Vec<i32>,
+                valid: Option<Vec<u8>>,
+            },
+            I64 {
+                values: Vec<i64>,
+                valid: Option<Vec<u8>>,
+            },
+            F64 {
+                values: Vec<f64>,
+                valid: Option<Vec<u8>>,
+            },
+            Date {
+                values: Vec<$crate::metadata::SasDate>,
+                valid: Option<Vec<u8>>,
+            },
+            DateTime {
+                values: Vec<$crate::metadata::SasDateTime>,
+                valid: Option<Vec<u8>>,
+            },
+            Time {
+                values: Vec<$crate::metadata::SasTime>,
+                valid: Option<Vec<u8>>,
+            },
+            Utf8 {
+                offsets: Vec<u32>,
+                data: Vec<u8>,
+                valid: Option<Vec<u8>>,
+            },
+            RawBytes {
+                offsets: Vec<u32>,
+                data: Vec<u8>,
+                valid: Option<Vec<u8>>,
+            },
+            $($extra_variant { $($extra_field : $extra_type),* }),*
+        }
+    };
+}
+
+define_owned_column_enum! {
+    #[derive(Debug, Clone)]
+    pub enum OwnedColumnBuffer {}
 }
 
 impl OwnedColumnBuffer {

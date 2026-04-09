@@ -8,6 +8,7 @@ use super::{
     ScanBuilder, StringDecodeKernel, TimeNumericValue,
     TrimmedString, TypedNumericValue, SAS_NUMERIC_MISSING_SENTINEL,
 };
+use crate::define_owned_column_enum;
 use encoding_rs::WINDOWS_1252;
 #[derive(Debug)]
 pub(super) struct BatchDecodePlan {
@@ -50,47 +51,15 @@ pub(super) struct BatchAccumulator {
     utf8_decode_scratch: String,
 }
 
-#[derive(Debug)]
-pub(super) enum OwnedBatchColumnBuilder {
-    I32 {
-        values: Vec<i32>,
-        valid: Option<Vec<u8>>,
-    },
-    I64 {
-        values: Vec<i64>,
-        valid: Option<Vec<u8>>,
-    },
-    F64 {
-        values: Vec<f64>,
-        valid: Option<Vec<u8>>,
-    },
-    StagedNumeric {
-        raw_bits: Vec<u64>,
-        mode: NumericTileMode,
-        has_missing: bool,
-    },
-    Date {
-        values: Vec<SasDate>,
-        valid: Option<Vec<u8>>,
-    },
-    DateTime {
-        values: Vec<SasDateTime>,
-        valid: Option<Vec<u8>>,
-    },
-    Time {
-        values: Vec<SasTime>,
-        valid: Option<Vec<u8>>,
-    },
-    Utf8 {
-        offsets: Vec<u32>,
-        data: Vec<u8>,
-        valid: Option<Vec<u8>>,
-    },
-    RawBytes {
-        offsets: Vec<u32>,
-        data: Vec<u8>,
-        valid: Option<Vec<u8>>,
-    },
+define_owned_column_enum! {
+    #[derive(Debug)]
+    pub(super) enum OwnedBatchColumnBuilder {
+        StagedNumeric {
+            raw_bits: Vec<u64>,
+            mode: NumericTileMode,
+            has_missing: bool,
+        },
+    }
 }
 
 impl BatchDecodePlan {
