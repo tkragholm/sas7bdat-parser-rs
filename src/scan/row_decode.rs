@@ -1,13 +1,13 @@
 use super::{
-    Arc, CompiledColumnPlan, CompiledDecodeKernel, DateNumericValue, DateTimeNumericValue,
-    DecodeMode, Encoding, Endianness, Error, OwnedCellMaterializationKind, Result, SasDate,
-    SasDateTime, SasTime, ScanBuilder, StringDecodeOptions, TimeNumericValue, TypedNumericValue,
-    UTF_8, Utf8ValidationMode, classify_date_numeric_value, classify_datetime_numeric_value,
-    classify_time_numeric_value, classify_typed_numeric_value, compile_column_plan,
-    compile_compiled_projection_column_plan, compile_owned_materialization_kind,
-    compile_string_decode_kernel, decode_numeric_cell, maybe_fix_mojibake,
-    mojibake_fix_maybe_needed_for_encoded_bytes, numeric_bits, resolve_encoding,
-    trim_and_classify_ascii,
+    classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value, compile_column_plan,
+    compile_compiled_projection_column_plan, compile_owned_materialization_kind, compile_string_decode_kernel, decode_numeric_cell, maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes, numeric_bits,
+    resolve_encoding, trim_and_classify_ascii, Arc, CompiledColumnPlan, CompiledDecodeKernel, DateNumericValue,
+    DateTimeNumericValue, DecodeMode, Encoding, Endianness,
+    Error, OwnedCellMaterializationKind, Result,
+    SasDate, SasDateTime,
+    SasTime, ScanBuilder, StringDecodeOptions,
+    TimeNumericValue, TypedNumericValue, Utf8ValidationMode,
+    UTF_8,
 };
 use bstr::ByteSlice;
 

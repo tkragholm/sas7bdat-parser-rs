@@ -37,7 +37,9 @@ const SAS7BCAT_MAGIC_NUMBER: [u8; 32] = [
 
 pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, DatasetMetadata)> {
     let mut start_buf = [0u8; SAS_HEADER_START_SIZE];
-    reader.read_exact(&mut start_buf).map_err(|e| io_header_error(&e))?;
+    reader
+        .read_exact(&mut start_buf)
+        .map_err(|e| io_header_error(&e))?;
 
     let header_start = HeaderStart::from_bytes(start_buf);
     let is_catalog = header_start.magic == SAS7BCAT_MAGIC_NUMBER;
@@ -76,10 +78,14 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
     let (header_size, page_size) = read_sizes(reader, endianness)?;
     let page_count = read_page_count(reader, uses_u64_pointers, endianness)?;
 
-    reader.seek(SeekFrom::Current(8)).map_err(|e| io_header_error(&e))?;
+    reader
+        .seek(SeekFrom::Current(8))
+        .map_err(|e| io_header_error(&e))?;
 
     let mut end_buf = [0u8; SAS_HEADER_END_SIZE];
-    reader.read_exact(&mut end_buf).map_err(|e| io_header_error(&e))?;
+    reader
+        .read_exact(&mut end_buf)
+        .map_err(|e| io_header_error(&e))?;
     let header_end = HeaderEnd::from_bytes(end_buf);
     let release = header_end.release()?;
 
@@ -259,7 +265,9 @@ fn read_timestamp<R: Read>(reader: &mut R, endianness: Endianness) -> Result<f64
 
 fn read_u32<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u32> {
     let mut buf = [0u8; 4];
-    reader.read_exact(&mut buf).map_err(|e| io_header_error(&e))?;
+    reader
+        .read_exact(&mut buf)
+        .map_err(|e| io_header_error(&e))?;
     Ok(match endianness {
         Endianness::Little => u32::from_le_bytes(buf),
         Endianness::Big => u32::from_be_bytes(buf),
@@ -268,7 +276,9 @@ fn read_u32<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u32> {
 
 fn read_u64<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u64> {
     let mut buf = [0u8; 8];
-    reader.read_exact(&mut buf).map_err(|e| io_header_error(&e))?;
+    reader
+        .read_exact(&mut buf)
+        .map_err(|e| io_header_error(&e))?;
     Ok(match endianness {
         Endianness::Little => u64::from_le_bytes(buf),
         Endianness::Big => u64::from_be_bytes(buf),
@@ -277,7 +287,9 @@ fn read_u64<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u64> {
 
 fn read_f64<R: Read>(reader: &mut R, endianness: Endianness) -> Result<f64> {
     let mut buf = [0u8; 8];
-    reader.read_exact(&mut buf).map_err(|e| io_header_error(&e))?;
+    reader
+        .read_exact(&mut buf)
+        .map_err(|e| io_header_error(&e))?;
     let bits = match endianness {
         Endianness::Little => u64::from_le_bytes(buf),
         Endianness::Big => u64::from_be_bytes(buf),
@@ -306,7 +318,7 @@ fn convert_sas_time(time: f64, diff: f64) -> Option<SystemTime> {
 }
 
 fn system_time_from_unix_seconds(seconds: f64) -> Option<SystemTime> {
-    // i64 can exactly represent integers up to 2^63-1. 
+    // i64 can exactly represent integers up to 2^63-1.
     // f64 can represent all integers up to 2^53.
     // For timestamps, we are well within these bounds.
     const I64_MIN_F64: f64 = -9_223_372_036_854_775_808.0;
@@ -438,7 +450,7 @@ const fn lookup_encoding(code: u8) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SAS_ENDIAN_LITTLE, SAS7BDAT_MAGIC_NUMBER, lookup_encoding, probe_header};
+    use super::{lookup_encoding, probe_header, SAS7BDAT_MAGIC_NUMBER, SAS_ENDIAN_LITTLE};
     use crate::{internal::HeaderInfo, metadata::Endianness};
     use std::{io::Cursor, path::Path};
 

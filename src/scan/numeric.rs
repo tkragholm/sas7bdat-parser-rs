@@ -1,6 +1,6 @@
 use super::{
-    Endianness, NumericTileMode, OwnedColumnBuffer, PlannedCell, Result, SasDate, SasDateTime,
-    SasTime, Simd, SimdPartialEq, unexpected_batch_cell,
+    unexpected_batch_cell, Endianness, NumericTileMode, OwnedColumnBuffer, PlannedCell, Result, SasDate,
+    SasDateTime, SasTime, Simd, SimdPartialEq,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -456,9 +456,9 @@ pub(super) fn classify_time_numeric_value(number: Option<f64>) -> TimeNumericVal
 #[cfg(test)]
 mod tests {
     use super::{
-        DateNumericValue, DateTimeNumericValue, TimeNumericValue, TypedNumericValue,
-        classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value,
-        classify_typed_numeric_value, try_i64_from_f64,
+        classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
+        try_i64_from_f64, DateNumericValue, DateTimeNumericValue,
+        TimeNumericValue, TypedNumericValue,
     };
 
     #[test]
