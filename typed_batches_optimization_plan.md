@@ -1,44 +1,72 @@
 # typed_batches Optimization Plan
 
-Focus area: `typed_batches` throughput on large `WINDOWS-1252` datasets.
+Focus area: maximize `typed_batches` throughput on large `WINDOWS-1252` fixtures with stable, reproducible benchmark signals.
 
-## Priority order
+## Progress log
 
-1. String decode hot path (`WINDOWS-1252`)
-- Highest likely ROI in encoded string decoding and mojibake handling.
-- Main code paths:
-  - `src/scan/row_decode.rs`
-  - `src/scan/batch.rs`
-- Rationale: top fixtures are large survey-style datasets with many text-like fields.
+Completed:
+1. Added family routing counters and target-corpus stats tooling.
+- Added `ScanStats` family counters and reporting in batch scan path.
+- Added examples:
+  - `examples/batch_family_stats.rs`
+  - `examples/batch_family_stats_target.rs`
+- Result on full target corpus:
+  - `staged_numeric_cells=93.67%`
+  - `direct_utf8_owned_cells=6.33%`
+  - `fallback_cells=0%`
 
-2. Reduce fallback decoding in batch path
-- Ensure common columns hit direct families (`direct_numeric`, `direct_utf8_*`) instead of `fallback`.
-- Add temporary counters per family to measure where rows actually route.
-- Main code path:
-  - `src/scan/batch.rs`
+2. Added hotpath profiling integration next to Criterion artifacts.
+- Added optional `hotpath-profile` feature and function instrumentation on batch hot paths.
+- Added example + recipes:
+  - `examples/hotpath_typed_batches_target.rs`
+  - `just hotpath-typed-batches-target`
+  - output in `target/criterion/hotpath/`.
 
-3. Tune batch size
-- Benchmark `BatchHint::Rows(256)` vs `512` vs `1024`.
-- Larger batches can improve throughput by amortizing per-batch overhead.
-- Benchmark entry:
-  - `benches/compression_matrix.rs`
+3. Implemented and kept high-ROI numeric-path optimizations.
+- Direct numeric dispatch specialized by compiled kernel groups.
+- `push_row` now avoids calling empty families.
+- Expanded staged numeric tiling coverage across widths.
+- Added staged+utf8 fast path and precomputed per-row counter increments.
+- Packed batch plan state into bitflags (removed clippy suppressions, improved branch-friendly state checks).
 
-4. Implement dictionary staging for repeated strings
-- Use existing `DictionaryStaging` option and columnar dictionary support.
-- High upside on categorical survey data.
-- Relevant code:
-  - `src/options.rs`
-  - `src/columnar.rs`
-  - `src/scan/*` (integration path)
+4. Improved benchmark quality for long typed-batch runs.
+- Increased typed-batches benchmark measurement window in `benches/compression_matrix.rs`.
+- Reduces repeated Criterion warnings and improves stability for large fixtures.
 
-5. Parallel decode (larger effort, high upside)
-- `Parallelism` is exposed in the API but not currently wired into execution.
-- Strategic step-change improvement after single-thread hot-path cleanup.
-- Relevant code:
-  - `src/scan/builder.rs`
-  - `src/scan/raw.rs`
-  - `src/scan/batch.rs`
+## Key learnings
 
-## Recommended first implementation step
+1. Numeric routing dominates cost and opportunity.
+- Moving more numeric cells into staged path produced the largest gains.
+- After staged expansion, `direct_numeric` pressure dropped to ~0 on target corpus.
 
-Start with step 2: add family-level counters and fallback visibility in `typed_batches`, then run benchmarks to identify exact hotspots before deeper optimization work.
+2. Raw hotpath elapsed is useful for ranking, not final throughput decisions.
+- Hotpath runs showed high variance across runs; Criterion top3 remains primary decision signal.
+
+3. Some intuitive micro-optimizations regressed real workloads.
+- Two attempted follow-up experiments were explicitly reverted after top3 regressions.
+- Keep strict loop: implement -> profile -> benchmark -> keep/revert.
+
+4. Bitflags are the right state representation for this planner.
+- Plan states are not globally mutually exclusive; mixed-family schemas are common.
+- Enum-only modeling is less practical than bitflags + targeted fast-path checks.
+
+## Current priority order
+
+1. Reduce staged numeric materialization overhead (`take_batch` / staged finalize path).
+- Main files: `src/scan/batch.rs`, `src/scan/numeric.rs`.
+
+2. Optimize remaining owned UTF-8 direct path (6.33% routed cells).
+- Main files: `src/scan/batch.rs`, `src/scan/row_decode.rs`.
+
+3. Batch-size sweep for large fixtures (`256` vs `512` vs `1024`) after current optimizations settle.
+- Main file: `benches/compression_matrix.rs`.
+
+4. Dictionary staging for repeated strings.
+- Main files: `src/options.rs`, `src/columnar.rs`, `src/scan/*`.
+
+5. Parallel typed-batch decode (larger effort).
+- Main files: `src/scan/builder.rs`, `src/scan/batch.rs`, `src/scan/raw.rs`.
+
+## Working rule
+
+Treat `top3_target` typed-batches Criterion results as the acceptance gate. Keep only changes that are neutral/improving across the large fixtures and revert mixed regressions.
