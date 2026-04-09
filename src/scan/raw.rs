@@ -1,6 +1,6 @@
 use super::{
-    decompress_row, Arc, ControlFlow, Cursor, Dataset, Error, File, FileSource, PageDescriptor, RawRow,
-    Result, RowSelection, RowSpan, RowSpanKind, ScanBuilder, ScanStats, Seek, SeekFrom,
+    Arc, ControlFlow, Cursor, Dataset, Error, File, FileSource, PageDescriptor, RawRow, Result,
+    RowSelection, RowSpan, RowSpanKind, ScanBuilder, ScanStats, Seek, SeekFrom, decompress_row,
 };
 use crate::types::{PageIndex, RowIndex};
 use std::io::Read;
@@ -125,7 +125,10 @@ where
 
         let page = page_slice(file_bytes, &plan, descriptor)?;
         ctx.stats.pages_seen = ctx.stats.pages_seen.saturating_add(1);
-        ctx.stats.raw_bytes_read = ctx.stats.raw_bytes_read.saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
+        ctx.stats.raw_bytes_read = ctx
+            .stats
+            .raw_bytes_read
+            .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
 
         if emit_rows_from_page(
             builder,

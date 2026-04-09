@@ -450,7 +450,7 @@ const fn lookup_encoding(code: u8) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{lookup_encoding, probe_header, SAS7BDAT_MAGIC_NUMBER, SAS_ENDIAN_LITTLE};
+    use super::{SAS_ENDIAN_LITTLE, SAS7BDAT_MAGIC_NUMBER, lookup_encoding, probe_header};
     use crate::{internal::HeaderInfo, metadata::Endianness};
     use std::{io::Cursor, path::Path};
 

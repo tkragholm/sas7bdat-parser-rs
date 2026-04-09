@@ -1,6 +1,6 @@
 use super::{
-    batch::DirectUtf8OwnedMode, trim_and_classify_ascii, BatchDecodePlan, ScanBuilder,
-    SAS_NUMERIC_MISSING_SENTINEL,
+    BatchDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder, batch::DirectUtf8OwnedMode,
+    trim_and_classify_ascii,
 };
 use crate::{
     columnar::OwnedColumnBuffer,
@@ -68,7 +68,10 @@ fn raw_scan_decompresses_rle_rows() {
     assert_eq!(stats.row_bytes_materialized, 4);
 }
 
-fn check_raw_scan(ds: &crate::dataset::Dataset, expected_rows: &[(crate::types::RowIndex, Vec<u8>)]) {
+fn check_raw_scan(
+    ds: &crate::dataset::Dataset,
+    expected_rows: &[(crate::types::RowIndex, Vec<u8>)],
+) {
     let mut rows = Vec::new();
     let stats = ScanBuilder::new(ds)
         .visit_raw_rows(|row| {
@@ -79,7 +82,10 @@ fn check_raw_scan(ds: &crate::dataset::Dataset, expected_rows: &[(crate::types::
 
     assert_eq!(rows, expected_rows);
     assert_eq!(stats.indexed_pages, 1);
-    assert_eq!(stats.rows_emitted, u64::try_from(expected_rows.len()).unwrap());
+    assert_eq!(
+        stats.rows_emitted,
+        u64::try_from(expected_rows.len()).unwrap()
+    );
 }
 
 #[test]

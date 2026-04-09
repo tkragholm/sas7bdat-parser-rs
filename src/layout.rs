@@ -1,9 +1,7 @@
 use crate::{
     encoding::resolve_encoding,
     error::{Error, Result},
-    internal::{
-        HeaderInfo, LayoutPlan, PageKind, classify_page, read_u16, read_u32, read_u64,
-    },
+    internal::{HeaderInfo, LayoutPlan, PageKind, classify_page, read_u16, read_u32, read_u64},
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
     types::RowLength,
 };

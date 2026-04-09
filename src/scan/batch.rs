@@ -1,12 +1,12 @@
 use super::{
-    classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
-    decode_numeric_cell, decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column, numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
-    trim_and_classify_ascii, ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
-    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode, OwnedColumnBuffer,
-    OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
-    SasDate, SasDateTime, SasTime,
-    ScanBuilder, StringDecodeKernel, TimeNumericValue,
-    TrimmedString, TypedNumericValue, SAS_NUMERIC_MISSING_SENTINEL,
+    ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
+    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode,
+    OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
+    SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
+    TimeNumericValue, TrimmedString, TypedNumericValue, classify_date_numeric_value,
+    classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
+    decode_numeric_cell, decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column,
+    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_ascii,
 };
 use crate::define_owned_column_enum;
 use encoding_rs::WINDOWS_1252;
@@ -15,10 +15,22 @@ pub(super) struct BatchDecodePlan {
     pub(super) row_plan: RowDecodePlan,
     pub(super) column_kinds: Vec<ColumnMaterializationKind>,
     pub(super) families: BatchColumnFamilies,
+    pub(super) direct_numeric_integer: Vec<usize>,
+    pub(super) direct_numeric_floatlike: Vec<usize>,
+    pub(super) direct_numeric_date: Vec<usize>,
+    pub(super) direct_numeric_datetime: Vec<usize>,
+    pub(super) direct_numeric_time: Vec<usize>,
     pub(super) direct_utf8_owned_mode: Option<DirectUtf8OwnedMode>,
     pub(super) use_single_byte_utf8_family: bool,
     pub(super) all_columns_staged_numeric: bool,
     pub(super) needs_owned_string_scratch: bool,
+    pub(super) has_staged_numeric: bool,
+    pub(super) has_direct_numeric: bool,
+    pub(super) has_direct_raw_bytes: bool,
+    pub(super) has_direct_utf8_single_byte: bool,
+    pub(super) has_direct_utf8_borrowed: bool,
+    pub(super) has_direct_utf8_owned: bool,
+    pub(super) has_fallback: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +61,18 @@ pub(super) struct BatchAccumulator {
     columns: Vec<OwnedBatchColumnBuilder>,
     owned_strings: Vec<String>,
     utf8_decode_scratch: String,
+    counters: BatchFamilyCounters,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct BatchFamilyCounters {
+    pub(super) staged_numeric_cells: u64,
+    pub(super) direct_numeric_cells: u64,
+    pub(super) direct_raw_bytes_cells: u64,
+    pub(super) direct_utf8_single_byte_cells: u64,
+    pub(super) direct_utf8_borrowed_cells: u64,
+    pub(super) direct_utf8_owned_cells: u64,
+    pub(super) fallback_cells: u64,
 }
 
 define_owned_column_enum! {
@@ -94,6 +118,33 @@ impl BatchDecodePlan {
                 StringDecodeKernel::EncodedLenient => DirectUtf8OwnedMode::EncodedLenient,
             })
         };
+        let mut direct_numeric_integer = Vec::new();
+        let mut direct_numeric_floatlike = Vec::new();
+        let mut direct_numeric_date = Vec::new();
+        let mut direct_numeric_datetime = Vec::new();
+        let mut direct_numeric_time = Vec::new();
+        for &idx in &families.direct_numeric {
+            let column = &row_plan.columns[idx];
+            match column.kernel {
+                CompiledDecodeKernel::Integer => direct_numeric_integer.push(idx),
+                CompiledDecodeKernel::Float
+                | CompiledDecodeKernel::NumericLossless
+                | CompiledDecodeKernel::DateAsNumeric
+                | CompiledDecodeKernel::DateTimeAsNumeric
+                | CompiledDecodeKernel::TimeAsNumeric => direct_numeric_floatlike.push(idx),
+                CompiledDecodeKernel::Date => direct_numeric_date.push(idx),
+                CompiledDecodeKernel::DateTime => direct_numeric_datetime.push(idx),
+                CompiledDecodeKernel::Time => direct_numeric_time.push(idx),
+                _ => unreachable!("non-numeric kernel in direct numeric family"),
+            }
+        }
+        let has_staged_numeric = !families.staged_numeric.is_empty();
+        let has_direct_numeric = !families.direct_numeric.is_empty();
+        let has_direct_raw_bytes = !families.direct_raw_bytes.is_empty();
+        let has_direct_utf8_single_byte = !families.direct_utf8_single_byte.is_empty();
+        let has_direct_utf8_borrowed = !families.direct_utf8_borrowed.is_empty();
+        let has_direct_utf8_owned = !families.direct_utf8_owned.is_empty();
+        let has_fallback = !families.fallback.is_empty();
         let use_single_byte_utf8_family = !families.direct_utf8_single_byte.is_empty();
         let all_columns_staged_numeric =
             !row_plan.columns.is_empty() && families.staged_numeric.len() == row_plan.columns.len();
@@ -105,10 +156,22 @@ impl BatchDecodePlan {
             row_plan,
             column_kinds,
             families,
+            direct_numeric_integer,
+            direct_numeric_floatlike,
+            direct_numeric_date,
+            direct_numeric_datetime,
+            direct_numeric_time,
             direct_utf8_owned_mode,
             use_single_byte_utf8_family,
             all_columns_staged_numeric,
             needs_owned_string_scratch,
+            has_staged_numeric,
+            has_direct_numeric,
+            has_direct_raw_bytes,
+            has_direct_utf8_single_byte,
+            has_direct_utf8_borrowed,
+            has_direct_utf8_owned,
+            has_fallback,
         })
     }
 }
@@ -152,6 +215,7 @@ impl BatchAccumulator {
             columns,
             owned_strings: Vec::new(),
             utf8_decode_scratch: String::new(),
+            counters: BatchFamilyCounters::default(),
         }
     }
 
@@ -163,11 +227,16 @@ impl BatchAccumulator {
         self.row_count >= self.target_rows
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_all_staged_numeric(&mut self, row: &[u8]) -> Result<()> {
         self.push_staged_numeric_family(row)
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_staged_numeric_family(&mut self, row: &[u8]) -> Result<()> {
+        self.counters.staged_numeric_cells = self.counters.staged_numeric_cells.saturating_add(
+            u64::try_from(self.plan.families.staged_numeric.len()).unwrap_or(u64::MAX),
+        );
         for &idx in &self.plan.families.staged_numeric {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -184,12 +253,69 @@ impl BatchAccumulator {
         Ok(())
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_numeric_family(&mut self, row: &[u8]) -> Result<()> {
-        for &idx in &self.plan.families.direct_numeric {
+        self.counters.direct_numeric_cells = self.counters.direct_numeric_cells.saturating_add(
+            u64::try_from(self.plan.families.direct_numeric.len()).unwrap_or(u64::MAX),
+        );
+        for &idx in &self.plan.direct_numeric_integer {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
-            let appended =
-                append_direct_numeric_batch_column(&self.plan.row_plan, batch_column, column, row);
+            let slice = RowDecodePlan::slice_in_bounds(row, column);
+            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
+            let appended = batch_column.append_integer_fast(number);
+            debug_assert!(appended, "compiled direct numeric batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled direct numeric batch plan did not match column builder",
+                ));
+            }
+        }
+        for &idx in &self.plan.direct_numeric_floatlike {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let slice = RowDecodePlan::slice_in_bounds(row, column);
+            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
+            let appended = batch_column.append_f64_fast(number);
+            debug_assert!(appended, "compiled direct numeric batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled direct numeric batch plan did not match column builder",
+                ));
+            }
+        }
+        for &idx in &self.plan.direct_numeric_date {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let slice = RowDecodePlan::slice_in_bounds(row, column);
+            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
+            let appended = batch_column.append_date_fast(number);
+            debug_assert!(appended, "compiled direct numeric batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled direct numeric batch plan did not match column builder",
+                ));
+            }
+        }
+        for &idx in &self.plan.direct_numeric_datetime {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let slice = RowDecodePlan::slice_in_bounds(row, column);
+            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
+            let appended = batch_column.append_datetime_fast(number);
+            debug_assert!(appended, "compiled direct numeric batch must match builder");
+            if !appended {
+                return Err(Error::unsupported(
+                    "compiled direct numeric batch plan did not match column builder",
+                ));
+            }
+        }
+        for &idx in &self.plan.direct_numeric_time {
+            let batch_column = &mut self.columns[idx];
+            let column = &self.plan.row_plan.columns[idx];
+            let slice = RowDecodePlan::slice_in_bounds(row, column);
+            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
+            let appended = batch_column.append_time_fast(number);
             debug_assert!(appended, "compiled direct numeric batch must match builder");
             if !appended {
                 return Err(Error::unsupported(
@@ -200,7 +326,11 @@ impl BatchAccumulator {
         Ok(())
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_raw_bytes_family(&mut self, row: &[u8]) -> Result<()> {
+        self.counters.direct_raw_bytes_cells = self.counters.direct_raw_bytes_cells.saturating_add(
+            u64::try_from(self.plan.families.direct_raw_bytes.len()).unwrap_or(u64::MAX),
+        );
         for &idx in &self.plan.families.direct_raw_bytes {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -220,8 +350,14 @@ impl BatchAccumulator {
         Ok(())
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_utf8_single_byte_family(&mut self, row: &[u8]) -> Result<()> {
         if self.plan.use_single_byte_utf8_family {
+            self.counters.direct_utf8_single_byte_cells =
+                self.counters.direct_utf8_single_byte_cells.saturating_add(
+                    u64::try_from(self.plan.families.direct_utf8_single_byte.len())
+                        .unwrap_or(u64::MAX),
+                );
             for &idx in &self.plan.families.direct_utf8_single_byte {
                 let batch_column = &mut self.columns[idx];
                 let column = &self.plan.row_plan.columns[idx];
@@ -246,7 +382,12 @@ impl BatchAccumulator {
         Ok(())
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_utf8_borrowed_family(&mut self, row: &[u8]) -> Result<()> {
+        self.counters.direct_utf8_borrowed_cells =
+            self.counters.direct_utf8_borrowed_cells.saturating_add(
+                u64::try_from(self.plan.families.direct_utf8_borrowed.len()).unwrap_or(u64::MAX),
+            );
         for &idx in &self.plan.families.direct_utf8_borrowed {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -266,9 +407,15 @@ impl BatchAccumulator {
         Ok(())
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_utf8_owned_family(&mut self, row: &[u8]) -> Result<()> {
         match self.plan.direct_utf8_owned_mode {
             Some(DirectUtf8OwnedMode::Utf8Lenient) => {
+                self.counters.direct_utf8_owned_cells =
+                    self.counters.direct_utf8_owned_cells.saturating_add(
+                        u64::try_from(self.plan.families.direct_utf8_owned.len())
+                            .unwrap_or(u64::MAX),
+                    );
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
@@ -288,6 +435,11 @@ impl BatchAccumulator {
                 }
             }
             Some(DirectUtf8OwnedMode::EncodedStrict) => {
+                self.counters.direct_utf8_owned_cells =
+                    self.counters.direct_utf8_owned_cells.saturating_add(
+                        u64::try_from(self.plan.families.direct_utf8_owned.len())
+                            .unwrap_or(u64::MAX),
+                    );
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
@@ -307,6 +459,11 @@ impl BatchAccumulator {
                 }
             }
             Some(DirectUtf8OwnedMode::EncodedLenient) => {
+                self.counters.direct_utf8_owned_cells =
+                    self.counters.direct_utf8_owned_cells.saturating_add(
+                        u64::try_from(self.plan.families.direct_utf8_owned.len())
+                            .unwrap_or(u64::MAX),
+                    );
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
@@ -330,7 +487,12 @@ impl BatchAccumulator {
         Ok(())
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_fallback_family(&mut self, row: &[u8]) -> Result<()> {
+        self.counters.fallback_cells = self
+            .counters
+            .fallback_cells
+            .saturating_add(u64::try_from(self.plan.families.fallback.len()).unwrap_or(u64::MAX));
         for &idx in &self.plan.families.fallback {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -344,6 +506,7 @@ impl BatchAccumulator {
     }
 
     #[allow(clippy::too_many_lines)]
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     pub(super) fn push_row(&mut self, row_index: u64, row: &[u8]) -> Result<()> {
         if self.row_base.is_none() {
             self.row_base = Some(row_index);
@@ -360,18 +523,33 @@ impl BatchAccumulator {
             self.owned_strings.clear();
         }
 
-        self.push_staged_numeric_family(row)?;
-        self.push_direct_numeric_family(row)?;
-        self.push_direct_raw_bytes_family(row)?;
-        self.push_direct_utf8_single_byte_family(row)?;
-        self.push_direct_utf8_borrowed_family(row)?;
-        self.push_direct_utf8_owned_family(row)?;
-        self.push_fallback_family(row)?;
+        if self.plan.has_staged_numeric {
+            self.push_staged_numeric_family(row)?;
+        }
+        if self.plan.has_direct_numeric {
+            self.push_direct_numeric_family(row)?;
+        }
+        if self.plan.has_direct_raw_bytes {
+            self.push_direct_raw_bytes_family(row)?;
+        }
+        if self.plan.has_direct_utf8_single_byte {
+            self.push_direct_utf8_single_byte_family(row)?;
+        }
+        if self.plan.has_direct_utf8_borrowed {
+            self.push_direct_utf8_borrowed_family(row)?;
+        }
+        if self.plan.has_direct_utf8_owned {
+            self.push_direct_utf8_owned_family(row)?;
+        }
+        if self.plan.has_fallback {
+            self.push_fallback_family(row)?;
+        }
 
         self.row_count += 1;
         Ok(())
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     pub(super) fn take_batch(&mut self) -> OwnedColumnarBatch {
         let row_base = self.row_base.unwrap_or(0);
         let row_count = self.row_count;
@@ -416,6 +594,10 @@ impl BatchAccumulator {
             .collect();
         self.owned_strings.clear();
         self.utf8_decode_scratch.clear();
+    }
+
+    pub(super) const fn counters(&self) -> BatchFamilyCounters {
+        self.counters
     }
 }
 
@@ -653,14 +835,17 @@ impl OwnedBatchColumnBuilder {
         }
     }
 
-    fn append_with_temporal_widening(&mut self, cell: PlannedCell, owned_strings: &[String]) -> Result<()> {
+    fn append_with_temporal_widening(
+        &mut self,
+        cell: PlannedCell,
+        owned_strings: &[String],
+    ) -> Result<()> {
         self.widen_temporal_to_f64();
         self.append(cell, owned_strings)
     }
 
     #[allow(clippy::too_many_lines)]
     pub(super) fn append(&mut self, cell: PlannedCell, owned_strings: &[String]) -> Result<()> {
-
         match self {
             Self::I32 { values, valid } => {
                 match cell {
@@ -957,49 +1142,6 @@ fn push_utf8_bytes_fast(
         push_variable_valid_without_validity(offsets, data, value)
     } else {
         push_variable_valid(offsets, data, valid, value)
-    }
-}
-
-#[inline]
-pub(super) fn append_direct_numeric_batch_column(
-    row_plan: &RowDecodePlan,
-    batch_column: &mut OwnedBatchColumnBuilder,
-    column: &CompiledColumnPlan,
-    row: &[u8],
-) -> bool {
-    let slice = RowDecodePlan::slice_in_bounds(row, column);
-
-    if column.numeric_tile.is_some() {
-        let raw = decode_numeric_raw_bits_or_missing(slice, row_plan.endianness);
-        return batch_column.append_staged_numeric_bits_fast(raw);
-    }
-
-    match column.kernel {
-        CompiledDecodeKernel::Integer => {
-            let number = decode_numeric_cell(slice, row_plan.endianness);
-            batch_column.append_integer_fast(number)
-        }
-        CompiledDecodeKernel::Float
-        | CompiledDecodeKernel::NumericLossless
-        | CompiledDecodeKernel::DateAsNumeric
-        | CompiledDecodeKernel::DateTimeAsNumeric
-        | CompiledDecodeKernel::TimeAsNumeric => {
-            let number = decode_numeric_cell(slice, row_plan.endianness);
-            batch_column.append_f64_fast(number)
-        }
-        CompiledDecodeKernel::Date => {
-            let number = decode_numeric_cell(slice, row_plan.endianness);
-            batch_column.append_date_fast(number)
-        }
-        CompiledDecodeKernel::DateTime => {
-            let number = decode_numeric_cell(slice, row_plan.endianness);
-            batch_column.append_datetime_fast(number)
-        }
-        CompiledDecodeKernel::Time => {
-            let number = decode_numeric_cell(slice, row_plan.endianness);
-            batch_column.append_time_fast(number)
-        }
-        _ => false,
     }
 }
 

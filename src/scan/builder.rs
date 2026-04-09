@@ -1,10 +1,10 @@
 use super::{
-    borrow_column_buffers, effective_scan_row_capacity_hint, materialize_planned_cells, resolve_batch_row_capacity, scan_raw_rows, scan_row_bytes,
-    BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch, ControlFlow,
-    Dataset, DecodeMode, Error, OrderingMode, OwnedColumnarBatch, OwnedRow, Parallelism, Projection,
-    RawRow, RawRowSink, Result, RowDecodePlan, RowSelection,
-    RowSink, RowView, ScanProgress,
-    ScanProgressObserver, ScanStats, StringDecodeOptions, TemporalDecodeOptions,
+    BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch,
+    ControlFlow, Dataset, DecodeMode, Error, OrderingMode, OwnedColumnarBatch, OwnedRow,
+    Parallelism, Projection, RawRow, RawRowSink, Result, RowDecodePlan, RowSelection, RowSink,
+    RowView, ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions,
+    TemporalDecodeOptions, borrow_column_buffers, effective_scan_row_capacity_hint,
+    materialize_planned_cells, resolve_batch_row_capacity, scan_raw_rows, scan_row_bytes,
 };
 pub struct ScanBuilder<'a> {
     pub(crate) ds: &'a Dataset,
@@ -278,6 +278,7 @@ impl<'a> ScanBuilder<'a> {
 const fn _keep_type_imports_alive<'a>(_columns: &'a [ColumnBuffer<'a>], _dataset: &'a Dataset) {}
 
 impl ScanBuilder<'_> {
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn scan_raw_rows<F>(&self, f: &mut F) -> Result<ScanStats>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
@@ -296,6 +297,7 @@ impl ScanBuilder<'_> {
         })
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn scan_rows<F>(&self, f: &mut F) -> Result<ScanStats>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
@@ -355,6 +357,7 @@ impl ScanBuilder<'_> {
         self.scan_batches_with_tap(f, &mut |_, _| {})
     }
 
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn scan_batches_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
@@ -399,7 +402,15 @@ impl ScanBuilder<'_> {
             let _ = f(batch)?;
         }
 
+        let counters = batcher.counters();
         stats.decode_batches = decode_batches;
+        stats.batch_staged_numeric_cells = counters.staged_numeric_cells;
+        stats.batch_direct_numeric_cells = counters.direct_numeric_cells;
+        stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes_cells;
+        stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte_cells;
+        stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed_cells;
+        stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned_cells;
+        stats.batch_fallback_cells = counters.fallback_cells;
         Ok(stats)
     }
 }

@@ -681,9 +681,7 @@ fn page_io_error(err: &std::io::Error) -> Error {
 mod tests {
     use super::*;
     use crate::{
-        internal::{
-            PageExecClass, RowSpanKind, SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MIX,
-        },
+        internal::{PageExecClass, RowSpanKind, SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MIX},
         metadata::CompressionKind,
         test_utils::*,
     };

@@ -52,3 +52,15 @@ update-top3-bench-readme:
 bench-top3-readme:
     @cargo bench --bench compression_matrix -- 'top3_target/'
     @python3 scripts/update_top3_bench_table.py
+
+batch-family-stats fixture batch_rows="256":
+    @BATCH_ROWS={{batch_rows}} cargo run --release --example batch_family_stats -- {{fixture}}
+
+batch-family-stats-target batch_rows="256" max_files="999999" top="10":
+    @BATCH_ROWS={{batch_rows}} MAX_FILES={{max_files}} TOP={{top}} cargo run --release --example batch_family_stats_target
+
+hotpath-typed-batches-target:
+    @/bin/zsh -lc 'out="${HOTPATH_OUTPUT_PATH:-target/criterion/hotpath/typed_batches_target.json}"; mkdir -p "$(dirname "$out")"; BATCH_ROWS="${BATCH_ROWS:-256}" MAX_FILES="${MAX_FILES:-999999}" HOTPATH_OUTPUT_PATH="$out" cargo run --release --features hotpath-profile --example hotpath_typed_batches_target'
+
+hotpath-typed-batches-top3:
+    @/bin/zsh -lc 'out="${HOTPATH_OUTPUT_PATH:-target/criterion/hotpath/typed_batches_top3_target.json}"; mkdir -p "$(dirname "$out")"; BATCH_ROWS="${BATCH_ROWS:-256}" MAX_FILES=3 HOTPATH_OUTPUT_PATH="$out" cargo run --release --features hotpath-profile --example hotpath_typed_batches_target'

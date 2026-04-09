@@ -18,7 +18,7 @@ use std::{
     fs::File,
     io::{Cursor, Seek, SeekFrom},
     ops::ControlFlow,
-    simd::{cmp::SimdPartialEq, num::SimdUint, Simd},
+    simd::{Simd, cmp::SimdPartialEq, num::SimdUint},
     sync::Arc,
 };
 
@@ -32,24 +32,24 @@ mod string;
 
 pub use builder::ScanBuilder;
 
-use batch::{borrow_column_buffers, unexpected_batch_cell, BatchAccumulator, BatchDecodePlan};
+use batch::{BatchAccumulator, BatchDecodePlan, borrow_column_buffers, unexpected_batch_cell};
 use numeric::{
-    classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
-    decode_numeric_cell, decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column,
-    numeric_bits, numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
-    DateNumericValue, DateTimeNumericValue, TimeNumericValue,
-    TypedNumericValue, SAS_NUMERIC_MISSING_SENTINEL,
+    DateNumericValue, DateTimeNumericValue, SAS_NUMERIC_MISSING_SENTINEL, TimeNumericValue,
+    TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
+    classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
+    decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column, numeric_bits,
+    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
 };
 use plan::{
-    compile_column_plan, compile_compiled_projection_column_plan, compile_owned_materialization_kind, compile_string_decode_kernel,
-    effective_scan_row_capacity_hint, resolve_batch_row_capacity, ColumnMaterializationKind,
-    CompiledColumnPlan, CompiledDecodeKernel,
-    NumericTileMode, OwnedCellMaterializationKind,
+    ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, NumericTileMode,
+    OwnedCellMaterializationKind, compile_column_plan, compile_compiled_projection_column_plan,
+    compile_owned_materialization_kind, compile_string_decode_kernel,
+    effective_scan_row_capacity_hint, resolve_batch_row_capacity,
 };
 use raw::{scan_raw_rows, scan_row_bytes};
 use row_decode::{
-    materialize_planned_cells, DecodedUtf8BatchValue, PlannedCell, RowDecodePlan, StringDecodeKernel,
-    TrimmedString,
+    DecodedUtf8BatchValue, PlannedCell, RowDecodePlan, StringDecodeKernel, TrimmedString,
+    materialize_planned_cells,
 };
 use string::{
     maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes, trim_and_classify_ascii,
@@ -66,6 +66,13 @@ pub struct ScanStats {
     pub raw_bytes_read: u64,
     pub row_bytes_materialized: u64,
     pub decode_batches: u64,
+    pub batch_staged_numeric_cells: u64,
+    pub batch_direct_numeric_cells: u64,
+    pub batch_direct_raw_bytes_cells: u64,
+    pub batch_direct_utf8_single_byte_cells: u64,
+    pub batch_direct_utf8_borrowed_cells: u64,
+    pub batch_direct_utf8_owned_cells: u64,
+    pub batch_fallback_cells: u64,
 }
 
 #[doc(hidden)]

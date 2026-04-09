@@ -10,6 +10,7 @@ resolver = "2"
 [dependencies]
 bstr = "1"
 encoding_rs = "0.8"
+hotpath = { version = "0.14.1", optional = true, features = ["hotpath"] }
 memchr = "2.8"
 memmap2 = "0.9"
 serde = { version = "1", features = ["derive"] }
@@ -41,3 +42,7 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
+
+[features]
+default = []
+hotpath-profile = ["dep:hotpath"]

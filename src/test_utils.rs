@@ -34,7 +34,13 @@ impl MockDatasetBuilder {
         }
     }
 
-    pub fn with_column(mut self, name: &str, logical_type: LogicalType, physical_width: u32, offset: u32) -> Self {
+    pub fn with_column(
+        mut self,
+        name: &str,
+        logical_type: LogicalType,
+        physical_width: u32,
+        offset: u32,
+    ) -> Self {
         let index = self.columns.len();
         self.columns.push(ColumnMeta {
             index,
@@ -107,7 +113,6 @@ impl MockDatasetBuilder {
             rows_per_page,
         };
 
-        
         Dataset {
             file: Arc::new(FileInner {
                 source: FileSource::Bytes(Arc::clone(&self.bytes)),
@@ -132,12 +137,7 @@ impl MockDatasetBuilder {
     }
 }
 
-pub fn write_page_header(
-    page: &mut [u8],
-    page_type: u16,
-    row_count: u16,
-    pointer_count: u16,
-) {
+pub fn write_page_header(page: &mut [u8], page_type: u16, row_count: u16, pointer_count: u16) {
     page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
     page[(24 - 6)..(24 - 4)].copy_from_slice(&row_count.to_le_bytes());
     page[(24 - 4)..(24 - 2)].copy_from_slice(&pointer_count.to_le_bytes());

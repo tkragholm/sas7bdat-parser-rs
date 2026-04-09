@@ -9,18 +9,30 @@ use std::{
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 
 const NON_TARGET_FIXTURES: &[(&str, &str)] = &[
-    ("compressed_narrow_mixed_54_class", "raw_data/csharp/54-class.sas7bdat"),
+    (
+        "compressed_narrow_mixed_54_class",
+        "raw_data/csharp/54-class.sas7bdat",
+    ),
     (
         "compressed_narrow_temporal_max_sas_date",
         "raw_data/pandas/max_sas_date.sas7bdat",
     ),
-    ("compressed_wide_mixed_test2", "raw_data/pandas/test2.sas7bdat"),
+    (
+        "compressed_wide_mixed_test2",
+        "raw_data/pandas/test2.sas7bdat",
+    ),
     (
         "compressed_wide_string_topical",
         "raw_data/ahs2013/topical.sas7bdat",
     ),
-    ("windows1252_local_nls", "raw_data/principlesofeco/nls.sas7bdat"),
-    ("windows1252_local_ces", "raw_data/principlesofeco/ces.sas7bdat"),
+    (
+        "windows1252_local_nls",
+        "raw_data/principlesofeco/nls.sas7bdat",
+    ),
+    (
+        "windows1252_local_ces",
+        "raw_data/principlesofeco/ces.sas7bdat",
+    ),
     (
         "windows1252_local_nels",
         "raw_data/principlesofeco/nels.sas7bdat",
@@ -208,12 +220,7 @@ fn compression_matrix_target(c: &mut Criterion) {
 
 fn compression_matrix_top3_target(c: &mut Criterion) {
     let mut targets = discover_target_paths(TARGET_MIN_SIZE_BYTES);
-    targets.sort_by(|left, right| {
-        right
-            .1
-            .cmp(&left.1)
-            .then_with(|| left.0.cmp(&right.0))
-    });
+    targets.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     for (relative, _) in targets.into_iter().take(3) {
         if let Some(dataset) = load_dataset(&relative) {
             let base = target_bench_name(&relative, &dataset);

@@ -79,8 +79,34 @@ cargo bench --bench compression_matrix -- 'top3_target/'
 
 | Fixture | raw_rows time | raw_rows throughput | typed_batches time | typed_batches throughput | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `top3_target/healthdatany_86he_eqwq/windows_1252/nysdoh_brfss_surveydata_2018_ad5548ba` | [32.11 µs 32.19 µs 32.27 µs] | [1.11 Gelem/s 1.11 Gelem/s 1.11 Gelem/s] | [49.62 ms 49.65 ms 49.67 ms] | [720.07 Kelem/s 720.41 Kelem/s 720.76 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
-| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2018_publicuse_aec3d115` | [99.10 µs 99.19 µs 99.30 µs] | [1.19 Gelem/s 1.19 Gelem/s 1.19 Gelem/s] | [419.67 ms 419.94 ms 420.27 ms] | [280.38 Kelem/s 280.60 Kelem/s 280.78 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
-| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2020_publicuse_c85e9144` | [122.80 µs 122.89 µs 123.00 µs] | [989.66 Melem/s 990.54 Melem/s 991.27 Melem/s] | [493.54 ms 493.87 ms 494.26 ms] | [246.29 Kelem/s 246.48 Kelem/s 246.65 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| `top3_target/healthdatany_86he_eqwq/windows_1252/nysdoh_brfss_surveydata_2018_ad5548ba` | [32.98 µs 33.03 µs 33.08 µs] | [1.08 Gelem/s 1.08 Gelem/s 1.08 Gelem/s] | [52.94 ms 53.10 ms 53.35 ms] | [670.43 Kelem/s 673.63 Kelem/s 675.63 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2018_publicuse_aec3d115` | [99.16 µs 99.24 µs 99.34 µs] | [1.19 Gelem/s 1.19 Gelem/s 1.19 Gelem/s] | [430.01 ms 431.62 ms 433.23 ms] | [271.99 Kelem/s 273.00 Kelem/s 274.03 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2020_publicuse_c85e9144` | [123.64 µs 123.83 µs 124.02 µs] | [981.51 Melem/s 983.06 Melem/s 984.52 Melem/s] | [493.16 ms 494.77 ms 496.50 ms] | [245.18 Kelem/s 246.03 Kelem/s 246.84 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
 
 <!-- TOP3_BENCH_TABLE:END -->
+
+## Typed-batches hotpath profiling
+
+Store hotpath output next to Criterion artifacts:
+
+```text
+just hotpath-typed-batches-target
+```
+
+This writes a JSON profile to:
+
+```text
+target/criterion/hotpath/typed_batches_target.json
+```
+
+Override defaults with environment variables, for example:
+
+```text
+MAX_FILES=3 BATCH_ROWS=256 HOTPATH_OUTPUT_PATH=target/criterion/hotpath/custom.json just hotpath-typed-batches-target
+```
+
+For a quick pass over only the 3 largest target files:
+
+```text
+just hotpath-typed-batches-top3
+```

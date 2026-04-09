@@ -1,6 +1,6 @@
 use super::{
     BatchHint, ColumnMeta, DecodeMode, Encoding, Error, LogicalType, ProjectedColumnPlan, Result,
-    RowSelection, ScanBuilder, StringDecodeKernel, StringDecodeOptions, Utf8ValidationMode, UTF_8,
+    RowSelection, ScanBuilder, StringDecodeKernel, StringDecodeOptions, UTF_8, Utf8ValidationMode,
 };
 #[derive(Debug, Clone)]
 pub(super) struct CompiledColumnPlan {
