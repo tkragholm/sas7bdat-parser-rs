@@ -1,7 +1,8 @@
 use crate::{
     error::{Error, Result},
     internal::{
-        LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass, RowSpan, RowSpanKind,
+        read_u32, read_u64, LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass,
+        RowSpan, RowSpanKind,
     },
     types::{ByteOffset, PageIndex, RowIndex},
 };
@@ -705,24 +706,6 @@ const fn signature_is_recognized(signature: u32) -> bool {
             | SIG_COUNTS
             | SIG_COLUMN_LIST
     )
-}
-
-const fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
-    let mut buf = [0u8; 4];
-    buf.copy_from_slice(bytes);
-    match endianness {
-        crate::metadata::Endianness::Little => u32::from_le_bytes(buf),
-        crate::metadata::Endianness::Big => u32::from_be_bytes(buf),
-    }
-}
-
-const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(bytes);
-    match endianness {
-        crate::metadata::Endianness::Little => u64::from_le_bytes(buf),
-        crate::metadata::Endianness::Big => u64::from_be_bytes(buf),
-    }
 }
 
 fn page_corruption(message: impl Into<String>) -> Error {

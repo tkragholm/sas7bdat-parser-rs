@@ -148,3 +148,41 @@ impl<const N: usize> Default for SmallCommandBlock<N> {
         }
     }
 }
+
+pub const fn read_u16(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
+    let mut buf = [0u8; 2];
+    buf[0] = bytes[0];
+    buf[1] = bytes[1];
+    match endianness {
+        crate::metadata::Endianness::Little => u16::from_le_bytes(buf),
+        crate::metadata::Endianness::Big => u16::from_be_bytes(buf),
+    }
+}
+
+pub const fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
+    let mut buf = [0u8; 4];
+    buf[0] = bytes[0];
+    buf[1] = bytes[1];
+    buf[2] = bytes[2];
+    buf[3] = bytes[3];
+    match endianness {
+        crate::metadata::Endianness::Little => u32::from_le_bytes(buf),
+        crate::metadata::Endianness::Big => u32::from_be_bytes(buf),
+    }
+}
+
+pub const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
+    let mut buf = [0u8; 8];
+    buf[0] = bytes[0];
+    buf[1] = bytes[1];
+    buf[2] = bytes[2];
+    buf[3] = bytes[3];
+    buf[4] = bytes[4];
+    buf[5] = bytes[5];
+    buf[6] = bytes[6];
+    buf[7] = bytes[7];
+    match endianness {
+        crate::metadata::Endianness::Little => u64::from_le_bytes(buf),
+        crate::metadata::Endianness::Big => u64::from_be_bytes(buf),
+    }
+}

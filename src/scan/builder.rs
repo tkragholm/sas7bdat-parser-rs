@@ -199,18 +199,7 @@ impl<'a> ScanBuilder<'a> {
         let plan = RowDecodePlan::new(self)?;
         let mut rows = Vec::with_capacity(usize::try_from(self.ds.metadata.row_count).unwrap_or(0));
         match plan.decode_mode {
-            DecodeMode::Typed => {
-                scan_row_bytes(self, &mut |row_index, bytes| {
-                    plan.validate_row_bounds(bytes)?;
-                    let mut cells = Vec::with_capacity(plan.columns.len());
-                    for (column, kind) in plan.columns.iter().zip(&plan.owned_kinds) {
-                        cells.push(plan.materialize_owned_cell_fast(bytes, column, *kind)?);
-                    }
-                    rows.push(OwnedRow { row_index, cells });
-                    Ok(ControlFlow::Continue(()))
-                })?;
-            }
-            DecodeMode::TypedLossless => {
+            DecodeMode::Typed | DecodeMode::TypedLossless => {
                 scan_row_bytes(self, &mut |row_index, bytes| {
                     plan.validate_row_bounds(bytes)?;
                     let mut cells = Vec::with_capacity(plan.columns.len());

@@ -1,6 +1,6 @@
 use super::{
-    Arc, ControlFlow, Cursor, Dataset, Error, File, FileSource, PageDescriptor, RawRow, Result,
-    RowSelection, RowSpan, RowSpanKind, ScanBuilder, ScanStats, Seek, SeekFrom, decompress_row,
+    decompress_row, Arc, ControlFlow, Cursor, Dataset, Error, File, FileSource, PageDescriptor, RawRow,
+    Result, RowSelection, RowSpan, RowSpanKind, ScanBuilder, ScanStats, Seek, SeekFrom,
 };
 use crate::types::{PageIndex, RowIndex};
 use std::io::Read;
@@ -41,15 +41,7 @@ where
     if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
-
-    if builder.ds.layout.compression != crate::metadata::CompressionKind::None
-        && builder.ds.metadata.row_count > 0
-        && builder.ds.descriptors.total_candidate_rows == 0
-    {
-        return Err(Error::unsupported(
-            "compressed dataset layout compiled no row producers; this compressed page layout is not implemented yet",
-        ));
-    }
+    RawScanPlan::validate_builder(builder)?;
 
     let mut stats = ScanStats::default();
     let mut page = vec![0u8; plan.page_size];
@@ -65,47 +57,17 @@ where
         }
 
         stats.pages_seen = stats.pages_seen.saturating_add(1);
-        match descriptor.exec_class {
-            crate::internal::PageExecClass::FusedContiguousUncompressed => {
-                stats.fused_pages = stats.fused_pages.saturating_add(1);
-                load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
-                if emit_contiguous_rows(&plan, descriptor, &page, &mut stats, f)? {
-                    return Ok(stats);
-                }
-            }
-            crate::internal::PageExecClass::MetadataOrEmpty => {}
-            crate::internal::PageExecClass::IndexedPointerRows => {
-                stats.indexed_pages = stats.indexed_pages.saturating_add(1);
-                load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
-                let spans = descriptor_spans(builder, descriptor)?;
-                if emit_indexed_rows(
-                    &plan,
-                    descriptor,
-                    spans,
-                    &page,
-                    &mut decompressed_row,
-                    &mut stats,
-                    f,
-                )? {
-                    return Ok(stats);
-                }
-            }
-            crate::internal::PageExecClass::IndexedCompressedRows => {
-                stats.compressed_pages = stats.compressed_pages.saturating_add(1);
-                load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
-                let spans = descriptor_spans(builder, descriptor)?;
-                if emit_indexed_rows(
-                    &plan,
-                    descriptor,
-                    spans,
-                    &page,
-                    &mut decompressed_row,
-                    &mut stats,
-                    f,
-                )? {
-                    return Ok(stats);
-                }
-            }
+        load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
+        if emit_rows_from_page(
+            builder,
+            &plan,
+            descriptor,
+            &page,
+            &mut decompressed_row,
+            &mut stats,
+            f,
+        )? {
+            return Ok(stats);
         }
 
         emit_progress(builder, &stats, total_pages, estimated_total_bytes);
@@ -126,15 +88,7 @@ where
     if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
-
-    if builder.ds.layout.compression != crate::metadata::CompressionKind::None
-        && builder.ds.metadata.row_count > 0
-        && builder.ds.descriptors.total_candidate_rows == 0
-    {
-        return Err(Error::unsupported(
-            "compressed dataset layout compiled no row producers; this compressed page layout is not implemented yet",
-        ));
-    }
+    RawScanPlan::validate_builder(builder)?;
 
     let mut stats = ScanStats::default();
     let mut decompressed_row = Vec::new();
@@ -154,44 +108,16 @@ where
             .raw_bytes_read
             .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
 
-        match descriptor.exec_class {
-            crate::internal::PageExecClass::FusedContiguousUncompressed => {
-                stats.fused_pages = stats.fused_pages.saturating_add(1);
-                if emit_contiguous_rows(&plan, descriptor, page, &mut stats, f)? {
-                    return Ok(stats);
-                }
-            }
-            crate::internal::PageExecClass::MetadataOrEmpty => {}
-            crate::internal::PageExecClass::IndexedPointerRows => {
-                stats.indexed_pages = stats.indexed_pages.saturating_add(1);
-                let spans = descriptor_spans(builder, descriptor)?;
-                if emit_indexed_rows(
-                    &plan,
-                    descriptor,
-                    spans,
-                    page,
-                    &mut decompressed_row,
-                    &mut stats,
-                    f,
-                )? {
-                    return Ok(stats);
-                }
-            }
-            crate::internal::PageExecClass::IndexedCompressedRows => {
-                stats.compressed_pages = stats.compressed_pages.saturating_add(1);
-                let spans = descriptor_spans(builder, descriptor)?;
-                if emit_indexed_rows(
-                    &plan,
-                    descriptor,
-                    spans,
-                    page,
-                    &mut decompressed_row,
-                    &mut stats,
-                    f,
-                )? {
-                    return Ok(stats);
-                }
-            }
+        if emit_rows_from_page(
+            builder,
+            &plan,
+            descriptor,
+            page,
+            &mut decompressed_row,
+            &mut stats,
+            f,
+        )? {
+            return Ok(stats);
         }
 
         emit_progress(builder, &stats, total_pages, estimated_total_bytes);
@@ -217,6 +143,44 @@ fn emit_progress(
             rows_emitted: stats.rows_emitted,
         });
     }
+}
+
+fn emit_rows_from_page<F>(
+    builder: &ScanBuilder<'_>,
+    plan: &RawScanPlan,
+    descriptor: PageDescriptor,
+    page: &[u8],
+    decompressed_row: &mut Vec<u8>,
+    stats: &mut ScanStats,
+    f: &mut F,
+) -> Result<bool>
+where
+    F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
+{
+    match descriptor.exec_class {
+        crate::internal::PageExecClass::FusedContiguousUncompressed => {
+            stats.fused_pages = stats.fused_pages.saturating_add(1);
+            if emit_contiguous_rows(plan, descriptor, page, stats, f)? {
+                return Ok(true);
+            }
+        }
+        crate::internal::PageExecClass::MetadataOrEmpty => {}
+        crate::internal::PageExecClass::IndexedPointerRows => {
+            stats.indexed_pages = stats.indexed_pages.saturating_add(1);
+            let spans = descriptor_spans(builder, descriptor)?;
+            if emit_indexed_rows(plan, descriptor, spans, page, decompressed_row, stats, f)? {
+                return Ok(true);
+            }
+        }
+        crate::internal::PageExecClass::IndexedCompressedRows => {
+            stats.compressed_pages = stats.compressed_pages.saturating_add(1);
+            let spans = descriptor_spans(builder, descriptor)?;
+            if emit_indexed_rows(plan, descriptor, spans, page, decompressed_row, stats, f)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn page_slice<'a>(
@@ -246,6 +210,18 @@ pub(super) struct RawScanPlan {
 }
 
 impl RawScanPlan {
+    fn validate_builder(builder: &ScanBuilder<'_>) -> Result<()> {
+        if builder.ds.layout.compression != crate::metadata::CompressionKind::None
+            && builder.ds.metadata.row_count > 0
+            && builder.ds.descriptors.total_candidate_rows == 0
+        {
+            return Err(Error::unsupported(
+                "compressed dataset layout compiled no row producers; this compressed page layout is not implemented yet",
+            ));
+        }
+        Ok(())
+    }
+
     fn compile(builder: &ScanBuilder<'_>) -> Self {
         let row_len = usize::from(builder.ds.layout.row_len);
         let page_size = usize::from(builder.ds.layout.header.page_size);

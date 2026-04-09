@@ -1,7 +1,7 @@
 use crate::{
     encoding::resolve_encoding,
     error::{Error, Result},
-    internal::{HeaderInfo, LayoutPlan},
+    internal::{read_u16, read_u32, read_u64, HeaderInfo, LayoutPlan},
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
     types::RowLength,
 };
@@ -171,7 +171,9 @@ pub fn parse_layout<R: Read + Seek>(
             .map_err(|e| metadata_io_error(&e))?;
 
         let mut page = vec![0u8; usize::from(header.page_size)];
-        reader.read_exact(&mut page).map_err(|e| metadata_io_error(&e))?;
+        reader
+            .read_exact(&mut page)
+            .map_err(|e| metadata_io_error(&e))?;
 
         let page_type = read_u16(
             header.endianness,
@@ -630,33 +632,6 @@ fn infer_logical_type(type_code: u8, format_name: Option<&str>) -> LogicalType {
             }
         }
         _ => LogicalType::Bytes,
-    }
-}
-
-const fn read_u16(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
-    let mut buf = [0u8; 2];
-    buf.copy_from_slice(bytes);
-    match endianness {
-        crate::metadata::Endianness::Little => u16::from_le_bytes(buf),
-        crate::metadata::Endianness::Big => u16::from_be_bytes(buf),
-    }
-}
-
-const fn read_u32(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u32 {
-    let mut buf = [0u8; 4];
-    buf.copy_from_slice(bytes);
-    match endianness {
-        crate::metadata::Endianness::Little => u32::from_le_bytes(buf),
-        crate::metadata::Endianness::Big => u32::from_be_bytes(buf),
-    }
-}
-
-const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u64 {
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(bytes);
-    match endianness {
-        crate::metadata::Endianness::Little => u64::from_le_bytes(buf),
-        crate::metadata::Endianness::Big => u64::from_be_bytes(buf),
     }
 }
 

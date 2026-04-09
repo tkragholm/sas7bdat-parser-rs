@@ -1,12 +1,12 @@
 use super::{
-    ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
-    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode,
-    OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
-    SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
-    TimeNumericValue, TrimmedString, TypedNumericValue, classify_date_numeric_value,
-    classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
-    decode_numeric_cell, decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column,
-    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_ascii,
+    classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
+    decode_numeric_cell, decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column, numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
+    trim_and_classify_ascii, ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
+    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode, OwnedColumnBuffer,
+    OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
+    SasDate, SasDateTime, SasTime,
+    ScanBuilder, StringDecodeKernel, TimeNumericValue,
+    TrimmedString, TypedNumericValue, SAS_NUMERIC_MISSING_SENTINEL,
 };
 use encoding_rs::WINDOWS_1252;
 #[derive(Debug)]
@@ -195,20 +195,7 @@ impl BatchAccumulator {
     }
 
     fn push_all_staged_numeric(&mut self, row: &[u8]) -> Result<()> {
-        for &idx in &self.plan.families.staged_numeric {
-            let batch_column = &mut self.columns[idx];
-            let column = &self.plan.row_plan.columns[idx];
-            let slice = RowDecodePlan::slice_in_bounds(row, column);
-            let raw = decode_numeric_raw_bits_or_missing(slice, self.plan.row_plan.endianness);
-            let appended = batch_column.append_staged_numeric_bits_fast(raw);
-            debug_assert!(appended, "compiled staged numeric batch must match builder");
-            if !appended {
-                return Err(Error::unsupported(
-                    "compiled staged numeric batch plan did not match column builder",
-                ));
-            }
-        }
-        Ok(())
+        self.push_staged_numeric_family(row)
     }
 
     fn push_staged_numeric_family(&mut self, row: &[u8]) -> Result<()> {
@@ -697,8 +684,14 @@ impl OwnedBatchColumnBuilder {
         }
     }
 
+    fn append_with_temporal_widening(&mut self, cell: PlannedCell, owned_strings: &[String]) -> Result<()> {
+        self.widen_temporal_to_f64();
+        self.append(cell, owned_strings)
+    }
+
     #[allow(clippy::too_many_lines)]
-    pub(super) fn append(&mut self, cell: PlannedCell<'_>, owned_strings: &[String]) -> Result<()> {
+    pub(super) fn append(&mut self, cell: PlannedCell, owned_strings: &[String]) -> Result<()> {
+
         match self {
             Self::I32 { values, valid } => {
                 match cell {
@@ -789,17 +782,8 @@ impl OwnedBatchColumnBuilder {
                     push_primitive_valid(values, valid, value);
                     Ok(())
                 }
-                PlannedCell::Int32(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Int32(value), owned_strings)
-                }
-                PlannedCell::Int64(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Int64(value), owned_strings)
-                }
-                PlannedCell::Float64(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Float64(value), owned_strings)
+                PlannedCell::Int32(_) | PlannedCell::Int64(_) | PlannedCell::Float64(_) => {
+                    self.append_with_temporal_widening(cell, owned_strings)
                 }
                 other => Err(unexpected_batch_cell("date", other)),
             },
@@ -818,17 +802,8 @@ impl OwnedBatchColumnBuilder {
                     push_primitive_valid(values, valid, value);
                     Ok(())
                 }
-                PlannedCell::Int32(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Int32(value), owned_strings)
-                }
-                PlannedCell::Int64(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Int64(value), owned_strings)
-                }
-                PlannedCell::Float64(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Float64(value), owned_strings)
+                PlannedCell::Int32(_) | PlannedCell::Int64(_) | PlannedCell::Float64(_) => {
+                    self.append_with_temporal_widening(cell, owned_strings)
                 }
                 other => Err(unexpected_batch_cell("datetime", other)),
             },
@@ -847,17 +822,8 @@ impl OwnedBatchColumnBuilder {
                     push_primitive_valid(values, valid, value);
                     Ok(())
                 }
-                PlannedCell::Int32(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Int32(value), owned_strings)
-                }
-                PlannedCell::Int64(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Int64(value), owned_strings)
-                }
-                PlannedCell::Float64(value) => {
-                    self.widen_temporal_to_f64();
-                    self.append(PlannedCell::Float64(value), owned_strings)
+                PlannedCell::Int32(_) | PlannedCell::Int64(_) | PlannedCell::Float64(_) => {
+                    self.append_with_temporal_widening(cell, owned_strings)
                 }
                 other => Err(unexpected_batch_cell("time", other)),
             },

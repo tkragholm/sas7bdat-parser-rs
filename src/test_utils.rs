@@ -175,8 +175,21 @@ pub fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
 }
 
 pub fn make_compressed_page(compressed: &[u8], page_size: usize, compression_flag: u8) -> Vec<u8> {
+    make_raw_compressed_page(compressed, page_size, compression_flag, 0x0200)
+}
+
+pub fn make_compressed_meta_page(compressed: &[u8], page_size: usize) -> Vec<u8> {
+    make_raw_compressed_page(compressed, page_size, 4, 0x0000)
+}
+
+fn make_raw_compressed_page(
+    compressed: &[u8],
+    page_size: usize,
+    compression_flag: u8,
+    page_type: u16,
+) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0200u16.to_le_bytes());
+    page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
     page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
     page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
 
@@ -219,23 +232,6 @@ pub fn make_mixed_pointer_page(
     page[40..44].copy_from_slice(&contiguous_row);
     let start = usize::try_from(pointer_data_offset).unwrap_or(0);
     page[start..start + 4].copy_from_slice(&pointer_row);
-    page
-}
-
-pub fn make_compressed_meta_page(compressed: &[u8], page_size: usize) -> Vec<u8> {
-    let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&0u16.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
-
-    let data_offset = 40u32;
-    let data_len = u32::try_from(compressed.len()).unwrap_or(u32::MAX);
-    page[24..28].copy_from_slice(&data_offset.to_le_bytes());
-    page[28..32].copy_from_slice(&data_len.to_le_bytes());
-    page[32] = 4;
-    page[33] = 1;
-    let start = usize::try_from(data_offset).unwrap_or(0);
-    page[start..start + compressed.len()].copy_from_slice(compressed);
     page
 }
 
