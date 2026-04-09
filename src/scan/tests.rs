@@ -1,78 +1,23 @@
 use super::{
-    BatchDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder, batch::DirectUtf8OwnedMode,
-    trim_and_classify_ascii,
+    batch::DirectUtf8OwnedMode, trim_and_classify_ascii, BatchDecodePlan, ScanBuilder,
+    SAS_NUMERIC_MISSING_SENTINEL,
 };
 use crate::{
     columnar::OwnedColumnBuffer,
-    dataset::Dataset,
-    internal::{FileInner, FileSource, HeaderInfo, LayoutPlan},
-    metadata::{ColumnMeta, CompressionKind, DatasetMetadata, Endianness, LogicalType},
-    options::OpenOptions,
+    metadata::{CompressionKind, LogicalType},
     row::OwnedCellValue,
+    test_utils::*,
 };
 use std::{ops::ControlFlow, sync::Arc};
 
 #[test]
 fn raw_scan_visits_rows_from_fused_pages() {
     let bytes = Arc::<[u8]>::from(make_pages());
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 3,
-            row_len: crate::types::RowLength(4).into(),
-            compression: CompressionKind::None,
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(LayoutPlan {
-            columns: Vec::new(),
-            header: HeaderInfo {
-                endianness: Endianness::Little,
-                uses_u64_pointers: false,
-                page_size: crate::types::PageSize(64),
-                page_count: 2,
-                page_header_size: 24,
-                subheader_pointer_size: 12,
-                subheader_signature_size: 4,
-                data_offset: 0,
-                header_size: 0,
-                release: String::new(),
-                is_catalog: false,
-            },
-            row_len: crate::types::RowLength(4),
-            total_rows: 3,
-            compression: CompressionKind::None,
-            rows_per_page: 1,
-        }),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &LayoutPlan {
-                    columns: Vec::new(),
-                    header: HeaderInfo {
-                        endianness: Endianness::Little,
-                        uses_u64_pointers: false,
-                        page_size: crate::types::PageSize(64),
-                        page_count: 2,
-                        page_header_size: 24,
-                        subheader_pointer_size: 12,
-                        subheader_signature_size: 4,
-                        data_offset: 0,
-                        header_size: 0,
-                        release: String::new(),
-                        is_catalog: false,
-                    },
-                    row_len: crate::types::RowLength(4),
-                    total_rows: 3,
-                    compression: CompressionKind::None,
-                    rows_per_page: 1,
-                },
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_row_len(4)
+        .with_total_rows(3)
+        .with_rows_per_page(1)
+        .build();
 
     let mut rows = Vec::new();
     let stats = ScanBuilder::new(&ds)
@@ -104,46 +49,12 @@ fn trim_and_classify_ascii_fast_path_handles_all_space_width_12() {
 #[test]
 fn raw_scan_decompresses_rle_rows() {
     let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, b'A'], 64, 4));
-    let layout = LayoutPlan {
-        columns: Vec::new(),
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(4),
-        total_rows: 1,
-        compression: CompressionKind::Row,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(4).into(),
-            compression: CompressionKind::Row,
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_row_len(4)
+        .with_total_rows(1)
+        .with_rows_per_page(1)
+        .with_compression(CompressionKind::Row)
+        .build();
 
     let mut rows = Vec::new();
     let stats = ScanBuilder::new(&ds)
@@ -160,46 +71,11 @@ fn raw_scan_decompresses_rle_rows() {
 #[test]
 fn raw_scan_visits_rows_from_indexed_pointer_pages() {
     let bytes = Arc::<[u8]>::from(make_pointer_page(&[b"ABCD", b"EFGH"], 64));
-    let layout = LayoutPlan {
-        columns: Vec::new(),
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(4),
-        total_rows: 2,
-        compression: CompressionKind::None,
-        rows_per_page: 2,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 2,
-            row_len: crate::types::RowLength(4).into(),
-            compression: CompressionKind::None,
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_row_len(4)
+        .with_total_rows(2)
+        .with_rows_per_page(2)
+        .build();
 
     let mut rows = Vec::new();
     let stats = ScanBuilder::new(&ds)
@@ -223,46 +99,11 @@ fn raw_scan_visits_rows_from_indexed_pointer_pages() {
 #[test]
 fn raw_scan_visits_rows_from_mixed_pointer_and_contiguous_page() {
     let bytes = Arc::<[u8]>::from(make_mixed_pointer_page(*b"WXYZ", *b"ABCD", 64));
-    let layout = LayoutPlan {
-        columns: Vec::new(),
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(4),
-        total_rows: 2,
-        compression: CompressionKind::None,
-        rows_per_page: 2,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 2,
-            row_len: crate::types::RowLength(4).into(),
-            compression: CompressionKind::None,
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_row_len(4)
+        .with_total_rows(2)
+        .with_rows_per_page(2)
+        .build();
 
     let mut rows = Vec::new();
     let stats = ScanBuilder::new(&ds)
@@ -292,66 +133,11 @@ fn typed_row_scan_decodes_projected_cells() {
         &[&make_numeric_text_row(42.0, *b"ABCD")],
         64,
     ));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
     let projection = ds
         .projection()
         .column("txt")
@@ -385,66 +171,11 @@ fn typed_lossless_rows_preserve_numeric_bits_and_string_bytes() {
     row.extend_from_slice(&missing_bits.to_le_bytes());
     row.extend_from_slice(b"A  ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 3,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(11),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(11).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 3, 8)
+        .with_row_len(11)
+        .build();
 
     let rows = ScanBuilder::new(&ds)
         .with_decode_mode(crate::DecodeMode::TypedLossless)
@@ -465,66 +196,11 @@ fn typed_lossless_rows_preserve_numeric_bits_and_string_bytes() {
 fn collect_rows_materializes_owned_values() {
     let row = make_numeric_text_row(7.0, *b"ZX  ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
 
     let rows = ScanBuilder::new(&ds).collect_rows().expect("owned rows");
     assert_eq!(rows.len(), 1);
@@ -543,66 +219,11 @@ fn collect_batches_materializes_columnar_values() {
     let row_a = make_numeric_text_row(1.5, *b"AA  ");
     let row_b = make_numeric_text_row(2.0, *b"BBBB");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 2, 0, &[&row_a, &row_b], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 2,
-        compression: CompressionKind::None,
-        rows_per_page: 2,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 2,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
 
     let batches = ScanBuilder::new(&ds)
         .with_batch_hint(crate::BatchHint::Rows(2))
@@ -643,75 +264,12 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
         bytes
     };
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 2,
-                name: "id".to_owned(),
-                logical_type: LogicalType::Integer,
-                physical_width: 4,
-                offset: 12,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(16),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(16).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_column("id", LogicalType::Integer, 4, 12)
+        .with_row_len(16)
+        .build();
 
     let projection = ds
         .projection()
@@ -743,66 +301,11 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
 fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
     let row = make_numeric_text_row(42.0, *b"ZX  ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
 
     let plan = BatchDecodePlan::new(
         &ScanBuilder::new(&ds)
@@ -826,66 +329,11 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
 fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
     let row = make_numeric_text_row(1.0, *b"pear");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
 
     let plan = BatchDecodePlan::new(
         &ScanBuilder::new(&ds)
@@ -916,66 +364,12 @@ fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_s
         row
     };
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "code".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 1,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(9),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(9).into(),
-            compression: CompressionKind::None,
-            encoding: Some("ISO-8859-1".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("code", LogicalType::String, 1, 8)
+        .with_row_len(9)
+        .with_encoding(Some("ISO-8859-1".to_owned()))
+        .build();
 
     let plan =
         BatchDecodePlan::new(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)))
@@ -1001,66 +395,13 @@ fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
         row
     };
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "code".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 1,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(9),
-        total_rows: 1,
-        compression: CompressionKind::Row,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(9).into(),
-            compression: CompressionKind::Row,
-            encoding: Some("ISO-8859-1".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("code", LogicalType::String, 1, 8)
+        .with_row_len(9)
+        .with_compression(CompressionKind::Row)
+        .with_encoding(Some("ISO-8859-1".to_owned()))
+        .build();
 
     let plan =
         BatchDecodePlan::new(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)))
@@ -1077,66 +418,12 @@ fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
 fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
     let row = make_numeric_text_row(1.0, *b"pear");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("WINDOWS-1252".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .with_encoding(Some("WINDOWS-1252".to_owned()))
+        .build();
 
     let rows = ScanBuilder::new(&ds).collect_rows().expect("rows");
     assert!(matches!(
@@ -1149,66 +436,12 @@ fn typed_rows_decode_ascii_strings_without_utf8_encoding() {
 fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
     let row = make_numeric_text_row(1.0, *b"pear");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("WINDOWS-1252".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .with_encoding(Some("WINDOWS-1252".to_owned()))
+        .build();
 
     let batches = ScanBuilder::new(&ds)
         .with_batch_hint(crate::BatchHint::Rows(1))
@@ -1233,66 +466,11 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
 fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
     let row = make_numeric_text_row(1.5, *b"INT ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Integer,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Integer, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
 
     let rows = ScanBuilder::new(&ds).collect_rows().expect("rows");
     assert!(
@@ -1317,66 +495,11 @@ fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
 fn collect_batches_typed_lossless_uses_f64_and_raw_bytes() {
     let row = make_numeric_text_row(42.0, *b"ZX  ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Integer,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 1,
-        compression: CompressionKind::None,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Integer, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
 
     let batches = ScanBuilder::new(&ds)
         .with_decode_mode(crate::DecodeMode::TypedLossless)
@@ -1411,55 +534,10 @@ fn collect_batches_staged_f64_preserves_missing_validity() {
     let mut row_b = Vec::with_capacity(8);
     row_b.extend_from_slice(&SAS_NUMERIC_MISSING_SENTINEL.to_le_bytes());
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 2, 0, &[&row_a, &row_b], 64));
-    let layout = LayoutPlan {
-        columns: vec![ColumnMeta {
-            index: 0,
-            name: "num".to_owned(),
-            logical_type: LogicalType::Float,
-            physical_width: 8,
-            offset: 0,
-            label: None,
-            format: None,
-        }],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(8),
-        total_rows: 2,
-        compression: CompressionKind::None,
-        rows_per_page: 2,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 2,
-            row_len: crate::types::RowLength(8).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_row_len(8)
+        .build();
 
     let batches = ScanBuilder::new(&ds)
         .with_batch_hint(crate::BatchHint::Rows(2))
@@ -1480,66 +558,11 @@ fn visit_batches_streams_projected_columnar_views() {
     let row_a = make_numeric_text_row(10.0, *b"ABCD");
     let row_b = make_numeric_text_row(20.0, *b"EF  ");
     let bytes = Arc::<[u8]>::from(make_pointer_page(&[&row_a, &row_b], 64));
-    let layout = LayoutPlan {
-        columns: vec![
-            ColumnMeta {
-                index: 0,
-                name: "num".to_owned(),
-                logical_type: LogicalType::Float,
-                physical_width: 8,
-                offset: 0,
-                label: None,
-                format: None,
-            },
-            ColumnMeta {
-                index: 1,
-                name: "txt".to_owned(),
-                logical_type: LogicalType::String,
-                physical_width: 4,
-                offset: 8,
-                label: None,
-                format: None,
-            },
-        ],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(12),
-        total_rows: 2,
-        compression: CompressionKind::None,
-        rows_per_page: 2,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 2,
-            row_len: crate::types::RowLength(12).into(),
-            compression: CompressionKind::None,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
     let projection = ds.projection().column("txt").build().expect("projection");
 
     let mut seen = Vec::new();
@@ -1570,55 +593,13 @@ fn visit_batches_streams_projected_columnar_views() {
 #[test]
 fn collect_rows_decodes_compressed_string_rows() {
     let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, b'Z'], 64, 4));
-    let layout = LayoutPlan {
-        columns: vec![ColumnMeta {
-            index: 0,
-            name: "txt".to_owned(),
-            logical_type: LogicalType::String,
-            physical_width: 4,
-            offset: 0,
-            label: None,
-            format: None,
-        }],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(4),
-        total_rows: 1,
-        compression: CompressionKind::Row,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(4).into(),
-            compression: CompressionKind::Row,
-            encoding: Some("UTF-8".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("txt", LogicalType::String, 4, 0)
+        .with_row_len(4)
+        .with_total_rows(1)
+        .with_rows_per_page(1)
+        .with_compression(CompressionKind::Row)
+        .build();
 
     let rows = ScanBuilder::new(&ds)
         .collect_rows()
@@ -1633,55 +614,14 @@ fn collect_rows_decodes_compressed_string_rows() {
 #[test]
 fn collect_batches_decodes_windows1252_single_byte_compressed_row() {
     let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, 0x96], 64, 4));
-    let layout = LayoutPlan {
-        columns: vec![ColumnMeta {
-            index: 0,
-            name: "txt".to_owned(),
-            logical_type: LogicalType::String,
-            physical_width: 1,
-            offset: 0,
-            label: None,
-            format: None,
-        }],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(4),
-        total_rows: 1,
-        compression: CompressionKind::Row,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(4).into(),
-            compression: CompressionKind::Row,
-            encoding: Some("WINDOWS-1252".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("txt", LogicalType::String, 1, 0)
+        .with_row_len(4)
+        .with_total_rows(1)
+        .with_rows_per_page(1)
+        .with_compression(CompressionKind::Row)
+        .with_encoding(Some("WINDOWS-1252".to_owned()))
+        .build();
 
     let batches = ScanBuilder::new(&ds)
         .with_string_options(crate::StringDecodeOptions {
@@ -1709,55 +649,14 @@ fn collect_batches_decodes_windows1252_single_byte_compressed_row() {
 #[test]
 fn collect_batches_windows1252_single_byte_strict_rejects_undefined() {
     let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, 0x81], 64, 4));
-    let layout = LayoutPlan {
-        columns: vec![ColumnMeta {
-            index: 0,
-            name: "txt".to_owned(),
-            logical_type: LogicalType::String,
-            physical_width: 1,
-            offset: 0,
-            label: None,
-            format: None,
-        }],
-        header: HeaderInfo {
-            endianness: Endianness::Little,
-            uses_u64_pointers: false,
-            page_size: crate::types::PageSize(64),
-            page_count: 1,
-            page_header_size: 24,
-            subheader_pointer_size: 12,
-            subheader_signature_size: 4,
-            data_offset: 0,
-            header_size: 0,
-            release: String::new(),
-            is_catalog: false,
-        },
-        row_len: crate::types::RowLength(4),
-        total_rows: 1,
-        compression: CompressionKind::Row,
-        rows_per_page: 1,
-    };
-    let ds = Dataset {
-        file: Arc::new(FileInner {
-            source: FileSource::Bytes(Arc::clone(&bytes)),
-            options: OpenOptions::default(),
-        }),
-        metadata: Arc::new(DatasetMetadata {
-            row_count: 1,
-            row_len: crate::types::RowLength(4).into(),
-            compression: CompressionKind::Row,
-            encoding: Some("WINDOWS-1252".to_owned()),
-            ..DatasetMetadata::default()
-        }),
-        layout: Arc::new(layout.clone()),
-        descriptors: Arc::new(
-            crate::pages::compile_page_descriptors(
-                &mut std::io::Cursor::new(bytes.as_ref()),
-                &layout,
-            )
-            .expect("descriptors"),
-        ),
-    };
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("txt", LogicalType::String, 1, 0)
+        .with_row_len(4)
+        .with_total_rows(1)
+        .with_rows_per_page(1)
+        .with_compression(CompressionKind::Row)
+        .with_encoding(Some("WINDOWS-1252".to_owned()))
+        .build();
 
     let err = ScanBuilder::new(&ds)
         .with_string_options(crate::StringDecodeOptions {
@@ -1775,109 +674,4 @@ fn make_pages() -> Vec<u8> {
     bytes.extend(make_page(0x0100, 2, 0, &[b"ABCD", b"EFGH"], 64));
     bytes.extend(make_page(0x0200, 0, 0, &[b"IJKL"], 64));
     bytes
-}
-
-fn make_page(
-    page_type: u16,
-    row_count: u16,
-    pointer_count: u16,
-    rows: &[&[u8]],
-    page_size: usize,
-) -> Vec<u8> {
-    let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&row_count.to_le_bytes());
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&pointer_count.to_le_bytes());
-
-    let mut offset = 24usize;
-    for row in rows {
-        page[offset..offset + row.len()].copy_from_slice(row);
-        offset += row.len();
-    }
-    page
-}
-
-fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
-    let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0200u16.to_le_bytes());
-    page[(24 - 6)..(24 - 4)]
-        .copy_from_slice(&u16::try_from(rows.len()).expect("rows").to_le_bytes());
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
-
-    let data_offset = 40u32;
-    let data_len = u32::try_from(rows.len() * 4).unwrap_or(u32::MAX);
-    page[24..28].copy_from_slice(&data_offset.to_le_bytes());
-    page[28..32].copy_from_slice(&data_len.to_le_bytes());
-    page[32] = 0;
-    page[33] = 1;
-
-    let mut offset = data_offset as usize;
-    for row in rows {
-        page[offset..offset + row.len()].copy_from_slice(row);
-        offset += row.len();
-    }
-    page
-}
-
-fn make_mixed_pointer_page(
-    pointer_row: [u8; 4],
-    contiguous_row: [u8; 4],
-    page_size: usize,
-) -> Vec<u8> {
-    let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0200u16.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&2u16.to_le_bytes());
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
-
-    let pointer_data_offset = 48u32;
-    page[24..28].copy_from_slice(&pointer_data_offset.to_le_bytes());
-    page[28..32].copy_from_slice(&4u32.to_le_bytes());
-    page[32] = 0;
-    page[33] = 1;
-
-    page[40..44].copy_from_slice(&contiguous_row);
-    let start = usize::try_from(pointer_data_offset).unwrap_or(0);
-    page[start..start + 4].copy_from_slice(&pointer_row);
-    page
-}
-
-fn make_numeric_text_row(number: f64, text: [u8; 4]) -> Vec<u8> {
-    let mut row = Vec::with_capacity(12);
-    row.extend_from_slice(&number.to_le_bytes());
-    row.extend_from_slice(&text);
-    row
-}
-
-fn make_compressed_page(compressed: &[u8], page_size: usize, compression_flag: u8) -> Vec<u8> {
-    let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&0x0200u16.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
-
-    let data_offset = 40u32;
-    let data_len = u32::try_from(compressed.len()).unwrap_or(u32::MAX);
-    page[24..28].copy_from_slice(&data_offset.to_le_bytes());
-    page[28..32].copy_from_slice(&data_len.to_le_bytes());
-    page[32] = compression_flag;
-    page[33] = 1;
-
-    let start = usize::try_from(data_offset).unwrap_or(0);
-    let end = start + compressed.len();
-    page[start..end].copy_from_slice(compressed);
-    page
-}
-
-fn read_utf8_column(column: &crate::ColumnBuffer<'_>) -> Vec<String> {
-    let crate::ColumnBuffer::Utf8(buffer) = column else {
-        panic!("expected utf8 column, got {column:?}");
-    };
-    buffer
-        .offsets
-        .windows(2)
-        .map(|window| {
-            let start = usize::try_from(window[0]).expect("utf8 start");
-            let end = usize::try_from(window[1]).expect("utf8 end");
-            String::from_utf8(buffer.data[start..end].to_vec()).expect("utf8 cell")
-        })
-        .collect()
 }

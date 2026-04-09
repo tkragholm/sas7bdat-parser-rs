@@ -1,10 +1,10 @@
 use super::{
-    BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch,
-    ControlFlow, Dataset, DecodeMode, Error, OrderingMode, OwnedColumnarBatch, OwnedRow,
-    Parallelism, Projection, RawRow, RawRowSink, Result, RowDecodePlan, RowSelection, RowSink,
-    RowView, ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions,
-    TemporalDecodeOptions, borrow_column_buffers, effective_scan_row_capacity_hint,
-    materialize_planned_cells, resolve_batch_row_capacity, scan_raw_rows, scan_row_bytes,
+    borrow_column_buffers, effective_scan_row_capacity_hint, materialize_planned_cells, resolve_batch_row_capacity, scan_raw_rows, scan_row_bytes,
+    BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch, ControlFlow,
+    Dataset, DecodeMode, Error, OrderingMode, OwnedColumnarBatch, OwnedRow, Parallelism, Projection,
+    RawRow, RawRowSink, Result, RowDecodePlan, RowSelection,
+    RowSink, RowView, ScanProgress,
+    ScanProgressObserver, ScanStats, StringDecodeOptions, TemporalDecodeOptions,
 };
 pub struct ScanBuilder<'a> {
     pub(crate) ds: &'a Dataset,
@@ -245,11 +245,8 @@ impl<'a> ScanBuilder<'a> {
         let target_rows_u64 = u64::try_from(target_rows).unwrap_or(u64::MAX).max(1);
         let estimated_batches = self.ds.metadata.row_count.div_ceil(target_rows_u64);
         let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
-        let mut batch_accumulator = BatchAccumulator::new(
-            BatchDecodePlan::new(self)?,
-            target_rows,
-            capacity_hint_rows,
-        );
+        let mut batch_accumulator =
+            BatchAccumulator::new(BatchDecodePlan::new(self)?, target_rows, capacity_hint_rows);
 
         let _stats = scan_row_bytes(self, &mut |row_index, bytes| {
             batch_accumulator.push_row(row_index.into(), bytes)?;
@@ -366,49 +363,7 @@ impl ScanBuilder<'_> {
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
-        if matches!(self.decode, DecodeMode::Raw) {
-            return Err(Error::unsupported(
-                "visit_batches does not support DecodeMode::Raw",
-            ));
-        }
-
-        let target_rows = resolve_batch_row_capacity(self)?;
-        let capacity_hint_rows = effective_scan_row_capacity_hint(self).min(target_rows);
-        let mut batcher = BatchAccumulator::new(
-            BatchDecodePlan::new(self)?,
-            target_rows,
-            capacity_hint_rows,
-        );
-        let mut decode_batches = 0u64;
-        let mut stop_after_current_batch = false;
-
-        let mut stats = scan_row_bytes(self, &mut |row_index, bytes| {
-            batcher.push_row(row_index.into(), bytes)?;
-            if batcher.is_full() {
-                let batch = batcher.take_batch();
-                match f(batch)? {
-                    ControlFlow::Continue(()) => {
-                        decode_batches = decode_batches.saturating_add(1);
-                        batcher.reset_after_flush();
-                    }
-                    ControlFlow::Break(()) => {
-                        decode_batches = decode_batches.saturating_add(1);
-                        stop_after_current_batch = true;
-                        return Ok(ControlFlow::Break(()));
-                    }
-                }
-            }
-            Ok(ControlFlow::Continue(()))
-        })?;
-
-        if !stop_after_current_batch && !batcher.is_empty() {
-            let batch = batcher.take_batch();
-            decode_batches = decode_batches.saturating_add(1);
-            let _ = f(batch)?;
-        }
-
-        stats.decode_batches = decode_batches;
-        Ok(stats)
+        self.scan_batches_with_tap(f, &mut |_, _| {})
     }
 
     fn scan_batches_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
@@ -424,11 +379,8 @@ impl ScanBuilder<'_> {
 
         let target_rows = resolve_batch_row_capacity(self)?;
         let capacity_hint_rows = effective_scan_row_capacity_hint(self).min(target_rows);
-        let mut batcher = BatchAccumulator::new(
-            BatchDecodePlan::new(self)?,
-            target_rows,
-            capacity_hint_rows,
-        );
+        let mut batcher =
+            BatchAccumulator::new(BatchDecodePlan::new(self)?, target_rows, capacity_hint_rows);
         let mut decode_batches = 0u64;
         let mut stop_after_current_batch = false;
 

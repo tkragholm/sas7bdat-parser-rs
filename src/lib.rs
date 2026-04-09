@@ -17,6 +17,9 @@ mod projection;
 mod row;
 mod scan;
 
+#[cfg(test)]
+pub(crate) mod test_utils;
+
 pub use columnar::{
     BytesBuffer, ColumnBuffer, ColumnarBatch, OwnedColumnBuffer, OwnedColumnarBatch,
     PrimitiveBuffer, Utf8Buffer, Utf8Dictionary,

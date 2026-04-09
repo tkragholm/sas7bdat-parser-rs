@@ -83,7 +83,9 @@ pub fn compile_page_descriptors<R: Read + Seek>(
         reader
             .seek(SeekFrom::Start(page_offset))
             .map_err(|e| page_io_error(&e))?;
-        reader.read_exact(&mut page).map_err(|e| page_io_error(&e))?;
+        reader
+            .read_exact(&mut page)
+            .map_err(|e| page_io_error(&e))?;
 
         let page_type = read_header_u16(&page, header.page_header_size as usize - 8, layout)?;
         let page_row_count = u64::from(read_header_u16(
@@ -121,7 +123,11 @@ pub fn compile_page_descriptors<R: Read + Seek>(
     })
 }
 
-fn empty_page_descriptor(page_index: u64, row_base: u64, exec_class: PageExecClass) -> PageDescriptor {
+fn empty_page_descriptor(
+    page_index: u64,
+    row_base: u64,
+    exec_class: PageExecClass,
+) -> PageDescriptor {
     PageDescriptor {
         page_index: PageIndex::from(page_index),
         row_base: RowIndex::from(row_base),
@@ -266,13 +272,8 @@ fn classify_descriptor(
         ));
     }
 
-    let rows_to_take = calculate_rows_to_take(
-        layout,
-        kind,
-        possible_rows,
-        page_row_count,
-        remaining_rows,
-    );
+    let rows_to_take =
+        calculate_rows_to_take(layout, kind, possible_rows, page_row_count, remaining_rows);
 
     let row_count = u32::try_from(rows_to_take).unwrap_or(u32::MAX);
     if row_count == 0 {
@@ -449,13 +450,8 @@ fn classify_indexed_descriptor(
     let available = page_len.saturating_sub(u64::from(data_start));
     let row_len = u64::from(layout.row_len);
     let possible_rows = available.checked_div(row_len).unwrap_or(0);
-    let rows_to_take = calculate_rows_to_take(
-        layout,
-        kind,
-        possible_rows,
-        page_row_count,
-        remaining_rows,
-    );
+    let rows_to_take =
+        calculate_rows_to_take(layout, kind, possible_rows, page_row_count, remaining_rows);
 
     let produced_rows = u64::from(row_span_count);
     if row_span_count > 0 && produced_rows < rows_to_take {
@@ -501,13 +497,8 @@ fn classify_indexed_descriptor(
         ));
     }
     let possible_rows = available / row_len;
-    let rows_to_take = calculate_rows_to_take(
-        layout,
-        kind,
-        possible_rows,
-        page_row_count,
-        remaining_rows,
-    );
+    let rows_to_take =
+        calculate_rows_to_take(layout, kind, possible_rows, page_row_count, remaining_rows);
     let row_count = u32::try_from(rows_to_take).unwrap_or(u32::MAX);
     let exec_class = if row_count == 0 {
         PageExecClass::MetadataOrEmpty
@@ -744,13 +735,11 @@ fn page_io_error(err: &std::io::Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MIX, compile_page_descriptors, contiguous_data_start,
-        is_stattransfer_release, page_corruption,
-    };
+    use super::*;
     use crate::{
-        internal::{HeaderInfo, LayoutPlan, PageExecClass, RowSpanKind},
-        metadata::{CompressionKind, Endianness},
+        internal::{PageExecClass, RowSpanKind},
+        metadata::CompressionKind,
+        test_utils::*,
     };
     use std::io::Cursor;
 
@@ -810,7 +799,7 @@ mod tests {
 
     #[test]
     fn marks_compressed_pointer_pages_as_compressed() {
-        let bytes = make_compressed_page(&[0xC1u8, b'A'], 64);
+        let bytes = make_compressed_page(&[0xC1u8, b'A'], 64, 4);
         let mut layout = simple_layout(64, 1, 4, 1);
         layout.compression = CompressionKind::Row;
         let mut cursor = Cursor::new(bytes);
@@ -889,106 +878,4 @@ mod tests {
         assert!(!is_stattransfer_release("9.0401M3"));
     }
 
-    fn simple_layout(page_size: u32, page_count: u64, row_len: u32, total_rows: u64) -> LayoutPlan {
-        LayoutPlan {
-            columns: Vec::new(),
-            header: HeaderInfo {
-                endianness: Endianness::Little,
-                uses_u64_pointers: false,
-                page_size: crate::types::PageSize(page_size),
-                page_count,
-                page_header_size: 24,
-                subheader_pointer_size: 12,
-                subheader_signature_size: 4,
-                data_offset: 0,
-                header_size: 0,
-                release: String::new(),
-                is_catalog: false,
-            },
-            row_len: crate::types::RowLength(row_len),
-            total_rows,
-            compression: CompressionKind::None,
-            rows_per_page: 1,
-        }
-    }
-
-    fn make_page(
-        page_type: u16,
-        row_count: u16,
-        pointer_count: u16,
-        rows: &[&[u8]],
-        page_size: usize,
-    ) -> Vec<u8> {
-        let mut page = vec![0u8; page_size];
-        page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
-        page[(24 - 6)..(24 - 4)].copy_from_slice(&row_count.to_le_bytes());
-        page[(24 - 4)..(24 - 2)].copy_from_slice(&pointer_count.to_le_bytes());
-
-        let mut offset = 24usize;
-        for row in rows {
-            page[offset..offset + row.len()].copy_from_slice(row);
-            offset += row.len();
-        }
-        page
-    }
-
-    fn make_pointer_page(rows: &[&[u8]], page_size: usize) -> Vec<u8> {
-        let mut page = vec![0u8; page_size];
-        page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_MIX.to_le_bytes());
-        page[(24 - 6)..(24 - 4)].copy_from_slice(
-            &u16::try_from(rows.len())
-                .map_err(|_| page_corruption("too many rows for pointer page"))
-                .unwrap()
-                .to_le_bytes(),
-        );
-        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
-
-        let data_offset = 40u32;
-        let data_len = u32::try_from(rows.len() * 4).unwrap_or(u32::MAX);
-        page[24..28].copy_from_slice(&data_offset.to_le_bytes());
-        page[28..32].copy_from_slice(&data_len.to_le_bytes());
-        page[32] = 0;
-        page[33] = 1;
-
-        let mut offset = data_offset as usize;
-        for row in rows {
-            page[offset..offset + row.len()].copy_from_slice(row);
-            offset += row.len();
-        }
-        page
-    }
-
-    fn make_compressed_page(compressed: &[u8], page_size: usize) -> Vec<u8> {
-        let mut page = vec![0u8; page_size];
-        page[(24 - 8)..(24 - 6)].copy_from_slice(&SAS_PAGE_TYPE_MIX.to_le_bytes());
-        page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
-        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
-
-        let data_offset = 40u32;
-        let data_len = u32::try_from(compressed.len()).unwrap_or(u32::MAX);
-        page[24..28].copy_from_slice(&data_offset.to_le_bytes());
-        page[28..32].copy_from_slice(&data_len.to_le_bytes());
-        page[32] = 4;
-        page[33] = 1;
-        let start = usize::try_from(data_offset).unwrap_or(0);
-        page[start..start + compressed.len()].copy_from_slice(compressed);
-        page
-    }
-
-    fn make_compressed_meta_page(compressed: &[u8], page_size: usize) -> Vec<u8> {
-        let mut page = vec![0u8; page_size];
-        page[(24 - 8)..(24 - 6)].copy_from_slice(&0u16.to_le_bytes());
-        page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
-        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
-
-        let data_offset = 40u32;
-        let data_len = u32::try_from(compressed.len()).unwrap_or(u32::MAX);
-        page[24..28].copy_from_slice(&data_offset.to_le_bytes());
-        page[28..32].copy_from_slice(&data_len.to_le_bytes());
-        page[32] = 4;
-        page[33] = 1;
-        let start = usize::try_from(data_offset).unwrap_or(0);
-        page[start..start + compressed.len()].copy_from_slice(compressed);
-        page
-    }
 }
