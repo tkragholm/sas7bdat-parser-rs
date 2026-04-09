@@ -4,9 +4,11 @@ use std::{
     fs,
     hint::black_box,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
+const TYPED_BATCHES_MEASUREMENT_SECONDS: u64 = 30;
 
 const NON_TARGET_FIXTURES: &[(&str, &str)] = &[
     (
@@ -85,6 +87,7 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
         });
     });
 
+    group.measurement_time(Duration::from_secs(TYPED_BATCHES_MEASUREMENT_SECONDS));
     group.bench_function(BenchmarkId::new("typed_batches", "all"), |b| {
         b.iter(|| {
             let batches = dataset
