@@ -103,12 +103,8 @@ pub(super) fn compile_compiled_projection_column_plan(
 
 pub(super) const fn compile_numeric_tile_mode(
     kernel: CompiledDecodeKernel,
-    width: u32,
+    _width: u32,
 ) -> Option<NumericTileMode> {
-    if width != 8 {
-        return None;
-    }
-
     match kernel {
         CompiledDecodeKernel::Float
         | CompiledDecodeKernel::NumericLossless

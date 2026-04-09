@@ -301,14 +301,14 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
         .with_batch_hint(crate::BatchHint::Rows(1));
     let plan = BatchDecodePlan::new(&builder).expect("batch plan");
 
-    assert_eq!(plan.families.staged_numeric, vec![0]);
+    assert_eq!(plan.families.staged_numeric, vec![0, 2]);
     assert!(plan.families.direct_utf8_borrowed.is_empty());
     assert_eq!(plan.families.direct_utf8_owned, vec![1]);
     assert_eq!(
         plan.direct_utf8_owned_mode,
         Some(DirectUtf8OwnedMode::Utf8Lenient)
     );
-    assert_eq!(plan.families.direct_numeric, vec![2]);
+    assert!(plan.families.direct_numeric.is_empty());
     assert!(plan.families.direct_raw_bytes.is_empty());
     assert!(plan.families.fallback.is_empty());
     assert!(!plan.all_columns_staged_numeric);
