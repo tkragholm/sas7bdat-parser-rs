@@ -404,13 +404,13 @@ impl ScanBuilder<'_> {
 
         let counters = batcher.counters();
         stats.decode_batches = decode_batches;
-        stats.batch_staged_numeric_cells = counters.staged_numeric_cells;
-        stats.batch_direct_numeric_cells = counters.direct_numeric_cells;
-        stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes_cells;
-        stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte_cells;
-        stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed_cells;
-        stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned_cells;
-        stats.batch_fallback_cells = counters.fallback_cells;
+        stats.batch_staged_numeric_cells = counters.staged_numeric;
+        stats.batch_direct_numeric_cells = counters.direct_numeric;
+        stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;
+        stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
+        stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
+        stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned;
+        stats.batch_fallback_cells = counters.fallback;
         Ok(stats)
     }
 }

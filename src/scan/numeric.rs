@@ -48,9 +48,7 @@ pub(super) fn numeric_bits(slice: &[u8], endianness: Endianness) -> u64 {
     debug_assert!(slice.len() <= 8);
     match slice.len() {
         8 => numeric_bits_scalar_8(slice, endianness),
-        7 => numeric_bits_padded(slice, endianness),
-        6 => numeric_bits_padded(slice, endianness),
-        5 => numeric_bits_padded(slice, endianness),
+        5..=7 => numeric_bits_padded(slice, endianness),
         4 => {
             let word = match endianness {
                 Endianness::Big => {

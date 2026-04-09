@@ -10,6 +10,7 @@ use super::{
 };
 use crate::define_owned_column_enum;
 use encoding_rs::WINDOWS_1252;
+
 #[derive(Debug)]
 pub(super) struct BatchDecodePlan {
     pub(super) row_plan: RowDecodePlan,
@@ -22,17 +23,7 @@ pub(super) struct BatchDecodePlan {
     pub(super) direct_numeric_datetime: Vec<usize>,
     pub(super) direct_numeric_time: Vec<usize>,
     pub(super) direct_utf8_owned_mode: Option<DirectUtf8OwnedMode>,
-    pub(super) use_single_byte_utf8_family: bool,
-    pub(super) all_columns_staged_numeric: bool,
-    pub(super) needs_owned_string_scratch: bool,
-    pub(super) has_staged_numeric: bool,
-    pub(super) has_direct_numeric: bool,
-    pub(super) has_direct_raw_bytes: bool,
-    pub(super) has_direct_utf8_single_byte: bool,
-    pub(super) has_direct_utf8_borrowed: bool,
-    pub(super) has_direct_utf8_owned: bool,
-    pub(super) has_fallback: bool,
-    pub(super) has_fast_path_staged_plus_utf8_owned: bool,
+    pub(super) flags: BatchPlanFlags,
     pub(super) staged_numeric_cells_per_row: u64,
     pub(super) direct_numeric_cells_per_row: u64,
     pub(super) direct_raw_bytes_cells_per_row: u64,
@@ -60,6 +51,35 @@ pub(super) enum DirectUtf8OwnedMode {
     EncodedLenient,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct BatchPlanFlags(u16);
+
+impl BatchPlanFlags {
+    const USE_SINGLE_BYTE_UTF8_FAMILY: u16 = 1 << 0;
+    const ALL_COLUMNS_STAGED_NUMERIC: u16 = 1 << 1;
+    const NEEDS_OWNED_STRING_SCRATCH: u16 = 1 << 2;
+    const HAS_STAGED_NUMERIC: u16 = 1 << 3;
+    const HAS_DIRECT_NUMERIC: u16 = 1 << 4;
+    const HAS_DIRECT_RAW_BYTES: u16 = 1 << 5;
+    const HAS_DIRECT_UTF8_SINGLE_BYTE: u16 = 1 << 6;
+    const HAS_DIRECT_UTF8_BORROWED: u16 = 1 << 7;
+    const HAS_DIRECT_UTF8_OWNED: u16 = 1 << 8;
+    const HAS_FALLBACK: u16 = 1 << 9;
+    const HAS_FAST_PATH_STAGED_PLUS_UTF8_OWNED: u16 = 1 << 10;
+
+    const fn has(self, bit: u16) -> bool {
+        (self.0 & bit) != 0
+    }
+
+    const fn set(&mut self, bit: u16, enabled: bool) {
+        if enabled {
+            self.0 |= bit;
+        } else {
+            self.0 &= !bit;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct StagedNumericOp {
     pub(super) idx: usize,
@@ -82,13 +102,13 @@ pub(super) struct BatchAccumulator {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct BatchFamilyCounters {
-    pub(super) staged_numeric_cells: u64,
-    pub(super) direct_numeric_cells: u64,
-    pub(super) direct_raw_bytes_cells: u64,
-    pub(super) direct_utf8_single_byte_cells: u64,
-    pub(super) direct_utf8_borrowed_cells: u64,
-    pub(super) direct_utf8_owned_cells: u64,
-    pub(super) fallback_cells: u64,
+    pub(super) staged_numeric: u64,
+    pub(super) direct_numeric: u64,
+    pub(super) direct_raw_bytes: u64,
+    pub(super) direct_utf8_single_byte: u64,
+    pub(super) direct_utf8_borrowed: u64,
+    pub(super) direct_utf8_owned: u64,
+    pub(super) fallback: u64,
 }
 
 define_owned_column_enum! {
@@ -120,20 +140,8 @@ impl BatchDecodePlan {
             row_plan.string_kernel,
             enable_single_byte_utf8,
         );
-        let direct_utf8_owned_mode = if families.direct_utf8_owned.is_empty() {
-            None
-        } else {
-            Some(match row_plan.string_kernel {
-                StringDecodeKernel::Utf8Strict => {
-                    return Err(Error::unsupported(
-                        "strict UTF-8 must not compile owned utf8 batch family",
-                    ));
-                }
-                StringDecodeKernel::Utf8Lenient => DirectUtf8OwnedMode::Utf8Lenient,
-                StringDecodeKernel::EncodedStrict => DirectUtf8OwnedMode::EncodedStrict,
-                StringDecodeKernel::EncodedLenient => DirectUtf8OwnedMode::EncodedLenient,
-            })
-        };
+        let direct_utf8_owned_mode =
+            resolve_direct_utf8_owned_mode(&families, row_plan.string_kernel)?;
         let staged_numeric_ops = families
             .staged_numeric
             .iter()
@@ -147,33 +155,14 @@ impl BatchDecodePlan {
                 }
             })
             .collect::<Vec<_>>();
-        let mut direct_numeric_integer = Vec::new();
-        let mut direct_numeric_floatlike = Vec::new();
-        let mut direct_numeric_date = Vec::new();
-        let mut direct_numeric_datetime = Vec::new();
-        let mut direct_numeric_time = Vec::new();
-        for &idx in &families.direct_numeric {
-            let column = &row_plan.columns[idx];
-            match column.kernel {
-                CompiledDecodeKernel::Integer => direct_numeric_integer.push(idx),
-                CompiledDecodeKernel::Float
-                | CompiledDecodeKernel::NumericLossless
-                | CompiledDecodeKernel::DateAsNumeric
-                | CompiledDecodeKernel::DateTimeAsNumeric
-                | CompiledDecodeKernel::TimeAsNumeric => direct_numeric_floatlike.push(idx),
-                CompiledDecodeKernel::Date => direct_numeric_date.push(idx),
-                CompiledDecodeKernel::DateTime => direct_numeric_datetime.push(idx),
-                CompiledDecodeKernel::Time => direct_numeric_time.push(idx),
-                _ => unreachable!("non-numeric kernel in direct numeric family"),
-            }
-        }
-        let has_staged_numeric = !families.staged_numeric.is_empty();
-        let has_direct_numeric = !families.direct_numeric.is_empty();
-        let has_direct_raw_bytes = !families.direct_raw_bytes.is_empty();
-        let has_direct_utf8_single_byte = !families.direct_utf8_single_byte.is_empty();
-        let has_direct_utf8_borrowed = !families.direct_utf8_borrowed.is_empty();
-        let has_direct_utf8_owned = !families.direct_utf8_owned.is_empty();
-        let has_fallback = !families.fallback.is_empty();
+        let DirectNumericGroups {
+            integer: direct_numeric_integer,
+            floatlike: direct_numeric_floatlike,
+            date: direct_numeric_date,
+            datetime: direct_numeric_datetime,
+            time: direct_numeric_time,
+        } = compile_direct_numeric_groups(&families, &row_plan);
+
         let staged_numeric_cells_per_row =
             u64::try_from(staged_numeric_ops.len()).unwrap_or(u64::MAX);
         let direct_numeric_cells_per_row =
@@ -187,21 +176,8 @@ impl BatchDecodePlan {
         let direct_utf8_owned_cells_per_row =
             u64::try_from(families.direct_utf8_owned.len()).unwrap_or(u64::MAX);
         let fallback_cells_per_row = u64::try_from(families.fallback.len()).unwrap_or(u64::MAX);
-        let use_single_byte_utf8_family = !families.direct_utf8_single_byte.is_empty();
-        let all_columns_staged_numeric =
-            !row_plan.columns.is_empty() && families.staged_numeric.len() == row_plan.columns.len();
-        let needs_owned_string_scratch = families
-            .fallback
-            .iter()
-            .any(|&idx| matches!(row_plan.columns[idx].kernel, CompiledDecodeKernel::Utf8));
-        let has_fast_path_staged_plus_utf8_owned = has_staged_numeric
-            && has_direct_utf8_owned
-            && !has_direct_numeric
-            && !has_direct_raw_bytes
-            && !has_direct_utf8_single_byte
-            && !has_direct_utf8_borrowed
-            && !has_fallback
-            && !needs_owned_string_scratch;
+        let flags = compile_plan_flags(&families, &row_plan);
+
         Ok(Self {
             row_plan,
             column_kinds,
@@ -213,17 +189,7 @@ impl BatchDecodePlan {
             direct_numeric_datetime,
             direct_numeric_time,
             direct_utf8_owned_mode,
-            use_single_byte_utf8_family,
-            all_columns_staged_numeric,
-            needs_owned_string_scratch,
-            has_staged_numeric,
-            has_direct_numeric,
-            has_direct_raw_bytes,
-            has_direct_utf8_single_byte,
-            has_direct_utf8_borrowed,
-            has_direct_utf8_owned,
-            has_fallback,
-            has_fast_path_staged_plus_utf8_owned,
+            flags,
             staged_numeric_cells_per_row,
             direct_numeric_cells_per_row,
             direct_raw_bytes_cells_per_row,
@@ -233,6 +199,115 @@ impl BatchDecodePlan {
             fallback_cells_per_row,
         })
     }
+}
+
+#[derive(Debug, Default)]
+struct DirectNumericGroups {
+    integer: Vec<usize>,
+    floatlike: Vec<usize>,
+    date: Vec<usize>,
+    datetime: Vec<usize>,
+    time: Vec<usize>,
+}
+
+fn resolve_direct_utf8_owned_mode(
+    families: &BatchColumnFamilies,
+    string_kernel: StringDecodeKernel,
+) -> Result<Option<DirectUtf8OwnedMode>> {
+    if families.direct_utf8_owned.is_empty() {
+        return Ok(None);
+    }
+    let mode = match string_kernel {
+        StringDecodeKernel::Utf8Strict => {
+            return Err(Error::unsupported(
+                "strict UTF-8 must not compile owned utf8 batch family",
+            ));
+        }
+        StringDecodeKernel::Utf8Lenient => DirectUtf8OwnedMode::Utf8Lenient,
+        StringDecodeKernel::EncodedStrict => DirectUtf8OwnedMode::EncodedStrict,
+        StringDecodeKernel::EncodedLenient => DirectUtf8OwnedMode::EncodedLenient,
+    };
+    Ok(Some(mode))
+}
+
+fn compile_direct_numeric_groups(
+    families: &BatchColumnFamilies,
+    row_plan: &RowDecodePlan,
+) -> DirectNumericGroups {
+    let mut groups = DirectNumericGroups::default();
+    for &idx in &families.direct_numeric {
+        let column = &row_plan.columns[idx];
+        match column.kernel {
+            CompiledDecodeKernel::Integer => groups.integer.push(idx),
+            CompiledDecodeKernel::Float
+            | CompiledDecodeKernel::NumericLossless
+            | CompiledDecodeKernel::DateAsNumeric
+            | CompiledDecodeKernel::DateTimeAsNumeric
+            | CompiledDecodeKernel::TimeAsNumeric => groups.floatlike.push(idx),
+            CompiledDecodeKernel::Date => groups.date.push(idx),
+            CompiledDecodeKernel::DateTime => groups.datetime.push(idx),
+            CompiledDecodeKernel::Time => groups.time.push(idx),
+            _ => unreachable!("non-numeric kernel in direct numeric family"),
+        }
+    }
+    groups
+}
+
+fn compile_plan_flags(families: &BatchColumnFamilies, row_plan: &RowDecodePlan) -> BatchPlanFlags {
+    let has_staged_numeric = !families.staged_numeric.is_empty();
+    let has_direct_numeric = !families.direct_numeric.is_empty();
+    let has_direct_raw_bytes = !families.direct_raw_bytes.is_empty();
+    let has_direct_utf8_single_byte = !families.direct_utf8_single_byte.is_empty();
+    let has_direct_utf8_borrowed = !families.direct_utf8_borrowed.is_empty();
+    let has_direct_utf8_owned = !families.direct_utf8_owned.is_empty();
+    let has_fallback = !families.fallback.is_empty();
+    let use_single_byte_utf8_family = has_direct_utf8_single_byte;
+    let all_columns_staged_numeric =
+        !row_plan.columns.is_empty() && families.staged_numeric.len() == row_plan.columns.len();
+    let needs_owned_string_scratch = families
+        .fallback
+        .iter()
+        .any(|&idx| matches!(row_plan.columns[idx].kernel, CompiledDecodeKernel::Utf8));
+    let has_fast_path_staged_plus_utf8_owned = has_staged_numeric
+        && has_direct_utf8_owned
+        && !has_direct_numeric
+        && !has_direct_raw_bytes
+        && !has_direct_utf8_single_byte
+        && !has_direct_utf8_borrowed
+        && !has_fallback
+        && !needs_owned_string_scratch;
+
+    let mut flags = BatchPlanFlags::default();
+    flags.set(
+        BatchPlanFlags::USE_SINGLE_BYTE_UTF8_FAMILY,
+        use_single_byte_utf8_family,
+    );
+    flags.set(
+        BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC,
+        all_columns_staged_numeric,
+    );
+    flags.set(
+        BatchPlanFlags::NEEDS_OWNED_STRING_SCRATCH,
+        needs_owned_string_scratch,
+    );
+    flags.set(BatchPlanFlags::HAS_STAGED_NUMERIC, has_staged_numeric);
+    flags.set(BatchPlanFlags::HAS_DIRECT_NUMERIC, has_direct_numeric);
+    flags.set(BatchPlanFlags::HAS_DIRECT_RAW_BYTES, has_direct_raw_bytes);
+    flags.set(
+        BatchPlanFlags::HAS_DIRECT_UTF8_SINGLE_BYTE,
+        has_direct_utf8_single_byte,
+    );
+    flags.set(
+        BatchPlanFlags::HAS_DIRECT_UTF8_BORROWED,
+        has_direct_utf8_borrowed,
+    );
+    flags.set(BatchPlanFlags::HAS_DIRECT_UTF8_OWNED, has_direct_utf8_owned);
+    flags.set(BatchPlanFlags::HAS_FALLBACK, has_fallback);
+    flags.set(
+        BatchPlanFlags::HAS_FAST_PATH_STAGED_PLUS_UTF8_OWNED,
+        has_fast_path_staged_plus_utf8_owned,
+    );
+    flags
 }
 
 impl BatchAccumulator {
@@ -293,7 +368,7 @@ impl BatchAccumulator {
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_staged_numeric_family(&mut self, row: &[u8]) -> Result<()> {
-        self.counters.staged_numeric_cells += self.plan.staged_numeric_cells_per_row;
+        self.counters.staged_numeric += self.plan.staged_numeric_cells_per_row;
         for op in &self.plan.staged_numeric_ops {
             let idx = op.idx;
             let batch_column = &mut self.columns[idx];
@@ -315,7 +390,7 @@ impl BatchAccumulator {
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_numeric_family(&mut self, row: &[u8]) -> Result<()> {
-        self.counters.direct_numeric_cells += self.plan.direct_numeric_cells_per_row;
+        self.counters.direct_numeric += self.plan.direct_numeric_cells_per_row;
         for &idx in &self.plan.direct_numeric_integer {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -386,7 +461,7 @@ impl BatchAccumulator {
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_raw_bytes_family(&mut self, row: &[u8]) -> Result<()> {
-        self.counters.direct_raw_bytes_cells += self.plan.direct_raw_bytes_cells_per_row;
+        self.counters.direct_raw_bytes += self.plan.direct_raw_bytes_cells_per_row;
         for &idx in &self.plan.families.direct_raw_bytes {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -408,8 +483,12 @@ impl BatchAccumulator {
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_utf8_single_byte_family(&mut self, row: &[u8]) -> Result<()> {
-        if self.plan.use_single_byte_utf8_family {
-            self.counters.direct_utf8_single_byte_cells +=
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::USE_SINGLE_BYTE_UTF8_FAMILY)
+        {
+            self.counters.direct_utf8_single_byte +=
                 self.plan.direct_utf8_single_byte_cells_per_row;
             for &idx in &self.plan.families.direct_utf8_single_byte {
                 let batch_column = &mut self.columns[idx];
@@ -437,7 +516,7 @@ impl BatchAccumulator {
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_utf8_borrowed_family(&mut self, row: &[u8]) -> Result<()> {
-        self.counters.direct_utf8_borrowed_cells += self.plan.direct_utf8_borrowed_cells_per_row;
+        self.counters.direct_utf8_borrowed += self.plan.direct_utf8_borrowed_cells_per_row;
         for &idx in &self.plan.families.direct_utf8_borrowed {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -461,7 +540,7 @@ impl BatchAccumulator {
     fn push_direct_utf8_owned_family(&mut self, row: &[u8]) -> Result<()> {
         match self.plan.direct_utf8_owned_mode {
             Some(DirectUtf8OwnedMode::Utf8Lenient) => {
-                self.counters.direct_utf8_owned_cells += self.plan.direct_utf8_owned_cells_per_row;
+                self.counters.direct_utf8_owned += self.plan.direct_utf8_owned_cells_per_row;
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
@@ -481,7 +560,7 @@ impl BatchAccumulator {
                 }
             }
             Some(DirectUtf8OwnedMode::EncodedStrict) => {
-                self.counters.direct_utf8_owned_cells += self.plan.direct_utf8_owned_cells_per_row;
+                self.counters.direct_utf8_owned += self.plan.direct_utf8_owned_cells_per_row;
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
@@ -501,7 +580,7 @@ impl BatchAccumulator {
                 }
             }
             Some(DirectUtf8OwnedMode::EncodedLenient) => {
-                self.counters.direct_utf8_owned_cells += self.plan.direct_utf8_owned_cells_per_row;
+                self.counters.direct_utf8_owned += self.plan.direct_utf8_owned_cells_per_row;
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
@@ -527,7 +606,7 @@ impl BatchAccumulator {
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_fallback_family(&mut self, row: &[u8]) -> Result<()> {
-        self.counters.fallback_cells += self.plan.fallback_cells_per_row;
+        self.counters.fallback += self.plan.fallback_cells_per_row;
         for &idx in &self.plan.families.fallback {
             let batch_column = &mut self.columns[idx];
             let column = &self.plan.row_plan.columns[idx];
@@ -548,42 +627,62 @@ impl BatchAccumulator {
         }
 
         self.plan.row_plan.validate_row_bounds(row)?;
-        if self.plan.all_columns_staged_numeric {
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC)
+        {
             self.push_all_staged_numeric(row)?;
             self.row_count += 1;
             return Ok(());
         }
 
-        if self.plan.has_fast_path_staged_plus_utf8_owned {
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::HAS_FAST_PATH_STAGED_PLUS_UTF8_OWNED)
+        {
             self.push_staged_numeric_family(row)?;
             self.push_direct_utf8_owned_family(row)?;
             self.row_count += 1;
             return Ok(());
         }
 
-        if self.plan.needs_owned_string_scratch {
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::NEEDS_OWNED_STRING_SCRATCH)
+        {
             self.owned_strings.clear();
         }
 
-        if self.plan.has_staged_numeric {
+        if self.plan.flags.has(BatchPlanFlags::HAS_STAGED_NUMERIC) {
             self.push_staged_numeric_family(row)?;
         }
-        if self.plan.has_direct_numeric {
+        if self.plan.flags.has(BatchPlanFlags::HAS_DIRECT_NUMERIC) {
             self.push_direct_numeric_family(row)?;
         }
-        if self.plan.has_direct_raw_bytes {
+        if self.plan.flags.has(BatchPlanFlags::HAS_DIRECT_RAW_BYTES) {
             self.push_direct_raw_bytes_family(row)?;
         }
-        if self.plan.has_direct_utf8_single_byte {
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::HAS_DIRECT_UTF8_SINGLE_BYTE)
+        {
             self.push_direct_utf8_single_byte_family(row)?;
         }
-        if self.plan.has_direct_utf8_borrowed {
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::HAS_DIRECT_UTF8_BORROWED)
+        {
             self.push_direct_utf8_borrowed_family(row)?;
         }
-        if self.plan.has_direct_utf8_owned {
+        if self.plan.flags.has(BatchPlanFlags::HAS_DIRECT_UTF8_OWNED) {
             self.push_direct_utf8_owned_family(row)?;
         }
-        if self.plan.has_fallback {
+        if self.plan.flags.has(BatchPlanFlags::HAS_FALLBACK) {
             self.push_fallback_family(row)?;
         }
 
