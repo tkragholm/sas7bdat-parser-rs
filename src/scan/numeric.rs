@@ -44,32 +44,65 @@ pub(super) fn decode_numeric_cell(slice: &[u8], endianness: Endianness) -> Optio
 }
 
 #[inline]
-pub(super) fn decode_numeric_raw_bits_or_missing(slice: &[u8], endianness: Endianness) -> u64 {
-    if slice.is_empty() {
-        SAS_NUMERIC_MISSING_SENTINEL
-    } else {
-        numeric_bits(slice, endianness)
+pub(super) fn numeric_bits(slice: &[u8], endianness: Endianness) -> u64 {
+    debug_assert!(slice.len() <= 8);
+    match slice.len() {
+        8 => numeric_bits_scalar_8(slice, endianness),
+        7 => numeric_bits_padded(slice, endianness),
+        6 => numeric_bits_padded(slice, endianness),
+        5 => numeric_bits_padded(slice, endianness),
+        4 => {
+            let word = match endianness {
+                Endianness::Big => {
+                    u64::from(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
+                }
+                Endianness::Little => {
+                    u64::from(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+                }
+            };
+            word << 32
+        }
+        3 => {
+            let word = match endianness {
+                Endianness::Big => {
+                    (u64::from(slice[0]) << 16) | (u64::from(slice[1]) << 8) | u64::from(slice[2])
+                }
+                Endianness::Little => {
+                    (u64::from(slice[2]) << 16) | (u64::from(slice[1]) << 8) | u64::from(slice[0])
+                }
+            };
+            word << 40
+        }
+        2 => {
+            let word = match endianness {
+                Endianness::Big => u64::from(u16::from_be_bytes([slice[0], slice[1]])),
+                Endianness::Little => u64::from(u16::from_le_bytes([slice[0], slice[1]])),
+            };
+            word << 48
+        }
+        1 => u64::from(slice[0]) << 56,
+        0 => 0,
+        _ => unreachable!("numeric width must be <= 8"),
     }
 }
 
 #[inline]
-pub(super) fn numeric_bits(slice: &[u8], endianness: Endianness) -> u64 {
-    debug_assert!(slice.len() <= 8);
-    if slice.len() == 8 {
-        numeric_bits_scalar_8(slice, endianness)
-    } else {
-        let mut buf = [0u8; 8];
-        match endianness {
-            Endianness::Big => {
-                buf[..slice.len()].copy_from_slice(slice);
-            }
-            Endianness::Little => {
-                buf[..slice.len()].copy_from_slice(slice);
-                buf[..slice.len()].reverse();
+fn numeric_bits_padded(slice: &[u8], endianness: Endianness) -> u64 {
+    let len = slice.len();
+    let mut word = 0u64;
+    match endianness {
+        Endianness::Big => {
+            for &byte in slice {
+                word = (word << 8) | u64::from(byte);
             }
         }
-        u64::from_be_bytes(buf)
+        Endianness::Little => {
+            for i in (0..len).rev() {
+                word = (word << 8) | u64::from(slice[i]);
+            }
+        }
     }
+    word << ((8 - len) * 8)
 }
 
 pub(super) fn materialize_staged_numeric_column(
@@ -458,8 +491,9 @@ mod tests {
     use super::{
         DateNumericValue, DateTimeNumericValue, TimeNumericValue, TypedNumericValue,
         classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value,
-        classify_typed_numeric_value, try_i64_from_f64,
+        classify_typed_numeric_value, numeric_bits, try_i64_from_f64,
     };
+    use crate::Endianness;
 
     #[test]
     fn try_i64_requires_finite_integral_values() {
@@ -533,5 +567,24 @@ mod tests {
         let rounded = 9_007_199_254_740_993_i64 as f64;
         assert_eq!(rounded, 9_007_199_254_740_992.0);
         assert_eq!(try_i64_from_f64(rounded), Some(9_007_199_254_740_992));
+    }
+
+    #[test]
+    fn numeric_bits_preserves_sas_alignment_for_partial_widths() {
+        let bytes = [0x11_u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77];
+        for len in 1..=7 {
+            let slice = &bytes[..len];
+            let be_expected = slice
+                .iter()
+                .fold(0_u64, |acc, &b| (acc << 8) | u64::from(b))
+                << ((8 - len) * 8);
+            let le_expected = slice
+                .iter()
+                .rev()
+                .fold(0_u64, |acc, &b| (acc << 8) | u64::from(b))
+                << ((8 - len) * 8);
+            assert_eq!(numeric_bits(slice, Endianness::Big), be_expected);
+            assert_eq!(numeric_bits(slice, Endianness::Little), le_expected);
+        }
     }
 }

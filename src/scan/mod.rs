@@ -37,8 +37,8 @@ use numeric::{
     DateNumericValue, DateTimeNumericValue, SAS_NUMERIC_MISSING_SENTINEL, TimeNumericValue,
     TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
     classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
-    decode_numeric_raw_bits_or_missing, materialize_staged_numeric_column, numeric_bits,
-    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
+    materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
+    staged_numeric_raw_bits_from_planned_cell,
 };
 use plan::{
     ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, NumericTileMode,
