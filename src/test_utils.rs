@@ -132,6 +132,17 @@ impl MockDatasetBuilder {
     }
 }
 
+pub fn write_page_header(
+    page: &mut [u8],
+    page_type: u16,
+    row_count: u16,
+    pointer_count: u16,
+) {
+    page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
+    page[(24 - 6)..(24 - 4)].copy_from_slice(&row_count.to_le_bytes());
+    page[(24 - 4)..(24 - 2)].copy_from_slice(&pointer_count.to_le_bytes());
+}
+
 pub fn make_page(
     page_type: u16,
     row_count: u16,
@@ -140,9 +151,7 @@ pub fn make_page(
     page_size: usize,
 ) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&row_count.to_le_bytes());
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&pointer_count.to_le_bytes());
+    write_page_header(&mut page, page_type, row_count, pointer_count);
 
     let mut offset = 24usize;
     for row in rows {
@@ -189,9 +198,7 @@ fn make_raw_compressed_page(
     page_type: u16,
 ) -> Vec<u8> {
     let mut page = vec![0u8; page_size];
-    page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
-    page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
-    page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+    write_page_header(&mut page, page_type, 1, 1);
 
     let data_offset = 40u32;
     let data_len = u32::try_from(compressed.len()).unwrap_or(u32::MAX);

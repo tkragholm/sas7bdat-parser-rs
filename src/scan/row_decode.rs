@@ -363,43 +363,37 @@ impl RowDecodePlan {
                 }
                 match decoded {
                     std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
-                    std::borrow::Cow::Owned(value) => {
-                        owned_strings.push(
-                            if mojibake_fix_maybe_needed_for_encoded_bytes(
-                                self.encoding,
-                                slice,
-                                self.string_options.mojibake_fix,
-                            ) {
-                                maybe_fix_mojibake(value, self.string_options.mojibake_fix)
-                            } else {
-                                value
-                            },
-                        );
-                        Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
-                    }
+                    std::borrow::Cow::Owned(value) => self.push_owned_string(owned_strings, slice, value),
                 }
             }
             StringDecodeKernel::EncodedLenient => {
                 let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
                 match decoded {
                     std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
-                    std::borrow::Cow::Owned(value) => {
-                        owned_strings.push(
-                            if mojibake_fix_maybe_needed_for_encoded_bytes(
-                                self.encoding,
-                                slice,
-                                self.string_options.mojibake_fix,
-                            ) {
-                                maybe_fix_mojibake(value, self.string_options.mojibake_fix)
-                            } else {
-                                value
-                            },
-                        );
-                        Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
-                    }
+                    std::borrow::Cow::Owned(value) => self.push_owned_string(owned_strings, slice, value),
                 }
             }
         }
+    }
+
+    fn push_owned_string<'row>(
+        &self,
+        owned_strings: &mut Vec<String>,
+        slice: &[u8],
+        value: String,
+    ) -> Result<PlannedCell<'row>> {
+        owned_strings.push(
+            if mojibake_fix_maybe_needed_for_encoded_bytes(
+                self.encoding,
+                slice,
+                self.string_options.mojibake_fix,
+            ) {
+                maybe_fix_mojibake(value, self.string_options.mojibake_fix)
+            } else {
+                value
+            },
+        );
+        Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
     }
 
     pub(super) fn plan_numeric_value<'row>(

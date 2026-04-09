@@ -28,6 +28,33 @@ where
     }
 }
 
+struct ScanLoopContext {
+    stats: ScanStats,
+    page: Vec<u8>,
+    decompressed_row: Vec<u8>,
+    total_pages: u64,
+    estimated_total_bytes: u64,
+}
+
+impl ScanLoopContext {
+    fn new(plan: &RawScanPlan, builder: &ScanBuilder<'_>) -> Self {
+        let stats = ScanStats::default();
+        let page = vec![0u8; plan.page_size];
+        let decompressed_row = Vec::new();
+        let total_pages = u64::try_from(builder.ds.descriptors.pages.len()).unwrap_or(u64::MAX);
+        let estimated_total_bytes = u64::try_from(plan.page_size)
+            .unwrap_or(u64::MAX)
+            .saturating_mul(total_pages);
+        Self {
+            stats,
+            page,
+            decompressed_row,
+            total_pages,
+            estimated_total_bytes,
+        }
+    }
+}
+
 pub(super) fn scan_row_bytes_with_reader<R, F>(
     builder: &ScanBuilder<'_>,
     reader: &mut R,
@@ -43,37 +70,36 @@ where
     }
     RawScanPlan::validate_builder(builder)?;
 
-    let mut stats = ScanStats::default();
-    let mut page = vec![0u8; plan.page_size];
-    let mut decompressed_row = Vec::new();
-    let total_pages = u64::try_from(builder.ds.descriptors.pages.len()).unwrap_or(u64::MAX);
-    let estimated_total_bytes = u64::try_from(plan.page_size)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(total_pages);
+    let mut ctx = ScanLoopContext::new(&plan, builder);
 
     for descriptor in builder.ds.descriptors.pages.iter().copied() {
-        if plan.should_stop(&stats) {
+        if plan.should_stop(&ctx.stats) {
             break;
         }
 
-        stats.pages_seen = stats.pages_seen.saturating_add(1);
-        load_descriptor_page(reader, &plan, descriptor, &mut page, &mut stats)?;
+        ctx.stats.pages_seen = ctx.stats.pages_seen.saturating_add(1);
+        load_descriptor_page(reader, &plan, descriptor, &mut ctx.page, &mut ctx.stats)?;
         if emit_rows_from_page(
             builder,
             &plan,
             descriptor,
-            &page,
-            &mut decompressed_row,
-            &mut stats,
+            &ctx.page,
+            &mut ctx.decompressed_row,
+            &mut ctx.stats,
             f,
         )? {
-            return Ok(stats);
+            return Ok(ctx.stats);
         }
 
-        emit_progress(builder, &stats, total_pages, estimated_total_bytes);
+        emit_progress(
+            builder,
+            &ctx.stats,
+            ctx.total_pages,
+            ctx.estimated_total_bytes,
+        );
     }
 
-    Ok(stats)
+    Ok(ctx.stats)
 }
 
 pub(super) fn scan_row_bytes_in_memory<F>(
@@ -90,40 +116,38 @@ where
     }
     RawScanPlan::validate_builder(builder)?;
 
-    let mut stats = ScanStats::default();
-    let mut decompressed_row = Vec::new();
-    let total_pages = u64::try_from(builder.ds.descriptors.pages.len()).unwrap_or(u64::MAX);
-    let estimated_total_bytes = u64::try_from(plan.page_size)
-        .unwrap_or(u64::MAX)
-        .saturating_mul(total_pages);
+    let mut ctx = ScanLoopContext::new(&plan, builder);
 
     for descriptor in builder.ds.descriptors.pages.iter().copied() {
-        if plan.should_stop(&stats) {
+        if plan.should_stop(&ctx.stats) {
             break;
         }
 
         let page = page_slice(file_bytes, &plan, descriptor)?;
-        stats.pages_seen = stats.pages_seen.saturating_add(1);
-        stats.raw_bytes_read = stats
-            .raw_bytes_read
-            .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
+        ctx.stats.pages_seen = ctx.stats.pages_seen.saturating_add(1);
+        ctx.stats.raw_bytes_read = ctx.stats.raw_bytes_read.saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
 
         if emit_rows_from_page(
             builder,
             &plan,
             descriptor,
             page,
-            &mut decompressed_row,
-            &mut stats,
+            &mut ctx.decompressed_row,
+            &mut ctx.stats,
             f,
         )? {
-            return Ok(stats);
+            return Ok(ctx.stats);
         }
 
-        emit_progress(builder, &stats, total_pages, estimated_total_bytes);
+        emit_progress(
+            builder,
+            &ctx.stats,
+            ctx.total_pages,
+            ctx.estimated_total_bytes,
+        );
     }
 
-    Ok(stats)
+    Ok(ctx.stats)
 }
 
 fn emit_progress(

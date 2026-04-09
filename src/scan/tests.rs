@@ -186,6 +186,24 @@ fn typed_lossless_rows_preserve_numeric_bits_and_string_bytes() {
     ));
 }
 
+fn make_standard_test_dataset(row: &[u8]) -> crate::dataset::Dataset {
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[row], 64));
+    MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build()
+}
+
+fn make_integer_test_dataset(row: &[u8]) -> crate::dataset::Dataset {
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[row], 64));
+    MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Integer, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build()
+}
+
 #[test]
 fn collect_rows_materializes_owned_values() {
     let row = make_numeric_text_row(7.0, *b"ZX  ");
@@ -294,12 +312,7 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
 #[test]
 fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
     let row = make_numeric_text_row(42.0, *b"ZX  ");
-    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let ds = MockDatasetBuilder::new(bytes)
-        .with_column("num", LogicalType::Float, 8, 0)
-        .with_column("txt", LogicalType::String, 4, 8)
-        .with_row_len(12)
-        .build();
+    let ds = make_standard_test_dataset(&row);
 
     let plan = BatchDecodePlan::new(
         &ScanBuilder::new(&ds)
@@ -322,12 +335,7 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
 #[test]
 fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
     let row = make_numeric_text_row(1.0, *b"pear");
-    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let ds = MockDatasetBuilder::new(bytes)
-        .with_column("num", LogicalType::Float, 8, 0)
-        .with_column("txt", LogicalType::String, 4, 8)
-        .with_row_len(12)
-        .build();
+    let ds = make_standard_test_dataset(&row);
 
     let plan = BatchDecodePlan::new(
         &ScanBuilder::new(&ds)
@@ -448,12 +456,7 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
 #[test]
 fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
     let row = make_numeric_text_row(1.5, *b"INT ");
-    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let ds = MockDatasetBuilder::new(bytes)
-        .with_column("num", LogicalType::Integer, 8, 0)
-        .with_column("txt", LogicalType::String, 4, 8)
-        .with_row_len(12)
-        .build();
+    let ds = make_integer_test_dataset(&row);
 
     let rows = ScanBuilder::new(&ds).collect_rows().expect("rows");
     assert!(
@@ -477,12 +480,7 @@ fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
 #[test]
 fn collect_batches_typed_lossless_uses_f64_and_raw_bytes() {
     let row = make_numeric_text_row(42.0, *b"ZX  ");
-    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
-    let ds = MockDatasetBuilder::new(bytes)
-        .with_column("num", LogicalType::Integer, 8, 0)
-        .with_column("txt", LogicalType::String, 4, 8)
-        .with_row_len(12)
-        .build();
+    let ds = make_integer_test_dataset(&row);
 
     let batches = ScanBuilder::new(&ds)
         .with_decode_mode(crate::DecodeMode::TypedLossless)

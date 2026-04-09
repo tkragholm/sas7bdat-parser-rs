@@ -12,7 +12,7 @@ use crate::{
 use memmap2::Mmap;
 use std::{
     fs::{self, File},
-    io::{Cursor, Seek},
+    io::{Cursor, Read, Seek},
     path::Path,
     sync::Arc,
 };
@@ -68,11 +68,7 @@ impl Dataset {
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let bytes = Arc::<[u8]>::from(bytes);
         let mut cursor = Cursor::new(&*bytes);
-        let (header, metadata) = probe_header(&mut cursor)?;
-        cursor.set_position(0);
-        let (layout, metadata) = parse_layout(&mut cursor, header, metadata)?;
-        cursor.set_position(0);
-        let descriptors = compile_page_descriptors(&mut cursor, &layout)?;
+        let (layout, metadata, descriptors) = Self::parse_from_reader(&mut cursor)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Bytes(Arc::clone(&bytes)),
@@ -113,22 +109,35 @@ impl Dataset {
 }
 
 impl Dataset {
+    fn parse_from_reader<R: Read + Seek>(
+        reader: &mut R,
+    ) -> Result<(LayoutPlan, DatasetMetadata, PageDescriptorTable)> {
+        let (header, metadata) = probe_header(reader)?;
+        reader.rewind().map_err(|err| {
+            Error::Io(crate::error::IoError {
+                path: None,
+                message: err.to_string(),
+            })
+        })?;
+        let (layout, metadata) = parse_layout(reader, header, metadata)?;
+        reader.rewind().map_err(|err| {
+            Error::Io(crate::error::IoError {
+                path: None,
+                message: err.to_string(),
+            })
+        })?;
+        let descriptors = compile_page_descriptors(reader, &layout)?;
+        Ok((layout, metadata, descriptors))
+    }
+
     fn from_buffered_file(path: &Path, mut file: File, options: OpenOptions) -> Result<Self> {
-        let (header, metadata) = probe_header(&mut file)?;
-        file.rewind().map_err(|err| {
-            Error::Io(crate::error::IoError {
-                path: Some(path.to_path_buf()),
-                message: err.to_string(),
-            })
-        })?;
-        let (layout, metadata) = parse_layout(&mut file, header, metadata)?;
-        file.rewind().map_err(|err| {
-            Error::Io(crate::error::IoError {
-                path: Some(path.to_path_buf()),
-                message: err.to_string(),
-            })
-        })?;
-        let descriptors = compile_page_descriptors(&mut file, &layout)?;
+        let (layout, metadata, descriptors) =
+            Self::parse_from_reader(&mut file).map_err(|mut err| {
+                if let Error::Io(ref mut io_err) = err {
+                    io_err.path = Some(path.to_path_buf());
+                }
+                err
+            })?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Path(path.to_path_buf()),
@@ -143,11 +152,7 @@ impl Dataset {
     fn from_mmap(mmap: Mmap, options: OpenOptions) -> Result<Self> {
         let mmap = Arc::new(mmap);
         let mut cursor = Cursor::new(&mmap[..]);
-        let (header, metadata) = probe_header(&mut cursor)?;
-        cursor.set_position(0);
-        let (layout, metadata) = parse_layout(&mut cursor, header, metadata)?;
-        cursor.set_position(0);
-        let descriptors = compile_page_descriptors(&mut cursor, &layout)?;
+        let (layout, metadata, descriptors) = Self::parse_from_reader(&mut cursor)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Mmap(Arc::clone(&mmap)),

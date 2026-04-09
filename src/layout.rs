@@ -1,7 +1,9 @@
 use crate::{
     encoding::resolve_encoding,
     error::{Error, Result},
-    internal::{read_u16, read_u32, read_u64, HeaderInfo, LayoutPlan},
+    internal::{
+        HeaderInfo, LayoutPlan, PageKind, classify_page, read_u16, read_u32, read_u64,
+    },
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
     types::RowLength,
 };
@@ -10,15 +12,6 @@ use std::{
     convert::TryFrom,
     io::{Read, Seek, SeekFrom},
 };
-
-const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
-const SAS_PAGE_TYPE_META: u16 = 0x0000;
-const SAS_PAGE_TYPE_DATA: u16 = 0x0100;
-const SAS_PAGE_TYPE_MIX: u16 = 0x0200;
-const SAS_PAGE_TYPE_META2: u16 = 0x4000;
-const SAS_PAGE_TYPE_AMD: u16 = 0x0400;
-const SAS_PAGE_TYPE_COMP: u16 = 0x9000;
-const SAS_PAGE_TYPE_COMP_TABLE: u16 = 0x8000;
 
 const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
 const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
@@ -491,37 +484,6 @@ fn parse_row_size_subheader(bytes: &[u8], header: &HeaderInfo) -> Result<RowInfo
             get_range(bytes, label_ref_offset, label_ref_offset + 6, "label ref")?,
         ),
     })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PageKind {
-    Meta,
-    Data,
-    Mix,
-    Amd,
-    Meta2,
-    Comp,
-    CompTable,
-    Unknown,
-}
-
-const fn classify_page(page_type: u16) -> PageKind {
-    if (page_type & SAS_PAGE_TYPE_COMP) == SAS_PAGE_TYPE_COMP {
-        return PageKind::Comp;
-    }
-    if (page_type & SAS_PAGE_TYPE_COMP_TABLE) == SAS_PAGE_TYPE_COMP_TABLE {
-        return PageKind::CompTable;
-    }
-    if (page_type & SAS_PAGE_TYPE_META2) == SAS_PAGE_TYPE_META2 {
-        return PageKind::Meta2;
-    }
-    match page_type & SAS_PAGE_TYPE_MASK {
-        SAS_PAGE_TYPE_META => PageKind::Meta,
-        SAS_PAGE_TYPE_DATA => PageKind::Data,
-        SAS_PAGE_TYPE_MIX => PageKind::Mix,
-        SAS_PAGE_TYPE_AMD => PageKind::Amd,
-        _ => PageKind::Unknown,
-    }
 }
 
 #[derive(Debug, Clone, Copy)]

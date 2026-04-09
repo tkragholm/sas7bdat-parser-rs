@@ -1,21 +1,13 @@
 use crate::{
     error::{Error, Result},
     internal::{
-        read_u32, read_u64, LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass,
-        RowSpan, RowSpanKind,
+        LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass, PageKind, RowSpan,
+        RowSpanKind, SAS_PAGE_TYPE_COMP, classify_page, read_u32, read_u64,
     },
     types::{ByteOffset, PageIndex, RowIndex},
 };
 use std::io::{Read, Seek, SeekFrom};
 
-const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
-const SAS_PAGE_TYPE_META: u16 = 0x0000;
-const SAS_PAGE_TYPE_DATA: u16 = 0x0100;
-const SAS_PAGE_TYPE_MIX: u16 = 0x0200;
-const SAS_PAGE_TYPE_META2: u16 = 0x4000;
-const SAS_PAGE_TYPE_AMD: u16 = 0x0400;
-const SAS_PAGE_TYPE_COMP: u16 = 0x9000;
-const SAS_PAGE_TYPE_COMP_TABLE: u16 = 0x8000;
 const SUBHEADER_POINTER_OFFSET: usize = 8;
 const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
 const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
@@ -25,18 +17,6 @@ const SIG_COLUMN_ATTRS: u32 = 0xFFFF_FFFC;
 const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
 const SIG_COUNTS: u32 = 0xFFFF_FC00;
 const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PageKind {
-    Meta,
-    Data,
-    Mix,
-    Amd,
-    Meta2,
-    Comp,
-    CompTable,
-    Unknown,
-}
 
 #[derive(Clone, Copy)]
 struct DescriptorInputs {
@@ -613,25 +593,6 @@ fn is_stattransfer_release(release: &str) -> bool {
     (major == 8 || major == 9) && minor == 0 && revision == 0
 }
 
-const fn classify_page(page_type: u16) -> PageKind {
-    if (page_type & SAS_PAGE_TYPE_COMP) == SAS_PAGE_TYPE_COMP {
-        return PageKind::Comp;
-    }
-    if (page_type & SAS_PAGE_TYPE_COMP_TABLE) == SAS_PAGE_TYPE_COMP_TABLE {
-        return PageKind::CompTable;
-    }
-    if (page_type & SAS_PAGE_TYPE_META2) == SAS_PAGE_TYPE_META2 {
-        return PageKind::Meta2;
-    }
-    match page_type & SAS_PAGE_TYPE_MASK {
-        SAS_PAGE_TYPE_META => PageKind::Meta,
-        SAS_PAGE_TYPE_DATA => PageKind::Data,
-        SAS_PAGE_TYPE_MIX => PageKind::Mix,
-        SAS_PAGE_TYPE_AMD => PageKind::Amd,
-        _ => PageKind::Unknown,
-    }
-}
-
 fn read_header_u16(page: &[u8], start: usize, layout: &LayoutPlan) -> Result<u16> {
     let end = start.saturating_add(2);
     let Some(bytes) = page.get(start..end) else {
@@ -720,7 +681,9 @@ fn page_io_error(err: &std::io::Error) -> Error {
 mod tests {
     use super::*;
     use crate::{
-        internal::{PageExecClass, RowSpanKind},
+        internal::{
+            PageExecClass, RowSpanKind, SAS_PAGE_TYPE_DATA, SAS_PAGE_TYPE_MIX,
+        },
         metadata::CompressionKind,
         test_utils::*,
     };
@@ -817,9 +780,7 @@ mod tests {
     fn skips_pages_with_comp_mask_bit_set_before_pointer_decode() {
         let mut page = vec![0u8; 64];
         let page_type = 0x1000u16;
-        page[(24 - 8)..(24 - 6)].copy_from_slice(&page_type.to_le_bytes());
-        page[(24 - 6)..(24 - 4)].copy_from_slice(&1u16.to_le_bytes());
-        page[(24 - 4)..(24 - 2)].copy_from_slice(&1u16.to_le_bytes());
+        write_page_header(&mut page, page_type, 1, 1);
         page[24..28].copy_from_slice(&40u32.to_le_bytes());
         page[28..32].copy_from_slice(&4u32.to_le_bytes());
         page[32] = 88;
@@ -857,5 +818,4 @@ mod tests {
         assert!(is_stattransfer_release("9.0000M0"));
         assert!(!is_stattransfer_release("9.0401M3"));
     }
-
 }
