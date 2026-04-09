@@ -33,6 +33,18 @@ Completed:
 - Increased typed-batches benchmark measurement window in `benches/compression_matrix.rs`.
 - Reduces repeated Criterion warnings and improves stability for large fixtures.
 
+5. Implemented SIMD integral/range probe for staged numeric materialization.
+- Added `first_non_integral_in_range_index_simd` in `src/scan/numeric.rs` using 4-lane SIMD
+  `floor + range + finite` checks over staged raw bits.
+- Applied probe to all staged typed-or-f64 materializers:
+  - `materialize_staged_i64_or_f64_column`
+  - `materialize_staged_date_or_f64_column`
+  - `materialize_staged_datetime_or_f64_column`
+  - `materialize_staged_time_or_f64_column`
+- On `top3_target` typed-batches (Criterion), this produced:
+  - clear improvement on the largest NYYTS 2020 file (~3.3% faster),
+  - neutral/noise-level movement on the other two targets.
+
 ## Key learnings
 
 1. Numeric routing dominates cost and opportunity.
@@ -50,21 +62,80 @@ Completed:
 - Plan states are not globally mutually exclusive; mixed-family schemas are common.
 - Enum-only modeling is less practical than bitflags + targeted fast-path checks.
 
+## Existing SIMD coverage
+
+| Location | What | SIMD width |
+|---|---|---|
+| `src/scan/numeric.rs:classify_missing_raw_bits` | missing-sentinel detection | `u64x8` |
+| `src/scan/string.rs:trim_trailing_space_or_nul_simd` | trailing space/nul trim | `u8x64` |
+| `src/scan/string.rs:is_ascii_simd` | ASCII classification | `u8x64` |
+| `src/scan/string.rs:is_all_space_or_nul_12` | exact-12-byte empty check | word (u64+u32) |
+
+The string and missing-detection paths are well covered. The numeric **finalize** path (`materialize_staged_*`) has no SIMD yet — that is the main gap.
+
 ## Current priority order
 
-1. Reduce staged numeric materialization overhead (`take_batch` / staged finalize path).
-- Main files: `src/scan/batch.rs`, `src/scan/numeric.rs`.
+1. **Single-pass materialization** — eliminate double-scan in `materialize_staged_*_or_f64_column`.
+- All four functions (`i64_or_f64`, `date_or_f64`, `datetime_or_f64`, `time_or_f64`) do a full
+  probe-pass (`all_integral` / `all_dates` check) followed by a separate convert-pass: 2× memory
+  bandwidth over the `raw_bits` vector, and `validity_is_null` is called twice per element in the
+  nullable case.
+- Fix: write output directly in a single pass; widen to f64 only on the first non-integral value.
+  The widen fallback only runs for rare mixed-type batches; all-integer batches get one pass.
+- Main file: `src/scan/numeric.rs`.
 
-2. Optimize remaining owned UTF-8 direct path (6.33% routed cells).
+2. **SIMD `all_integral` / `all_dates` check via `SimdFloat::floor()`** — vectorize the probe-pass.
+- The current probe-pass calls `try_i64_from_f64` per element (involves `is_finite`, range check,
+  cast, round-trip compare — multiple branches per value).
+- `std::simd::num::SimdFloat::floor()` is available on nightly. With `Simd<f64, 4>` and the
+  existing `NUMERIC_EXP_MASK` constant (reused from `classify_missing_raw_bits`):
+  ```
+  finite   = (bits & EXP_MASK) != EXP_MASK   // non-finite lanes = null/NaN → excluded
+  integral = floor(vals) == vals
+  ok       = !finite | integral               // any lane failing → widen to f64
+  ```
+- Replaces 4 calls to `try_i64_from_f64` (each multi-branch) with a couple of SIMD ops per chunk.
+- Applies identically to all four `materialize_staged_*_or_f64_column` type-check passes.
+- If `SimdFloat::cast::<i64>()` is also available, the convert-pass can be vectorized too.
+- Best implemented together with item 1 (single-pass structure makes the probe naturally SIMD).
+- Main file: `src/scan/numeric.rs`.
+
+3. **Optimize remaining owned UTF-8 direct path** (6.33% routed cells).
 - Main files: `src/scan/batch.rs`, `src/scan/row_decode.rs`.
 
-3. Batch-size sweep for large fixtures (`256` vs `512` vs `1024`) after current optimizations settle.
+4. **SIMD for validity-byte–masked f64 materialization**.
+- In `materialize_staged_f64_column` with `valid.is_some()`, per-element `validity_is_null` loads
+  `valid[index]` (a byte), which prevents autovectorization of the transmute loop.
+- Fix: load 8 `raw_bits` + 8 validity bytes simultaneously; blend with `simd_ne(0)` mask; push 8
+  f64s. Straightforward `u64x8` blend, no gather needed since `valid: Vec<u8>` is contiguous.
+- Main file: `src/scan/numeric.rs`.
+
+5. **Bit-packed validity bitmap** — architectural enabler for deeper SIMD.
+- `valid: Option<Vec<u8>>` uses 1 byte per row. `classify_missing_raw_bits` already internally
+  computes a `u64` bitmask per 8-lane chunk (`to_bitmask()`) and then expands it back to bytes —
+  that expansion is pure waste.
+- Switching to a bit-packed `Vec<u64>` (Arrow-style, 1 bit/row) would:
+  - Let `classify_missing_raw_bits` write bitmask words directly.
+  - Make validity masking in materialize a bitwise op on `u64` words rather than byte loads.
+  - Cut validity footprint by 8× → better cache behaviour for large batches.
+- Depends on whether downstream batch consumers can handle bit-packed validity (larger change).
+- Main files: `src/scan/numeric.rs`, `src/columnar.rs`.
+
+6. **Word-at-a-time trim for 8–63-byte strings**.
+- `trim_and_classify_ascii` takes the SIMD path only for `>= 64` bytes; 8–63-byte strings use a
+  scalar byte loop from the tail.
+- For the common case of trailing-space-padded fixed-width columns of width 8–32, a word-at-a-time
+  scan checking 8 bytes at a time (`u64::from_ne_bytes`) is 8× fewer iterations.
+- The exact-12 special case already does this; generalise it to the full 8–63-byte range.
+- Main file: `src/scan/string.rs`.
+
+7. **Batch-size sweep** for large fixtures (`256` vs `512` vs `1024`) after materialization improvements settle.
 - Main file: `benches/compression_matrix.rs`.
 
-4. Dictionary staging for repeated strings.
+8. **Dictionary staging for repeated strings**.
 - Main files: `src/options.rs`, `src/columnar.rs`, `src/scan/*`.
 
-5. Parallel typed-batch decode (larger effort).
+9. **Parallel typed-batch decode** (larger effort).
 - Main files: `src/scan/builder.rs`, `src/scan/batch.rs`, `src/scan/raw.rs`.
 
 ## Working rule

@@ -199,6 +199,16 @@ impl BatchDecodePlan {
             fallback_cells_per_row,
         })
     }
+
+    #[cfg(test)]
+    pub(super) const fn all_columns_staged_numeric(&self) -> bool {
+        self.flags.has(BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC)
+    }
+
+    #[cfg(test)]
+    pub(super) const fn needs_owned_string_scratch(&self) -> bool {
+        self.flags.has(BatchPlanFlags::NEEDS_OWNED_STRING_SCRATCH)
+    }
 }
 
 #[derive(Debug, Default)]

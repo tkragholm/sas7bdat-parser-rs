@@ -311,8 +311,8 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
     assert!(plan.families.direct_numeric.is_empty());
     assert!(plan.families.direct_raw_bytes.is_empty());
     assert!(plan.families.fallback.is_empty());
-    assert!(!plan.all_columns_staged_numeric);
-    assert!(!plan.needs_owned_string_scratch);
+    assert!(!plan.all_columns_staged_numeric());
+    assert!(!plan.needs_owned_string_scratch());
 }
 
 #[test]
@@ -334,8 +334,8 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
     assert!(plan.families.direct_utf8_owned.is_empty());
     assert!(plan.direct_utf8_owned_mode.is_none());
     assert!(plan.families.fallback.is_empty());
-    assert!(!plan.all_columns_staged_numeric);
-    assert!(!plan.needs_owned_string_scratch);
+    assert!(!plan.all_columns_staged_numeric());
+    assert!(!plan.needs_owned_string_scratch());
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
     assert!(plan.families.direct_utf8_owned.is_empty());
     assert!(plan.direct_utf8_owned_mode.is_none());
     assert!(plan.families.fallback.is_empty());
-    assert!(!plan.needs_owned_string_scratch);
+    assert!(!plan.needs_owned_string_scratch());
 }
 
 fn make_single_byte_test_dataset(compression: CompressionKind) -> crate::dataset::Dataset {

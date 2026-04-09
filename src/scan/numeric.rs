@@ -2,6 +2,7 @@ use super::{
     Endianness, NumericTileMode, OwnedColumnBuffer, PlannedCell, Result, SasDate, SasDateTime,
     SasTime, Simd, SimdPartialEq, unexpected_batch_cell,
 };
+use std::simd::{StdFloat, cmp::SimdPartialOrd};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum TypedNumericValue {
@@ -123,7 +124,7 @@ pub(super) fn materialize_staged_numeric_column(
             } else {
                 None
             };
-            materialize_staged_i64_or_f64_column(raw_bits, valid)
+            materialize_staged_i64_or_f64_column(&raw_bits, valid)
         }
         NumericTileMode::Date => {
             let valid = if has_missing {
@@ -131,7 +132,7 @@ pub(super) fn materialize_staged_numeric_column(
             } else {
                 None
             };
-            materialize_staged_date_or_f64_column(raw_bits, valid)
+            materialize_staged_date_or_f64_column(&raw_bits, valid)
         }
         NumericTileMode::DateTime => {
             let valid = if has_missing {
@@ -139,7 +140,7 @@ pub(super) fn materialize_staged_numeric_column(
             } else {
                 None
             };
-            materialize_staged_datetime_or_f64_column(raw_bits, valid)
+            materialize_staged_datetime_or_f64_column(&raw_bits, valid)
         }
         NumericTileMode::Time => {
             let valid = if has_missing {
@@ -147,7 +148,7 @@ pub(super) fn materialize_staged_numeric_column(
             } else {
                 None
             };
-            materialize_staged_time_or_f64_column(raw_bits, valid)
+            materialize_staged_time_or_f64_column(&raw_bits, valid)
         }
     }
 }
@@ -173,141 +174,224 @@ pub(super) fn materialize_staged_f64_column(
 }
 
 pub(super) fn materialize_staged_i64_or_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u8>>,
 ) -> OwnedColumnBuffer {
-    let all_integral = raw_bits.iter().enumerate().all(|(index, &bits)| {
-        validity_is_null(valid.as_deref(), index)
-            || try_i64_from_f64(f64::from_bits(bits)).is_some()
-    });
+    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
+        .is_some()
+    {
+        return materialize_staged_f64_column(raw_bits.to_vec(), valid);
+    }
 
-    if all_integral {
-        let mut values = Vec::with_capacity(raw_bits.len());
-        if valid.is_none() {
-            values.extend(raw_bits.iter().map(|&bits| {
-                try_i64_from_f64(f64::from_bits(bits)).expect("checked integer range")
-            }));
-        } else {
+    let mut values = Vec::with_capacity(raw_bits.len());
+    match valid.as_deref() {
+        None => {
+            #[allow(clippy::cast_possible_truncation)]
+            values.extend(raw_bits.iter().map(|&bits| f64::from_bits(bits) as i64));
+        }
+        Some(validity) => {
             values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
-                if validity_is_null(valid.as_deref(), index) {
+                if validity[index] == 0 {
                     0
                 } else {
-                    try_i64_from_f64(f64::from_bits(bits)).expect("checked integer range")
+                    #[allow(clippy::cast_possible_truncation)]
+                    let value = f64::from_bits(bits) as i64;
+                    value
                 }
             }));
         }
-        OwnedColumnBuffer::I64 { values, valid }
-    } else {
-        materialize_staged_f64_column(raw_bits, valid)
     }
+    OwnedColumnBuffer::I64 { values, valid }
 }
 
 pub(super) fn materialize_staged_date_or_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u8>>,
 ) -> OwnedColumnBuffer {
-    let all_dates = raw_bits.iter().enumerate().all(|(index, &bits)| {
-        validity_is_null(valid.as_deref(), index)
-            || try_i32_from_f64(f64::from_bits(bits)).is_some()
-    });
+    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I32_MIN_F64, I32_MAX_F64)
+        .is_some()
+    {
+        return materialize_staged_f64_column(raw_bits.to_vec(), valid);
+    }
 
-    if all_dates {
-        let mut values = Vec::with_capacity(raw_bits.len());
-        if valid.is_none() {
-            values.extend(raw_bits.iter().map(|&bits| SasDate {
-                days_since_sas_epoch:
-                    try_i32_from_f64(f64::from_bits(bits)).expect("checked date range"),
+    let mut values = Vec::with_capacity(raw_bits.len());
+    match valid.as_deref() {
+        None => {
+            values.extend(raw_bits.iter().map(|&bits| {
+                #[allow(clippy::cast_possible_truncation)]
+                let days = f64::from_bits(bits) as i32;
+                SasDate {
+                    days_since_sas_epoch: days,
+                }
             }));
-        } else {
+        }
+        Some(validity) => {
             values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
-                if validity_is_null(valid.as_deref(), index) {
+                if validity[index] == 0 {
                     SasDate {
                         days_since_sas_epoch: 0,
                     }
                 } else {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let days = f64::from_bits(bits) as i32;
                     SasDate {
-                        days_since_sas_epoch: try_i32_from_f64(f64::from_bits(bits))
-                            .expect("checked date range"),
+                        days_since_sas_epoch: days,
                     }
                 }
             }));
         }
-        OwnedColumnBuffer::Date { values, valid }
-    } else {
-        materialize_staged_f64_column(raw_bits, valid)
     }
+    OwnedColumnBuffer::Date { values, valid }
 }
 
 pub(super) fn materialize_staged_datetime_or_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u8>>,
 ) -> OwnedColumnBuffer {
-    let all_datetimes = raw_bits.iter().enumerate().all(|(index, &bits)| {
-        validity_is_null(valid.as_deref(), index)
-            || try_i64_from_f64(f64::from_bits(bits)).is_some()
-    });
+    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
+        .is_some()
+    {
+        return materialize_staged_f64_column(raw_bits.to_vec(), valid);
+    }
 
-    if all_datetimes {
-        let mut values = Vec::with_capacity(raw_bits.len());
-        if valid.is_none() {
-            values.extend(raw_bits.iter().map(|&bits| SasDateTime {
-                seconds_since_sas_epoch:
-                    try_i64_from_f64(f64::from_bits(bits)).expect("checked datetime range"),
+    let mut values = Vec::with_capacity(raw_bits.len());
+    match valid.as_deref() {
+        None => {
+            values.extend(raw_bits.iter().map(|&bits| {
+                #[allow(clippy::cast_possible_truncation)]
+                let seconds = f64::from_bits(bits) as i64;
+                SasDateTime {
+                    seconds_since_sas_epoch: seconds,
+                }
             }));
-        } else {
+        }
+        Some(validity) => {
             values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
-                if validity_is_null(valid.as_deref(), index) {
+                if validity[index] == 0 {
                     SasDateTime {
                         seconds_since_sas_epoch: 0,
                     }
                 } else {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let seconds = f64::from_bits(bits) as i64;
                     SasDateTime {
-                        seconds_since_sas_epoch: try_i64_from_f64(f64::from_bits(bits))
-                            .expect("checked datetime range"),
+                        seconds_since_sas_epoch: seconds,
                     }
                 }
             }));
         }
-        OwnedColumnBuffer::DateTime { values, valid }
-    } else {
-        materialize_staged_f64_column(raw_bits, valid)
     }
+    OwnedColumnBuffer::DateTime { values, valid }
 }
 
 pub(super) fn materialize_staged_time_or_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u8>>,
 ) -> OwnedColumnBuffer {
-    let all_times = raw_bits.iter().enumerate().all(|(index, &bits)| {
-        validity_is_null(valid.as_deref(), index)
-            || try_i64_from_f64(f64::from_bits(bits)).is_some()
-    });
+    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
+        .is_some()
+    {
+        return materialize_staged_f64_column(raw_bits.to_vec(), valid);
+    }
 
-    if all_times {
-        let mut values = Vec::with_capacity(raw_bits.len());
-        if valid.is_none() {
-            values.extend(raw_bits.iter().map(|&bits| SasTime {
-                seconds_since_midnight:
-                    try_i64_from_f64(f64::from_bits(bits)).expect("checked time range"),
+    let mut values = Vec::with_capacity(raw_bits.len());
+    match valid.as_deref() {
+        None => {
+            values.extend(raw_bits.iter().map(|&bits| {
+                #[allow(clippy::cast_possible_truncation)]
+                let seconds = f64::from_bits(bits) as i64;
+                SasTime {
+                    seconds_since_midnight: seconds,
+                }
             }));
-        } else {
+        }
+        Some(validity) => {
             values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
-                if validity_is_null(valid.as_deref(), index) {
+                if validity[index] == 0 {
                     SasTime {
                         seconds_since_midnight: 0,
                     }
                 } else {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let seconds = f64::from_bits(bits) as i64;
                     SasTime {
-                        seconds_since_midnight: try_i64_from_f64(f64::from_bits(bits))
-                            .expect("checked time range"),
+                        seconds_since_midnight: seconds,
                     }
                 }
             }));
         }
-        OwnedColumnBuffer::Time { values, valid }
-    } else {
-        materialize_staged_f64_column(raw_bits, valid)
     }
+    OwnedColumnBuffer::Time { values, valid }
+}
+
+#[allow(clippy::cast_precision_loss)]
+const I64_MIN_F64: f64 = i64::MIN as f64;
+#[allow(clippy::cast_precision_loss)]
+const I64_MAX_F64: f64 = i64::MAX as f64;
+#[allow(clippy::cast_precision_loss)]
+const I32_MIN_F64: f64 = i32::MIN as f64;
+#[allow(clippy::cast_precision_loss)]
+const I32_MAX_F64: f64 = i32::MAX as f64;
+
+fn first_non_integral_in_range_index_simd(
+    raw_bits: &[u64],
+    valid: Option<&[u8]>,
+    min: f64,
+    max: f64,
+) -> Option<usize> {
+    type U64x4 = Simd<u64, 4>;
+    type F64x4 = Simd<f64, 4>;
+
+    let exp_mask = U64x4::splat(NUMERIC_EXP_MASK);
+    let min_lanes = F64x4::splat(min);
+    let max_lanes = F64x4::splat(max);
+    let mut chunks = raw_bits.chunks_exact(4);
+
+    for (chunk_index, chunk) in chunks.by_ref().enumerate() {
+        let bits = U64x4::from_slice(chunk);
+        let numbers = F64x4::from_array([
+            f64::from_bits(chunk[0]),
+            f64::from_bits(chunk[1]),
+            f64::from_bits(chunk[2]),
+            f64::from_bits(chunk[3]),
+        ]);
+        let finite = (bits & exp_mask).simd_ne(exp_mask);
+        let integral = numbers.floor().simd_eq(numbers);
+        let in_range = numbers.simd_ge(min_lanes) & numbers.simd_le(max_lanes);
+        let eligible_bitmask =
+            u8::try_from((finite & integral & in_range).to_bitmask()).expect("4-lane bitmask");
+        let required_bitmask = valid.map_or(0b1111, |validity| {
+            let base = chunk_index * 4;
+            let mut mask = 0u8;
+            for lane in 0..4 {
+                if validity[base + lane] != 0 {
+                    mask |= 1 << lane;
+                }
+            }
+            mask
+        });
+        let failing = required_bitmask & !eligible_bitmask;
+        if failing != 0 {
+            return Some((chunk_index * 4) + failing.trailing_zeros() as usize);
+        }
+    }
+
+    let processed = raw_bits.len() - chunks.remainder().len();
+    for (offset, &bits) in chunks.remainder().iter().enumerate() {
+        let index = processed + offset;
+        if valid.is_some_and(|validity| validity[index] == 0) {
+            continue;
+        }
+        let number = f64::from_bits(bits);
+        if !number.is_finite()
+            || number < min
+            || number > max
+            || number.floor().to_bits() != number.to_bits()
+        {
+            return Some(index);
+        }
+    }
+    None
 }
 
 pub(super) fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u8>> {
