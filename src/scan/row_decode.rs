@@ -363,14 +363,14 @@ impl RowDecodePlan {
                 }
                 match decoded {
                     std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
-                    std::borrow::Cow::Owned(value) => self.push_owned_string(owned_strings, slice, value),
+                    std::borrow::Cow::Owned(value) => Ok(self.push_owned_string(owned_strings, slice, value)),
                 }
             }
             StringDecodeKernel::EncodedLenient => {
                 let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
                 match decoded {
                     std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
-                    std::borrow::Cow::Owned(value) => self.push_owned_string(owned_strings, slice, value),
+                    std::borrow::Cow::Owned(value) => Ok(self.push_owned_string(owned_strings, slice, value)),
                 }
             }
         }
@@ -381,7 +381,7 @@ impl RowDecodePlan {
         owned_strings: &mut Vec<String>,
         slice: &[u8],
         value: String,
-    ) -> Result<PlannedCell<'row>> {
+    ) -> PlannedCell<'row> {
         owned_strings.push(
             if mojibake_fix_maybe_needed_for_encoded_bytes(
                 self.encoding,
@@ -393,7 +393,7 @@ impl RowDecodePlan {
                 value
             },
         );
-        Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
+        PlannedCell::StrOwned(owned_strings.len() - 1)
     }
 
     pub(super) fn plan_numeric_value<'row>(
