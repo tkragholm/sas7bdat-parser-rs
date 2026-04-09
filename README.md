@@ -66,3 +66,21 @@ Optimization priority for this project:
 2. Medium/narrow width hot paths first, with wide-path support kept performant.
 3. Correctness support for the remaining compression modes (last 9 files).
 4. Uncompressed macro-fixtures (for example `ahs2013n`) kept as secondary validation targets.
+
+## Top3 target benchmark snapshot
+
+Command used:
+
+```text
+cargo bench --bench compression_matrix -- 'top3_target/'
+```
+
+<!-- TOP3_BENCH_TABLE:START -->
+
+| Fixture | raw_rows time | raw_rows throughput | typed_batches time | typed_batches throughput | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `top3_target/healthdatany_86he_eqwq/windows_1252/nysdoh_brfss_surveydata_2018_ad5548ba` | [32.11 µs 32.19 µs 32.27 µs] | [1.11 Gelem/s 1.11 Gelem/s 1.11 Gelem/s] | [49.62 ms 49.65 ms 49.67 ms] | [720.07 Kelem/s 720.41 Kelem/s 720.76 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2018_publicuse_aec3d115` | [99.10 µs 99.19 µs 99.30 µs] | [1.19 Gelem/s 1.19 Gelem/s 1.19 Gelem/s] | [419.67 ms 419.94 ms 420.27 ms] | [280.38 Kelem/s 280.60 Kelem/s 280.78 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2020_publicuse_c85e9144` | [122.80 µs 122.89 µs 123.00 µs] | [989.66 Melem/s 990.54 Melem/s 991.27 Melem/s] | [493.54 ms 493.87 ms 494.26 ms] | [246.29 Kelem/s 246.48 Kelem/s 246.65 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+
+<!-- TOP3_BENCH_TABLE:END -->

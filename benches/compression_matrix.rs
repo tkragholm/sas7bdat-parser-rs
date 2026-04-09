@@ -1,6 +1,47 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use sas7bdat_simd::{BatchHint, Dataset};
-use std::{fs, hint::black_box, path::PathBuf};
+use std::{
+    fs,
+    hint::black_box,
+    path::{Path, PathBuf},
+};
+
+const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
+
+const NON_TARGET_FIXTURES: &[(&str, &str)] = &[
+    ("compressed_narrow_mixed_54_class", "raw_data/csharp/54-class.sas7bdat"),
+    (
+        "compressed_narrow_temporal_max_sas_date",
+        "raw_data/pandas/max_sas_date.sas7bdat",
+    ),
+    ("compressed_wide_mixed_test2", "raw_data/pandas/test2.sas7bdat"),
+    (
+        "compressed_wide_string_topical",
+        "raw_data/ahs2013/topical.sas7bdat",
+    ),
+    ("windows1252_local_nls", "raw_data/principlesofeco/nls.sas7bdat"),
+    ("windows1252_local_ces", "raw_data/principlesofeco/ces.sas7bdat"),
+    (
+        "windows1252_local_nels",
+        "raw_data/principlesofeco/nels.sas7bdat",
+    ),
+    (
+        "windows1252_local_figurec_3",
+        "raw_data/principlesofeco/figurec_3.sas7bdat",
+    ),
+    (
+        "windows1252_local_nls_panel",
+        "raw_data/principlesofeco/nls_panel.sas7bdat",
+    ),
+    (
+        "windows1252_local_crime",
+        "raw_data/principlesofeco/crime.sas7bdat",
+    ),
+    (
+        "windows1252_local_test_meta2_page",
+        "raw_data/pandas/test_meta2_page.sas7bdat",
+    ),
+];
 
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -32,16 +73,6 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
         });
     });
 
-    group.bench_function(BenchmarkId::new("typed_rows", "all"), |b| {
-        b.iter(|| {
-            let rows = dataset
-                .scan()
-                .collect_rows()
-                .expect("compressed typed rows");
-            black_box(rows.len());
-        });
-    });
-
     group.bench_function(BenchmarkId::new("typed_batches", "all"), |b| {
         b.iter(|| {
             let batches = dataset
@@ -56,87 +87,152 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
     group.finish();
 }
 
-fn compression_matrix(c: &mut Criterion) {
-    if let Some(dataset) = load_dataset("raw_data/csharp/54-class.sas7bdat") {
-        bench_case(c, "compressed_narrow_mixed_54_class", &dataset);
+fn sanitize_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('_');
+        }
     }
-
-    if let Some(dataset) = load_dataset("raw_data/pandas/max_sas_date.sas7bdat") {
-        bench_case(c, "compressed_narrow_temporal_max_sas_date", &dataset);
+    while out.contains("__") {
+        out = out.replace("__", "_");
     }
+    out.trim_matches('_').to_owned()
+}
 
-    if let Some(dataset) = load_dataset("raw_data/pandas/test2.sas7bdat") {
-        bench_case(c, "compressed_wide_mixed_test2", &dataset);
+const fn fnv1a32(bytes: &[u8]) -> u32 {
+    let mut hash = 0x811c9dc5u32;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+        i += 1;
     }
+    hash
+}
 
-    if let Some(dataset) = load_dataset("raw_data/ahs2013/topical.sas7bdat") {
-        bench_case(c, "compressed_wide_string_topical", &dataset);
+fn target_bench_name(relative: &str, dataset: &Dataset) -> String {
+    let mut parts = relative.split('/');
+    let source = parts.next().unwrap_or("source");
+    let file_stem = Path::new(relative)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(relative);
+    let source = sanitize_name(source);
+    let file_stem = sanitize_name(file_stem);
+    let encoding = sanitize_name(dataset.metadata().encoding.as_deref().unwrap_or("unknown"));
+    let hash = fnv1a32(relative.as_bytes());
+    format!("target/{source}/{encoding}/{file_stem}_{hash:08x}")
+}
+
+fn discover_target_roots(fixtures_root: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let Ok(entries) = fs::read_dir(fixtures_root) else {
+        return roots;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name == "raw_data" {
+            continue;
+        }
+        roots.push(path);
     }
+    roots.sort();
+    roots
+}
 
-    if let Some(dataset) = load_dataset("raw_data/principlesofeco/nls.sas7bdat") {
-        bench_case(c, "windows1252_local_nls", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset("raw_data/principlesofeco/ces.sas7bdat") {
-        bench_case(c, "windows1252_local_ces", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset("raw_data/principlesofeco/nels.sas7bdat") {
-        bench_case(c, "windows1252_local_nels", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset("raw_data/principlesofeco/figurec_3.sas7bdat") {
-        bench_case(c, "windows1252_local_figurec_3", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset("raw_data/principlesofeco/nls_panel.sas7bdat") {
-        bench_case(c, "windows1252_local_nls_panel", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset("raw_data/principlesofeco/crime.sas7bdat") {
-        bench_case(c, "windows1252_local_crime", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset("raw_data/pandas/test_meta2_page.sas7bdat") {
-        bench_case(c, "windows1252_local_test_meta2_page", &dataset);
-    }
-
-    if let Some(dataset) =
-        load_dataset("apnorc-ap-votecast-public-use-file/AP_VOTECAST_2018_DATA.sas7bdat")
-    {
-        bench_case(c, "windows1252_real_corpus_ap_votecast_2018", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset(
-        "healthdatany-hb5k-887e/original/NYSDOH_BRFSS_SurveyData_2010.sas7bdat",
-    ) {
-        bench_case(c, "windows1252_real_corpus_nysdoh_brfss_2010", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset(
-        "epa-modeling-tribal-exposures/original/tribal fish HG paper data/hg_all.sas7bdat",
-    ) {
-        bench_case(c, "windows1252_real_corpus_epa_hg_all", &dataset);
-    }
-
-    if let Some(dataset) = load_dataset(
-        "epa-modeling-tribal-exposures/original/tribal fish HG paper data/lake_pcb_ug_kg.sas7bdat",
-    ) {
-        bench_case(c, "windows1252_real_corpus_epa_lake_pcb", &dataset);
-    }
-
-    if let Some(dataset) =
-        load_dataset("education-edu-demog-and-geog-estimate/GRF14/grf14_lea_blkgrp.sas7bdat")
-    {
-        bench_case(c, "windows1252_real_corpus_grf14_blkgrp", &dataset);
-    }
-
-    if let Some(dataset) =
-        load_dataset("education-edu-demog-and-geog-estimate/GRF15/grf15_lea_blkgrp.sas7bdat")
-    {
-        bench_case(c, "windows1252_real_corpus_grf15_blkgrp", &dataset);
+fn collect_sas7bdat_files(root: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_sas7bdat_files(&path, out);
+            continue;
+        }
+        let is_sas = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("sas7bdat"));
+        if is_sas {
+            out.push(path);
+        }
     }
 }
 
-criterion_group!(benches, compression_matrix);
-criterion_main!(benches);
+fn discover_target_paths(min_size_bytes: u64) -> Vec<(String, u64)> {
+    let fixtures_root = fixture_path("");
+    let target_roots = discover_target_roots(&fixtures_root);
+    let mut files = Vec::new();
+
+    for root in target_roots {
+        collect_sas7bdat_files(&root, &mut files);
+    }
+
+    files.sort();
+
+    let mut out = Vec::new();
+    for path in files {
+        let Ok(meta) = fs::metadata(&path) else {
+            continue;
+        };
+        if meta.len() < min_size_bytes {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(&fixtures_root) else {
+            continue;
+        };
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        out.push((relative, meta.len()));
+    }
+    out
+}
+
+fn compression_matrix_target(c: &mut Criterion) {
+    for (relative, _) in discover_target_paths(TARGET_MIN_SIZE_BYTES) {
+        if let Some(dataset) = load_dataset(&relative) {
+            let name = target_bench_name(&relative, &dataset);
+            bench_case(c, &name, &dataset);
+        }
+    }
+}
+
+fn compression_matrix_top3_target(c: &mut Criterion) {
+    let mut targets = discover_target_paths(TARGET_MIN_SIZE_BYTES);
+    targets.sort_by(|left, right| {
+        right
+            .1
+            .cmp(&left.1)
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    for (relative, _) in targets.into_iter().take(3) {
+        if let Some(dataset) = load_dataset(&relative) {
+            let base = target_bench_name(&relative, &dataset);
+            let scoped = base.replacen("target/", "top3_target/", 1);
+            bench_case(c, &scoped, &dataset);
+        }
+    }
+}
+
+fn compression_matrix_non_target(c: &mut Criterion) {
+    for (name, relative) in NON_TARGET_FIXTURES {
+        if let Some(dataset) = load_dataset(relative) {
+            let scoped_name = format!("baseline/{name}");
+            bench_case(c, &scoped_name, &dataset);
+        }
+    }
+}
+
+criterion_group!(benches_target, compression_matrix_target);
+criterion_group!(benches_top3_target, compression_matrix_top3_target);
+criterion_group!(benches_non_target, compression_matrix_non_target);
+criterion_main!(benches_target, benches_top3_target, benches_non_target);

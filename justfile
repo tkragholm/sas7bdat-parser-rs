@@ -45,3 +45,10 @@ bench-numeric-heavy projection="numeric" max_fixtures="999" catalog="fixtures/fi
 
 bench-macro projection="full" max_fixtures="999" catalog="fixtures/fixture_catalog.local.json":
     @just bench-tags benchmark-macro {{projection}} {{max_fixtures}} {{catalog}}
+
+update-top3-bench-readme:
+    @python3 scripts/update_top3_bench_table.py
+
+bench-top3-readme:
+    @cargo bench --bench compression_matrix -- 'top3_target/'
+    @python3 scripts/update_top3_bench_table.py
