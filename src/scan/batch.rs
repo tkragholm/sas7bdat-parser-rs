@@ -32,6 +32,7 @@ pub(super) struct BatchDecodePlan {
     pub(super) has_direct_utf8_borrowed: bool,
     pub(super) has_direct_utf8_owned: bool,
     pub(super) has_fallback: bool,
+    pub(super) has_fast_path_staged_plus_utf8_owned: bool,
     pub(super) staged_numeric_cells_per_row: u64,
     pub(super) direct_numeric_cells_per_row: u64,
     pub(super) direct_raw_bytes_cells_per_row: u64,
@@ -193,6 +194,14 @@ impl BatchDecodePlan {
             .fallback
             .iter()
             .any(|&idx| matches!(row_plan.columns[idx].kernel, CompiledDecodeKernel::Utf8));
+        let has_fast_path_staged_plus_utf8_owned = has_staged_numeric
+            && has_direct_utf8_owned
+            && !has_direct_numeric
+            && !has_direct_raw_bytes
+            && !has_direct_utf8_single_byte
+            && !has_direct_utf8_borrowed
+            && !has_fallback
+            && !needs_owned_string_scratch;
         Ok(Self {
             row_plan,
             column_kinds,
@@ -214,6 +223,7 @@ impl BatchDecodePlan {
             has_direct_utf8_borrowed,
             has_direct_utf8_owned,
             has_fallback,
+            has_fast_path_staged_plus_utf8_owned,
             staged_numeric_cells_per_row,
             direct_numeric_cells_per_row,
             direct_raw_bytes_cells_per_row,
@@ -540,6 +550,13 @@ impl BatchAccumulator {
         self.plan.row_plan.validate_row_bounds(row)?;
         if self.plan.all_columns_staged_numeric {
             self.push_all_staged_numeric(row)?;
+            self.row_count += 1;
+            return Ok(());
+        }
+
+        if self.plan.has_fast_path_staged_plus_utf8_owned {
+            self.push_staged_numeric_family(row)?;
+            self.push_direct_utf8_owned_family(row)?;
             self.row_count += 1;
             return Ok(());
         }
