@@ -2,7 +2,7 @@ use super::{
     Endianness, NumericTileMode, OwnedColumnBuffer, PlannedCell, Result, SasDate, SasDateTime,
     SasTime, Simd, SimdPartialEq, unexpected_batch_cell,
 };
-use std::simd::{StdFloat, cmp::SimdPartialOrd};
+use std::simd::{Select, StdFloat, cmp::SimdPartialOrd};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum TypedNumericValue {
@@ -157,19 +157,49 @@ pub(super) fn materialize_staged_f64_column(
     raw_bits: Vec<u64>,
     valid: Option<Vec<u8>>,
 ) -> OwnedColumnBuffer {
+    type U64x8 = Simd<u64, 8>;
+    type U8x8 = Simd<u8, 8>;
+
     let mut values = Vec::with_capacity(raw_bits.len());
     if valid.is_none() {
         values.extend(raw_bits.into_iter().map(f64::from_bits));
         return OwnedColumnBuffer::F64 { values, valid };
     }
 
-    values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
-        if validity_is_null(valid.as_deref(), index) {
-            0.0
-        } else {
-            f64::from_bits(bits)
+    if let Some(validity) = valid.as_deref() {
+        let zeros_u64 = U64x8::splat(0);
+        let zero_u8 = U8x8::splat(0);
+
+        let mut raw_chunks = raw_bits.chunks_exact(8);
+        let mut valid_chunks = validity.chunks_exact(8);
+        for (raw_chunk, valid_chunk) in raw_chunks.by_ref().zip(valid_chunks.by_ref()) {
+            let lanes = U64x8::from_slice(raw_chunk);
+            let valid_lanes = U8x8::from_slice(valid_chunk);
+            let null_mask = valid_lanes.simd_eq(zero_u8);
+            let masked = null_mask.select(zeros_u64, lanes);
+            values.extend(masked.to_array().into_iter().map(f64::from_bits));
         }
-    }));
+
+        let raw_remainder = raw_chunks.remainder();
+        let valid_remainder = valid_chunks.remainder();
+        values.extend(raw_remainder.iter().zip(valid_remainder.iter()).map(
+            |(&bits, &is_valid)| {
+                if is_valid == 0 {
+                    0.0
+                } else {
+                    f64::from_bits(bits)
+                }
+            },
+        ));
+    } else {
+        values.extend(raw_bits.iter().enumerate().map(|(index, &bits)| {
+            if validity_is_null(valid.as_deref(), index) {
+                0.0
+            } else {
+                f64::from_bits(bits)
+            }
+        }));
+    }
     OwnedColumnBuffer::F64 { values, valid }
 }
 

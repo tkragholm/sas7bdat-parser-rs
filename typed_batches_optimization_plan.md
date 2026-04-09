@@ -45,6 +45,15 @@ Completed:
   - clear improvement on the largest NYYTS 2020 file (~3.3% faster),
   - neutral/noise-level movement on the other two targets.
 
+6. Implemented SIMD validity-mask materialization for staged `f64` columns.
+- Updated `materialize_staged_f64_column` to process nullable staged chunks in 8-lane SIMD
+  (`u64x8` bits + `u8x8` validity mask), writing zero bits for null lanes before conversion.
+- Kept scalar fallback only for the remainder (<8 lanes).
+- On `top3_target` typed-batches (Criterion), this gave broad wins:
+  - NYYTS 2020: ~6.3% faster,
+  - NYYTS 2018: ~6.6% faster,
+  - NYSDOH BRFSS 2018: ~4.4% faster.
+
 ## Key learnings
 
 1. Numeric routing dominates cost and opportunity.
@@ -57,6 +66,7 @@ Completed:
 3. Some intuitive micro-optimizations regressed real workloads.
 - Two attempted follow-up experiments were explicitly reverted after top3 regressions.
 - Keep strict loop: implement -> profile -> benchmark -> keep/revert.
+- Example: direct owned-UTF8 dispatch simplification regressed all top3 fixtures and was reverted.
 
 4. Bitflags are the right state representation for this planner.
 - Plan states are not globally mutually exclusive; mixed-family schemas are common.
