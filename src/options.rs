@@ -74,8 +74,15 @@ pub enum DictionaryStaging {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrimMode {
+    Preserve,
+    RTrim,
+    Strip,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StringDecodeOptions {
-    pub trim_fixed_width: bool,
+    pub trim_mode: TrimMode,
     pub utf8_validation: Utf8ValidationMode,
     pub mojibake_fix: MojibakePolicy,
     pub dictionary_staging: DictionaryStaging,
@@ -84,7 +91,7 @@ pub struct StringDecodeOptions {
 impl Default for StringDecodeOptions {
     fn default() -> Self {
         Self {
-            trim_fixed_width: true,
+            trim_mode: TrimMode::RTrim,
             utf8_validation: Utf8ValidationMode::Auto,
             mojibake_fix: MojibakePolicy::Auto,
             dictionary_staging: DictionaryStaging::Auto,

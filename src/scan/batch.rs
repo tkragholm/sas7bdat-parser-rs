@@ -1,13 +1,14 @@
 use super::{
     ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
-    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error,
-    NumericTileMode, OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
+    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode,
+    OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
     SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
-    TimeNumericValue, TrimmedString, TypedNumericValue, classify_date_numeric_value,
+    TimeNumericValue, TrimMode, TrimmedString, TypedNumericValue, classify_date_numeric_value,
     classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
-    decode_numeric_cell, materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
-    staged_numeric_raw_bits_from_planned_cell, trim_and_classify_ascii,
+    decode_numeric_cell, is_blank_after_trim_mode, materialize_staged_numeric_column, numeric_bits,
+    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
+use crate::DictionaryStaging;
 use crate::define_owned_column_enum;
 use encoding_rs::WINDOWS_1252;
 
@@ -137,6 +138,9 @@ struct StagedStringLookup {
     seen: u32,
     promoted: u32,
     disabled: bool,
+    recent_hashes: [u32; 4],
+    recent_entries: [u16; 4],
+    recent_valid: [u8; 4],
 }
 
 impl StagedStringLookup {
@@ -148,6 +152,9 @@ impl StagedStringLookup {
             seen: 0,
             promoted: 0,
             disabled: false,
+            recent_hashes: [0; 4],
+            recent_entries: [0; 4],
+            recent_valid: [0; 4],
         }
     }
 
@@ -181,13 +188,34 @@ impl StagedStringLookup {
         (h, fp)
     }
 
+    #[inline]
+    const fn remember_recent(&mut self, hash: u32, entry_idx: u16) {
+        let slot = (hash as usize) & 3;
+        self.recent_hashes[slot] = hash;
+        self.recent_entries[slot] = entry_idx;
+        self.recent_valid[slot] = 1;
+    }
+
     /// Returns staged state for `key` if present.
     #[inline]
-    fn lookup(&self, key: &[u8]) -> Option<StageLookupHit> {
+    fn lookup(&mut self, key: &[u8]) -> Option<StageLookupHit> {
         if self.disabled {
             return None;
         }
         let (h, fp) = Self::key_hash_and_fingerprint(key);
+        let recent_slot = (h as usize) & 3;
+        if self.recent_valid[recent_slot] != 0 && self.recent_hashes[recent_slot] == h {
+            let entry_idx = self.recent_entries[recent_slot];
+            let entry = &self.entries[entry_idx as usize];
+            let len = usize::from(entry.key_len);
+            if key.len() == len && entry.key[..len] == *key {
+                return match entry.state {
+                    DictEntryState::SeenOnce => Some(StageLookupHit::SeenOnce(entry_idx)),
+                    DictEntryState::Interned => Some(StageLookupHit::Interned(entry_idx)),
+                };
+            }
+        }
+
         let mut slot = (h as usize) & DICT_SLOT_MASK;
         loop {
             let s = self.slots[slot];
@@ -195,10 +223,14 @@ impl StagedStringLookup {
                 return None; // empty slot → not in table
             }
             if s.fingerprint == fp {
-                let entry = &self.entries[s.entry_idx as usize];
-                let len = usize::from(entry.key_len);
-                if key.len() == len && entry.key[..len] == *key {
-                    return match entry.state {
+                let (matched, state) = {
+                    let entry = &self.entries[s.entry_idx as usize];
+                    let len = usize::from(entry.key_len);
+                    (key.len() == len && entry.key[..len] == *key, entry.state)
+                };
+                if matched {
+                    self.remember_recent(h, s.entry_idx);
+                    return match state {
                         DictEntryState::SeenOnce => Some(StageLookupHit::SeenOnce(s.entry_idx)),
                         DictEntryState::Interned => Some(StageLookupHit::Interned(s.entry_idx)),
                     };
@@ -247,6 +279,7 @@ impl StagedStringLookup {
             fingerprint: fp,
             entry_idx,
         };
+        self.remember_recent(h, entry_idx);
         Some(entry_idx)
     }
 
@@ -499,13 +532,26 @@ fn compile_plan_flags(families: &BatchColumnFamilies, row_plan: &RowDecodePlan) 
 
 fn build_staged_string_lookups(plan: &BatchDecodePlan) -> Vec<Option<StagedStringLookup>> {
     let mut lookups = Vec::with_capacity(plan.row_plan.columns.len());
-    let allow_staging = plan.row_plan.string_options.trim_fixed_width
-        && !matches!(plan.direct_utf8_owned_mode, Some(DirectUtf8OwnedMode::Utf8Lenient));
+    let allow_staging = match plan.row_plan.string_options.dictionary_staging {
+        DictionaryStaging::Off => false,
+        DictionaryStaging::On => true,
+        DictionaryStaging::Auto => {
+            !matches!(
+                plan.direct_utf8_owned_mode,
+                Some(DirectUtf8OwnedMode::Utf8Lenient)
+            ) && !matches!(plan.row_plan.string_options.trim_mode, TrimMode::Preserve)
+        }
+    };
     for (idx, column) in plan.row_plan.columns.iter().enumerate() {
+        let width_ok = match plan.row_plan.string_options.dictionary_staging {
+            DictionaryStaging::On => column.width > 0,
+            DictionaryStaging::Auto | DictionaryStaging::Off => {
+                column.width > 0 && column.width <= MAX_STAGED_STRING_WIDTH
+            }
+        };
         let should_stage = allow_staging
             && plan.families.direct_utf8_owned.contains(&idx)
-            && column.width > 0
-            && column.width <= MAX_STAGED_STRING_WIDTH
+            && width_ok
             && matches!(column.kernel, CompiledDecodeKernel::Utf8);
         if should_stage {
             lookups.push(Some(StagedStringLookup::new()));
@@ -1539,7 +1585,11 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
             },
         ) if column.width == 1 => {
             let byte = row[column.start];
-            let slice = if row_plan.string_options.trim_fixed_width && byte == b' ' {
+            let trim_space = match row_plan.string_options.trim_mode {
+                TrimMode::Preserve => false,
+                TrimMode::RTrim | TrimMode::Strip => byte == b' ' || byte == 0,
+            };
+            let slice = if trim_space {
                 &[][..]
             } else {
                 &row[column.start..column.end]
@@ -1654,7 +1704,6 @@ fn append_windows_1252_single_byte_utf8(
     push_variable_valid(offsets, data, valid, encoded.as_bytes())
 }
 
-
 #[inline]
 const fn windows_1252_single_byte_to_codepoint(byte: u8) -> Option<u32> {
     match byte {
@@ -1739,16 +1788,15 @@ fn append_direct_utf8_owned_batch_column(
                 valid,
             },
         ) => {
-            let trimmed = if row_plan.string_options.trim_fixed_width {
-                trim_and_classify_ascii(slice)
-            } else {
-                TrimmedString {
-                    bytes: slice,
-                    is_ascii: slice.is_ascii(),
-                }
-            };
+            let trimmed = trim_and_classify_for_mode(slice, row_plan.string_options.trim_mode);
             let slice = trimmed.bytes;
-            if slice.is_empty() || trimmed.is_ascii {
+            if slice.is_empty()
+                || is_blank_after_trim_mode(slice, row_plan.string_options.trim_mode)
+            {
+                push_variable_valid(offsets, data, valid, &[])?;
+                return Ok(true);
+            }
+            if trimmed.is_ascii {
                 push_variable_valid(offsets, data, valid, slice)?;
                 return Ok(true);
             }
@@ -1772,7 +1820,10 @@ fn append_direct_utf8_owned_batch_column(
                                     push_variable_valid(offsets, data, valid, interned)?;
                                 }
                                 DecodedUtf8BatchValue::Scratch => {
-                                    dict.promote_interned(entry_idx, utf8_decode_scratch.as_bytes());
+                                    dict.promote_interned(
+                                        entry_idx,
+                                        utf8_decode_scratch.as_bytes(),
+                                    );
                                     let interned = dict.interned_utf8(entry_idx);
                                     push_variable_valid(offsets, data, valid, interned)?;
                                 }

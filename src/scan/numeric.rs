@@ -255,13 +255,21 @@ pub(super) fn materialize_staged_i64_or_f64_column(
                 let converted: I64x8 =
                     F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
                         .cast();
-                values.extend(expand_validity_byte(valid_byte).select(zeros, converted).to_array());
+                values.extend(
+                    expand_validity_byte(valid_byte)
+                        .select(zeros, converted)
+                        .to_array(),
+                );
             }
             let processed = raw_bits.len() - raw_chunks.remainder().len();
             for (offset, &bits) in raw_chunks.remainder().iter().enumerate() {
                 let idx = processed + offset;
                 #[allow(clippy::cast_possible_truncation)]
-                values.push(if valid_bit(validity, idx) { f64::from_bits(bits) as i64 } else { 0 });
+                values.push(if valid_bit(validity, idx) {
+                    f64::from_bits(bits) as i64
+                } else {
+                    0
+                });
             }
         }
     }
@@ -300,7 +308,9 @@ pub(super) fn materialize_staged_date_or_f64_column(
             }
             for &bits in raw_chunks.remainder() {
                 #[allow(clippy::cast_possible_truncation)]
-                values.push(SasDate { days_since_sas_epoch: f64::from_bits(bits) as i32 });
+                values.push(SasDate {
+                    days_since_sas_epoch: f64::from_bits(bits) as i32,
+                });
             }
         }
         Some(validity) => {
@@ -329,9 +339,13 @@ pub(super) fn materialize_staged_date_or_f64_column(
                 let idx = processed + offset;
                 values.push(if valid_bit(validity, idx) {
                     #[allow(clippy::cast_possible_truncation)]
-                    SasDate { days_since_sas_epoch: f64::from_bits(bits) as i32 }
+                    SasDate {
+                        days_since_sas_epoch: f64::from_bits(bits) as i32,
+                    }
                 } else {
-                    SasDate { days_since_sas_epoch: 0 }
+                    SasDate {
+                        days_since_sas_epoch: 0,
+                    }
                 });
             }
         }
@@ -362,12 +376,15 @@ pub(super) fn materialize_staged_datetime_or_f64_column(
                 let converted: I64x8 =
                     F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
                         .cast();
-                values
-                    .extend(converted.to_array().map(|x| SasDateTime { seconds_since_sas_epoch: x }));
+                values.extend(converted.to_array().map(|x| SasDateTime {
+                    seconds_since_sas_epoch: x,
+                }));
             }
             for &bits in raw_chunks.remainder() {
                 #[allow(clippy::cast_possible_truncation)]
-                values.push(SasDateTime { seconds_since_sas_epoch: f64::from_bits(bits) as i64 });
+                values.push(SasDateTime {
+                    seconds_since_sas_epoch: f64::from_bits(bits) as i64,
+                });
             }
         }
         Some(validity) => {
@@ -385,7 +402,9 @@ pub(super) fn materialize_staged_datetime_or_f64_column(
                     expand_validity_byte(valid_byte)
                         .select(zeros, converted)
                         .to_array()
-                        .map(|x| SasDateTime { seconds_since_sas_epoch: x }),
+                        .map(|x| SasDateTime {
+                            seconds_since_sas_epoch: x,
+                        }),
                 );
             }
             let processed = raw_bits.len() - raw_chunks.remainder().len();
@@ -393,9 +412,13 @@ pub(super) fn materialize_staged_datetime_or_f64_column(
                 let idx = processed + offset;
                 values.push(if valid_bit(validity, idx) {
                     #[allow(clippy::cast_possible_truncation)]
-                    SasDateTime { seconds_since_sas_epoch: f64::from_bits(bits) as i64 }
+                    SasDateTime {
+                        seconds_since_sas_epoch: f64::from_bits(bits) as i64,
+                    }
                 } else {
-                    SasDateTime { seconds_since_sas_epoch: 0 }
+                    SasDateTime {
+                        seconds_since_sas_epoch: 0,
+                    }
                 });
             }
         }
@@ -426,12 +449,15 @@ pub(super) fn materialize_staged_time_or_f64_column(
                 let converted: I64x8 =
                     F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
                         .cast();
-                values
-                    .extend(converted.to_array().map(|x| SasTime { seconds_since_midnight: x }));
+                values.extend(converted.to_array().map(|x| SasTime {
+                    seconds_since_midnight: x,
+                }));
             }
             for &bits in raw_chunks.remainder() {
                 #[allow(clippy::cast_possible_truncation)]
-                values.push(SasTime { seconds_since_midnight: f64::from_bits(bits) as i64 });
+                values.push(SasTime {
+                    seconds_since_midnight: f64::from_bits(bits) as i64,
+                });
             }
         }
         Some(validity) => {
@@ -449,7 +475,9 @@ pub(super) fn materialize_staged_time_or_f64_column(
                     expand_validity_byte(valid_byte)
                         .select(zeros, converted)
                         .to_array()
-                        .map(|x| SasTime { seconds_since_midnight: x }),
+                        .map(|x| SasTime {
+                            seconds_since_midnight: x,
+                        }),
                 );
             }
             let processed = raw_bits.len() - raw_chunks.remainder().len();
@@ -457,9 +485,13 @@ pub(super) fn materialize_staged_time_or_f64_column(
                 let idx = processed + offset;
                 values.push(if valid_bit(validity, idx) {
                     #[allow(clippy::cast_possible_truncation)]
-                    SasTime { seconds_since_midnight: f64::from_bits(bits) as i64 }
+                    SasTime {
+                        seconds_since_midnight: f64::from_bits(bits) as i64,
+                    }
                 } else {
-                    SasTime { seconds_since_midnight: 0 }
+                    SasTime {
+                        seconds_since_midnight: 0,
+                    }
                 });
             }
         }

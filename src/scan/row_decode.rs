@@ -5,9 +5,9 @@ use super::{
     UTF_8, Utf8ValidationMode, classify_date_numeric_value, classify_datetime_numeric_value,
     classify_time_numeric_value, classify_typed_numeric_value, compile_column_plan,
     compile_compiled_projection_column_plan, compile_owned_materialization_kind,
-    compile_string_decode_kernel, decode_numeric_cell, maybe_fix_mojibake,
-    mojibake_fix_maybe_needed_for_encoded_bytes, numeric_bits, resolve_encoding,
-    trim_and_classify_ascii,
+    compile_string_decode_kernel, decode_numeric_cell, is_blank_after_trim_mode,
+    maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes, numeric_bits,
+    resolve_encoding, trim_and_classify_for_mode,
 };
 use bstr::ByteSlice;
 
@@ -190,16 +190,9 @@ impl RowDecodePlan {
             return Ok(PlannedCell::Bytes(slice));
         }
 
-        let trimmed = if self.string_options.trim_fixed_width {
-            trim_and_classify_ascii(slice)
-        } else {
-            TrimmedString {
-                bytes: slice,
-                is_ascii: slice.is_ascii(),
-            }
-        };
+        let trimmed = trim_and_classify_for_mode(slice, self.string_options.trim_mode);
         let slice = trimmed.bytes;
-        if slice.is_empty() {
+        if slice.is_empty() || is_blank_after_trim_mode(slice, self.string_options.trim_mode) {
             return Ok(PlannedCell::StrBorrowed(""));
         }
 
@@ -217,16 +210,12 @@ impl RowDecodePlan {
         &self,
         slice: &'row [u8],
     ) -> Result<&'row [u8]> {
-        let trimmed = if self.string_options.trim_fixed_width {
-            trim_and_classify_ascii(slice)
-        } else {
-            TrimmedString {
-                bytes: slice,
-                is_ascii: slice.is_ascii(),
-            }
-        };
+        let trimmed = trim_and_classify_for_mode(slice, self.string_options.trim_mode);
         let slice = trimmed.bytes;
-        if slice.is_empty() || trimmed.is_ascii {
+        if slice.is_empty()
+            || is_blank_after_trim_mode(slice, self.string_options.trim_mode)
+            || trimmed.is_ascii
+        {
             return Ok(slice);
         }
 
@@ -479,17 +468,10 @@ impl RowDecodePlan {
         &self,
         slice: &[u8],
     ) -> Result<crate::row::OwnedCellValue> {
-        let trimmed = if self.string_options.trim_fixed_width {
-            trim_and_classify_ascii(slice)
-        } else {
-            TrimmedString {
-                bytes: slice,
-                is_ascii: slice.is_ascii(),
-            }
-        };
+        let trimmed = trim_and_classify_for_mode(slice, self.string_options.trim_mode);
         let slice = trimmed.bytes;
 
-        if slice.is_empty() {
+        if slice.is_empty() || is_blank_after_trim_mode(slice, self.string_options.trim_mode) {
             return Ok(crate::row::OwnedCellValue::String(String::new()));
         }
 

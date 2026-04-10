@@ -38,7 +38,7 @@ pub use metadata::{
 pub use options::{
     BatchHint, DecodeMode, DictionaryStaging, IoBackendPreference, MojibakePolicy, OpenOptions,
     OrderingMode, PageCachePolicy, Parallelism, PrefetchPolicy, RowSelection, StringDecodeOptions,
-    TemporalDecodeOptions, Utf8ValidationMode, ValidationMode,
+    TemporalDecodeOptions, TrimMode, Utf8ValidationMode, ValidationMode,
 };
 pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};
 pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};

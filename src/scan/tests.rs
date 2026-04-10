@@ -346,7 +346,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
     let plan = BatchDecodePlan::new(
         &ScanBuilder::new(&ds)
             .with_string_options(crate::StringDecodeOptions {
-                trim_fixed_width: true,
+                trim_mode: crate::TrimMode::RTrim,
                 utf8_validation: crate::Utf8ValidationMode::Strict,
                 mojibake_fix: crate::MojibakePolicy::Auto,
                 dictionary_staging: crate::DictionaryStaging::Auto,

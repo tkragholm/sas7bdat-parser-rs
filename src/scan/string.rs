@@ -1,4 +1,4 @@
-use super::{Encoding, MojibakePolicy, Simd, SimdPartialEq, SimdUint, TrimmedString};
+use super::{Encoding, MojibakePolicy, Simd, SimdPartialEq, SimdUint, TrimMode, TrimmedString};
 
 const SPACES_HEAD_12: u64 = u64::from_ne_bytes([b' '; 8]);
 const SPACES_TAIL_12: u32 = u32::from_ne_bytes([b' '; 4]);
@@ -38,6 +38,48 @@ pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
     TrimmedString {
         bytes: trimmed,
         is_ascii: is_ascii_simd(trimmed),
+    }
+}
+
+#[inline]
+pub(super) fn trim_and_classify_for_mode(slice: &[u8], mode: TrimMode) -> TrimmedString<'_> {
+    match mode {
+        TrimMode::Preserve => TrimmedString {
+            bytes: slice,
+            is_ascii: if slice.len() < 64 {
+                is_ascii_word(slice)
+            } else {
+                is_ascii_simd(slice)
+            },
+        },
+        TrimMode::RTrim => trim_and_classify_ascii(slice),
+        TrimMode::Strip => {
+            let mut start = 0usize;
+            while start < slice.len() {
+                let byte = slice[start];
+                if byte != b' ' && byte != 0 {
+                    break;
+                }
+                start += 1;
+            }
+            let trimmed = trim_trailing_space_or_nul_word(&slice[start..]);
+            TrimmedString {
+                bytes: trimmed,
+                is_ascii: if trimmed.len() < 64 {
+                    is_ascii_word(trimmed)
+                } else {
+                    is_ascii_simd(trimmed)
+                },
+            }
+        }
+    }
+}
+
+#[inline]
+pub(super) fn is_blank_after_trim_mode(slice: &[u8], mode: TrimMode) -> bool {
+    match mode {
+        TrimMode::Preserve => !slice.is_empty() && slice.iter().all(|&b| b == b' '),
+        TrimMode::RTrim | TrimMode::Strip => slice.is_empty(),
     }
 }
 

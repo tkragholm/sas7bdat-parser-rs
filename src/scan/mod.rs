@@ -8,7 +8,7 @@ use crate::{
     metadata::{ColumnMeta, Endianness, LogicalType, SasDate, SasDateTime, SasTime},
     options::{
         BatchHint, DecodeMode, MojibakePolicy, OrderingMode, Parallelism, RowSelection,
-        StringDecodeOptions, TemporalDecodeOptions, Utf8ValidationMode,
+        StringDecodeOptions, TemporalDecodeOptions, TrimMode, Utf8ValidationMode,
     },
     projection::Projection,
     row::{OwnedRow, RawRow, RowView},
@@ -51,8 +51,11 @@ use row_decode::{
     DecodedUtf8BatchValue, PlannedCell, RowDecodePlan, StringDecodeKernel, TrimmedString,
     materialize_planned_cells,
 };
+#[cfg(test)]
+use string::trim_and_classify_ascii;
 use string::{
-    maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes, trim_and_classify_ascii,
+    is_blank_after_trim_mode, maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes,
+    trim_and_classify_for_mode,
 };
 
 #[derive(Debug, Clone, Default)]
