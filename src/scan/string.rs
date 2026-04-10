@@ -93,21 +93,16 @@ pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
         let start = end - 64;
         let chunk = U8x64::from_slice(&slice[start..end]);
         let trim_mask = chunk.simd_eq(spaces) | chunk.simd_eq(nuls);
-        if trim_mask.to_bitmask() == u64::MAX {
+        let bitmask = trim_mask.to_bitmask();
+        if bitmask == u64::MAX {
             end = start;
             continue;
         }
-
-        let tail = &slice[start..end];
-        let mut local_end = tail.len();
-        while local_end > 0 {
-            let byte = tail[local_end - 1];
-            if byte != b' ' && byte != 0 {
-                break;
-            }
-            local_end -= 1;
-        }
-        return &slice[..start + local_end];
+        // `bitmask` has bit i set where lane i is a trim char (space/nul).
+        // Use CLZ on the inverted mask to locate the rightmost non-trim byte
+        // in constant time rather than scanning backwards byte-by-byte.
+        let last_content = 63 - (!bitmask).leading_zeros() as usize;
+        return &slice[..=(start + last_content)];
     }
 
     trim_trailing_space_or_nul_word(&slice[..end])

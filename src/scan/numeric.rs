@@ -501,7 +501,9 @@ fn first_non_integral_in_range_index_simd(
         // Extract 4 validity bits from the packed word for this chunk's rows.
         let required_bitmask = valid.map_or(0b1111u8, |validity| {
             let bit_base = chunk_index * 4;
-            ((validity[bit_base / 64] >> (bit_base % 64)) & 0xF) as u8
+            #[allow(clippy::cast_possible_truncation)]
+            let b = ((validity[bit_base / 64] >> (bit_base % 64)) & 0xF) as u8;
+            b
         });
         let failing = required_bitmask & !eligible_bitmask;
         if failing != 0 {

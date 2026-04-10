@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 START_MARKER = "<!-- TOP3_BENCH_TABLE:START -->"
 END_MARKER = "<!-- TOP3_BENCH_TABLE:END -->"
@@ -45,56 +46,114 @@ def parse_elements(path: Path) -> int:
     return int(data["throughput"]["Elements"])
 
 
-def gather_rows(criterion_root: Path) -> List[Dict[str, str]]:
+def format_ci(mid: str, low: str, high: str) -> str:
+    return f"{mid} [{low}; {high}]"
+
+
+def parse_change_estimate(path: Path) -> Tuple[float, float, float]:
+    data = json.loads(path.read_text())
+    ci = data["mean"]["confidence_interval"]
+    return (
+        float(ci["lower_bound"]),
+        float(data["mean"]["point_estimate"]),
+        float(ci["upper_bound"]),
+    )
+
+
+def classify_change(point_estimate: float, noise_threshold: float) -> str:
+    if point_estimate < -noise_threshold:
+        return "improved"
+    if point_estimate <= noise_threshold:
+        return "within_noise"
+    return "regressed"
+
+
+def get_commit_id(explicit_commit_id: Optional[str]) -> str:
+    if explicit_commit_id:
+        return explicit_commit_id
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                text=True,
+            )
+            .strip()
+        )
+    except Exception:
+        return "unknown"
+
+
+def gather_rows(
+    criterion_root: Path, noise_threshold: float, commit_id: str
+) -> Tuple[List[Dict[str, str]], List[str]]:
     grouped: Dict[str, Dict[str, str]] = {}
+    regressions: List[str] = []
     for bench_json in criterion_root.glob(
-        "top3_target*/raw_rows/all/new/benchmark.json"
+        "top3_target*/typed_batches/all/new/benchmark.json"
     ):
         group = json.loads(bench_json.read_text())["group_id"]
         base_dir = bench_json.parents[3]
-        raw_estimates = base_dir / "raw_rows" / "all" / "new" / "estimates.json"
-        batch_estimates = (
-            base_dir / "typed_batches" / "all" / "new" / "estimates.json"
+        batch_estimates = base_dir / "typed_batches" / "all" / "new" / "estimates.json"
+        batch_change_estimates = (
+            base_dir / "typed_batches" / "all" / "change" / "estimates.json"
         )
-        batch_bench = base_dir / "typed_batches" / "all" / "new" / "benchmark.json"
-        if not (raw_estimates.exists() and batch_estimates.exists() and batch_bench.exists()):
+
+        if not (batch_estimates.exists() and batch_change_estimates.exists()):
             continue
 
-        raw_low, raw_mid, raw_high = parse_estimates(raw_estimates)
         batch_low, batch_mid, batch_high = parse_estimates(batch_estimates)
+        change_low, change_mid, change_high = parse_change_estimate(batch_change_estimates)
         elems = parse_elements(bench_json)
 
-        raw_thrpt_low = elems * 1_000_000_000.0 / raw_high
-        raw_thrpt_mid = elems * 1_000_000_000.0 / raw_mid
-        raw_thrpt_high = elems * 1_000_000_000.0 / raw_low
         batch_thrpt_low = elems * 1_000_000_000.0 / batch_high
         batch_thrpt_mid = elems * 1_000_000_000.0 / batch_mid
         batch_thrpt_high = elems * 1_000_000_000.0 / batch_low
 
+        # Throughput relative change is inverse of time: (1 / (1 + dt)) - 1
+        thrpt_change_low = (1.0 / (1.0 + change_high)) - 1.0
+        thrpt_change_mid = (1.0 / (1.0 + change_mid)) - 1.0
+        thrpt_change_high = (1.0 / (1.0 + change_low)) - 1.0
+
+        runtime_status = classify_change(change_mid, noise_threshold)
+        # For throughput, positive is good, so classify the negated value.
+        thrpt_status = classify_change(-thrpt_change_mid, noise_threshold)
+        if runtime_status == "regressed" or thrpt_status == "regressed":
+            regressions.append(
+                f"{group}: runtime_change={change_mid:+.3%} "
+                f"throughput_change={thrpt_change_mid:+.3%}"
+            )
+            continue
+
         grouped[group] = {
-            "fixture": f"`{group}`",
-            "raw_time": f"[{format_time_ns(raw_low)} {format_time_ns(raw_mid)} {format_time_ns(raw_high)}]",
-            "raw_thrpt": f"[{format_throughput(raw_thrpt_low)} {format_throughput(raw_thrpt_mid)} {format_throughput(raw_thrpt_high)}]",
-            "batch_time": f"[{format_time_ns(batch_low)} {format_time_ns(batch_mid)} {format_time_ns(batch_high)}]",
-            "batch_thrpt": f"[{format_throughput(batch_thrpt_low)} {format_throughput(batch_thrpt_mid)} {format_throughput(batch_thrpt_high)}]",
-            "notes": "auto-generated from `target/criterion/*/new/estimates.json`",
+            "filename": f"`{group.rsplit('/', 1)[-1]}`",
+            "runtime": format_ci(
+                format_time_ns(batch_mid),
+                format_time_ns(batch_low),
+                format_time_ns(batch_high),
+            ),
+            "thrpt": format_ci(
+                format_throughput(batch_thrpt_mid),
+                format_throughput(batch_thrpt_low),
+                format_throughput(batch_thrpt_high),
+            ),
+            "commit_id": f"`{commit_id}`",
         }
 
     rows = list(grouped.values())
-    rows.sort(key=lambda r: r["fixture"])
-    return rows
+    rows.sort(key=lambda r: r["filename"])
+    return rows, regressions
 
 
 def render_table(rows: List[Dict[str, str]]) -> str:
     lines = [
         START_MARKER,
         "",
-        "| Fixture | raw_rows time | raw_rows throughput | typed_batches time | typed_batches throughput | Notes |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| filename | runtime | thrpt | commit-id |",
+        "| --- | --- | --- | --- |",
     ]
     for row in rows:
         lines.append(
-            f"| {row['fixture']} | {row['raw_time']} | {row['raw_thrpt']} | {row['batch_time']} | {row['batch_thrpt']} | {row['notes']} |"
+            f"| {row['filename']} | {row['runtime']} | {row['thrpt']} | {row['commit_id']} |"
         )
     lines.extend(["", END_MARKER])
     return "\n".join(lines)
@@ -121,11 +180,32 @@ def main() -> None:
         "--criterion-root", default="target/criterion", help="Criterion output root"
     )
     parser.add_argument("--readme", default="README.md", help="README path")
+    parser.add_argument(
+        "--noise-threshold",
+        type=float,
+        default=0.01,
+        help="Relative noise threshold used to classify change (default: 0.01 = 1%%).",
+    )
+    parser.add_argument(
+        "--commit-id",
+        default=None,
+        help="Commit id to include in table (default: current `git rev-parse --short HEAD`).",
+    )
     args = parser.parse_args()
 
-    rows = gather_rows(Path(args.criterion_root))
+    commit_id = get_commit_id(args.commit_id)
+    rows, regressions = gather_rows(
+        Path(args.criterion_root), args.noise_threshold, commit_id
+    )
+    if regressions:
+        print("Skipped README table update due to regressions:")
+        for line in regressions:
+            print(f"- {line}")
+        raise SystemExit(0)
     if not rows:
-        raise SystemExit("No top3_target Criterion runs found to summarize.")
+        raise SystemExit(
+            "No eligible top3_target typed_batches runs found to summarize."
+        )
     update_readme(Path(args.readme), render_table(rows))
     print(f"Updated {args.readme} with {len(rows)} top3 rows.")
 

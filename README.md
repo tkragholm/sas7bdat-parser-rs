@@ -77,11 +77,11 @@ cargo bench --bench compression_matrix -- 'top3_target/'
 
 <!-- TOP3_BENCH_TABLE:START -->
 
-| Fixture | raw_rows time | raw_rows throughput | typed_batches time | typed_batches throughput | Notes |
-| --- | --- | --- | --- | --- | --- |
-| `top3_target/healthdatany_86he_eqwq/windows_1252/nysdoh_brfss_surveydata_2018_ad5548ba` | [32.58 µs 32.64 µs 32.69 µs] | [1.09 Gelem/s 1.10 Gelem/s 1.10 Gelem/s] | [50.18 ms 50.25 ms 50.32 ms] | [710.73 Kelem/s 711.80 Kelem/s 712.76 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
-| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2018_publicuse_aec3d115` | [100.26 µs 100.32 µs 100.38 µs] | [1.17 Gelem/s 1.17 Gelem/s 1.18 Gelem/s] | [159.75 ms 159.86 ms 159.98 ms] | [736.55 Kelem/s 737.12 Kelem/s 737.62 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
-| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2020_publicuse_c85e9144` | [123.74 µs 123.82 µs 123.90 µs] | [982.51 Melem/s 983.14 Melem/s 983.73 Melem/s] | [183.41 ms 183.64 ms 183.93 ms] | [661.82 Kelem/s 662.87 Kelem/s 663.69 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| filename | runtime | thrpt | commit-id |
+| --- | --- | --- | --- |
+| `nysdoh_brfss_surveydata_2018_ad5548ba` | 48.69 ms [48.61 ms; 48.77 ms] | 734.60 Kelem/s [733.40 Kelem/s; 735.73 Kelem/s] | `d537465` |
+| `nyyts_2000_2018_publicuse_aec3d115` | 155.04 ms [154.80 ms; 155.29 ms] | 760.03 Kelem/s [758.79 Kelem/s; 761.19 Kelem/s] | `d537465` |
+| `nyyts_2000_2020_publicuse_c85e9144` | 180.31 ms [180.14 ms; 180.49 ms] | 675.13 Kelem/s [674.44 Kelem/s; 675.76 Kelem/s] | `d537465` |
 
 <!-- TOP3_BENCH_TABLE:END -->
 

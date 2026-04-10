@@ -139,7 +139,7 @@ Completed:
 | `src/scan/numeric.rs:materialize_staged_date_or_f64_column` | nullable date materialization | `f64x8`→`i64x8` + `u64x8` validity |
 | `src/scan/numeric.rs:materialize_staged_datetime_or_f64_column` | nullable datetime materialization | `f64x8`→`i64x8` + `u64x8` validity |
 | `src/scan/numeric.rs:materialize_staged_time_or_f64_column` | nullable time materialization | `f64x8`→`i64x8` + `u64x8` validity |
-| `src/scan/string.rs:trim_trailing_space_or_nul_simd` | trailing space/nul trim | `u8x64` |
+| `src/scan/string.rs:trim_trailing_space_or_nul_simd` | trailing space/nul trim + CLZ final position | `u8x64` |
 | `src/scan/string.rs:is_ascii_simd` | ASCII classification | `u8x64` |
 | `src/scan/string.rs:is_all_space_or_nul_12` | exact-12-byte empty check | word (u64+u32) |
 | `src/scan/string.rs:trim_trailing_space_or_nul_word` | 8-63-byte trim | word (u64) |
