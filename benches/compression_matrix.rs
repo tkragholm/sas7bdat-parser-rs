@@ -88,16 +88,22 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
     });
 
     group.measurement_time(Duration::from_secs(TYPED_BATCHES_MEASUREMENT_SECONDS));
-    group.bench_function(BenchmarkId::new("typed_batches", "all"), |b| {
-        b.iter(|| {
-            let batches = dataset
-                .scan()
-                .with_batch_hint(BatchHint::Rows(256))
-                .collect_batches()
-                .expect("compressed typed batches");
-            black_box(batches.len());
-        });
-    });
+    for &batch_rows in &[256usize, 512, 1024] {
+        group.bench_with_input(
+            BenchmarkId::new("typed_batches", batch_rows),
+            &batch_rows,
+            |b, &rows| {
+                b.iter(|| {
+                    let batches = dataset
+                        .scan()
+                        .with_batch_hint(BatchHint::Rows(rows))
+                        .collect_batches()
+                        .expect("compressed typed batches");
+                    black_box(batches.len());
+                });
+            },
+        );
+    }
 
     group.finish();
 }

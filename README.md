@@ -79,9 +79,9 @@ cargo bench --bench compression_matrix -- 'top3_target/'
 
 | filename | runtime | thrpt | commit-id |
 | --- | --- | --- | --- |
-| `nysdoh_brfss_surveydata_2018_ad5548ba` | 48.75 ms [48.64 ms; 48.87 ms] | 733.65 Kelem/s [731.85 Kelem/s; 735.34 Kelem/s] | `e02ec0c` |
-| `nyyts_2000_2018_publicuse_aec3d115` | 154.19 ms [154.05 ms; 154.34 ms] | 764.20 Kelem/s [763.47 Kelem/s; 764.89 Kelem/s] | `e02ec0c` |
-| `nyyts_2000_2020_publicuse_c85e9144` | 179.69 ms [179.55 ms; 179.84 ms] | 677.43 Kelem/s [676.89 Kelem/s; 677.96 Kelem/s] | `e02ec0c` |
+| `nysdoh_brfss_surveydata_2018_ad5548ba` | 48.75 ms [48.64 ms; 48.87 ms] | 733.65 Kelem/s [731.85 Kelem/s; 735.34 Kelem/s] | `4ca487e` |
+| `nyyts_2000_2018_publicuse_aec3d115` | 154.19 ms [154.05 ms; 154.34 ms] | 764.20 Kelem/s [763.47 Kelem/s; 764.89 Kelem/s] | `4ca487e` |
+| `nyyts_2000_2020_publicuse_c85e9144` | 179.69 ms [179.55 ms; 179.84 ms] | 677.43 Kelem/s [676.89 Kelem/s; 677.96 Kelem/s] | `4ca487e` |
 
 <!-- TOP3_BENCH_TABLE:END -->
 

@@ -111,6 +111,18 @@ Completed:
 - Plan states are not globally mutually exclusive; mixed-family schemas are common.
 - Enum-only modeling is less practical than bitflags + targeted fast-path checks.
 
+5. `as_simd()` provides no benefit on NEON (aarch64) — do not retry.
+- Attempted: replaced `chunks_exact(8)` + `U64x8::from_slice` in all five materializers with
+  `as_simd::<8>()` to get aligned SIMD chunks.
+- Expected benefit: aligned SIMD access (primary use case per `core::simd` docs).
+- Actual result: 5–7% regression on two top3 targets, neutral on third.
+- Root cause: NEON handles unaligned loads natively at zero cost — alignment is irrelevant.
+  The `prefix` scalar loop, added `row_base` counter, and `read_8_validity_bits` branch for
+  word-straddling validity extraction all added overhead with no compensating gain.
+- Reverted. `chunks_exact(8)` + `U64x8::from_slice` remains correct for aarch64.
+- Guide rule "more lanes often better" (Rule 7) is x86-centric; widening probe F64x4→F64x8
+  on NEON also regressed (doubled register pressure, same total hardware instructions).
+
 11. Bit-packed validity bitmap (Arrow-style `Vec<u64>`, 1 bit/row).
 - Changed `valid: Option<Vec<u8>>` (1 byte/row) to `valid: Option<Vec<u64>>` (64 rows/word)
   throughout: `OwnedColumnBuffer`, `OwnedBatchColumnBuilder`, `ColumnBuffer`/`BitSlice`.
@@ -145,10 +157,39 @@ Completed:
 | `src/scan/string.rs:trim_trailing_space_or_nul_word` | 8-63-byte trim | word (u64) |
 | `src/scan/string.rs:is_ascii_word` | 8-63-byte ASCII check | word (u64) |
 
+## Batch-size sweep findings
+
+Sweep implemented in `benches/compression_matrix.rs` (`bench_with_input` over `[256, 512, 1024]`).
+
+Results on the **wide test fixtures** (391–514 columns, NYYTS 2020/2018, BRFSS 2018):
+- 256 ≈ 512 (within noise on all three targets)
+- 1024 is ~57–60% slower across all three targets
+- Root cause: 514 cols × 1024 rows × 8 bytes = 4.1 MB of simultaneous raw_bits allocations → TLB/cache pressure.
+  At 1024-row capacity, each `Vec<u64>` = 8 KB = 2 pages → 514 × 2 = 1028 pages, exceeding L1 DTLB capacity.
+  At 512-row capacity (4 KB = 1 page each), TLB pressure is already borderline, hence 512 ≈ 256 rather than faster.
+
+**However, the test fixtures are not representative of the production corpus:**
+
+Production corpus (`profile_20260331`, 1019 profiled files on a remote Windows host):
+- Column count: median **9**, p90=26, max=95 — dramatically narrower than test fixtures
+- Row count: median **2.8M**, max 1.77B — much longer
+- Rows/page: median **880** (narrow files), p75=1221 — most files have 500–1000+ rows per SAS page
+- Current throughput at 256 rows/batch: median **5.8M rows/s** (1–10 col files)
+
+For the actual production workload, the TLB pressure argument does not apply:
+- At 9 cols × 1024 rows × 8 bytes = 72 KB raw_bits → fits entirely in L1D at all batch sizes
+- Current 256-row default causes ~3.4 batch flushes per SAS page (median 880 rows/page)
+- A 1024-row batch would align to roughly 1 page, with 4× fewer materializations per file
+
+**Blocked on**: no suitable local narrow + large fixture exists. Local narrow files (principlesofeco) top out at
+13K rows. `ahs2013n.sas7bdat` is 4041 columns. Need either a representative production file downloaded
+locally or a sweep run on the Windows host to validate the correct default for production.
+
 ## Current priority order
 
-1. **Batch-size sweep** for large fixtures (`256` vs `512` vs `1024`) after materialization improvements settle.
-- Main file: `benches/compression_matrix.rs`.
+1. **Batch-size sweep — BLOCKED**. Validate optimal batch size for narrow production files once a
+   representative fixture is available locally or the sweep can be run on the Windows host.
+   Current benchmark is wide-file only and not representative of production.
 
 5. **Dictionary staging for repeated strings**.
 - Main files: `src/options.rs`, `src/columnar.rs`, `src/scan/*`.
