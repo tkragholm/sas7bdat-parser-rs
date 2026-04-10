@@ -34,6 +34,8 @@ struct FileSummary {
     routed_cells: u64,
     fallback_cells: u64,
     direct_utf8_owned_cells: u64,
+    direct_utf8_owned_interned_hits: u64,
+    direct_utf8_owned_seen_once_promotions: u64,
     direct_utf8_single_byte_cells: u64,
 }
 
@@ -159,6 +161,9 @@ fn main() {
             routed_cells: routed,
             fallback_cells: stats.batch_fallback_cells,
             direct_utf8_owned_cells: stats.batch_direct_utf8_owned_cells,
+            direct_utf8_owned_interned_hits: stats.batch_direct_utf8_owned_interned_hits,
+            direct_utf8_owned_seen_once_promotions: stats
+                .batch_direct_utf8_owned_seen_once_promotions,
             direct_utf8_single_byte_cells: stats.batch_direct_utf8_single_byte_cells,
         });
 
@@ -263,6 +268,16 @@ fn main() {
             .cmp(&left.fallback_cells)
             .then_with(|| {
                 right
+                    .direct_utf8_owned_interned_hits
+                    .cmp(&left.direct_utf8_owned_interned_hits)
+            })
+            .then_with(|| {
+                right
+                    .direct_utf8_owned_seen_once_promotions
+                    .cmp(&left.direct_utf8_owned_seen_once_promotions)
+            })
+            .then_with(|| {
+                right
                     .direct_utf8_owned_cells
                     .cmp(&left.direct_utf8_owned_cells)
             })
@@ -283,6 +298,40 @@ fn main() {
             pct(summary.direct_utf8_owned_cells, summary.routed_cells),
             summary.direct_utf8_single_byte_cells,
             pct(summary.direct_utf8_single_byte_cells, summary.routed_cells),
+        );
+    }
+
+    println!("\nTop files by interned/promoted UTF-8 staging activity:");
+    file_summaries.sort_by(|left, right| {
+        right
+            .direct_utf8_owned_interned_hits
+            .cmp(&left.direct_utf8_owned_interned_hits)
+            .then_with(|| {
+                right
+                    .direct_utf8_owned_seen_once_promotions
+                    .cmp(&left.direct_utf8_owned_seen_once_promotions)
+            })
+            .then_with(|| {
+                right
+                    .direct_utf8_owned_cells
+                    .cmp(&left.direct_utf8_owned_cells)
+            })
+    });
+    for summary in file_summaries.iter().take(print_top) {
+        println!(
+            "{} | utf8_owned={} interned_hits={} ({:.2}% of owned) promotions={} ({:.2}% of owned)",
+            summary.relative,
+            summary.direct_utf8_owned_cells,
+            summary.direct_utf8_owned_interned_hits,
+            pct(
+                summary.direct_utf8_owned_interned_hits,
+                summary.direct_utf8_owned_cells
+            ),
+            summary.direct_utf8_owned_seen_once_promotions,
+            pct(
+                summary.direct_utf8_owned_seen_once_promotions,
+                summary.direct_utf8_owned_cells
+            )
         );
     }
 }

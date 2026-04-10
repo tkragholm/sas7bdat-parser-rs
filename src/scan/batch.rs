@@ -93,6 +93,9 @@ const DICT_SLOT_MASK: usize = DICT_CAPACITY - 1;
 const MAX_DICT_ENTRIES: usize = 200;
 const MAX_STAGED_STRING_WIDTH: u32 = 20;
 const DICT_ID_NONE: u32 = u32::MAX;
+const DICT_DISABLE_MIN_LOOKUPS: u32 = 512;
+const DICT_DISABLE_MIN_LOOKUPS_ZERO_PROMOTIONS: u32 = 256;
+const DICT_DISABLE_MIN_PROMOTION_BPS: u32 = 800; // 8%
 
 #[derive(Debug, Clone, Copy)]
 struct DictSlot {
@@ -171,7 +174,14 @@ impl StagedStringLookup {
     #[inline]
     const fn observe_lookup(&mut self) {
         self.seen = self.seen.saturating_add(1);
-        if self.seen >= 2_048 && self.promoted.saturating_mul(100) < self.seen.saturating_mul(8) {
+        if self.promoted == 0 && self.seen >= DICT_DISABLE_MIN_LOOKUPS_ZERO_PROMOTIONS {
+            self.disabled = true;
+            return;
+        }
+        if self.seen >= DICT_DISABLE_MIN_LOOKUPS
+            && self.promoted.saturating_mul(10_000)
+                < self.seen.saturating_mul(DICT_DISABLE_MIN_PROMOTION_BPS)
+        {
             self.disabled = true;
         }
     }
