@@ -1,7 +1,7 @@
 use super::{
     ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
-    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode,
-    OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
+    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error,
+    NumericTileMode, OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
     SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
     TimeNumericValue, TrimmedString, TypedNumericValue, classify_date_numeric_value,
     classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
@@ -1286,7 +1286,7 @@ impl OwnedBatchColumnBuilder {
 fn push_utf8_bytes_fast(
     offsets: &mut Vec<u32>,
     data: &mut Vec<u8>,
-    valid: &mut Option<Vec<u8>>,
+    valid: &mut Option<Vec<u64>>,
     value: &[u8],
 ) -> Result<()> {
     if valid.is_none() {
@@ -1430,7 +1430,7 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
 fn append_windows_1252_single_byte_utf8(
     offsets: &mut Vec<u32>,
     data: &mut Vec<u8>,
-    valid: &mut Option<Vec<u8>>,
+    valid: &mut Option<Vec<u64>>,
     byte: u8,
     strict: bool,
 ) -> Result<()> {
@@ -1449,6 +1449,7 @@ fn append_windows_1252_single_byte_utf8(
     let encoded = scalar.encode_utf8(&mut scratch);
     push_variable_valid(offsets, data, valid, encoded.as_bytes())
 }
+
 
 #[inline]
 const fn windows_1252_single_byte_to_codepoint(byte: u8) -> Option<u32> {
@@ -1691,40 +1692,77 @@ pub(super) fn borrow_column_buffers(columns: &[OwnedColumnBuffer]) -> Vec<Column
     columns.iter().map(OwnedColumnBuffer::as_borrowed).collect()
 }
 
+/// Set bit `pos` in the bit-packed validity word array (1 = valid).
 #[inline]
-pub(super) fn push_primitive_valid<T>(values: &mut Vec<T>, valid: &mut Option<Vec<u8>>, value: T) {
+fn set_valid_bit(bits: &mut Vec<u64>, pos: usize) {
+    let word = pos / 64;
+    let bit = pos % 64;
+    if bits.len() <= word {
+        bits.resize(word + 1, 0);
+    }
+    bits[word] |= 1u64 << bit;
+}
+
+/// Initialize a bit-packed validity vector for the first null at row `first_null_pos`.
+/// Rows `0..first_null_pos` are set valid (1); row `first_null_pos` is null (0).
+#[inline]
+fn init_validity_first_null(first_null_pos: usize) -> Vec<u64> {
+    let full_words = first_null_pos / 64;
+    let bit_offset = first_null_pos % 64;
+    let mut bits = Vec::with_capacity(full_words + 1);
+    bits.extend(std::iter::repeat_n(u64::MAX, full_words));
+    // Partial word: bits 0..bit_offset-1 set to 1, bit bit_offset stays 0.
+    bits.push(if bit_offset == 0 {
+        0u64
+    } else {
+        (1u64 << bit_offset) - 1
+    });
+    bits
+}
+
+#[inline]
+pub(super) fn push_primitive_valid<T>(values: &mut Vec<T>, valid: &mut Option<Vec<u64>>, value: T) {
+    let pos = values.len();
     values.push(value);
-    if let Some(valid) = valid {
-        valid.push(1);
+    if let Some(bits) = valid {
+        set_valid_bit(bits, pos);
     }
 }
 
 #[inline]
 pub(super) fn push_primitive_null<T: Copy>(
     values: &mut Vec<T>,
-    valid: &mut Option<Vec<u8>>,
+    valid: &mut Option<Vec<u64>>,
     default: T,
 ) {
+    let pos = values.len();
     if valid.is_none() {
-        *valid = Some(vec![1; values.len()]);
+        *valid = Some(init_validity_first_null(pos));
+    } else {
+        let bits = valid.as_mut().expect("validity initialized");
+        let word = pos / 64;
+        if bits.len() <= word {
+            bits.resize(word + 1, 0);
+        }
+        // bit at pos stays 0 (null)
     }
     values.push(default);
-    valid.as_mut().expect("validity initialized").push(0);
 }
 
 #[inline]
 pub(super) fn push_variable_valid(
     offsets: &mut Vec<u32>,
     data: &mut Vec<u8>,
-    valid: &mut Option<Vec<u8>>,
+    valid: &mut Option<Vec<u64>>,
     value: &[u8],
 ) -> Result<()> {
+    let pos = offsets.len().saturating_sub(1);
     data.extend_from_slice(value);
     let next_offset = u32::try_from(data.len())
         .map_err(|_| Error::unsupported("columnar variable buffer exceeds u32 offset range"))?;
     offsets.push(next_offset);
-    if let Some(valid) = valid {
-        valid.push(1);
+    if let Some(bits) = valid {
+        set_valid_bit(bits, pos);
     }
     Ok(())
 }
@@ -1749,14 +1787,21 @@ pub(super) fn push_variable_valid_without_validity(
 pub(super) fn push_variable_null(
     offsets: &mut Vec<u32>,
     _data: &mut Vec<u8>,
-    valid: &mut Option<Vec<u8>>,
+    valid: &mut Option<Vec<u64>>,
 ) {
+    let pos = offsets.len().saturating_sub(1);
     if valid.is_none() {
-        *valid = Some(vec![1; offsets.len().saturating_sub(1)]);
+        *valid = Some(init_validity_first_null(pos));
+    } else {
+        let bits = valid.as_mut().expect("validity initialized");
+        let word = pos / 64;
+        if bits.len() <= word {
+            bits.resize(word + 1, 0);
+        }
+        // bit at pos stays 0 (null)
     }
     let last = *offsets.last().unwrap_or(&0);
     offsets.push(last);
-    valid.as_mut().expect("validity initialized").push(0);
 }
 
 pub(super) fn unexpected_batch_cell(expected: &str, actual: PlannedCell<'_>) -> Error {

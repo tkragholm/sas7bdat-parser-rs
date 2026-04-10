@@ -64,6 +64,34 @@ Completed:
 - On top3 typed-batches, the tuned variant showed improvement on the two NYYTS files and
   near-noise movement on BRFSS (monitor for run-to-run variance).
 
+8. Post-review cleanup and small refinements.
+- Removed unreachable dead `else` branch in `materialize_staged_f64_column` (lines 194-202 were
+  never reached since `valid.is_none()` returned early; the `if let Some` was always true).
+- Replaced double chunk-index in `first_non_integral_in_range_index_simd`: `F64x4` now built via
+  `bits.to_array().map(f64::from_bits)` rather than re-indexing `chunk[0..3]`.
+- `trim_trailing_space_or_nul_simd` now delegates its sub-64-byte remainder to
+  `trim_trailing_space_or_nul_word` instead of the scalar byte loop.
+- Removed now-unused `validity_is_null` helper (was only called from the dead code removed above).
+
+9. Eliminated `.to_vec()` clone in `materialize_staged_*_or_f64_column` f64 fallback.
+- Changed all four `*_or_f64` functions from `raw_bits: &[u64]` to `raw_bits: Vec<u64>` (owned).
+- Updated `materialize_staged_numeric_column` callers to move rather than borrow, allowing the
+  f64 fallback path to call `materialize_staged_f64_column(raw_bits, valid)` without allocating
+  and copying the entire `raw_bits` vector. Previously each f64-type-fallback batch paid a full
+  `Vec<u64>` clone before materialization.
+
+10. WINDOWS-1252 direct transcode for the lenient UTF-8 owned path — **REVERTED**.
+- Implemented compile-time lookup table + direct transcode into column data buffer, bypassing
+  `encoding_rs` and mojibake allocations for non-ASCII WINDOWS-1252 strings without 0xC2/0xC3.
+- Benchmarked on top3_target typed-batches:
+  - NYYTS 2020: neutral (p=0.85)
+  - NYYTS 2018: **+1.3% slower** (p=0.00, statistically significant regression)
+  - BRFSS 2018: -1.1% faster (p=0.02)
+- Mixed result → reverted per working rule.
+- Root cause: 93.67% of cells are staged_numeric; string fast path only touches 6.33% of cells,
+  leaving minimal leverage. The mojibake pre-check (`memchr2`) and branch overhead in the fast
+  path cost slightly more than the allocation savings for these fixtures.
+
 ## Key learnings
 
 1. Numeric routing dominates cost and opportunity.
@@ -83,80 +111,49 @@ Completed:
 - Plan states are not globally mutually exclusive; mixed-family schemas are common.
 - Enum-only modeling is less practical than bitflags + targeted fast-path checks.
 
+11. Bit-packed validity bitmap (Arrow-style `Vec<u64>`, 1 bit/row).
+- Changed `valid: Option<Vec<u8>>` (1 byte/row) to `valid: Option<Vec<u64>>` (64 rows/word)
+  throughout: `OwnedColumnBuffer`, `OwnedBatchColumnBuilder`, `ColumnBuffer`/`BitSlice`.
+- `classify_missing_raw_bits` now writes one `u64` bitmask word per 64 rows directly from the
+  SIMD `to_bitmask()` result, eliminating the byte-expansion loop.
+- `materialize_staged_f64_column` extracts 8 validity bits per SIMD chunk from the packed word
+  via shift+expand, removing the 8-byte validity load and `U8x8` comparison.
+- `first_non_integral_in_range_index_simd` now extracts 4 validity bits from a packed word with a
+  single shift+mask, replacing a 4-byte loop.
+- Row-by-row push functions (`push_primitive_*`, `push_variable_*`) use `set_valid_bit` and
+  `init_validity_first_null` helpers for incremental bit-accumulation.
+- Validity footprint: 8× smaller → better cache behaviour for large batches.
+- On top3_target typed-batches (Criterion):
+  - NYYTS 2020: **-11.7% faster** (p=0.00)
+  - NYYTS 2018: **-9.6% faster** (p=0.00)
+  - BRFSS 2018: **-3.1% faster** (p=0.00)
+
 ## Existing SIMD coverage
 
 | Location | What | SIMD width |
 |---|---|---|
 | `src/scan/numeric.rs:classify_missing_raw_bits` | missing-sentinel detection | `u64x8` |
+| `src/scan/numeric.rs:first_non_integral_in_range_index_simd` | integral+range probe | `f64x4` |
+| `src/scan/numeric.rs:materialize_staged_f64_column` | nullable f64 materialization | `u64x8` |
+| `src/scan/numeric.rs:materialize_staged_i64_or_f64_column` | nullable i64 materialization | `f64x8`→`i64x8` + `u64x8` validity |
+| `src/scan/numeric.rs:materialize_staged_date_or_f64_column` | nullable date materialization | `f64x8`→`i64x8` + `u64x8` validity |
+| `src/scan/numeric.rs:materialize_staged_datetime_or_f64_column` | nullable datetime materialization | `f64x8`→`i64x8` + `u64x8` validity |
+| `src/scan/numeric.rs:materialize_staged_time_or_f64_column` | nullable time materialization | `f64x8`→`i64x8` + `u64x8` validity |
 | `src/scan/string.rs:trim_trailing_space_or_nul_simd` | trailing space/nul trim | `u8x64` |
 | `src/scan/string.rs:is_ascii_simd` | ASCII classification | `u8x64` |
 | `src/scan/string.rs:is_all_space_or_nul_12` | exact-12-byte empty check | word (u64+u32) |
-
-The string and missing-detection paths are well covered. The numeric **finalize** path (`materialize_staged_*`) has no SIMD yet — that is the main gap.
+| `src/scan/string.rs:trim_trailing_space_or_nul_word` | 8-63-byte trim | word (u64) |
+| `src/scan/string.rs:is_ascii_word` | 8-63-byte ASCII check | word (u64) |
 
 ## Current priority order
 
-1. **Single-pass materialization** — eliminate double-scan in `materialize_staged_*_or_f64_column`.
-- All four functions (`i64_or_f64`, `date_or_f64`, `datetime_or_f64`, `time_or_f64`) do a full
-  probe-pass (`all_integral` / `all_dates` check) followed by a separate convert-pass: 2× memory
-  bandwidth over the `raw_bits` vector, and `validity_is_null` is called twice per element in the
-  nullable case.
-- Fix: write output directly in a single pass; widen to f64 only on the first non-integral value.
-  The widen fallback only runs for rare mixed-type batches; all-integer batches get one pass.
-- Main file: `src/scan/numeric.rs`.
-
-2. **SIMD `all_integral` / `all_dates` check via `SimdFloat::floor()`** — vectorize the probe-pass.
-- The current probe-pass calls `try_i64_from_f64` per element (involves `is_finite`, range check,
-  cast, round-trip compare — multiple branches per value).
-- `std::simd::num::SimdFloat::floor()` is available on nightly. With `Simd<f64, 4>` and the
-  existing `NUMERIC_EXP_MASK` constant (reused from `classify_missing_raw_bits`):
-  ```
-  finite   = (bits & EXP_MASK) != EXP_MASK   // non-finite lanes = null/NaN → excluded
-  integral = floor(vals) == vals
-  ok       = !finite | integral               // any lane failing → widen to f64
-  ```
-- Replaces 4 calls to `try_i64_from_f64` (each multi-branch) with a couple of SIMD ops per chunk.
-- Applies identically to all four `materialize_staged_*_or_f64_column` type-check passes.
-- If `SimdFloat::cast::<i64>()` is also available, the convert-pass can be vectorized too.
-- Best implemented together with item 1 (single-pass structure makes the probe naturally SIMD).
-- Main file: `src/scan/numeric.rs`.
-
-3. **Optimize remaining owned UTF-8 direct path** (6.33% routed cells).
-- Main files: `src/scan/batch.rs`, `src/scan/row_decode.rs`.
-
-4. **SIMD for validity-byte–masked f64 materialization**.
-- In `materialize_staged_f64_column` with `valid.is_some()`, per-element `validity_is_null` loads
-  `valid[index]` (a byte), which prevents autovectorization of the transmute loop.
-- Fix: load 8 `raw_bits` + 8 validity bytes simultaneously; blend with `simd_ne(0)` mask; push 8
-  f64s. Straightforward `u64x8` blend, no gather needed since `valid: Vec<u8>` is contiguous.
-- Main file: `src/scan/numeric.rs`.
-
-5. **Bit-packed validity bitmap** — architectural enabler for deeper SIMD.
-- `valid: Option<Vec<u8>>` uses 1 byte per row. `classify_missing_raw_bits` already internally
-  computes a `u64` bitmask per 8-lane chunk (`to_bitmask()`) and then expands it back to bytes —
-  that expansion is pure waste.
-- Switching to a bit-packed `Vec<u64>` (Arrow-style, 1 bit/row) would:
-  - Let `classify_missing_raw_bits` write bitmask words directly.
-  - Make validity masking in materialize a bitwise op on `u64` words rather than byte loads.
-  - Cut validity footprint by 8× → better cache behaviour for large batches.
-- Depends on whether downstream batch consumers can handle bit-packed validity (larger change).
-- Main files: `src/scan/numeric.rs`, `src/columnar.rs`.
-
-6. **Word-at-a-time trim for 8–63-byte strings**.
-- `trim_and_classify_ascii` takes the SIMD path only for `>= 64` bytes; 8–63-byte strings use a
-  scalar byte loop from the tail.
-- For the common case of trailing-space-padded fixed-width columns of width 8–32, a word-at-a-time
-  scan checking 8 bytes at a time (`u64::from_ne_bytes`) is 8× fewer iterations.
-- The exact-12 special case already does this; generalise it to the full 8–63-byte range.
-- Main file: `src/scan/string.rs`.
-
-7. **Batch-size sweep** for large fixtures (`256` vs `512` vs `1024`) after materialization improvements settle.
+1. **Batch-size sweep** for large fixtures (`256` vs `512` vs `1024`) after materialization improvements settle.
 - Main file: `benches/compression_matrix.rs`.
 
-8. **Dictionary staging for repeated strings**.
+5. **Dictionary staging for repeated strings**.
 - Main files: `src/options.rs`, `src/columnar.rs`, `src/scan/*`.
 
-9. **Parallel typed-batch decode** (larger effort).
+6. **Parallel typed-batch decode** (larger effort).
 - Main files: `src/scan/builder.rs`, `src/scan/batch.rs`, `src/scan/raw.rs`.
 
 ## Working rule

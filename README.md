@@ -79,9 +79,9 @@ cargo bench --bench compression_matrix -- 'top3_target/'
 
 | Fixture | raw_rows time | raw_rows throughput | typed_batches time | typed_batches throughput | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `top3_target/healthdatany_86he_eqwq/windows_1252/nysdoh_brfss_surveydata_2018_ad5548ba` | [32.98 µs 33.03 µs 33.08 µs] | [1.08 Gelem/s 1.08 Gelem/s 1.08 Gelem/s] | [52.94 ms 53.10 ms 53.35 ms] | [670.43 Kelem/s 673.63 Kelem/s 675.63 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
-| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2018_publicuse_aec3d115` | [99.16 µs 99.24 µs 99.34 µs] | [1.19 Gelem/s 1.19 Gelem/s 1.19 Gelem/s] | [430.01 ms 431.62 ms 433.23 ms] | [271.99 Kelem/s 273.00 Kelem/s 274.03 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
-| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2020_publicuse_c85e9144` | [123.64 µs 123.83 µs 124.02 µs] | [981.51 Melem/s 983.06 Melem/s 984.52 Melem/s] | [493.16 ms 494.77 ms 496.50 ms] | [245.18 Kelem/s 246.03 Kelem/s 246.84 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| `top3_target/healthdatany_86he_eqwq/windows_1252/nysdoh_brfss_surveydata_2018_ad5548ba` | [32.58 µs 32.64 µs 32.69 µs] | [1.09 Gelem/s 1.10 Gelem/s 1.10 Gelem/s] | [50.18 ms 50.25 ms 50.32 ms] | [710.73 Kelem/s 711.80 Kelem/s 712.76 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2018_publicuse_aec3d115` | [100.26 µs 100.32 µs 100.38 µs] | [1.17 Gelem/s 1.17 Gelem/s 1.18 Gelem/s] | [159.75 ms 159.86 ms 159.98 ms] | [736.55 Kelem/s 737.12 Kelem/s 737.62 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
+| `top3_target/healthdatany_pbq7_ddg9/windows_1252/nyyts_2000_2020_publicuse_c85e9144` | [123.74 µs 123.82 µs 123.90 µs] | [982.51 Melem/s 983.14 Melem/s 983.73 Melem/s] | [183.41 ms 183.64 ms 183.93 ms] | [661.82 Kelem/s 662.87 Kelem/s 663.69 Kelem/s] | auto-generated from `target/criterion/*/new/estimates.json` |
 
 <!-- TOP3_BENCH_TABLE:END -->
 

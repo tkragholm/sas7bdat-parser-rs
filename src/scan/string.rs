@@ -110,7 +110,7 @@ pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
         return &slice[..start + local_end];
     }
 
-    trim_trailing_space_or_nul(&slice[..end])
+    trim_trailing_space_or_nul_word(&slice[..end])
 }
 
 #[inline(always)]

@@ -534,7 +534,8 @@ fn collect_batches_staged_f64_preserves_missing_validity() {
     match &batches[0].columns[0] {
         OwnedColumnBuffer::F64 { values, valid } => {
             assert_eq!(values, &vec![1.25, 0.0]);
-            assert_eq!(valid.as_deref(), Some(&[1, 0][..]));
+            // Bit-packed validity: row 0 valid (bit 0 = 1), row 1 null (bit 1 = 0) → word = 0b01 = 1.
+            assert_eq!(valid.as_deref(), Some(&[1u64][..]));
         }
         other => panic!("unexpected staged f64 batch column: {other:?}"),
     }

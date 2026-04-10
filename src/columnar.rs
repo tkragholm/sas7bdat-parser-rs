@@ -1,6 +1,9 @@
 use crate::metadata::{SasDate, SasDateTime, SasTime};
 
-pub type BitSlice<'a> = &'a [u8];
+/// Bit-packed validity slice: each `u64` word holds 64 row-validity bits (LSB = first row).
+/// Bit `i % 64` of word `i / 64` is 1 if row `i` is valid, 0 if null.
+/// Unused bits in the last word (when row count is not a multiple of 64) are 0.
+pub type BitSlice<'a> = &'a [u64];
 
 #[derive(Debug, Clone, Copy)]
 pub struct PrimitiveBuffer<'a, T> {
@@ -52,37 +55,37 @@ macro_rules! define_owned_column_enum {
         $vis enum $name {
             I32 {
                 values: Vec<i32>,
-                valid: Option<Vec<u8>>,
+                valid: Option<Vec<u64>>,
             },
             I64 {
                 values: Vec<i64>,
-                valid: Option<Vec<u8>>,
+                valid: Option<Vec<u64>>,
             },
             F64 {
                 values: Vec<f64>,
-                valid: Option<Vec<u8>>,
+                valid: Option<Vec<u64>>,
             },
             Date {
                 values: Vec<$crate::metadata::SasDate>,
-                valid: Option<Vec<u8>>,
+                valid: Option<Vec<u64>>,
             },
             DateTime {
                 values: Vec<$crate::metadata::SasDateTime>,
-                valid: Option<Vec<u8>>,
+                valid: Option<Vec<u64>>,
             },
             Time {
                 values: Vec<$crate::metadata::SasTime>,
-                valid: Option<Vec<u8>>,
+                valid: Option<Vec<u64>>,
             },
             Utf8 {
                 offsets: Vec<u32>,
                 data: Vec<u8>,
-                valid: Option<Vec<u8>>,
+                valid: Option<Vec<u64>>,
             },
             RawBytes {
                 offsets: Vec<u32>,
                 data: Vec<u8>,
-                valid: Option<Vec<u8>>,
+                valid: Option<Vec<u64>>,
             },
             $($extra_variant { $($extra_field : $extra_type),* }),*
         }
