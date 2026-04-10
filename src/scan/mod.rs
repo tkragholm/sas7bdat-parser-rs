@@ -75,6 +75,8 @@ pub struct ScanStats {
     pub batch_direct_utf8_single_byte_cells: u64,
     pub batch_direct_utf8_borrowed_cells: u64,
     pub batch_direct_utf8_owned_cells: u64,
+    pub batch_direct_utf8_owned_interned_hits: u64,
+    pub batch_direct_utf8_owned_seen_once_promotions: u64,
     pub batch_fallback_cells: u64,
 }
 

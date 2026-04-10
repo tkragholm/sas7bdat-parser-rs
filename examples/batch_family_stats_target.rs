@@ -20,6 +20,8 @@ struct Aggregated {
     direct_utf8_single_byte_cells: u64,
     direct_utf8_borrowed_cells: u64,
     direct_utf8_owned_cells: u64,
+    direct_utf8_owned_interned_hits: u64,
+    direct_utf8_owned_seen_once_promotions: u64,
     fallback_cells: u64,
 }
 
@@ -189,6 +191,12 @@ fn main() {
         aggregated.direct_utf8_owned_cells = aggregated
             .direct_utf8_owned_cells
             .saturating_add(stats.batch_direct_utf8_owned_cells);
+        aggregated.direct_utf8_owned_interned_hits = aggregated
+            .direct_utf8_owned_interned_hits
+            .saturating_add(stats.batch_direct_utf8_owned_interned_hits);
+        aggregated.direct_utf8_owned_seen_once_promotions = aggregated
+            .direct_utf8_owned_seen_once_promotions
+            .saturating_add(stats.batch_direct_utf8_owned_seen_once_promotions);
         aggregated.fallback_cells = aggregated
             .fallback_cells
             .saturating_add(stats.batch_fallback_cells);
@@ -234,6 +242,14 @@ fn main() {
         "direct_utf8_owned_cells={} ({:.2}%)",
         aggregated.direct_utf8_owned_cells,
         pct(aggregated.direct_utf8_owned_cells, aggregated.routed_cells)
+    );
+    println!(
+        "direct_utf8_owned_interned_hits={}",
+        aggregated.direct_utf8_owned_interned_hits
+    );
+    println!(
+        "direct_utf8_owned_seen_once_promotions={}",
+        aggregated.direct_utf8_owned_seen_once_promotions
     );
     println!(
         "fallback_cells={} ({:.2}%)",

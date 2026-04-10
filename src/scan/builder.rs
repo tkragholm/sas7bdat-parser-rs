@@ -410,6 +410,9 @@ impl ScanBuilder<'_> {
         stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
         stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
         stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned;
+        stats.batch_direct_utf8_owned_interned_hits = counters.direct_utf8_owned_interned_hits;
+        stats.batch_direct_utf8_owned_seen_once_promotions =
+            counters.direct_utf8_owned_seen_once_promotions;
         stats.batch_fallback_cells = counters.fallback;
         Ok(stats)
     }

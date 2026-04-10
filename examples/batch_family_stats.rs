@@ -72,6 +72,14 @@ fn main() {
         pct(stats.batch_direct_utf8_owned_cells, total_cells)
     );
     println!(
+        "direct_utf8_owned_interned_hits={}",
+        stats.batch_direct_utf8_owned_interned_hits
+    );
+    println!(
+        "direct_utf8_owned_seen_once_promotions={}",
+        stats.batch_direct_utf8_owned_seen_once_promotions
+    );
+    println!(
         "fallback_cells={} ({:.2}%)",
         stats.batch_fallback_cells,
         pct(stats.batch_fallback_cells, total_cells)
