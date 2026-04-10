@@ -5,7 +5,7 @@ use super::{
     SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
     TimeNumericValue, TrimMode, TrimmedString, TypedNumericValue, classify_date_numeric_value,
     classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
-    decode_numeric_cell, is_blank_after_trim_mode, materialize_staged_numeric_column, numeric_bits,
+    decode_numeric_cell, materialize_staged_numeric_column, numeric_bits,
     numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
 use crate::define_owned_column_enum;
@@ -92,6 +92,7 @@ const DICT_CAPACITY: usize = 512;
 const DICT_SLOT_MASK: usize = DICT_CAPACITY - 1;
 const MAX_DICT_ENTRIES: usize = 200;
 const MAX_STAGED_STRING_WIDTH: u32 = 20;
+const INLINE_DICT_KEY_BYTES: usize = 16;
 const DICT_ID_NONE: u32 = u32::MAX;
 const DICT_DISABLE_MIN_LOOKUPS: u32 = 512;
 const DICT_DISABLE_MIN_LOOKUPS_ZERO_PROMOTIONS: u32 = 256;
@@ -120,6 +121,8 @@ enum DictEntryState {
 struct DictEntry {
     raw_start: u32,
     raw_end: u32,
+    inline_len: u8,
+    inline_key: [u8; INLINE_DICT_KEY_BYTES],
     state: DictEntryState,
     utf8_is_raw: bool,
     utf8_start: u32,
@@ -130,6 +133,13 @@ struct DictEntry {
 enum StageLookupHit {
     SeenOnce(u16),
     Interned(u16),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TrimmedCellClass<'a> {
+    Blank,
+    Ascii(&'a [u8]),
+    NonAscii(TrimmedString<'a>),
 }
 
 /// Per-column open-address hash table mapping semantic string bytes -> staged entry.
@@ -223,7 +233,7 @@ impl StagedStringLookup {
             let entry_idx = self.recent_entries[recent_slot];
             let (matched, state) = {
                 let entry = &self.entries[entry_idx as usize];
-                (self.entry_raw_bytes(entry) == key, entry.state)
+                (self.entry_key_matches(entry, key), entry.state)
             };
             if matched {
                 return match state {
@@ -242,7 +252,7 @@ impl StagedStringLookup {
             if s.fingerprint == fp {
                 let (matched, state) = {
                     let entry = &self.entries[s.entry_idx as usize];
-                    (self.entry_raw_bytes(entry) == key, entry.state)
+                    (self.entry_key_matches(entry, key), entry.state)
                 };
                 if matched {
                     self.remember_recent(h, s.entry_idx);
@@ -261,6 +271,14 @@ impl StagedStringLookup {
         let start = entry.raw_start as usize;
         let end = entry.raw_end as usize;
         &self.raw_data[start..end]
+    }
+
+    #[inline]
+    fn entry_key_matches(&self, entry: &DictEntry, key: &[u8]) -> bool {
+        if key.len() <= INLINE_DICT_KEY_BYTES && usize::from(entry.inline_len) == key.len() {
+            return entry.inline_key[..key.len()] == *key;
+        }
+        self.entry_raw_bytes(entry) == key
     }
 
     fn interned_utf8(&self, entry_idx: u16) -> &[u8] {
@@ -295,9 +313,18 @@ impl StagedStringLookup {
         let raw_start = u32::try_from(self.raw_data.len()).ok()?;
         self.raw_data.extend_from_slice(key);
         let raw_end = u32::try_from(self.raw_data.len()).ok()?;
+        let mut inline_key = [0_u8; INLINE_DICT_KEY_BYTES];
+        let inline_len = if key.len() <= INLINE_DICT_KEY_BYTES {
+            inline_key[..key.len()].copy_from_slice(key);
+            u8::try_from(key.len()).expect("inline key length is capped")
+        } else {
+            0
+        };
         self.entries.push(DictEntry {
             raw_start,
             raw_end,
+            inline_len,
+            inline_key,
             state: DictEntryState::SeenOnce,
             utf8_is_raw: false,
             utf8_start: 0,
@@ -843,14 +870,35 @@ impl BatchAccumulator {
                 let batch_column = &mut self.columns[idx];
                 let column = &self.plan.row_plan.columns[idx];
                 let staged_lookup = self.staged_string_lookups[idx].as_mut();
-                let appended = append_direct_utf8_owned_batch_column(
-                    (&self.plan.row_plan, column, row),
-                    batch_column,
-                    &mut self.utf8_decode_scratch,
-                    staged_lookup,
-                    mode,
-                    &mut breakdown,
-                )?;
+                let appended = match mode {
+                    DirectUtf8OwnedMode::Utf8Lenient => append_direct_utf8_owned_batch_column(
+                        (&self.plan.row_plan, column, row),
+                        batch_column,
+                        &mut self.utf8_decode_scratch,
+                        staged_lookup,
+                        |p, t, s| Ok(p.decode_utf8_lenient_trimmed_bytes_for_batch_direct(t, s)),
+                        true,
+                        &mut breakdown,
+                    )?,
+                    DirectUtf8OwnedMode::EncodedStrict => append_direct_utf8_owned_batch_column(
+                        (&self.plan.row_plan, column, row),
+                        batch_column,
+                        &mut self.utf8_decode_scratch,
+                        staged_lookup,
+                        RowDecodePlan::decode_encoded_strict_trimmed_bytes_for_batch_direct,
+                        false,
+                        &mut breakdown,
+                    )?,
+                    DirectUtf8OwnedMode::EncodedLenient => append_direct_utf8_owned_batch_column(
+                        (&self.plan.row_plan, column, row),
+                        batch_column,
+                        &mut self.utf8_decode_scratch,
+                        staged_lookup,
+                        |p, t, s| Ok(p.decode_encoded_lenient_trimmed_bytes_for_batch_direct(t, s)),
+                        false,
+                        &mut breakdown,
+                    )?,
+                };
                 debug_assert!(appended, "compiled utf8 batch must match builder");
                 if !appended {
                     return Err(Error::unsupported(
@@ -1586,6 +1634,21 @@ fn staged_entry_to_dictionary_id(entry_idx: u16) -> u32 {
     u32::from(entry_idx).saturating_add(1)
 }
 
+#[inline]
+fn classify_trimmed_cell(slice: &[u8], mode: TrimMode) -> TrimmedCellClass<'_> {
+    let trimmed = trim_and_classify_for_mode(slice, mode);
+    let bytes = trimmed.bytes;
+    let is_blank = bytes.is_empty()
+        || (matches!(mode, TrimMode::Preserve) && bytes.iter().all(|&byte| byte == b' '));
+    if is_blank {
+        TrimmedCellClass::Blank
+    } else if trimmed.is_ascii {
+        TrimmedCellClass::Ascii(bytes)
+    } else {
+        TrimmedCellClass::NonAscii(trimmed)
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct DirectUtf8OwnedBreakdown {
     interned_hits: u64,
@@ -1841,7 +1904,12 @@ fn append_direct_utf8_owned_batch_column(
     batch_column: &mut OwnedBatchColumnBuilder,
     utf8_decode_scratch: &mut String,
     mut staged_lookup: Option<&mut StagedStringLookup>,
-    mode: DirectUtf8OwnedMode,
+    decode_owned: impl for<'a> Fn(
+        &'a RowDecodePlan,
+        TrimmedString<'a>,
+        &'a mut String,
+    ) -> Result<DecodedUtf8BatchValue<'a>>,
+    fast_valid_utf8_non_ascii: bool,
     breakdown: &mut DirectUtf8OwnedBreakdown,
 ) -> Result<bool> {
     let (row_plan, column, row) = source;
@@ -1856,16 +1924,22 @@ fn append_direct_utf8_owned_batch_column(
                 dictionary_ids,
             },
         ) => {
-            let trimmed = trim_and_classify_for_mode(slice, row_plan.string_options.trim_mode);
-            let slice = trimmed.bytes;
-            if slice.is_empty()
-                || is_blank_after_trim_mode(slice, row_plan.string_options.trim_mode)
-            {
-                push_variable_valid(offsets, data, valid, &[])?;
-                push_dictionary_id(dictionary_ids, BLANK_ID);
-                return Ok(true);
-            }
-            if trimmed.is_ascii {
+            let (trimmed, slice) =
+                match classify_trimmed_cell(slice, row_plan.string_options.trim_mode) {
+                    TrimmedCellClass::Blank => {
+                        push_variable_valid(offsets, data, valid, &[])?;
+                        push_dictionary_id(dictionary_ids, BLANK_ID);
+                        return Ok(true);
+                    }
+                    TrimmedCellClass::Ascii(bytes) => {
+                        push_variable_valid(offsets, data, valid, bytes)?;
+                        push_dictionary_id(dictionary_ids, DICT_ID_NONE);
+                        return Ok(true);
+                    }
+                    TrimmedCellClass::NonAscii(trimmed) => (trimmed, trimmed.bytes),
+                };
+
+            if fast_valid_utf8_non_ascii && std::str::from_utf8(slice).is_ok() {
                 push_variable_valid(offsets, data, valid, slice)?;
                 push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 return Ok(true);
@@ -1890,7 +1964,7 @@ fn append_direct_utf8_owned_batch_column(
                         StageLookupHit::SeenOnce(entry_idx) => {
                             breakdown.seen_once_promotions =
                                 breakdown.seen_once_promotions.saturating_add(1);
-                            match decode_owned_direct(row_plan, trimmed, utf8_decode_scratch, mode)? {
+                            match decode_owned(row_plan, trimmed, utf8_decode_scratch)? {
                                 DecodedUtf8BatchValue::Borrowed(bytes) => {
                                     // Append once from freshly decoded bytes, then promote for subsequent hits.
                                     push_variable_valid(offsets, data, valid, bytes)?;
@@ -1921,7 +1995,7 @@ fn append_direct_utf8_owned_batch_column(
                 }
             }
 
-            match decode_owned_direct(row_plan, trimmed, utf8_decode_scratch, mode)? {
+            match decode_owned(row_plan, trimmed, utf8_decode_scratch)? {
                 DecodedUtf8BatchValue::Borrowed(bytes) => {
                     if let Some(dict) = staged_lookup.as_mut() {
                         let _ = dict.insert_seen_once(slice);
@@ -1940,26 +2014,6 @@ fn append_direct_utf8_owned_batch_column(
             Ok(true)
         }
         _ => Ok(false),
-    }
-}
-
-#[inline]
-fn decode_owned_direct<'a>(
-    row_plan: &'a RowDecodePlan,
-    trimmed: TrimmedString<'a>,
-    utf8_decode_scratch: &mut String,
-    mode: DirectUtf8OwnedMode,
-) -> Result<DecodedUtf8BatchValue<'a>> {
-    match mode {
-        DirectUtf8OwnedMode::Utf8Lenient => Ok(
-            row_plan.decode_utf8_lenient_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch),
-        ),
-        DirectUtf8OwnedMode::EncodedStrict => {
-            row_plan.decode_encoded_strict_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)
-        }
-        DirectUtf8OwnedMode::EncodedLenient => Ok(
-            row_plan.decode_encoded_lenient_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch),
-        ),
     }
 }
 
