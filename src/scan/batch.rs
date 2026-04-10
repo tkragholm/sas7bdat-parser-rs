@@ -87,6 +87,182 @@ pub(super) struct StagedNumericOp {
     pub(super) end: usize,
 }
 
+const DICT_CAPACITY: usize = 512;
+const DICT_SLOT_MASK: usize = DICT_CAPACITY - 1;
+const MAX_DICT_ENTRIES: usize = 200;
+const MAX_STAGED_STRING_WIDTH: u32 = 20;
+
+#[derive(Debug, Clone, Copy)]
+struct DictSlot {
+    fingerprint: u16, // 0 = empty
+    entry_idx: u16,
+}
+
+impl DictSlot {
+    const EMPTY: Self = Self {
+        fingerprint: 0,
+        entry_idx: 0,
+    };
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DictEntryState {
+    SeenOnce,
+    Interned,
+}
+
+#[derive(Debug, Clone)]
+struct DictEntry {
+    key_len: u8,
+    key: [u8; MAX_STAGED_STRING_WIDTH as usize],
+    state: DictEntryState,
+    utf8_start: u32,
+    utf8_end: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum StageLookupHit {
+    SeenOnce(u16),
+    Interned(u16),
+}
+
+/// Per-column open-address hash table mapping semantic string bytes -> staged entry.
+/// Entries are first staged as `SeenOnce`, then promoted to `Interned` on second sighting.
+#[derive(Debug)]
+struct StagedStringLookup {
+    slots: Vec<DictSlot>,
+    entries: Vec<DictEntry>,
+    /// Concatenated UTF-8 bytes for each unique entry.
+    utf8_data: Vec<u8>,
+    seen: u32,
+    promoted: u32,
+    disabled: bool,
+}
+
+impl StagedStringLookup {
+    fn new() -> Self {
+        Self {
+            slots: vec![DictSlot::EMPTY; DICT_CAPACITY],
+            entries: Vec::new(),
+            utf8_data: Vec::new(),
+            seen: 0,
+            promoted: 0,
+            disabled: false,
+        }
+    }
+
+    #[inline]
+    const fn should_use(&self) -> bool {
+        !self.disabled
+    }
+
+    #[inline]
+    const fn observe_lookup(&mut self) {
+        self.seen = self.seen.saturating_add(1);
+        if self.seen >= 2_048 && self.promoted.saturating_mul(100) < self.seen.saturating_mul(5) {
+            self.disabled = true;
+        }
+    }
+
+    #[inline]
+    fn fnv1a(bytes: &[u8]) -> u32 {
+        let mut h = 0x811c_9dc5_u32;
+        for &b in bytes {
+            h ^= u32::from(b);
+            h = h.wrapping_mul(0x0100_0193);
+        }
+        h
+    }
+
+    #[inline]
+    fn key_hash_and_fingerprint(key: &[u8]) -> (u32, u16) {
+        let h = Self::fnv1a(key);
+        let fp = (h >> 16) as u16 | 1; // force non-zero
+        (h, fp)
+    }
+
+    /// Returns staged state for `key` if present.
+    #[inline]
+    fn lookup(&self, key: &[u8]) -> Option<StageLookupHit> {
+        if self.disabled {
+            return None;
+        }
+        let (h, fp) = Self::key_hash_and_fingerprint(key);
+        let mut slot = (h as usize) & DICT_SLOT_MASK;
+        loop {
+            let s = self.slots[slot];
+            if s.fingerprint == 0 {
+                return None; // empty slot → not in table
+            }
+            if s.fingerprint == fp {
+                let entry = &self.entries[s.entry_idx as usize];
+                let len = usize::from(entry.key_len);
+                if key.len() == len && entry.key[..len] == *key {
+                    return match entry.state {
+                        DictEntryState::SeenOnce => Some(StageLookupHit::SeenOnce(s.entry_idx)),
+                        DictEntryState::Interned => Some(StageLookupHit::Interned(s.entry_idx)),
+                    };
+                }
+            }
+            slot = (slot + 1) & DICT_SLOT_MASK;
+        }
+    }
+
+    fn interned_utf8(&self, entry_idx: u16) -> &[u8] {
+        let entry = &self.entries[entry_idx as usize];
+        let start = entry.utf8_start as usize;
+        let end = entry.utf8_end as usize;
+        &self.utf8_data[start..end]
+    }
+
+    fn insert_seen_once(&mut self, key: &[u8]) -> Option<u16> {
+        if self.disabled {
+            return None;
+        }
+        if key.len() > MAX_STAGED_STRING_WIDTH as usize {
+            return None;
+        }
+        if self.entries.len() >= MAX_DICT_ENTRIES {
+            return None;
+        }
+        let (h, fp) = Self::key_hash_and_fingerprint(key);
+        let mut slot = (h as usize) & DICT_SLOT_MASK;
+        loop {
+            if self.slots[slot].fingerprint == 0 {
+                break;
+            }
+            slot = (slot + 1) & DICT_SLOT_MASK;
+        }
+        let entry_idx = u16::try_from(self.entries.len()).ok()?;
+        let mut stored = [0u8; MAX_STAGED_STRING_WIDTH as usize];
+        stored[..key.len()].copy_from_slice(key);
+        self.entries.push(DictEntry {
+            key_len: u8::try_from(key.len()).expect("staged key length capped by 20"),
+            key: stored,
+            state: DictEntryState::SeenOnce,
+            utf8_start: 0,
+            utf8_end: 0,
+        });
+        self.slots[slot] = DictSlot {
+            fingerprint: fp,
+            entry_idx,
+        };
+        Some(entry_idx)
+    }
+
+    #[inline]
+    fn promote_interned(&mut self, entry_idx: u16, utf8: &[u8]) {
+        let start = u32::try_from(self.utf8_data.len()).expect("dict utf8 data within u32");
+        self.utf8_data.extend_from_slice(utf8);
+        let end = u32::try_from(self.utf8_data.len()).expect("dict utf8 data within u32");
+        let entry = &mut self.entries[entry_idx as usize];
+        entry.state = DictEntryState::Interned;
+        entry.utf8_start = start;
+        entry.utf8_end = end;
+        self.promoted = self.promoted.saturating_add(1);
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct BatchAccumulator {
     plan: BatchDecodePlan,
@@ -97,6 +273,7 @@ pub(super) struct BatchAccumulator {
     columns: Vec<OwnedBatchColumnBuilder>,
     owned_strings: Vec<String>,
     utf8_decode_scratch: String,
+    staged_string_lookups: Vec<Option<StagedStringLookup>>,
     counters: BatchFamilyCounters,
 }
 
@@ -320,12 +497,32 @@ fn compile_plan_flags(families: &BatchColumnFamilies, row_plan: &RowDecodePlan) 
     flags
 }
 
+fn build_staged_string_lookups(plan: &BatchDecodePlan) -> Vec<Option<StagedStringLookup>> {
+    let mut lookups = Vec::with_capacity(plan.row_plan.columns.len());
+    let allow_staging = plan.row_plan.string_options.trim_fixed_width
+        && !matches!(plan.direct_utf8_owned_mode, Some(DirectUtf8OwnedMode::Utf8Lenient));
+    for (idx, column) in plan.row_plan.columns.iter().enumerate() {
+        let should_stage = allow_staging
+            && plan.families.direct_utf8_owned.contains(&idx)
+            && column.width > 0
+            && column.width <= MAX_STAGED_STRING_WIDTH
+            && matches!(column.kernel, CompiledDecodeKernel::Utf8);
+        if should_stage {
+            lookups.push(Some(StagedStringLookup::new()));
+        } else {
+            lookups.push(None);
+        }
+    }
+    lookups
+}
+
 impl BatchAccumulator {
     pub(super) fn new(
         plan: BatchDecodePlan,
         target_rows: usize,
         capacity_hint_rows: usize,
     ) -> Self {
+        let staged_string_lookups = build_staged_string_lookups(&plan);
         let columns = plan
             .row_plan
             .columns
@@ -359,6 +556,7 @@ impl BatchAccumulator {
             columns,
             owned_strings: Vec::new(),
             utf8_decode_scratch: String::new(),
+            staged_string_lookups,
             counters: BatchFamilyCounters::default(),
         }
     }
@@ -554,12 +752,14 @@ impl BatchAccumulator {
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
+                    let staged_lookup = self.staged_string_lookups[idx].as_mut();
                     let appended = append_direct_utf8_lenient_batch_column(
                         &self.plan.row_plan,
                         batch_column,
                         column,
                         row,
                         &mut self.utf8_decode_scratch,
+                        staged_lookup,
                     )?;
                     debug_assert!(appended, "compiled utf8 batch must match builder");
                     if !appended {
@@ -574,12 +774,14 @@ impl BatchAccumulator {
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
+                    let staged_lookup = self.staged_string_lookups[idx].as_mut();
                     let appended = append_direct_encoded_strict_batch_column(
                         &self.plan.row_plan,
                         batch_column,
                         column,
                         row,
                         &mut self.utf8_decode_scratch,
+                        staged_lookup,
                     )?;
                     debug_assert!(appended, "compiled utf8 batch must match builder");
                     if !appended {
@@ -594,12 +796,14 @@ impl BatchAccumulator {
                 for &idx in &self.plan.families.direct_utf8_owned {
                     let batch_column = &mut self.columns[idx];
                     let column = &self.plan.row_plan.columns[idx];
+                    let staged_lookup = self.staged_string_lookups[idx].as_mut();
                     let appended = append_direct_encoded_lenient_batch_column(
                         &self.plan.row_plan,
                         batch_column,
                         column,
                         row,
                         &mut self.utf8_decode_scratch,
+                        staged_lookup,
                     )?;
                     debug_assert!(appended, "compiled utf8 batch must match builder");
                     if !appended {
@@ -1518,6 +1722,7 @@ fn append_direct_utf8_owned_batch_column(
     column: &CompiledColumnPlan,
     row: &[u8],
     utf8_decode_scratch: &mut String,
+    mut staged_lookup: Option<&mut StagedStringLookup>,
     decode_owned: impl for<'a> FnOnce(
         &'a RowDecodePlan,
         TrimmedString<'a>,
@@ -1547,11 +1752,48 @@ fn append_direct_utf8_owned_batch_column(
                 push_variable_valid(offsets, data, valid, slice)?;
                 return Ok(true);
             }
+
+            if let Some(dict) = staged_lookup.as_deref_mut()
+                && dict.should_use()
+            {
+                dict.observe_lookup();
+                if let Some(hit) = dict.lookup(slice) {
+                    match hit {
+                        StageLookupHit::Interned(entry_idx) => {
+                            let interned = dict.interned_utf8(entry_idx);
+                            push_variable_valid(offsets, data, valid, interned)?;
+                            return Ok(true);
+                        }
+                        StageLookupHit::SeenOnce(entry_idx) => {
+                            match decode_owned(row_plan, trimmed, utf8_decode_scratch)? {
+                                DecodedUtf8BatchValue::Borrowed(bytes) => {
+                                    dict.promote_interned(entry_idx, bytes);
+                                    let interned = dict.interned_utf8(entry_idx);
+                                    push_variable_valid(offsets, data, valid, interned)?;
+                                }
+                                DecodedUtf8BatchValue::Scratch => {
+                                    dict.promote_interned(entry_idx, utf8_decode_scratch.as_bytes());
+                                    let interned = dict.interned_utf8(entry_idx);
+                                    push_variable_valid(offsets, data, valid, interned)?;
+                                }
+                            }
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+
             match decode_owned(row_plan, trimmed, utf8_decode_scratch)? {
                 DecodedUtf8BatchValue::Borrowed(bytes) => {
+                    if let Some(dict) = staged_lookup.as_mut() {
+                        let _ = dict.insert_seen_once(slice);
+                    }
                     push_variable_valid(offsets, data, valid, bytes)?;
                 }
                 DecodedUtf8BatchValue::Scratch => {
+                    if let Some(dict) = staged_lookup.as_mut() {
+                        let _ = dict.insert_seen_once(slice);
+                    }
                     push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
                 }
             }
@@ -1561,12 +1803,13 @@ fn append_direct_utf8_owned_batch_column(
     }
 }
 
-pub(super) fn append_direct_utf8_lenient_batch_column(
+fn append_direct_utf8_lenient_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
     utf8_decode_scratch: &mut String,
+    staged_lookup: Option<&mut StagedStringLookup>,
 ) -> Result<bool> {
     append_direct_utf8_owned_batch_column(
         row_plan,
@@ -1574,16 +1817,18 @@ pub(super) fn append_direct_utf8_lenient_batch_column(
         column,
         row,
         utf8_decode_scratch,
+        staged_lookup,
         |p, t, s| Ok(p.decode_utf8_lenient_trimmed_bytes_for_batch_direct(t, s)),
     )
 }
 
-pub(super) fn append_direct_encoded_strict_batch_column(
+fn append_direct_encoded_strict_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
     utf8_decode_scratch: &mut String,
+    staged_lookup: Option<&mut StagedStringLookup>,
 ) -> Result<bool> {
     append_direct_utf8_owned_batch_column(
         row_plan,
@@ -1591,16 +1836,18 @@ pub(super) fn append_direct_encoded_strict_batch_column(
         column,
         row,
         utf8_decode_scratch,
+        staged_lookup,
         RowDecodePlan::decode_encoded_strict_trimmed_bytes_for_batch_direct,
     )
 }
 
-pub(super) fn append_direct_encoded_lenient_batch_column(
+fn append_direct_encoded_lenient_batch_column(
     row_plan: &RowDecodePlan,
     batch_column: &mut OwnedBatchColumnBuilder,
     column: &CompiledColumnPlan,
     row: &[u8],
     utf8_decode_scratch: &mut String,
+    staged_lookup: Option<&mut StagedStringLookup>,
 ) -> Result<bool> {
     append_direct_utf8_owned_batch_column(
         row_plan,
@@ -1608,6 +1855,7 @@ pub(super) fn append_direct_encoded_lenient_batch_column(
         column,
         row,
         utf8_decode_scratch,
+        staged_lookup,
         |p, t, s| Ok(p.decode_encoded_lenient_trimmed_bytes_for_batch_direct(t, s)),
     )
 }
