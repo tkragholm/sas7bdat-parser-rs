@@ -1000,6 +1000,13 @@ impl BatchAccumulator {
     pub(super) const fn counters(&self) -> BatchFamilyCounters {
         self.counters
     }
+
+    #[cfg(test)]
+    pub(super) fn has_staged_string_lookup_for(&self, idx: usize) -> bool {
+        self.staged_string_lookups
+            .get(idx)
+            .is_some_and(Option::is_some)
+    }
 }
 
 impl OwnedBatchColumnBuilder {

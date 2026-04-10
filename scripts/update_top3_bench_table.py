@@ -159,6 +159,42 @@ def render_table(rows: List[Dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def parse_existing_rows(readme: Path) -> Dict[str, Dict[str, str]]:
+    text = readme.read_text()
+    start = text.find(START_MARKER)
+    end = text.find(END_MARKER)
+    if start == -1 or end == -1 or end < start:
+        return {}
+    block = text[start:end]
+    rows: Dict[str, Dict[str, str]] = {}
+    for line in block.splitlines():
+        striped = line.strip()
+        if not striped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in striped.strip("|").split("|")]
+        if len(cells) != 4:
+            continue
+        if cells[0].lower() == "filename" or cells[0] == "---":
+            continue
+        rows[cells[0]] = {
+            "runtime": cells[1],
+            "thrpt": cells[2],
+            "commit_id": cells[3],
+        }
+    return rows
+
+
+def preserve_commit_for_unchanged_rows(
+    rows: List[Dict[str, str]], existing: Dict[str, Dict[str, str]]
+) -> None:
+    for row in rows:
+        previous = existing.get(row["filename"])
+        if previous is None:
+            continue
+        if previous["runtime"] == row["runtime"] and previous["thrpt"] == row["thrpt"]:
+            row["commit_id"] = previous["commit_id"]
+
+
 def update_readme(readme: Path, table_block: str) -> None:
     text = readme.read_text()
     start = text.find(START_MARKER)
@@ -206,6 +242,8 @@ def main() -> None:
         raise SystemExit(
             "No eligible top3_target typed_batches runs found to summarize."
         )
+    existing_rows = parse_existing_rows(Path(args.readme))
+    preserve_commit_for_unchanged_rows(rows, existing_rows)
     update_readme(Path(args.readme), render_table(rows))
     print(f"Updated {args.readme} with {len(rows)} top3 rows.")
 

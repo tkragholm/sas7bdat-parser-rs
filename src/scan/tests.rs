@@ -1,5 +1,6 @@
 use super::{
-    BatchDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder, batch::DirectUtf8OwnedMode,
+    BatchDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, ScanBuilder,
+    batch::{BatchAccumulator, DirectUtf8OwnedMode},
     trim_and_classify_ascii,
 };
 use crate::{
@@ -210,6 +211,16 @@ fn make_integer_test_dataset(row: &[u8]) -> crate::dataset::Dataset {
         .build()
 }
 
+fn make_windows1252_test_dataset(row: &[u8]) -> crate::dataset::Dataset {
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[row], 64));
+    MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .with_encoding(Some("WINDOWS-1252".to_owned()))
+        .build()
+}
+
 #[test]
 fn collect_rows_materializes_owned_values() {
     let row = make_numeric_text_row(7.0, *b"ZX  ");
@@ -230,6 +241,105 @@ fn collect_rows_materializes_owned_values() {
         rows[0].cells[1],
         crate::row::OwnedCellValue::String(ref value) if value == "ZX"
     ));
+}
+
+#[test]
+fn trim_mode_preserve_keeps_spaces_for_non_blank_values() {
+    let row = make_numeric_text_row(7.0, *b" A  ");
+    let ds = make_standard_test_dataset(&row);
+
+    let rows = ScanBuilder::new(&ds)
+        .with_string_options(crate::StringDecodeOptions {
+            trim_mode: crate::TrimMode::Preserve,
+            ..crate::StringDecodeOptions::default()
+        })
+        .collect_rows()
+        .expect("owned rows");
+
+    assert!(matches!(
+        rows[0].cells[1],
+        crate::row::OwnedCellValue::String(ref value) if value == " A  "
+    ));
+}
+
+#[test]
+fn trim_mode_strip_removes_leading_and_trailing_spaces() {
+    let row = make_numeric_text_row(7.0, *b" A  ");
+    let ds = make_standard_test_dataset(&row);
+
+    let rows = ScanBuilder::new(&ds)
+        .with_string_options(crate::StringDecodeOptions {
+            trim_mode: crate::TrimMode::Strip,
+            ..crate::StringDecodeOptions::default()
+        })
+        .collect_rows()
+        .expect("owned rows");
+
+    assert!(matches!(
+        rows[0].cells[1],
+        crate::row::OwnedCellValue::String(ref value) if value == "A"
+    ));
+}
+
+#[test]
+fn trim_mode_preserve_blank_still_canonicalizes_to_empty() {
+    let row = make_numeric_text_row(7.0, *b"    ");
+    let ds = make_standard_test_dataset(&row);
+
+    let rows = ScanBuilder::new(&ds)
+        .with_string_options(crate::StringDecodeOptions {
+            trim_mode: crate::TrimMode::Preserve,
+            ..crate::StringDecodeOptions::default()
+        })
+        .collect_rows()
+        .expect("owned rows");
+
+    assert!(matches!(
+        rows[0].cells[1],
+        crate::row::OwnedCellValue::String(ref value) if value.is_empty()
+    ));
+}
+
+#[test]
+fn dictionary_staging_policy_controls_lookup_construction() {
+    let row = make_numeric_text_row(1.0, *b"A  \xC4");
+    let ds = make_windows1252_test_dataset(&row);
+
+    let plan_off = BatchDecodePlan::new(
+        &ScanBuilder::new(&ds).with_string_options(crate::StringDecodeOptions {
+            trim_mode: crate::TrimMode::RTrim,
+            utf8_validation: crate::Utf8ValidationMode::Strict,
+            mojibake_fix: crate::MojibakePolicy::Auto,
+            dictionary_staging: crate::DictionaryStaging::Off,
+        }),
+    )
+    .expect("plan off");
+    let acc_off = BatchAccumulator::new(plan_off, 1, 1);
+    assert!(!acc_off.has_staged_string_lookup_for(1));
+
+    let plan_on = BatchDecodePlan::new(
+        &ScanBuilder::new(&ds).with_string_options(crate::StringDecodeOptions {
+            trim_mode: crate::TrimMode::Preserve,
+            utf8_validation: crate::Utf8ValidationMode::Strict,
+            mojibake_fix: crate::MojibakePolicy::Auto,
+            dictionary_staging: crate::DictionaryStaging::On,
+        }),
+    )
+    .expect("plan on");
+    let acc_on = BatchAccumulator::new(plan_on, 1, 1);
+    assert!(acc_on.has_staged_string_lookup_for(1));
+
+    let plan_auto = BatchDecodePlan::new(
+        &ScanBuilder::new(&ds).with_string_options(crate::StringDecodeOptions {
+            trim_mode: crate::TrimMode::Preserve,
+            utf8_validation: crate::Utf8ValidationMode::Strict,
+            mojibake_fix: crate::MojibakePolicy::Auto,
+            dictionary_staging: crate::DictionaryStaging::Auto,
+        }),
+    )
+    .expect("plan auto");
+    let acc_auto = BatchAccumulator::new(plan_auto, 1, 1);
+    assert!(!acc_auto.has_staged_string_lookup_for(1));
 }
 
 #[test]
