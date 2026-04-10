@@ -115,9 +115,10 @@ enum DictEntryState {
 
 #[derive(Debug, Clone)]
 struct DictEntry {
-    key_len: u8,
-    key: [u8; MAX_STAGED_STRING_WIDTH as usize],
+    raw_start: u32,
+    raw_end: u32,
     state: DictEntryState,
+    utf8_is_raw: bool,
     utf8_start: u32,
     utf8_end: u32,
 }
@@ -134,6 +135,8 @@ enum StageLookupHit {
 struct StagedStringLookup {
     slots: Vec<DictSlot>,
     entries: Vec<DictEntry>,
+    /// Concatenated raw bytes for staged dictionary keys.
+    raw_data: Vec<u8>,
     /// Concatenated UTF-8 bytes for each unique entry.
     utf8_data: Vec<u8>,
     seen: u32,
@@ -149,6 +152,7 @@ impl StagedStringLookup {
         Self {
             slots: vec![DictSlot::EMPTY; DICT_CAPACITY],
             entries: Vec::new(),
+            raw_data: Vec::new(),
             utf8_data: Vec::new(),
             seen: 0,
             promoted: 0,
@@ -207,27 +211,28 @@ impl StagedStringLookup {
         let recent_slot = (h as usize) & 3;
         if self.recent_valid[recent_slot] != 0 && self.recent_hashes[recent_slot] == h {
             let entry_idx = self.recent_entries[recent_slot];
+            let (matched, state) = {
                 let entry = &self.entries[entry_idx as usize];
-                let len = usize::from(entry.key_len);
-                if key.len() == len && entry.key[..len] == *key {
-                    return match entry.state {
-                        DictEntryState::SeenOnce => Some(StageLookupHit::SeenOnce(entry_idx)),
-                        DictEntryState::Interned => Some(StageLookupHit::Interned(entry_idx)),
-                    };
-                }
+                (self.entry_raw_bytes(entry) == key, entry.state)
+            };
+            if matched {
+                return match state {
+                    DictEntryState::SeenOnce => Some(StageLookupHit::SeenOnce(entry_idx)),
+                    DictEntryState::Interned => Some(StageLookupHit::Interned(entry_idx)),
+                };
+            }
         }
 
         let mut slot = (h as usize) & DICT_SLOT_MASK;
         loop {
             let s = self.slots[slot];
             if s.fingerprint == 0 {
-                return None; // empty slot → not in table
+                return None; // empty slot -> not in table
             }
             if s.fingerprint == fp {
                 let (matched, state) = {
                     let entry = &self.entries[s.entry_idx as usize];
-                    let len = usize::from(entry.key_len);
-                    (key.len() == len && entry.key[..len] == *key, entry.state)
+                    (self.entry_raw_bytes(entry) == key, entry.state)
                 };
                 if matched {
                     self.remember_recent(h, s.entry_idx);
@@ -241,8 +246,18 @@ impl StagedStringLookup {
         }
     }
 
+    #[inline]
+    fn entry_raw_bytes<'a>(&'a self, entry: &DictEntry) -> &'a [u8] {
+        let start = entry.raw_start as usize;
+        let end = entry.raw_end as usize;
+        &self.raw_data[start..end]
+    }
+
     fn interned_utf8(&self, entry_idx: u16) -> &[u8] {
         let entry = &self.entries[entry_idx as usize];
+        if entry.utf8_is_raw {
+            return self.entry_raw_bytes(entry);
+        }
         let start = entry.utf8_start as usize;
         let end = entry.utf8_end as usize;
         &self.utf8_data[start..end]
@@ -267,12 +282,14 @@ impl StagedStringLookup {
             slot = (slot + 1) & DICT_SLOT_MASK;
         }
         let entry_idx = u16::try_from(self.entries.len()).ok()?;
-        let mut stored = [0u8; MAX_STAGED_STRING_WIDTH as usize];
-        stored[..key.len()].copy_from_slice(key);
+        let raw_start = u32::try_from(self.raw_data.len()).ok()?;
+        self.raw_data.extend_from_slice(key);
+        let raw_end = u32::try_from(self.raw_data.len()).ok()?;
         self.entries.push(DictEntry {
-            key_len: u8::try_from(key.len()).expect("staged key length capped by 20"),
-            key: stored,
+            raw_start,
+            raw_end,
             state: DictEntryState::SeenOnce,
+            utf8_is_raw: false,
             utf8_start: 0,
             utf8_end: 0,
         });
@@ -285,12 +302,18 @@ impl StagedStringLookup {
     }
 
     #[inline]
-    fn promote_interned(&mut self, entry_idx: u16, utf8: &[u8]) {
-        let start = u32::try_from(self.utf8_data.len()).expect("dict utf8 data within u32");
-        self.utf8_data.extend_from_slice(utf8);
-        let end = u32::try_from(self.utf8_data.len()).expect("dict utf8 data within u32");
+    fn promote_interned(&mut self, entry_idx: u16, utf8: &[u8], utf8_is_raw: bool) {
+        let (start, end) = if utf8_is_raw {
+            (0, 0)
+        } else {
+            let start = u32::try_from(self.utf8_data.len()).expect("dict utf8 data within u32");
+            self.utf8_data.extend_from_slice(utf8);
+            let end = u32::try_from(self.utf8_data.len()).expect("dict utf8 data within u32");
+            (start, end)
+        };
         let entry = &mut self.entries[entry_idx as usize];
         entry.state = DictEntryState::Interned;
+        entry.utf8_is_raw = utf8_is_raw;
         entry.utf8_start = start;
         entry.utf8_end = end;
         self.promoted = self.promoted.saturating_add(1);
@@ -1861,7 +1884,7 @@ fn append_direct_utf8_owned_batch_column(
                                 DecodedUtf8BatchValue::Borrowed(bytes) => {
                                     // Append once from freshly decoded bytes, then promote for subsequent hits.
                                     push_variable_valid(offsets, data, valid, bytes)?;
-                                    dict.promote_interned(entry_idx, bytes);
+                                    dict.promote_interned(entry_idx, bytes, bytes == slice);
                                     push_dictionary_id(
                                         dictionary_ids,
                                         staged_entry_to_dictionary_id(entry_idx),
@@ -1874,6 +1897,7 @@ fn append_direct_utf8_owned_batch_column(
                                     dict.promote_interned(
                                         entry_idx,
                                         promoted_utf8,
+                                        false,
                                     );
                                     push_dictionary_id(
                                         dictionary_ids,
