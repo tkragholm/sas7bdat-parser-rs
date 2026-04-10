@@ -9,6 +9,7 @@ use std::{
 
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 const TYPED_BATCHES_MEASUREMENT_SECONDS: u64 = 30;
+const DEFAULT_TYPED_BATCH_ROWS: &[usize] = &[256];
 
 const NON_TARGET_FIXTURES: &[(&str, &str)] = &[
     (
@@ -88,7 +89,7 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
     });
 
     group.measurement_time(Duration::from_secs(TYPED_BATCHES_MEASUREMENT_SECONDS));
-    for &batch_rows in &[256usize, 512, 1024] {
+    for &batch_rows in DEFAULT_TYPED_BATCH_ROWS {
         group.bench_with_input(
             BenchmarkId::new("typed_batches", batch_rows),
             &batch_rows,
