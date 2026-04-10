@@ -8,8 +8,8 @@ use super::{
     decode_numeric_cell, is_blank_after_trim_mode, materialize_staged_numeric_column, numeric_bits,
     numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
-use crate::DictionaryStaging;
 use crate::define_owned_column_enum;
+use crate::{BLANK_ID, DictionaryStaging};
 use encoding_rs::WINDOWS_1252;
 
 #[derive(Debug)]
@@ -92,6 +92,7 @@ const DICT_CAPACITY: usize = 512;
 const DICT_SLOT_MASK: usize = DICT_CAPACITY - 1;
 const MAX_DICT_ENTRIES: usize = 200;
 const MAX_STAGED_STRING_WIDTH: u32 = 20;
+const DICT_ID_NONE: u32 = u32::MAX;
 
 #[derive(Debug, Clone, Copy)]
 struct DictSlot {
@@ -166,7 +167,7 @@ impl StagedStringLookup {
     #[inline]
     const fn observe_lookup(&mut self) {
         self.seen = self.seen.saturating_add(1);
-        if self.seen >= 2_048 && self.promoted.saturating_mul(100) < self.seen.saturating_mul(5) {
+        if self.seen >= 2_048 && self.promoted.saturating_mul(100) < self.seen.saturating_mul(8) {
             self.disabled = true;
         }
     }
@@ -206,14 +207,14 @@ impl StagedStringLookup {
         let recent_slot = (h as usize) & 3;
         if self.recent_valid[recent_slot] != 0 && self.recent_hashes[recent_slot] == h {
             let entry_idx = self.recent_entries[recent_slot];
-            let entry = &self.entries[entry_idx as usize];
-            let len = usize::from(entry.key_len);
-            if key.len() == len && entry.key[..len] == *key {
-                return match entry.state {
-                    DictEntryState::SeenOnce => Some(StageLookupHit::SeenOnce(entry_idx)),
-                    DictEntryState::Interned => Some(StageLookupHit::Interned(entry_idx)),
-                };
-            }
+                let entry = &self.entries[entry_idx as usize];
+                let len = usize::from(entry.key_len);
+                if key.len() == len && entry.key[..len] == *key {
+                    return match entry.state {
+                        DictEntryState::SeenOnce => Some(StageLookupHit::SeenOnce(entry_idx)),
+                        DictEntryState::Interned => Some(StageLookupHit::Interned(entry_idx)),
+                    };
+                }
         }
 
         let mut slot = (h as usize) & DICT_SLOT_MASK;
@@ -569,7 +570,7 @@ impl BatchAccumulator {
         capacity_hint_rows: usize,
     ) -> Self {
         let staged_string_lookups = build_staged_string_lookups(&plan);
-        let columns = plan
+        let mut columns: Vec<OwnedBatchColumnBuilder> = plan
             .row_plan
             .columns
             .iter()
@@ -593,6 +594,14 @@ impl BatchAccumulator {
                 )
             })
             .collect();
+        for &idx in &plan.families.direct_utf8_owned {
+            if staged_string_lookups.get(idx).is_some_and(Option::is_some)
+                && let Some(OwnedBatchColumnBuilder::Utf8 { dictionary_ids, .. }) =
+                    columns.get_mut(idx)
+            {
+                dictionary_ids.replace(Vec::with_capacity(capacity_hint_rows.max(1)));
+            }
+        }
         Self {
             plan,
             target_rows: target_rows.max(1),
@@ -993,6 +1002,14 @@ impl BatchAccumulator {
                 )
             })
             .collect();
+        for &idx in &self.plan.families.direct_utf8_owned {
+            if self.staged_string_lookups.get(idx).is_some_and(Option::is_some)
+                && let Some(OwnedBatchColumnBuilder::Utf8 { dictionary_ids, .. }) =
+                    self.columns.get_mut(idx)
+            {
+                dictionary_ids.replace(Vec::with_capacity(self.capacity_hint_rows.max(1)));
+            }
+        }
         self.owned_strings.clear();
         self.utf8_decode_scratch.clear();
     }
@@ -1050,6 +1067,7 @@ impl OwnedBatchColumnBuilder {
                 offsets: Vec::with_capacity(target_rows.saturating_add(1)),
                 data: Vec::with_capacity(utf8_variable_capacity),
                 valid: None,
+                dictionary_ids: None,
             },
             ColumnMaterializationKind::RawBytes => Self::RawBytes {
                 offsets: Vec::with_capacity(target_rows.saturating_add(1)),
@@ -1393,13 +1411,16 @@ impl OwnedBatchColumnBuilder {
                 offsets,
                 data,
                 valid,
+                dictionary_ids,
             } => match cell {
                 PlannedCell::Null => {
                     push_variable_null(offsets, data, valid);
+                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                     Ok(())
                 }
                 PlannedCell::StrBorrowed(value) => {
                     push_utf8_bytes_fast(offsets, data, valid, value.as_bytes())?;
+                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                     Ok(())
                 }
                 PlannedCell::StrOwned(index) => {
@@ -1412,6 +1433,7 @@ impl OwnedBatchColumnBuilder {
                             .ok_or_else(|| Error::unsupported("owned string index out of range"))?
                             .as_bytes(),
                     )?;
+                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                     Ok(())
                 }
                 other => Err(unexpected_batch_cell("utf8", other)),
@@ -1521,10 +1543,12 @@ impl OwnedBatchColumnBuilder {
                 offsets,
                 data,
                 valid,
+                dictionary_ids,
             } => OwnedColumnBuffer::Utf8 {
                 offsets,
                 data,
                 valid,
+                dictionary_ids,
             },
             Self::RawBytes {
                 offsets,
@@ -1551,6 +1575,18 @@ fn push_utf8_bytes_fast(
     } else {
         push_variable_valid(offsets, data, valid, value)
     }
+}
+
+#[inline]
+fn push_dictionary_id(dictionary_ids: &mut Option<Vec<u32>>, dictionary_id: u32) {
+    if let Some(ids) = dictionary_ids.as_mut() {
+        ids.push(dictionary_id);
+    }
+}
+
+#[inline]
+fn staged_entry_to_dictionary_id(entry_idx: u16) -> u32 {
+    u32::from(entry_idx).saturating_add(1)
 }
 
 #[inline]
@@ -1589,6 +1625,7 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                 offsets,
                 data,
                 valid,
+                dictionary_ids,
             },
         ) if column.width == 1 => {
             let byte = row[column.start];
@@ -1604,6 +1641,14 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
 
             if slice.is_empty() || byte.is_ascii() {
                 push_variable_valid(offsets, data, valid, slice)?;
+                push_dictionary_id(
+                    dictionary_ids,
+                    if slice.is_empty() {
+                        BLANK_ID
+                    } else {
+                        DICT_ID_NONE
+                    },
+                );
                 return Ok(true);
             }
 
@@ -1620,70 +1665,84 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                     byte,
                     matches!(row_plan.string_kernel, StringDecodeKernel::EncodedStrict),
                 )?;
+                push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 return Ok(true);
             }
 
-            let trimmed = TrimmedString {
-                bytes: slice,
-                is_ascii: false,
-            };
-            match row_plan.string_kernel {
-                StringDecodeKernel::Utf8Strict => {
-                    // Single-byte non-ASCII cannot form a valid UTF-8 scalar.
-                    if column.width == 1 {
-                        return Err(Error::Decode(crate::error::DecodeError {
-                            message: "invalid UTF-8 in fixed-width string cell".to_owned(),
-                        }));
-                    }
-                    match std::str::from_utf8(slice) {
-                        Ok(_) => push_variable_valid(offsets, data, valid, slice)?,
-                        Err(_) => {
-                            return Err(Error::Decode(crate::error::DecodeError {
-                                message: "invalid UTF-8 in fixed-width string cell".to_owned(),
-                            }));
-                        }
-                    }
-                }
-                StringDecodeKernel::Utf8Lenient => match row_plan
-                    .decode_utf8_lenient_trimmed_bytes_for_batch_direct(
-                        trimmed,
-                        utf8_decode_scratch,
-                    ) {
-                    DecodedUtf8BatchValue::Borrowed(bytes) => {
-                        push_variable_valid(offsets, data, valid, bytes)?;
-                    }
-                    DecodedUtf8BatchValue::Scratch => {
-                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
-                    }
-                },
-                StringDecodeKernel::EncodedStrict => match row_plan
-                    .decode_encoded_strict_trimmed_bytes_for_batch_direct(
-                        trimmed,
-                        utf8_decode_scratch,
-                    )? {
-                    DecodedUtf8BatchValue::Borrowed(bytes) => {
-                        push_variable_valid(offsets, data, valid, bytes)?;
-                    }
-                    DecodedUtf8BatchValue::Scratch => {
-                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
-                    }
-                },
-                StringDecodeKernel::EncodedLenient => match row_plan
-                    .decode_encoded_lenient_trimmed_bytes_for_batch_direct(
-                        trimmed,
-                        utf8_decode_scratch,
-                    ) {
-                    DecodedUtf8BatchValue::Borrowed(bytes) => {
-                        push_variable_valid(offsets, data, valid, bytes)?;
-                    }
-                    DecodedUtf8BatchValue::Scratch => {
-                        push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
-                    }
-                },
-            }
+            append_non_ascii_single_byte_utf8(
+                row_plan,
+                offsets,
+                data,
+                valid,
+                dictionary_ids,
+                slice,
+                utf8_decode_scratch,
+            )?;
             Ok(true)
         }
         _ => Ok(false),
+    }
+}
+
+#[inline]
+fn append_non_ascii_single_byte_utf8(
+    row_plan: &RowDecodePlan,
+    offsets: &mut Vec<u32>,
+    data: &mut Vec<u8>,
+    valid: &mut Option<Vec<u64>>,
+    dictionary_ids: &mut Option<Vec<u32>>,
+    slice: &[u8],
+    utf8_decode_scratch: &mut String,
+) -> Result<()> {
+    let trimmed = TrimmedString {
+        bytes: slice,
+        is_ascii: false,
+    };
+    match row_plan.string_kernel {
+        StringDecodeKernel::Utf8Strict => {
+            Err(Error::Decode(crate::error::DecodeError {
+                message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+            }))
+        }
+        StringDecodeKernel::Utf8Lenient => {
+            match row_plan.decode_utf8_lenient_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)
+            {
+                DecodedUtf8BatchValue::Borrowed(bytes) => {
+                    push_variable_valid(offsets, data, valid, bytes)?;
+                }
+                DecodedUtf8BatchValue::Scratch => {
+                    push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
+                }
+            }
+            push_dictionary_id(dictionary_ids, DICT_ID_NONE);
+            Ok(())
+        }
+        StringDecodeKernel::EncodedStrict => {
+            match row_plan.decode_encoded_strict_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)?
+            {
+                DecodedUtf8BatchValue::Borrowed(bytes) => {
+                    push_variable_valid(offsets, data, valid, bytes)?;
+                }
+                DecodedUtf8BatchValue::Scratch => {
+                    push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
+                }
+            }
+            push_dictionary_id(dictionary_ids, DICT_ID_NONE);
+            Ok(())
+        }
+        StringDecodeKernel::EncodedLenient => {
+            match row_plan.decode_encoded_lenient_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)
+            {
+                DecodedUtf8BatchValue::Borrowed(bytes) => {
+                    push_variable_valid(offsets, data, valid, bytes)?;
+                }
+                DecodedUtf8BatchValue::Scratch => {
+                    push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
+                }
+            }
+            push_dictionary_id(dictionary_ids, DICT_ID_NONE);
+            Ok(())
+        }
     }
 }
 
@@ -1761,10 +1820,12 @@ pub(super) fn append_direct_utf8_borrowed_batch_column(
                 offsets,
                 data,
                 valid,
+                dictionary_ids,
             },
         ) => {
             let bytes = row_plan.decode_string_bytes_for_batch_borrowed(slice)?;
             push_variable_valid(offsets, data, valid, bytes)?;
+            push_dictionary_id(dictionary_ids, DICT_ID_NONE);
             Ok(true)
         }
         _ => Ok(false),
@@ -1793,6 +1854,7 @@ fn append_direct_utf8_owned_batch_column(
                 offsets,
                 data,
                 valid,
+                dictionary_ids,
             },
         ) => {
             let trimmed = trim_and_classify_for_mode(slice, row_plan.string_options.trim_mode);
@@ -1801,10 +1863,12 @@ fn append_direct_utf8_owned_batch_column(
                 || is_blank_after_trim_mode(slice, row_plan.string_options.trim_mode)
             {
                 push_variable_valid(offsets, data, valid, &[])?;
+                push_dictionary_id(dictionary_ids, BLANK_ID);
                 return Ok(true);
             }
             if trimmed.is_ascii {
                 push_variable_valid(offsets, data, valid, slice)?;
+                push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 return Ok(true);
             }
 
@@ -1817,22 +1881,35 @@ fn append_direct_utf8_owned_batch_column(
                         StageLookupHit::Interned(entry_idx) => {
                             let interned = dict.interned_utf8(entry_idx);
                             push_variable_valid(offsets, data, valid, interned)?;
+                            push_dictionary_id(
+                                dictionary_ids,
+                                staged_entry_to_dictionary_id(entry_idx),
+                            );
                             return Ok(true);
                         }
                         StageLookupHit::SeenOnce(entry_idx) => {
                             match decode_owned(row_plan, trimmed, utf8_decode_scratch)? {
                                 DecodedUtf8BatchValue::Borrowed(bytes) => {
+                                    // Append once from freshly decoded bytes, then promote for subsequent hits.
+                                    push_variable_valid(offsets, data, valid, bytes)?;
                                     dict.promote_interned(entry_idx, bytes);
-                                    let interned = dict.interned_utf8(entry_idx);
-                                    push_variable_valid(offsets, data, valid, interned)?;
+                                    push_dictionary_id(
+                                        dictionary_ids,
+                                        staged_entry_to_dictionary_id(entry_idx),
+                                    );
                                 }
                                 DecodedUtf8BatchValue::Scratch => {
+                                    // Avoid reloading from dictionary arena on the promotion row.
+                                    let promoted_utf8 = utf8_decode_scratch.as_bytes();
+                                    push_variable_valid(offsets, data, valid, promoted_utf8)?;
                                     dict.promote_interned(
                                         entry_idx,
-                                        utf8_decode_scratch.as_bytes(),
+                                        promoted_utf8,
                                     );
-                                    let interned = dict.interned_utf8(entry_idx);
-                                    push_variable_valid(offsets, data, valid, interned)?;
+                                    push_dictionary_id(
+                                        dictionary_ids,
+                                        staged_entry_to_dictionary_id(entry_idx),
+                                    );
                                 }
                             }
                             return Ok(true);
@@ -1847,12 +1924,14 @@ fn append_direct_utf8_owned_batch_column(
                         let _ = dict.insert_seen_once(slice);
                     }
                     push_variable_valid(offsets, data, valid, bytes)?;
+                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 }
                 DecodedUtf8BatchValue::Scratch => {
                     if let Some(dict) = staged_lookup.as_mut() {
                         let _ = dict.insert_seen_once(slice);
                     }
                     push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
+                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 }
             }
             Ok(true)

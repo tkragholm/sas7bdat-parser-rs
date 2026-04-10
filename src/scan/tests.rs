@@ -373,10 +373,12 @@ fn collect_batches_materializes_columnar_values() {
             offsets,
             data,
             valid,
+            dictionary_ids,
         } => {
             assert_eq!(offsets, &vec![0, 2, 6]);
             assert_eq!(data, b"AABBBB");
             assert!(valid.is_none());
+            assert!(dictionary_ids.is_none());
         }
         other => panic!("unexpected utf8 batch column: {other:?}"),
     }
@@ -560,10 +562,14 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
             offsets,
             data,
             valid,
+            dictionary_ids,
         } => {
             assert_eq!(offsets, &vec![0, 4]);
             assert_eq!(data, b"pear");
             assert!(valid.is_none());
+            assert!(
+                dictionary_ids.is_none() || dictionary_ids.as_deref() == Some(&[u32::MAX][..])
+            );
         }
         other => panic!("unexpected utf8 batch column: {other:?}"),
     }
@@ -735,10 +741,12 @@ fn collect_batches_decodes_windows1252_single_byte_compressed_row() {
             offsets,
             data,
             valid,
+            dictionary_ids,
         } => {
             assert_eq!(offsets, &vec![0, 3]);
             assert_eq!(data, &[0xE2, 0x80, 0x93]);
             assert!(valid.is_none());
+            assert!(dictionary_ids.is_none());
         }
         other => panic!("unexpected utf8 batch column: {other:?}"),
     }

@@ -1,4 +1,5 @@
 use crate::metadata::{SasDate, SasDateTime, SasTime};
+pub const BLANK_ID: u32 = 0;
 
 /// Bit-packed validity slice: each `u64` word holds 64 row-validity bits (LSB = first row).
 /// Bit `i % 64` of word `i / 64` is 1 if row `i` is valid, 0 if null.
@@ -21,6 +22,7 @@ pub struct Utf8Buffer<'a> {
     pub offsets: &'a [u32],
     pub data: &'a [u8],
     pub valid: Option<BitSlice<'a>>,
+    pub dictionary_ids: Option<&'a [u32]>,
     pub dictionary: Option<&'a Utf8Dictionary<'a>>,
 }
 
@@ -81,6 +83,7 @@ macro_rules! define_owned_column_enum {
                 offsets: Vec<u32>,
                 data: Vec<u8>,
                 valid: Option<Vec<u64>>,
+                dictionary_ids: Option<Vec<u32>>,
             },
             RawBytes {
                 offsets: Vec<u32>,
@@ -129,10 +132,12 @@ impl OwnedColumnBuffer {
                 offsets,
                 data,
                 valid,
+                dictionary_ids,
             } => ColumnBuffer::Utf8(Utf8Buffer {
                 offsets,
                 data,
                 valid: valid.as_deref(),
+                dictionary_ids: dictionary_ids.as_deref(),
                 dictionary: None,
             }),
             Self::RawBytes {

@@ -189,6 +189,7 @@ fn fixture_54_class_matches_expected_shape() {
             offsets,
             data,
             valid,
+        dictionary_ids: _,
         } => {
             assert_eq!(offsets, &vec![0, 6, 11, 18]);
             assert_eq!(data, b"AlfredAliceBarbara");
@@ -233,6 +234,7 @@ fn fixture_test2_matches_expected_shape() {
             offsets,
             data,
             valid,
+        dictionary_ids: _,
         } => {
             assert_eq!(offsets, &vec![0, 4, 7]);
             assert_eq!(data, b"peardog");
@@ -283,6 +285,7 @@ fn fixture_max_sas_date_matches_expected_shape() {
             offsets,
             data,
             valid,
+        dictionary_ids: _,
         } => {
             assert_eq!(offsets, &vec![0, 3, 9]);
             assert_eq!(data, b"maxnormal");
@@ -339,6 +342,7 @@ fn fixture_charset_utf8_matches_expected_shape() {
             offsets,
             data,
             valid,
+        dictionary_ids: _,
         } => {
             assert_eq!(offsets, &vec![0, 11, 22, 33]);
             assert_eq!(data, b"Iris-setosaIris-setosaIris-setosa");
@@ -383,6 +387,7 @@ fn fixture_cookie_matches_expected_shape() {
             offsets,
             data,
             valid,
+        dictionary_ids: _,
         } => {
             assert_eq!(offsets, &vec![0, 3, 7, 8]);
             assert_eq!(data, b"9.015.1.");
