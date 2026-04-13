@@ -39,7 +39,7 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
     let mut start_buf = [0u8; SAS_HEADER_START_SIZE];
     reader
         .read_exact(&mut start_buf)
-        .map_err(|e| io_header_error(&e))?;
+        .map_err(|e| Error::metadata_io(&e))?;
 
     let header_start = HeaderStart::from_bytes(start_buf);
     let is_catalog = header_start.magic == SAS7BCAT_MAGIC_NUMBER;
@@ -65,7 +65,7 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
     if pad_alignment > 0 {
         reader
             .seek(SeekFrom::Current(i64::from(pad_alignment)))
-            .map_err(|e| io_header_error(&e))?;
+            .map_err(|e| Error::metadata_io(&e))?;
     }
 
     let created_at = read_timestamp(reader, endianness)?;
@@ -80,12 +80,12 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
 
     reader
         .seek(SeekFrom::Current(8))
-        .map_err(|e| io_header_error(&e))?;
+        .map_err(|e| Error::metadata_io(&e))?;
 
     let mut end_buf = [0u8; SAS_HEADER_END_SIZE];
     reader
         .read_exact(&mut end_buf)
-        .map_err(|e| io_header_error(&e))?;
+        .map_err(|e| Error::metadata_io(&e))?;
     let header_end = HeaderEnd::from_bytes(end_buf);
     let release = header_end.release()?;
 
@@ -267,7 +267,7 @@ fn read_u32<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u32> {
     let mut buf = [0u8; 4];
     reader
         .read_exact(&mut buf)
-        .map_err(|e| io_header_error(&e))?;
+        .map_err(|e| Error::metadata_io(&e))?;
     Ok(match endianness {
         Endianness::Little => u32::from_le_bytes(buf),
         Endianness::Big => u32::from_be_bytes(buf),
@@ -278,7 +278,7 @@ fn read_u64<R: Read>(reader: &mut R, endianness: Endianness) -> Result<u64> {
     let mut buf = [0u8; 8];
     reader
         .read_exact(&mut buf)
-        .map_err(|e| io_header_error(&e))?;
+        .map_err(|e| Error::metadata_io(&e))?;
     Ok(match endianness {
         Endianness::Little => u64::from_le_bytes(buf),
         Endianness::Big => u64::from_be_bytes(buf),
@@ -289,7 +289,7 @@ fn read_f64<R: Read>(reader: &mut R, endianness: Endianness) -> Result<f64> {
     let mut buf = [0u8; 8];
     reader
         .read_exact(&mut buf)
-        .map_err(|e| io_header_error(&e))?;
+        .map_err(|e| Error::metadata_io(&e))?;
     let bits = match endianness {
         Endianness::Little => u64::from_le_bytes(buf),
         Endianness::Big => u64::from_be_bytes(buf),
@@ -349,10 +349,6 @@ fn system_time_from_unix_seconds(seconds: f64) -> Option<SystemTime> {
     } else {
         UNIX_EPOCH.checked_sub(duration)
     }
-}
-
-fn io_header_error(err: &std::io::Error) -> Error {
-    Error::metadata_corruption(err.to_string())
 }
 
 fn header_error(message: impl Into<String>) -> Error {

@@ -187,6 +187,21 @@ pub const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> 
     }
 }
 
+pub fn parse_subheader_signature(header: &HeaderInfo, data: &[u8]) -> Option<u32> {
+    if data.len() < header.subheader_signature_size {
+        return None;
+    }
+    let mut signature = read_u32(header.endianness, &data[0..4]);
+    if matches!(header.endianness, crate::metadata::Endianness::Big)
+        && header.uses_u64_pointers
+        && signature == u32::MAX
+        && data.len() >= 8
+    {
+        signature = read_u32(header.endianness, &data[4..8]);
+    }
+    Some(signature)
+}
+
 pub const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
 pub const SAS_PAGE_TYPE_META: u16 = 0x0000;
 pub const SAS_PAGE_TYPE_DATA: u16 = 0x0100;

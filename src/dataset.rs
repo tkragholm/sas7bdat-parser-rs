@@ -40,18 +40,8 @@ impl Dataset {
     /// SAS7BDAT structure cannot be parsed.
     pub fn open_with(path: impl AsRef<Path>, options: OpenOptions) -> Result<Self> {
         let path = path.as_ref();
-        let _meta = fs::metadata(path).map_err(|err| {
-            Error::Io(crate::error::IoError {
-                path: Some(path.to_path_buf()),
-                message: err.to_string(),
-            })
-        })?;
-        let file = File::open(path).map_err(|err| {
-            Error::Io(crate::error::IoError {
-                path: Some(path.to_path_buf()),
-                message: err.to_string(),
-            })
-        })?;
+        let _meta = fs::metadata(path).map_err(|err| Error::io_error_with_path(path, &err))?;
+        let file = File::open(path).map_err(|err| Error::io_error_with_path(path, &err))?;
         if should_try_mmap(options.io_backend)
             && let Some(mmap) = try_map_file(path, &file)?
         {
@@ -113,19 +103,9 @@ impl Dataset {
         reader: &mut R,
     ) -> Result<(LayoutPlan, DatasetMetadata, PageDescriptorTable)> {
         let (header, metadata) = probe_header(reader)?;
-        reader.rewind().map_err(|err| {
-            Error::Io(crate::error::IoError {
-                path: None,
-                message: err.to_string(),
-            })
-        })?;
+        reader.rewind().map_err(|err| Error::io_error(&err))?;
         let (layout, metadata) = parse_layout(reader, header, metadata)?;
-        reader.rewind().map_err(|err| {
-            Error::Io(crate::error::IoError {
-                path: None,
-                message: err.to_string(),
-            })
-        })?;
+        reader.rewind().map_err(|err| Error::io_error(&err))?;
         let descriptors = compile_page_descriptors(reader, &layout)?;
         Ok((layout, metadata, descriptors))
     }
@@ -181,10 +161,7 @@ fn try_map_file(path: &Path, file: &File) -> Result<Option<Mmap>> {
             if cfg!(target_family = "unix") || cfg!(target_family = "windows") {
                 Ok(None)
             } else {
-                Err(Error::Io(crate::error::IoError {
-                    path: Some(path.to_path_buf()),
-                    message: err.to_string(),
-                }))
+                Err(Error::io_error_with_path(path, &err))
             }
         }
     }

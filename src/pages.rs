@@ -2,9 +2,10 @@ use crate::{
     error::{Error, Result},
     internal::{
         LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass, PageKind, RowSpan,
-        RowSpanKind, SAS_PAGE_TYPE_COMP, classify_page, read_u32, read_u64,
+        RowSpanKind, SAS_PAGE_TYPE_COMP, classify_page, parse_subheader_signature, read_u32,
+        read_u64,
     },
-    types::{ByteOffset, PageIndex, RowIndex},
+    types::{ByteOffset, PageIndex, PageSlice, RowIndex},
 };
 use std::io::{Read, Seek, SeekFrom};
 
@@ -321,7 +322,9 @@ fn parse_subheader_pointers(
             0 => {
                 let data = &page[pointer.offset..data_end];
                 if pointer.is_compressed_data
-                    && !signature_is_recognized(parse_subheader_signature(header, data))
+                    && !signature_is_recognized(
+                        parse_subheader_signature(header, data).unwrap_or(0),
+                    )
                 {
                     let row_len = usize::from(layout.row_len);
                     let mut local_offset = pointer.offset;
@@ -594,14 +597,12 @@ fn is_stattransfer_release(release: &str) -> bool {
 }
 
 fn read_header_u16(page: &[u8], start: usize, layout: &LayoutPlan) -> Result<u16> {
-    let end = start.saturating_add(2);
-    let Some(bytes) = page.get(start..end) else {
+    let Ok(start) = u32::try_from(start) else {
         return Err(page_corruption("page header field exceeds page bounds"));
     };
-    Ok(match layout.header.endianness {
-        crate::metadata::Endianness::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
-        crate::metadata::Endianness::Big => u16::from_be_bytes([bytes[0], bytes[1]]),
-    })
+    PageSlice::new(page)
+        .get_u16(ByteOffset::from(start), layout.header.endianness)
+        .ok_or_else(|| page_corruption("page header field exceeds page bounds"))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -638,21 +639,6 @@ fn parse_pointer(pointer: &[u8], header: &crate::internal::HeaderInfo) -> Result
             is_compressed_data: pointer[9] != 0,
         })
     }
-}
-
-fn parse_subheader_signature(header: &crate::internal::HeaderInfo, data: &[u8]) -> u32 {
-    if data.len() < 4 {
-        return 0;
-    }
-    let mut signature = read_u32(header.endianness, &data[0..4]);
-    if matches!(header.endianness, crate::metadata::Endianness::Big)
-        && header.uses_u64_pointers
-        && signature == u32::MAX
-        && data.len() >= 8
-    {
-        signature = read_u32(header.endianness, &data[4..8]);
-    }
-    signature
 }
 
 const fn signature_is_recognized(signature: u32) -> bool {

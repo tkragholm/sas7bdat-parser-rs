@@ -115,6 +115,32 @@ pub enum Error {
 
 impl Error {
     #[must_use]
+    pub fn io(message: impl Into<String>) -> Self {
+        Self::Io(IoError {
+            path: None,
+            message: message.into(),
+        })
+    }
+
+    #[must_use]
+    pub fn io_with_path(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
+        Self::Io(IoError {
+            path: Some(path.into()),
+            message: message.into(),
+        })
+    }
+
+    #[must_use]
+    pub fn io_error(err: &std::io::Error) -> Self {
+        Self::io(err.to_string())
+    }
+
+    #[must_use]
+    pub fn io_error_with_path(path: impl Into<PathBuf>, err: &std::io::Error) -> Self {
+        Self::io_with_path(path, err.to_string())
+    }
+
+    #[must_use]
     pub fn unsupported(feature: impl Into<String>) -> Self {
         Self::Unsupported(UnsupportedError {
             feature: feature.into(),
@@ -134,6 +160,11 @@ impl Error {
     #[must_use]
     pub fn metadata_corruption(message: impl Into<String>) -> Self {
         Self::Metadata(MetadataError::Other(message.into()))
+    }
+
+    #[must_use]
+    pub fn metadata_io(err: &std::io::Error) -> Self {
+        Self::metadata_corruption(err.to_string())
     }
 }
 

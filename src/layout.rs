@@ -1,7 +1,10 @@
 use crate::{
     encoding::resolve_encoding,
     error::{Error, Result},
-    internal::{HeaderInfo, LayoutPlan, PageKind, classify_page, read_u16, read_u32, read_u64},
+    internal::{
+        HeaderInfo, LayoutPlan, PageKind, classify_page, parse_subheader_signature, read_u16,
+        read_u32, read_u64,
+    },
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
     types::RowLength,
 };
@@ -159,12 +162,12 @@ pub fn parse_layout<R: Read + Seek>(
         let page_offset = header.data_offset + page_index * u64::from(header.page_size);
         reader
             .seek(SeekFrom::Start(page_offset))
-            .map_err(|e| metadata_io_error(&e))?;
+            .map_err(|e| Error::metadata_io(&e))?;
 
         let mut page = vec![0u8; usize::from(header.page_size)];
         reader
             .read_exact(&mut page)
-            .map_err(|e| metadata_io_error(&e))?;
+            .map_err(|e| Error::metadata_io(&e))?;
 
         let page_type = read_u16(
             header.endianness,
@@ -527,21 +530,6 @@ fn parse_pointer(pointer: &[u8], header: &HeaderInfo) -> Result<PointerInfo> {
     }
 }
 
-fn parse_subheader_signature(header: &HeaderInfo, data: &[u8]) -> Option<u32> {
-    if data.len() < header.subheader_signature_size {
-        return None;
-    }
-    let mut signature = read_u32(header.endianness, &data[0..4]);
-    if matches!(header.endianness, crate::metadata::Endianness::Big)
-        && header.uses_u64_pointers
-        && signature == u32::MAX
-        && data.len() >= 8
-    {
-        signature = read_u32(header.endianness, &data[4..8]);
-    }
-    Some(signature)
-}
-
 fn parse_text_ref(endianness: crate::metadata::Endianness, bytes: &[u8]) -> TextRef {
     TextRef {
         index: read_u16(endianness, &bytes[0..2]),
@@ -599,10 +587,6 @@ fn get_range<'a>(bytes: &'a [u8], start: usize, end: usize, what: &str) -> Resul
     bytes
         .get(start..end)
         .ok_or_else(|| metadata_error(format!("{what} exceeds bounds")))
-}
-
-fn metadata_io_error(err: &std::io::Error) -> Error {
-    Error::metadata_corruption(err.to_string())
 }
 
 fn metadata_error(message: impl Into<String>) -> Error {

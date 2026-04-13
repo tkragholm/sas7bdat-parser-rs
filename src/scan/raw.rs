@@ -311,8 +311,8 @@ pub(super) fn load_descriptor_page<R: Read + Seek>(
 ) -> Result<()> {
     reader
         .seek(SeekFrom::Start(plan.page_offset(descriptor.page_index)))
-        .map_err(|e| scan_io_error(&e))?;
-    reader.read_exact(page).map_err(|e| scan_io_error(&e))?;
+        .map_err(|e| Error::io_error(&e))?;
+    reader.read_exact(page).map_err(|e| Error::io_error(&e))?;
     stats.raw_bytes_read = stats
         .raw_bytes_read
         .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
@@ -424,13 +424,6 @@ where
     Ok(false)
 }
 
-pub(super) fn scan_io_error(err: &std::io::Error) -> Error {
-    Error::Io(crate::error::IoError {
-        path: None,
-        message: err.to_string(),
-    })
-}
-
 pub(super) enum ScanReader {
     File(File),
     Bytes(Cursor<Arc<[u8]>>),
@@ -456,12 +449,9 @@ impl Seek for ScanReader {
 
 pub(super) fn open_scan_reader(ds: &Dataset) -> Result<ScanReader> {
     match &ds.file.source {
-        FileSource::Path(path) => File::open(path).map(ScanReader::File).map_err(|err| {
-            Error::Io(crate::error::IoError {
-                path: Some(path.clone()),
-                message: err.to_string(),
-            })
-        }),
+        FileSource::Path(path) => File::open(path)
+            .map(ScanReader::File)
+            .map_err(|err| Error::io_error_with_path(path, &err)),
         FileSource::Bytes(bytes) => Ok(ScanReader::Bytes(Cursor::new(Arc::clone(bytes)))),
         FileSource::Mmap(_) => unreachable!("mapped files use the in-memory scan path"),
     }
