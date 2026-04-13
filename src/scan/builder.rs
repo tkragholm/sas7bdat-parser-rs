@@ -480,7 +480,7 @@ impl ScanBuilder<'_> {
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
-        if let Some(mut batches) = self.try_collect_batches_parallel(
+        if let Some(batches) = self.try_collect_batches_parallel(
             resolve_batch_row_capacity(self)?,
             effective_scan_row_capacity_hint(self).min(resolve_batch_row_capacity(self)?),
         )? {
@@ -488,7 +488,7 @@ impl ScanBuilder<'_> {
                 decode_batches: u64::try_from(batches.len()).unwrap_or(u64::MAX),
                 ..ScanStats::default()
             };
-            for batch in batches.drain(..) {
+            for batch in batches {
                 stats.rows_emitted = stats
                     .rows_emitted
                     .saturating_add(u64::try_from(batch.row_count).unwrap_or(u64::MAX));
