@@ -5,8 +5,8 @@ use super::{
     SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
     TimeNumericValue, TrimMode, TrimmedString, TypedNumericValue, classify_date_numeric_value,
     classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
-    decode_numeric_cell, materialize_staged_numeric_column, numeric_bits,
-    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
+    decode_numeric_cell, materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
+    staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
 use crate::define_owned_column_enum;
 use crate::{BLANK_ID, DictionaryStaging};
@@ -1054,7 +1054,10 @@ impl BatchAccumulator {
             })
             .collect();
         for &idx in &self.plan.families.direct_utf8_owned {
-            if self.staged_string_lookups.get(idx).is_some_and(Option::is_some)
+            if self
+                .staged_string_lookups
+                .get(idx)
+                .is_some_and(Option::is_some)
                 && let Some(OwnedBatchColumnBuilder::Utf8 { dictionary_ids, .. }) =
                     self.columns.get_mut(idx)
             {
@@ -1799,13 +1802,12 @@ fn append_non_ascii_single_byte_utf8(
         is_ascii: false,
     };
     match row_plan.string_kernel {
-        StringDecodeKernel::Utf8Strict => {
-            Err(Error::Decode(crate::error::DecodeError {
-                message: "invalid UTF-8 in fixed-width string cell".to_owned(),
-            }))
-        }
+        StringDecodeKernel::Utf8Strict => Err(Error::Decode(crate::error::DecodeError {
+            message: "invalid UTF-8 in fixed-width string cell".to_owned(),
+        })),
         StringDecodeKernel::Utf8Lenient => {
-            match row_plan.decode_utf8_lenient_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)
+            match row_plan
+                .decode_utf8_lenient_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)
             {
                 DecodedUtf8BatchValue::Borrowed(bytes) => {
                     push_variable_valid(offsets, data, valid, bytes)?;
@@ -1818,8 +1820,10 @@ fn append_non_ascii_single_byte_utf8(
             Ok(())
         }
         StringDecodeKernel::EncodedStrict => {
-            match row_plan.decode_encoded_strict_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)?
-            {
+            match row_plan.decode_encoded_strict_trimmed_bytes_for_batch_direct(
+                trimmed,
+                utf8_decode_scratch,
+            )? {
                 DecodedUtf8BatchValue::Borrowed(bytes) => {
                     push_variable_valid(offsets, data, valid, bytes)?;
                 }
@@ -1831,7 +1835,8 @@ fn append_non_ascii_single_byte_utf8(
             Ok(())
         }
         StringDecodeKernel::EncodedLenient => {
-            match row_plan.decode_encoded_lenient_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)
+            match row_plan
+                .decode_encoded_lenient_trimmed_bytes_for_batch_direct(trimmed, utf8_decode_scratch)
             {
                 DecodedUtf8BatchValue::Borrowed(bytes) => {
                     push_variable_valid(offsets, data, valid, bytes)?;
@@ -2012,11 +2017,7 @@ fn append_direct_utf8_owned_batch_column(
                                     // Avoid reloading from dictionary arena on the promotion row.
                                     let promoted_utf8 = utf8_decode_scratch.as_bytes();
                                     push_variable_valid(offsets, data, valid, promoted_utf8)?;
-                                    dict.promote_interned(
-                                        entry_idx,
-                                        promoted_utf8,
-                                        false,
-                                    );
+                                    dict.promote_interned(entry_idx, promoted_utf8, false);
                                     push_dictionary_id(
                                         dictionary_ids,
                                         staged_entry_to_dictionary_id(entry_idx),

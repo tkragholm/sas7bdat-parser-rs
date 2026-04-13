@@ -305,38 +305,38 @@ fn dictionary_staging_policy_controls_lookup_construction() {
     let row = make_numeric_text_row(1.0, *b"A  \xC4");
     let ds = make_windows1252_test_dataset(&row);
 
-    let plan_off = BatchDecodePlan::new(
-        &ScanBuilder::new(&ds).with_string_options(crate::StringDecodeOptions {
+    let plan_off = BatchDecodePlan::new(&ScanBuilder::new(&ds).with_string_options(
+        crate::StringDecodeOptions {
             trim_mode: crate::TrimMode::RTrim,
             utf8_validation: crate::Utf8ValidationMode::Strict,
             mojibake_fix: crate::MojibakePolicy::Auto,
             dictionary_staging: crate::DictionaryStaging::Off,
-        }),
-    )
+        },
+    ))
     .expect("plan off");
     let acc_off = BatchAccumulator::new(plan_off, 1, 1);
     assert!(!acc_off.has_staged_string_lookup_for(1));
 
-    let plan_on = BatchDecodePlan::new(
-        &ScanBuilder::new(&ds).with_string_options(crate::StringDecodeOptions {
+    let plan_on = BatchDecodePlan::new(&ScanBuilder::new(&ds).with_string_options(
+        crate::StringDecodeOptions {
             trim_mode: crate::TrimMode::Preserve,
             utf8_validation: crate::Utf8ValidationMode::Strict,
             mojibake_fix: crate::MojibakePolicy::Auto,
             dictionary_staging: crate::DictionaryStaging::On,
-        }),
-    )
+        },
+    ))
     .expect("plan on");
     let acc_on = BatchAccumulator::new(plan_on, 1, 1);
     assert!(acc_on.has_staged_string_lookup_for(1));
 
-    let plan_auto = BatchDecodePlan::new(
-        &ScanBuilder::new(&ds).with_string_options(crate::StringDecodeOptions {
+    let plan_auto = BatchDecodePlan::new(&ScanBuilder::new(&ds).with_string_options(
+        crate::StringDecodeOptions {
             trim_mode: crate::TrimMode::Preserve,
             utf8_validation: crate::Utf8ValidationMode::Strict,
             mojibake_fix: crate::MojibakePolicy::Auto,
             dictionary_staging: crate::DictionaryStaging::Auto,
-        }),
-    )
+        },
+    ))
     .expect("plan auto");
     let acc_auto = BatchAccumulator::new(plan_auto, 1, 1);
     assert!(!acc_auto.has_staged_string_lookup_for(1));
@@ -567,9 +567,7 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
             assert_eq!(offsets, &vec![0, 4]);
             assert_eq!(data, b"pear");
             assert!(valid.is_none());
-            assert!(
-                dictionary_ids.is_none() || dictionary_ids.as_deref() == Some(&[u32::MAX][..])
-            );
+            assert!(dictionary_ids.is_none() || dictionary_ids.as_deref() == Some(&[u32::MAX][..]));
         }
         other => panic!("unexpected utf8 batch column: {other:?}"),
     }

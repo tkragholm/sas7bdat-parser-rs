@@ -48,6 +48,9 @@ fn bench_dataset_scans(
 ) {
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Elements(dataset.metadata().row_count));
+    const BATCH_ROWS_SMALL: usize = 256;
+    const BATCH_ROWS_MEDIUM: usize = 4096;
+    const BATCH_ROWS_LARGE: usize = 16384;
 
     if bench_raw {
         group.bench_function(BenchmarkId::new("raw_rows", "all"), |b| {
@@ -75,16 +78,37 @@ fn bench_dataset_scans(
     }
 
     if bench_batches {
-        group.bench_function(BenchmarkId::new("typed_batches", "all"), |b| {
-            b.iter(|| {
-                let batches = dataset
-                    .scan()
-                    .with_batch_hint(BatchHint::Rows(256))
-                    .collect_batches()
-                    .expect("typed batches");
-                black_box(batches.len());
+        group.bench_function(
+            BenchmarkId::new("typed_batches_collect", BATCH_ROWS_SMALL),
+            |b| {
+                b.iter(|| {
+                    let batches = dataset
+                        .scan()
+                        .with_batch_hint(BatchHint::Rows(BATCH_ROWS_SMALL))
+                        .collect_batches()
+                        .expect("typed batches");
+                    black_box(batches.len());
+                });
+            },
+        );
+
+        for batch_rows in [BATCH_ROWS_SMALL, BATCH_ROWS_MEDIUM, BATCH_ROWS_LARGE] {
+            group.bench_function(BenchmarkId::new("typed_batches_visit", batch_rows), |b| {
+                b.iter(|| {
+                    let stats = dataset
+                        .scan()
+                        .with_batch_hint(BatchHint::Rows(batch_rows))
+                        .visit_batches(|batch| {
+                            black_box(batch.row_base);
+                            black_box(batch.row_count);
+                            black_box(batch.columns.len());
+                            Ok(std::ops::ControlFlow::Continue(()))
+                        })
+                        .expect("typed batch visit");
+                    black_box(stats.decode_batches);
+                });
             });
-        });
+        }
     }
 
     group.bench_function(BenchmarkId::new("raw_rows", "slice"), |b| {
@@ -111,6 +135,9 @@ fn bench_dataset_scans(
 fn bench_projected_scans(c: &mut Criterion, name: &str, dataset: Dataset, projection: Projection) {
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Elements(dataset.metadata().row_count));
+    const BATCH_ROWS_SMALL: usize = 256;
+    const BATCH_ROWS_MEDIUM: usize = 4096;
+    const BATCH_ROWS_LARGE: usize = 16384;
 
     group.bench_function(BenchmarkId::new("typed_rows", "projected"), |b| {
         b.iter(|| {
@@ -123,19 +150,49 @@ fn bench_projected_scans(c: &mut Criterion, name: &str, dataset: Dataset, projec
         });
     });
 
-    group.bench_function(BenchmarkId::new("typed_batches", "projected"), |b| {
-        b.iter(|| {
-            let batches = dataset
-                .scan()
-                .with_projection(&projection)
-                .with_batch_hint(BatchHint::Rows(256))
-                .collect_batches()
-                .expect("projected typed batches");
-            black_box(batches.len());
+    group.bench_function(
+        BenchmarkId::new("typed_batches_collect", "projected_256"),
+        |b| {
+            b.iter(|| {
+                let batches = dataset
+                    .scan()
+                    .with_projection(&projection)
+                    .with_batch_hint(BatchHint::Rows(BATCH_ROWS_SMALL))
+                    .collect_batches()
+                    .expect("projected typed batches");
+                black_box(batches.len());
+            });
+        },
+    );
+
+    for batch_rows in [BATCH_ROWS_SMALL, BATCH_ROWS_MEDIUM, BATCH_ROWS_LARGE] {
+        group.bench_function(BenchmarkId::new("typed_batches_visit", batch_rows), |b| {
+            b.iter(|| {
+                let stats = dataset
+                    .scan()
+                    .with_projection(&projection)
+                    .with_batch_hint(BatchHint::Rows(batch_rows))
+                    .visit_batches(|batch| {
+                        black_box(batch.row_base);
+                        black_box(batch.row_count);
+                        black_box(batch.columns.len());
+                        Ok(std::ops::ControlFlow::Continue(()))
+                    })
+                    .expect("projected typed batch visit");
+                black_box(stats.decode_batches);
+            });
         });
-    });
+    }
 
     group.finish();
+}
+
+fn bench_numeric_projection(c: &mut Criterion, name: &str, dataset: Dataset) {
+    let Some(projection) = build_projection(&dataset, ProjectionPreset::Numeric) else {
+        return;
+    };
+    let projected_name = format!("{name}_numeric_only");
+    bench_projected_scans(c, &projected_name, dataset, projection);
 }
 
 fn maybe_scan_hotpaths_from_catalog(c: &mut Criterion) -> bool {
@@ -189,7 +246,8 @@ fn maybe_scan_hotpaths_from_catalog(c: &mut Criterion) -> bool {
         match projection {
             ProjectionPreset::Full => {
                 let name = format!("tag_{tag_label}_{fixture_id}");
-                bench_dataset_scans(c, &name, dataset, true, true, true);
+                bench_dataset_scans(c, &name, dataset.clone(), true, true, true);
+                bench_numeric_projection(c, &name, dataset);
             }
             preset => {
                 let Some(projection) = build_projection(&dataset, preset) else {
@@ -243,19 +301,23 @@ fn scan_hotpaths(c: &mut Criterion) {
     }
 
     if let Some(dataset) = load_dataset("raw_data/csharp/charset_utf8.sas7bdat") {
-        bench_dataset_scans(c, "fixture_charset_utf8", dataset, true, true, true);
+        bench_dataset_scans(c, "fixture_charset_utf8", dataset.clone(), true, true, true);
+        bench_numeric_projection(c, "fixture_charset_utf8", dataset);
     }
 
     if let Some(dataset) = load_dataset("raw_data/csharp/54-class.sas7bdat") {
-        bench_dataset_scans(c, "fixture_54_class", dataset, true, true, true);
+        bench_dataset_scans(c, "fixture_54_class", dataset.clone(), true, true, true);
+        bench_numeric_projection(c, "fixture_54_class", dataset);
     }
 
     if let Some(dataset) = load_dataset("raw_data/pandas/test2.sas7bdat") {
-        bench_dataset_scans(c, "fixture_test2", dataset, true, true, true);
+        bench_dataset_scans(c, "fixture_test2", dataset.clone(), true, true, true);
+        bench_numeric_projection(c, "fixture_test2", dataset);
     }
 
     if let Some(dataset) = load_dataset("raw_data/pandas/max_sas_date.sas7bdat") {
-        bench_dataset_scans(c, "fixture_max_sas_date", dataset, true, true, true);
+        bench_dataset_scans(c, "fixture_max_sas_date", dataset.clone(), true, true, true);
+        bench_numeric_projection(c, "fixture_max_sas_date", dataset);
     }
 
     if let Some(dataset) = load_dataset("raw_data/ahs2013/topical.sas7bdat") {
@@ -301,14 +363,16 @@ fn scan_hotpaths(c: &mut Criterion) {
                 projection,
             );
         }
-        bench_dataset_scans(c, "fixture_topical", dataset, true, true, true);
+        bench_dataset_scans(c, "fixture_topical", dataset.clone(), true, true, true);
+        bench_numeric_projection(c, "fixture_topical", dataset);
     }
 
     if let Some(dataset) = load_dataset("raw_data/ahs2013/homimp.sas7bdat") {
         if let Ok(projection) = dataset.projection().columns(["CONTROL", "RAD"]).build() {
             bench_projected_scans(c, "fixture_homimp_projection", dataset.clone(), projection);
         }
-        bench_dataset_scans(c, "fixture_homimp", dataset, true, true, true);
+        bench_dataset_scans(c, "fixture_homimp", dataset.clone(), true, true, true);
+        bench_numeric_projection(c, "fixture_homimp", dataset);
     }
 }
 
