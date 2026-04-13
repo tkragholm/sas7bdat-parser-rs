@@ -7,7 +7,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use sas7bdat_simd::{
-    BatchHint, Dataset, Projection, RowSelection,
+    BatchHint, Dataset, Parallelism, Projection, RowSelection,
     fixture_catalog::{FixtureCatalog, FixtureStatus, ProjectionPreset, build_projection},
 };
 use std::{
@@ -51,6 +51,7 @@ fn bench_dataset_scans(
     const BATCH_ROWS_SMALL: usize = 256;
     const BATCH_ROWS_MEDIUM: usize = 4096;
     const BATCH_ROWS_LARGE: usize = 16384;
+    const PARALLEL_THREADS: usize = 4;
 
     if bench_raw {
         group.bench_function(BenchmarkId::new("raw_rows", "all"), |b| {
@@ -92,6 +93,21 @@ fn bench_dataset_scans(
             },
         );
 
+        group.bench_function(
+            BenchmarkId::new("typed_batches_collect_threads_4", BATCH_ROWS_SMALL),
+            |b| {
+                b.iter(|| {
+                    let batches = dataset
+                        .scan()
+                        .with_parallelism(Parallelism::Threads(PARALLEL_THREADS))
+                        .with_batch_hint(BatchHint::Rows(BATCH_ROWS_SMALL))
+                        .collect_batches()
+                        .expect("typed batches");
+                    black_box(batches.len());
+                });
+            },
+        );
+
         for batch_rows in [BATCH_ROWS_SMALL, BATCH_ROWS_MEDIUM, BATCH_ROWS_LARGE] {
             group.bench_function(BenchmarkId::new("typed_batches_visit", batch_rows), |b| {
                 b.iter(|| {
@@ -108,6 +124,26 @@ fn bench_dataset_scans(
                     black_box(stats.decode_batches);
                 });
             });
+
+            group.bench_function(
+                BenchmarkId::new("typed_batches_visit_threads_4", batch_rows),
+                |b| {
+                    b.iter(|| {
+                        let stats = dataset
+                            .scan()
+                            .with_parallelism(Parallelism::Threads(PARALLEL_THREADS))
+                            .with_batch_hint(BatchHint::Rows(batch_rows))
+                            .visit_batches(|batch| {
+                                black_box(batch.row_base);
+                                black_box(batch.row_count);
+                                black_box(batch.columns.len());
+                                Ok(std::ops::ControlFlow::Continue(()))
+                            })
+                            .expect("typed batch visit");
+                        black_box(stats.decode_batches);
+                    });
+                },
+            );
         }
     }
 
@@ -138,6 +174,7 @@ fn bench_projected_scans(c: &mut Criterion, name: &str, dataset: Dataset, projec
     const BATCH_ROWS_SMALL: usize = 256;
     const BATCH_ROWS_MEDIUM: usize = 4096;
     const BATCH_ROWS_LARGE: usize = 16384;
+    const PARALLEL_THREADS: usize = 4;
 
     group.bench_function(BenchmarkId::new("typed_rows", "projected"), |b| {
         b.iter(|| {
@@ -165,6 +202,22 @@ fn bench_projected_scans(c: &mut Criterion, name: &str, dataset: Dataset, projec
         },
     );
 
+    group.bench_function(
+        BenchmarkId::new("typed_batches_collect_threads_4", "projected_256"),
+        |b| {
+            b.iter(|| {
+                let batches = dataset
+                    .scan()
+                    .with_projection(&projection)
+                    .with_parallelism(Parallelism::Threads(PARALLEL_THREADS))
+                    .with_batch_hint(BatchHint::Rows(BATCH_ROWS_SMALL))
+                    .collect_batches()
+                    .expect("projected typed batches");
+                black_box(batches.len());
+            });
+        },
+    );
+
     for batch_rows in [BATCH_ROWS_SMALL, BATCH_ROWS_MEDIUM, BATCH_ROWS_LARGE] {
         group.bench_function(BenchmarkId::new("typed_batches_visit", batch_rows), |b| {
             b.iter(|| {
@@ -182,6 +235,27 @@ fn bench_projected_scans(c: &mut Criterion, name: &str, dataset: Dataset, projec
                 black_box(stats.decode_batches);
             });
         });
+
+        group.bench_function(
+            BenchmarkId::new("typed_batches_visit_threads_4", batch_rows),
+            |b| {
+                b.iter(|| {
+                    let stats = dataset
+                        .scan()
+                        .with_projection(&projection)
+                        .with_parallelism(Parallelism::Threads(PARALLEL_THREADS))
+                        .with_batch_hint(BatchHint::Rows(batch_rows))
+                        .visit_batches(|batch| {
+                            black_box(batch.row_base);
+                            black_box(batch.row_count);
+                            black_box(batch.columns.len());
+                            Ok(std::ops::ControlFlow::Continue(()))
+                        })
+                        .expect("projected typed batch visit");
+                    black_box(stats.decode_batches);
+                });
+            },
+        );
     }
 
     group.finish();
