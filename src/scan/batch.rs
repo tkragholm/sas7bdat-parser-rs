@@ -11,6 +11,7 @@ use super::{
 use crate::define_owned_column_enum;
 use crate::{BLANK_ID, DictionaryStaging};
 use encoding_rs::WINDOWS_1252;
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 #[derive(Debug)]
 pub(super) struct BatchDecodePlan {
@@ -369,6 +370,7 @@ pub(super) struct BatchAccumulator {
     utf8_decode_scratch: String,
     staged_string_lookups: Vec<Option<StagedStringLookup>>,
     counters: BatchFamilyCounters,
+    materialize_threads: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -675,7 +677,13 @@ impl BatchAccumulator {
             utf8_decode_scratch: String::new(),
             staged_string_lookups,
             counters: BatchFamilyCounters::default(),
+            materialize_threads: 1,
         }
+    }
+
+    pub(super) fn with_materialize_threads(mut self, threads: usize) -> Self {
+        self.materialize_threads = threads.max(1);
+        self
     }
 
     pub(super) const fn is_empty(&self) -> bool {
@@ -1008,10 +1016,8 @@ impl BatchAccumulator {
     pub(super) fn take_batch(&mut self) -> OwnedColumnarBatch {
         let row_base = self.row_base.unwrap_or(0);
         let row_count = self.row_count;
-        let columns = std::mem::take(&mut self.columns)
-            .into_iter()
-            .map(OwnedBatchColumnBuilder::finish)
-            .collect();
+        let columns =
+            finish_columns_ordered(std::mem::take(&mut self.columns), self.materialize_threads);
         self.row_base = None;
         self.row_count = 0;
         OwnedColumnarBatch {
@@ -1069,6 +1075,34 @@ impl BatchAccumulator {
             .get(idx)
             .is_some_and(Option::is_some)
     }
+}
+
+fn finish_columns_ordered(
+    columns: Vec<OwnedBatchColumnBuilder>,
+    materialize_threads: usize,
+) -> Vec<OwnedColumnBuffer> {
+    const PARALLEL_MIN_COLUMNS: usize = 16;
+
+    let column_count = columns.len();
+    if materialize_threads <= 1 || column_count < PARALLEL_MIN_COLUMNS {
+        return columns
+            .into_iter()
+            .map(OwnedBatchColumnBuilder::finish)
+            .collect();
+    }
+
+    let workers = materialize_threads.min(column_count);
+    let mut merged = columns
+        .into_iter()
+        .enumerate()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .with_max_len(column_count.div_ceil(workers))
+        .map(|(idx, column)| (idx, column.finish()))
+        .collect::<Vec<_>>();
+
+    merged.sort_unstable_by_key(|(idx, _)| *idx);
+    merged.into_iter().map(|(_, column)| column).collect()
 }
 
 impl OwnedBatchColumnBuilder {

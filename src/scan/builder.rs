@@ -6,6 +6,13 @@ use super::{
     TemporalDecodeOptions, borrow_column_buffers, effective_scan_row_capacity_hint,
     materialize_planned_cells, resolve_batch_row_capacity, scan_raw_rows, scan_row_bytes,
 };
+
+fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
+    match parallelism {
+        Parallelism::Threads(n) => n.max(1),
+        Parallelism::None | Parallelism::Auto => 1,
+    }
+}
 pub struct ScanBuilder<'a> {
     pub(crate) ds: &'a Dataset,
     pub(crate) projection: Option<&'a Projection>,
@@ -235,7 +242,8 @@ impl<'a> ScanBuilder<'a> {
         let estimated_batches = self.ds.metadata.row_count.div_ceil(target_rows_u64);
         let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
         let mut batch_accumulator =
-            BatchAccumulator::new(BatchDecodePlan::new(self)?, target_rows, capacity_hint_rows);
+            BatchAccumulator::new(BatchDecodePlan::new(self)?, target_rows, capacity_hint_rows)
+                .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
 
         let _stats = scan_row_bytes(self, &mut |row_index, bytes| {
             batch_accumulator.push_row(row_index.into(), bytes)?;
@@ -372,7 +380,8 @@ impl ScanBuilder<'_> {
         let target_rows = resolve_batch_row_capacity(self)?;
         let capacity_hint_rows = effective_scan_row_capacity_hint(self).min(target_rows);
         let mut batcher =
-            BatchAccumulator::new(BatchDecodePlan::new(self)?, target_rows, capacity_hint_rows);
+            BatchAccumulator::new(BatchDecodePlan::new(self)?, target_rows, capacity_hint_rows)
+                .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
         let mut decode_batches = 0u64;
         let mut stop_after_current_batch = false;
 

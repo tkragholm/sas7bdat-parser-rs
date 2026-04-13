@@ -914,6 +914,7 @@ dependencies = [
  "hotpath",
  "memchr",
  "memmap2",
+ "rayon",
  "serde",
  "serde_json",
 ]

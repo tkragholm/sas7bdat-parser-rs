@@ -140,6 +140,19 @@ Completed:
   - NYYTS 2018: **-9.6% faster** (p=0.00)
   - BRFSS 2018: **-3.1% faster** (p=0.00)
 
+12. Added opt-in parallel typed-batch column materialization at batch flush.
+- Implemented parallel `OwnedBatchColumnBuilder::finish()` dispatch in `BatchAccumulator::take_batch`,
+  preserving deterministic column order on merge.
+- Wired to `ScanBuilder` via existing `Parallelism` config.
+- Switched implementation backend from per-batch `std::thread::scope` to `rayon`.
+- Safety/default behavior:
+  - `Parallelism::Auto` remains single-threaded (no default overhead),
+  - parallel path is activated only for `Parallelism::Threads(n)`,
+  - disabled for small column sets (`<16` columns) to avoid scheduling overhead.
+- Benchmark note:
+  - first attempt enabling parallel work for `Auto` regressed heavily due per-batch spawn overhead,
+    so it was rolled back to opt-in only.
+
 ## Existing SIMD coverage
 
 | Location | What | SIMD width |
