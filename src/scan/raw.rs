@@ -172,7 +172,7 @@ fn emit_progress(
     }
 }
 
-fn emit_rows_from_page<F>(
+pub(super) fn emit_rows_from_page<F>(
     builder: &ScanBuilder<'_>,
     plan: &RawScanPlan,
     descriptor: PageDescriptor,
@@ -237,7 +237,7 @@ pub(super) struct RawScanPlan {
 }
 
 impl RawScanPlan {
-    fn validate_builder(builder: &ScanBuilder<'_>) -> Result<()> {
+    pub(super) fn validate_builder(builder: &ScanBuilder<'_>) -> Result<()> {
         if builder.ds.layout.compression != crate::metadata::CompressionKind::None
             && builder.ds.metadata.row_count > 0
             && builder.ds.descriptors.total_candidate_rows == 0
@@ -249,7 +249,7 @@ impl RawScanPlan {
         Ok(())
     }
 
-    fn compile(builder: &ScanBuilder<'_>) -> Self {
+    pub(super) fn compile(builder: &ScanBuilder<'_>) -> Self {
         let row_len = usize::from(builder.ds.layout.row_len);
         let page_size = usize::from(builder.ds.layout.header.page_size);
         Self {

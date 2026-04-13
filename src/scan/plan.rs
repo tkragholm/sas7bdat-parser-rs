@@ -2,6 +2,8 @@ use super::{
     BatchHint, ColumnMeta, DecodeMode, Encoding, Error, LogicalType, ProjectedColumnPlan, Result,
     RowSelection, ScanBuilder, StringDecodeKernel, StringDecodeOptions, UTF_8, Utf8ValidationMode,
 };
+
+const AUTO_BATCH_ROWS_MIN: usize = 4096;
 #[derive(Debug, Clone)]
 pub(super) struct CompiledColumnPlan {
     pub(super) start: usize,
@@ -210,7 +212,7 @@ pub(super) fn resolve_batch_row_capacity(builder: &ScanBuilder<'_>) -> Result<us
         BatchHint::Auto => {
             let rows_per_page = usize::try_from(builder.ds.layout.rows_per_page)
                 .map_err(|_| Error::unsupported("rows per page exceeds platform usize"))?;
-            Ok(rows_per_page.max(1))
+            Ok(rows_per_page.max(AUTO_BATCH_ROWS_MIN).max(1))
         }
     }
 }

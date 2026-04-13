@@ -1,11 +1,12 @@
 use super::{
     BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch,
-    ControlFlow, Dataset, DecodeMode, Error, OrderingMode, OwnedColumnarBatch, OwnedRow,
-    Parallelism, Projection, RawRow, RawRowSink, Result, RowDecodePlan, RowSelection, RowSink,
-    RowView, ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions,
+    ControlFlow, Dataset, DecodeMode, Error, FileSource, OrderingMode, OwnedColumnarBatch,
+    OwnedRow, Parallelism, Projection, RawRow, RawRowSink, Result, RowDecodePlan, RowSelection,
+    RowSink, RowView, ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions,
     TemporalDecodeOptions, borrow_column_buffers, effective_scan_row_capacity_hint,
     materialize_planned_cells, resolve_batch_row_capacity, scan_raw_rows, scan_row_bytes,
 };
+use rayon::prelude::{ParallelIterator, ParallelSlice};
 
 fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
     match parallelism {
@@ -13,6 +14,14 @@ fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
         Parallelism::None | Parallelism::Auto => 1,
     }
 }
+
+fn resolved_parallel_workers(parallelism: Parallelism, work_items: usize) -> usize {
+    match parallelism {
+        Parallelism::Threads(n) => n.max(1).min(work_items.max(1)),
+        Parallelism::None | Parallelism::Auto => 1,
+    }
+}
+
 pub struct ScanBuilder<'a> {
     pub(crate) ds: &'a Dataset,
     pub(crate) projection: Option<&'a Projection>,
@@ -238,6 +247,9 @@ impl<'a> ScanBuilder<'a> {
 
         let target_rows = resolve_batch_row_capacity(self)?;
         let capacity_hint_rows = effective_scan_row_capacity_hint(self).min(target_rows);
+        if let Some(batches) = self.try_collect_batches_parallel(target_rows, capacity_hint_rows)? {
+            return Ok(batches);
+        }
         let target_rows_u64 = u64::try_from(target_rows).unwrap_or(u64::MAX).max(1);
         let estimated_batches = self.ds.metadata.row_count.div_ceil(target_rows_u64);
         let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
@@ -281,6 +293,112 @@ impl<'a> ScanBuilder<'a> {
     pub fn write_batches(&self, sink: &mut impl BatchSink) -> Result<ScanStats> {
         self.visit_batches(|batch| sink.push(batch))
     }
+}
+
+impl ScanBuilder<'_> {
+    fn try_collect_batches_parallel(
+        &self,
+        target_rows: usize,
+        capacity_hint_rows: usize,
+    ) -> Result<Option<Vec<OwnedColumnarBatch>>> {
+        let page_count = self.ds.descriptors.pages.len();
+        let workers = resolved_parallel_workers(self.parallelism, page_count);
+        if workers <= 1 || page_count <= 1 || self.row_limit.is_some() {
+            return Ok(None);
+        }
+
+        let file_bytes: &[u8] = match &self.ds.file.source {
+            FileSource::Bytes(bytes) => bytes.as_ref(),
+            FileSource::Mmap(mmap) => &mmap[..],
+            FileSource::Path(_) => return Ok(None),
+        };
+
+        let worker_capacity_hint = capacity_hint_rows.div_ceil(workers).max(1);
+        let plan = super::raw::RawScanPlan::compile(self);
+        super::raw::RawScanPlan::validate_builder(self)?;
+        if usize::from(self.ds.layout.row_len) == 0 {
+            return Ok(Some(Vec::new()));
+        }
+
+        let chunk_size = page_count.div_ceil(workers).max(1);
+        let results = self
+            .ds
+            .descriptors
+            .pages
+            .par_chunks(chunk_size)
+            .map(|chunk| {
+                collect_batches_for_descriptor_chunk(
+                    self,
+                    file_bytes,
+                    chunk,
+                    &plan,
+                    target_rows,
+                    worker_capacity_hint,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let mut batches = Vec::new();
+        for result in results {
+            let mut chunk_batches = result?;
+            batches.append(&mut chunk_batches);
+        }
+        if matches!(self.ordering, OrderingMode::Stable) {
+            batches.sort_unstable_by_key(|batch| batch.row_base);
+        }
+        Ok(Some(batches))
+    }
+}
+
+fn collect_batches_for_descriptor_chunk(
+    builder: &ScanBuilder<'_>,
+    file_bytes: &[u8],
+    descriptors: &[crate::internal::PageDescriptor],
+    plan: &super::raw::RawScanPlan,
+    target_rows: usize,
+    capacity_hint_rows: usize,
+) -> Result<Vec<OwnedColumnarBatch>> {
+    let target_rows_u64 = u64::try_from(target_rows).unwrap_or(u64::MAX).max(1);
+    let estimated_batches = builder.ds.metadata.row_count.div_ceil(target_rows_u64);
+    let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
+    let mut batch_accumulator = BatchAccumulator::new(
+        BatchDecodePlan::new(builder)?,
+        target_rows,
+        capacity_hint_rows,
+    )
+    .with_materialize_threads(1);
+    let mut stats = ScanStats::default();
+    let mut decompressed_row = Vec::new();
+
+    for &descriptor in descriptors {
+        let page = super::raw::page_slice(file_bytes, plan, descriptor)?;
+        stats.pages_seen = stats.pages_seen.saturating_add(1);
+        stats.raw_bytes_read = stats
+            .raw_bytes_read
+            .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
+        super::raw::emit_rows_from_page(
+            builder,
+            plan,
+            descriptor,
+            page,
+            &mut decompressed_row,
+            &mut stats,
+            &mut |row_index, bytes| {
+                batch_accumulator.push_row(row_index.into(), bytes)?;
+                if batch_accumulator.is_full() {
+                    batches.push(batch_accumulator.take_batch());
+                    batch_accumulator.reset_after_flush();
+                }
+                Ok(ControlFlow::Continue(()))
+            },
+        )?;
+    }
+
+    if !batch_accumulator.is_empty() {
+        batches.push(batch_accumulator.take_batch());
+    }
+
+    Ok(batches)
 }
 
 const fn _keep_type_imports_alive<'a>(_columns: &'a [ColumnBuffer<'a>], _dataset: &'a Dataset) {}

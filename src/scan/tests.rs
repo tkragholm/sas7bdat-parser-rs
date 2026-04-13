@@ -385,6 +385,77 @@ fn collect_batches_materializes_columnar_values() {
 }
 
 #[test]
+fn collect_batches_parallel_in_memory_matches_serial_batches() {
+    let row_a = make_numeric_text_row(1.0, *b"AA  ");
+    let row_b = make_numeric_text_row(2.0, *b"BB  ");
+    let row_c = make_numeric_text_row(3.0, *b"CC  ");
+    let row_d = make_numeric_text_row(4.0, *b"DD  ");
+    let mut bytes = make_page(0x0100, 2, 0, &[&row_a, &row_b], 64);
+    bytes.extend_from_slice(&make_page(0x0100, 2, 0, &[&row_c, &row_d], 64));
+    let ds = MockDatasetBuilder::new(Arc::<[u8]>::from(bytes))
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .with_total_rows(4)
+        .with_rows_per_page(2)
+        .build();
+
+    let serial = ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(2))
+        .collect_batches()
+        .expect("serial batches");
+    let parallel = ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(2))
+        .with_parallelism(crate::Parallelism::Threads(2))
+        .collect_batches()
+        .expect("parallel batches");
+
+    assert_eq!(parallel.len(), serial.len());
+    for (parallel_batch, serial_batch) in parallel.iter().zip(serial.iter()) {
+        assert_eq!(parallel_batch.row_base, serial_batch.row_base);
+        assert_eq!(parallel_batch.row_count, serial_batch.row_count);
+        match (&parallel_batch.columns[0], &serial_batch.columns[0]) {
+            (
+                OwnedColumnBuffer::F64 {
+                    values: parallel_values,
+                    valid: parallel_valid,
+                },
+                OwnedColumnBuffer::F64 {
+                    values: serial_values,
+                    valid: serial_valid,
+                },
+            ) => {
+                assert_eq!(parallel_values, serial_values);
+                assert_eq!(parallel_valid, serial_valid);
+            }
+            other => panic!("unexpected numeric batch columns: {other:?}"),
+        }
+        match (&parallel_batch.columns[1], &serial_batch.columns[1]) {
+            (
+                OwnedColumnBuffer::Utf8 {
+                    offsets: parallel_offsets,
+                    data: parallel_data,
+                    valid: parallel_valid,
+                    dictionary_ids: parallel_dict_ids,
+                },
+                OwnedColumnBuffer::Utf8 {
+                    offsets: serial_offsets,
+                    data: serial_data,
+                    valid: serial_valid,
+                    dictionary_ids: serial_dict_ids,
+                },
+            ) => {
+                assert_eq!(parallel_offsets, serial_offsets);
+                assert_eq!(parallel_data, serial_data);
+                assert_eq!(parallel_valid, serial_valid);
+                assert_eq!(parallel_dict_ids, serial_dict_ids);
+            }
+            other => panic!("unexpected utf8 batch columns: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn batch_decode_plan_compiles_mixed_projected_families() {
     let row = {
         let mut bytes = Vec::with_capacity(16);
