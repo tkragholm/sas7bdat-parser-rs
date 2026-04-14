@@ -387,6 +387,45 @@ fn collect_batches_materializes_columnar_values() {
 }
 
 #[test]
+fn collect_batches_stops_at_row_limit() {
+    let row_a = make_numeric_text_row(1.0, *b"AA  ");
+    let row_b = make_numeric_text_row(2.0, *b"BB  ");
+    let row_c = make_numeric_text_row(3.0, *b"CC  ");
+    let row_d = make_numeric_text_row(4.0, *b"DD  ");
+    let bytes = Arc::<[u8]>::from(make_page(
+        0x0100,
+        4,
+        0,
+        &[&row_a, &row_b, &row_c, &row_d],
+        96,
+    ));
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .with_total_rows(4)
+        .with_rows_per_page(4)
+        .build();
+
+    let batches = ScanBuilder::new(&ds)
+        .limit(3)
+        .with_batch_hint(crate::BatchHint::Rows(2))
+        .collect_batches()
+        .expect("limited batches");
+
+    assert_eq!(batches.len(), 2);
+    assert_eq!(batches[0].row_base, crate::types::RowIndex(0));
+    assert_eq!(batches[0].row_count, 2);
+    assert_eq!(batches[1].row_base, crate::types::RowIndex(2));
+    assert_eq!(batches[1].row_count, 1);
+
+    match &batches[1].columns[1] {
+        OwnedColumnBuffer::Utf8 { data, .. } => assert_eq!(data, b"CC"),
+        other => panic!("unexpected limited utf8 batch column: {other:?}"),
+    }
+}
+
+#[test]
 fn collect_batches_parallel_in_memory_matches_serial_batches() {
     let row_a = make_numeric_text_row(1.0, *b"AA  ");
     let row_b = make_numeric_text_row(2.0, *b"BB  ");
