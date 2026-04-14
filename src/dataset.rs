@@ -14,7 +14,7 @@ use std::{
     fs::{self, File},
     io::{Cursor, Read, Seek},
     path::Path,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 #[derive(Debug, Clone)]
@@ -22,7 +22,7 @@ pub struct Dataset {
     pub(crate) file: Arc<FileInner>,
     pub(crate) metadata: Arc<DatasetMetadata>,
     pub(crate) layout: Arc<LayoutPlan>,
-    pub(crate) descriptors: Arc<PageDescriptorTable>,
+    pub(crate) descriptors: Arc<Mutex<Option<Arc<PageDescriptorTable>>>>,
 }
 
 impl Dataset {
@@ -58,7 +58,7 @@ impl Dataset {
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let bytes = Arc::<[u8]>::from(bytes);
         let mut cursor = Cursor::new(&*bytes);
-        let (layout, metadata, descriptors) = Self::parse_from_reader(&mut cursor)?;
+        let (layout, metadata) = Self::parse_from_reader(&mut cursor)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Bytes(Arc::clone(&bytes)),
@@ -66,7 +66,7 @@ impl Dataset {
             }),
             metadata: Arc::new(metadata),
             layout: Arc::new(layout),
-            descriptors: Arc::new(descriptors),
+            descriptors: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -96,28 +96,42 @@ impl Dataset {
     pub fn scan(&self) -> ScanBuilder<'_> {
         ScanBuilder::new(self)
     }
+
+    pub(crate) fn descriptors(&self) -> Result<Arc<PageDescriptorTable>> {
+        let descriptors = {
+            let mut guard = self
+                .descriptors
+                .lock()
+                .map_err(|_| Error::unsupported("descriptor cache poisoned"))?;
+            if let Some(descriptors) = guard.as_ref() {
+                return Ok(Arc::clone(descriptors));
+            }
+
+            let descriptors = Arc::new(self.load_descriptors()?);
+            *guard = Some(Arc::clone(&descriptors));
+            descriptors
+        };
+        Ok(descriptors)
+    }
 }
 
 impl Dataset {
     fn parse_from_reader<R: Read + Seek>(
         reader: &mut R,
-    ) -> Result<(LayoutPlan, DatasetMetadata, PageDescriptorTable)> {
+    ) -> Result<(LayoutPlan, DatasetMetadata)> {
         let (header, metadata) = probe_header(reader)?;
         reader.rewind().map_err(|err| Error::io_error(&err))?;
         let (layout, metadata) = parse_layout(reader, header, metadata)?;
-        reader.rewind().map_err(|err| Error::io_error(&err))?;
-        let descriptors = compile_page_descriptors(reader, &layout)?;
-        Ok((layout, metadata, descriptors))
+        Ok((layout, metadata))
     }
 
     fn from_buffered_file(path: &Path, mut file: File, options: OpenOptions) -> Result<Self> {
-        let (layout, metadata, descriptors) =
-            Self::parse_from_reader(&mut file).map_err(|mut err| {
-                if let Error::Io(ref mut io_err) = err {
-                    io_err.path = Some(path.to_path_buf());
-                }
-                err
-            })?;
+        let (layout, metadata) = Self::parse_from_reader(&mut file).map_err(|mut err| {
+            if let Error::Io(ref mut io_err) = err {
+                io_err.path = Some(path.to_path_buf());
+            }
+            err
+        })?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Path(path.to_path_buf()),
@@ -125,14 +139,14 @@ impl Dataset {
             }),
             metadata: Arc::new(metadata),
             layout: Arc::new(layout),
-            descriptors: Arc::new(descriptors),
+            descriptors: Arc::new(Mutex::new(None)),
         })
     }
 
     fn from_mmap(mmap: Mmap, options: OpenOptions) -> Result<Self> {
         let mmap = Arc::new(mmap);
         let mut cursor = Cursor::new(&mmap[..]);
-        let (layout, metadata, descriptors) = Self::parse_from_reader(&mut cursor)?;
+        let (layout, metadata) = Self::parse_from_reader(&mut cursor)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Mmap(Arc::clone(&mmap)),
@@ -140,8 +154,26 @@ impl Dataset {
             }),
             metadata: Arc::new(metadata),
             layout: Arc::new(layout),
-            descriptors: Arc::new(descriptors),
+            descriptors: Arc::new(Mutex::new(None)),
         })
+    }
+
+    fn load_descriptors(&self) -> Result<PageDescriptorTable> {
+        match &self.file.source {
+            FileSource::Bytes(bytes) => {
+                let mut cursor = Cursor::new(bytes.as_ref());
+                compile_page_descriptors(&mut cursor, &self.layout)
+            }
+            FileSource::Mmap(mmap) => {
+                let mut cursor = Cursor::new(&mmap[..]);
+                compile_page_descriptors(&mut cursor, &self.layout)
+            }
+            FileSource::Path(path) => {
+                let mut file =
+                    File::open(path).map_err(|err| Error::io_error_with_path(path, &err))?;
+                compile_page_descriptors(&mut file, &self.layout)
+            }
+        }
     }
 }
 

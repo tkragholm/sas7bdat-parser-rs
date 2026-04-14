@@ -359,7 +359,8 @@ impl ScanBuilder<'_> {
         &self,
         plan: &ScanPlan,
     ) -> Result<Option<Vec<OwnedColumnarBatch>>> {
-        let page_count = self.ds.descriptors.pages.len();
+        let descriptors = self.ds.descriptors()?;
+        let page_count = descriptors.pages.len();
         let workers = resolved_parallel_workers(self.parallelism, page_count);
         if workers <= 1 || page_count <= 1 || self.row_limit.is_some() {
             return Ok(None);
@@ -378,22 +379,18 @@ impl ScanBuilder<'_> {
         }
 
         let chunk_size = page_count.div_ceil(workers).max(1);
-        let results = self
-            .ds
-            .descriptors
+        let context = DescriptorChunkContext {
+            descriptor_table: descriptors.as_ref(),
+            raw_plan: &plan.raw,
+            batch_plan: &plan.batch,
+            row_count: self.ds.metadata.row_count,
+            target_rows: plan.batch_row_capacity,
+            capacity_hint_rows: worker_capacity_hint,
+        };
+        let results = descriptors
             .pages
             .par_chunks(chunk_size)
-            .map(|chunk| {
-                collect_batches_for_descriptor_chunk(
-                    self,
-                    file_bytes,
-                    chunk,
-                    &plan.raw,
-                    &plan.batch,
-                    plan.batch_row_capacity,
-                    worker_capacity_hint,
-                )
-            })
+            .map(|chunk| collect_batches_for_descriptor_chunk(file_bytes, chunk, &context))
             .collect::<Vec<_>>();
 
         let mut batches = Vec::new();
@@ -408,38 +405,46 @@ impl ScanBuilder<'_> {
     }
 }
 
-fn collect_batches_for_descriptor_chunk(
-    builder: &ScanBuilder<'_>,
-    file_bytes: &[u8],
-    descriptors: &[crate::internal::PageDescriptor],
-    raw_plan: &super::raw::RawScanPlan,
-    batch_plan: &BatchDecodePlan,
+struct DescriptorChunkContext<'a> {
+    descriptor_table: &'a crate::internal::PageDescriptorTable,
+    raw_plan: &'a super::raw::RawScanPlan,
+    batch_plan: &'a BatchDecodePlan,
+    row_count: u64,
     target_rows: usize,
     capacity_hint_rows: usize,
+}
+
+fn collect_batches_for_descriptor_chunk(
+    file_bytes: &[u8],
+    descriptor_chunk: &[crate::internal::PageDescriptor],
+    context: &DescriptorChunkContext<'_>,
 ) -> Result<Vec<OwnedColumnarBatch>> {
-    let target_rows_u64 = u64::try_from(target_rows).unwrap_or(u64::MAX).max(1);
-    let estimated_batches = builder.ds.metadata.row_count.div_ceil(target_rows_u64);
+    let target_rows_u64 = u64::try_from(context.target_rows).unwrap_or(u64::MAX).max(1);
+    let estimated_batches = context.row_count.div_ceil(target_rows_u64);
     let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
-    let mut batch_accumulator =
-        BatchAccumulator::new(batch_plan.clone(), target_rows, capacity_hint_rows)
-            .with_materialize_threads(1);
+    let mut batch_accumulator = BatchAccumulator::new(
+        context.batch_plan.clone(),
+        context.target_rows,
+        context.capacity_hint_rows,
+    )
+    .with_materialize_threads(1);
     let mut stats = ScanStats::default();
     let mut decompressed_row = Vec::new();
 
-    for &descriptor in descriptors {
-        let page = super::raw::page_slice(file_bytes, raw_plan, descriptor)?;
+    for &descriptor in descriptor_chunk {
+        let page = super::raw::page_slice(file_bytes, context.raw_plan, descriptor)?;
         stats.pages_seen = stats.pages_seen.saturating_add(1);
         stats.raw_bytes_read = stats
             .raw_bytes_read
             .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
         super::raw::emit_rows_from_page(
-            builder,
-            raw_plan,
+            context.raw_plan,
+            context.descriptor_table,
             descriptor,
             page,
             &mut decompressed_row,
             &mut stats,
-            &mut |row_index, bytes| {
+            &mut |row_index: crate::types::RowIndex, bytes| {
                 batch_accumulator.push_row(row_index.into(), bytes)?;
                 if batch_accumulator.is_full() {
                     batches.push(batch_accumulator.take_batch());

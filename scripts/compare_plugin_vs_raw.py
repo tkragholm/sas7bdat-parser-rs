@@ -137,6 +137,16 @@ def run_plugin_warm_batch_reader(
     ds = sp.SasDataset(fixture)
     open_elapsed = time.perf_counter_ns() - ds_start
 
+    prime_start = time.perf_counter_ns()
+    prime_reader = ds.batch_reader(
+        columns,
+        None,
+        limit if limit > 0 else None,
+        batch_rows,
+    )
+    prime_rows = sum(frame.height for frame in prime_reader)
+    prime_elapsed = time.perf_counter_ns() - prime_start
+
     start = time.perf_counter_ns()
     rows_last = 0
     batches_last = 0
@@ -165,8 +175,10 @@ def run_plugin_warm_batch_reader(
         "batch_rows": batch_rows,
         "limit": None if limit <= 0 else limit,
         "dataset_open_ns": open_elapsed,
-        "elapsed_ns_total": elapsed_total,
-        "elapsed_ns_avg": elapsed_avg,
+        "priming_ns": prime_elapsed,
+        "priming_rows": prime_rows,
+        "steady_elapsed_ns_total": elapsed_total,
+        "steady_elapsed_ns_avg": elapsed_avg,
         "rows_last": rows_last,
         "batches_last": batches_last,
         "rows_per_second": rows_per_second,
@@ -212,6 +224,13 @@ def run_plugin_warm_lazy_collect(
     ds = sp.SasDataset(fixture)
     open_elapsed = time.perf_counter_ns() - ds_start
 
+    prime_start = time.perf_counter_ns()
+    prime_lf = ds.scan_sas().select(columns)
+    if limit > 0:
+        prime_lf = prime_lf.head(limit)
+    prime_df = prime_lf.collect()
+    prime_elapsed = time.perf_counter_ns() - prime_start
+
     start = time.perf_counter_ns()
     rows_last = 0
     for _ in range(repeat):
@@ -230,8 +249,10 @@ def run_plugin_warm_lazy_collect(
         "repeat": repeat,
         "limit": None if limit <= 0 else limit,
         "dataset_open_ns": open_elapsed,
-        "elapsed_ns_total": elapsed_total,
-        "elapsed_ns_avg": elapsed_avg,
+        "priming_ns": prime_elapsed,
+        "priming_rows": prime_df.height,
+        "steady_elapsed_ns_total": elapsed_total,
+        "steady_elapsed_ns_avg": elapsed_avg,
         "rows_last": rows_last,
         "rows_per_second": rows_per_second,
     }
@@ -261,13 +282,13 @@ def main() -> int:
         plugin_cold_batch_reader["elapsed_ns_avg"] / raw_avg if raw_avg else None
     )
     warm_batch_reader_ratio = (
-        plugin_warm_batch_reader["elapsed_ns_avg"] / raw_avg if raw_avg else None
+        plugin_warm_batch_reader["steady_elapsed_ns_avg"] / raw_avg if raw_avg else None
     )
     cold_lazy_ratio = (
         plugin_cold_lazy_collect["elapsed_ns_avg"] / raw_avg if raw_avg else None
     )
     warm_lazy_ratio = (
-        plugin_warm_lazy_collect["elapsed_ns_avg"] / raw_avg if raw_avg else None
+        plugin_warm_lazy_collect["steady_elapsed_ns_avg"] / raw_avg if raw_avg else None
     )
 
     print(

@@ -19,6 +19,25 @@ const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
 const SIG_COUNTS: u32 = 0xFFFF_FC00;
 const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
 
+pub fn walk_pages<R, F>(reader: &mut R, header: &crate::internal::HeaderInfo, mut visit: F) -> Result<()>
+where
+    R: Read + Seek,
+    F: FnMut(u64, &[u8]) -> Result<()>,
+{
+    let mut page = vec![0u8; usize::from(header.page_size)];
+    for page_index in 0..header.page_count {
+        let page_offset = header.data_offset + page_index * u64::from(header.page_size);
+        reader
+            .seek(SeekFrom::Start(page_offset))
+            .map_err(|e| page_io_error(&e))?;
+        reader
+            .read_exact(&mut page)
+            .map_err(|e| page_io_error(&e))?;
+        visit(page_index, &page)?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 struct DescriptorInputs {
     page_index: u64,
@@ -58,32 +77,22 @@ pub fn compile_page_descriptors<R: Read + Seek>(
     );
     let mut row_spans = Vec::new();
     let mut row_base = 0u64;
-    let mut page = vec![0u8; usize::from(header.page_size)];
-
-    for page_index in 0..header.page_count {
-        let page_offset = header.data_offset + page_index * u64::from(header.page_size);
-        reader
-            .seek(SeekFrom::Start(page_offset))
-            .map_err(|e| page_io_error(&e))?;
-        reader
-            .read_exact(&mut page)
-            .map_err(|e| page_io_error(&e))?;
-
-        let page_type = read_header_u16(&page, header.page_header_size as usize - 8, layout)?;
+    walk_pages(reader, header, |page_index, page| {
+        let page_type = read_header_u16(page, header.page_header_size as usize - 8, layout)?;
         let page_row_count = u64::from(read_header_u16(
-            &page,
+            page,
             header.page_header_size as usize - 6,
             layout,
         )?);
         let subheader_count = u64::from(read_header_u16(
-            &page,
+            page,
             header.page_header_size as usize - 4,
             layout,
         )?);
 
         let descriptor = classify_descriptor(
             layout,
-            &page,
+            page,
             DescriptorInputs {
                 page_index,
                 page_type,
@@ -96,7 +105,8 @@ pub fn compile_page_descriptors<R: Read + Seek>(
 
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);
-    }
+        Ok(())
+    })?;
 
     Ok(PageDescriptorTable {
         pages: descriptors.into_boxed_slice(),

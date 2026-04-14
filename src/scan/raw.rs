@@ -26,12 +26,17 @@ pub(super) fn scan_row_bytes_with_plan<F>(
 where
     F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
+    let descriptors = builder.ds.descriptors()?;
     match &builder.ds.file.source {
-        FileSource::Bytes(bytes) => scan_row_bytes_in_memory(builder, plan, bytes.as_ref(), f),
-        FileSource::Mmap(mmap) => scan_row_bytes_in_memory(builder, plan, &mmap[..], f),
+        FileSource::Bytes(bytes) => {
+            scan_row_bytes_in_memory(builder, plan, bytes.as_ref(), descriptors.as_ref(), f)
+        }
+        FileSource::Mmap(mmap) => {
+            scan_row_bytes_in_memory(builder, plan, &mmap[..], descriptors.as_ref(), f)
+        }
         FileSource::Path(_) => {
             let mut reader = open_scan_reader(builder.ds)?;
-            scan_row_bytes_with_reader(builder, plan, &mut reader, f)
+            scan_row_bytes_with_reader(builder, plan, descriptors.as_ref(), &mut reader, f)
         }
     }
 }
@@ -45,11 +50,10 @@ struct ScanLoopContext {
 }
 
 impl ScanLoopContext {
-    fn new(plan: &RawScanPlan, builder: &ScanBuilder<'_>) -> Self {
+    fn new(plan: &RawScanPlan, total_pages: u64) -> Self {
         let stats = ScanStats::default();
         let page = vec![0u8; plan.page_size];
         let decompressed_row = Vec::new();
-        let total_pages = u64::try_from(builder.ds.descriptors.pages.len()).unwrap_or(u64::MAX);
         let estimated_total_bytes = u64::try_from(plan.page_size)
             .unwrap_or(u64::MAX)
             .saturating_mul(total_pages);
@@ -66,6 +70,7 @@ impl ScanLoopContext {
 pub(super) fn scan_row_bytes_with_reader<R, F>(
     builder: &ScanBuilder<'_>,
     plan: &RawScanPlan,
+    descriptors: &crate::internal::PageDescriptorTable,
     reader: &mut R,
     f: &mut F,
 ) -> Result<ScanStats>
@@ -78,18 +83,21 @@ where
     }
     RawScanPlan::validate_builder(builder)?;
 
-    let mut ctx = ScanLoopContext::new(&plan, builder);
+    let mut ctx = ScanLoopContext::new(
+        plan,
+        u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX),
+    );
 
-    for descriptor in builder.ds.descriptors.pages.iter().copied() {
+    for descriptor in descriptors.pages.iter().copied() {
         if plan.should_stop(&ctx.stats) {
             break;
         }
 
         ctx.stats.pages_seen = ctx.stats.pages_seen.saturating_add(1);
-        load_descriptor_page(reader, &plan, descriptor, &mut ctx.page, &mut ctx.stats)?;
+        load_descriptor_page(reader, plan, descriptor, &mut ctx.page, &mut ctx.stats)?;
         if emit_rows_from_page(
-            builder,
-            &plan,
+            plan,
+            descriptors,
             descriptor,
             &ctx.page,
             &mut ctx.decompressed_row,
@@ -114,6 +122,7 @@ pub(super) fn scan_row_bytes_in_memory<F>(
     builder: &ScanBuilder<'_>,
     plan: &RawScanPlan,
     file_bytes: &[u8],
+    descriptors: &crate::internal::PageDescriptorTable,
     f: &mut F,
 ) -> Result<ScanStats>
 where
@@ -124,14 +133,17 @@ where
     }
     RawScanPlan::validate_builder(builder)?;
 
-    let mut ctx = ScanLoopContext::new(&plan, builder);
+    let mut ctx = ScanLoopContext::new(
+        plan,
+        u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX),
+    );
 
-    for descriptor in builder.ds.descriptors.pages.iter().copied() {
+    for descriptor in descriptors.pages.iter().copied() {
         if plan.should_stop(&ctx.stats) {
             break;
         }
 
-        let page = page_slice(file_bytes, &plan, descriptor)?;
+        let page = page_slice(file_bytes, plan, descriptor)?;
         ctx.stats.pages_seen = ctx.stats.pages_seen.saturating_add(1);
         ctx.stats.raw_bytes_read = ctx
             .stats
@@ -139,8 +151,8 @@ where
             .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
 
         if emit_rows_from_page(
-            builder,
-            &plan,
+            plan,
+            descriptors,
             descriptor,
             page,
             &mut ctx.decompressed_row,
@@ -181,8 +193,8 @@ fn emit_progress(
 }
 
 pub(super) fn emit_rows_from_page<F>(
-    builder: &ScanBuilder<'_>,
     plan: &RawScanPlan,
+    descriptors: &crate::internal::PageDescriptorTable,
     descriptor: PageDescriptor,
     page: &[u8],
     decompressed_row: &mut Vec<u8>,
@@ -202,14 +214,14 @@ where
         crate::internal::PageExecClass::MetadataOrEmpty => {}
         crate::internal::PageExecClass::IndexedPointerRows => {
             stats.indexed_pages = stats.indexed_pages.saturating_add(1);
-            let spans = descriptor_spans(builder, descriptor)?;
+            let spans = descriptor_spans(descriptors, descriptor)?;
             if emit_indexed_rows(plan, descriptor, spans, page, decompressed_row, stats, f)? {
                 return Ok(true);
             }
         }
         crate::internal::PageExecClass::IndexedCompressedRows => {
             stats.compressed_pages = stats.compressed_pages.saturating_add(1);
-            let spans = descriptor_spans(builder, descriptor)?;
+            let spans = descriptor_spans(descriptors, descriptor)?;
             if emit_indexed_rows(plan, descriptor, spans, page, decompressed_row, stats, f)? {
                 return Ok(true);
             }
@@ -246,9 +258,10 @@ pub(super) struct RawScanPlan {
 
 impl RawScanPlan {
     pub(super) fn validate_builder(builder: &ScanBuilder<'_>) -> Result<()> {
+        let descriptors = builder.ds.descriptors()?;
         if builder.ds.layout.compression != crate::metadata::CompressionKind::None
             && builder.ds.metadata.row_count > 0
-            && builder.ds.descriptors.total_candidate_rows == 0
+            && descriptors.total_candidate_rows == 0
         {
             return Err(Error::unsupported(
                 "compressed dataset layout compiled no row producers; this compressed page layout is not implemented yet",
@@ -327,10 +340,10 @@ pub(super) fn load_descriptor_page<R: Read + Seek>(
     Ok(())
 }
 
-pub(super) fn descriptor_spans<'a>(
-    builder: &'a ScanBuilder<'_>,
+pub(super) fn descriptor_spans(
+    descriptors: &crate::internal::PageDescriptorTable,
     descriptor: PageDescriptor,
-) -> Result<&'a [RowSpan]> {
+) -> Result<&[RowSpan]> {
     let span_start = usize::try_from(descriptor.row_span_start)
         .map_err(|_| Error::unsupported("row span start exceeds platform usize"))?;
     let span_end = span_start
@@ -339,9 +352,7 @@ pub(super) fn descriptor_spans<'a>(
                 .map_err(|_| Error::unsupported("row span count exceeds platform usize"))?,
         )
         .ok_or_else(|| Error::unsupported("row span range overflow"))?;
-    builder
-        .ds
-        .descriptors
+    descriptors
         .row_spans
         .get(span_start..span_end)
         .ok_or_else(|| Error::unsupported("row span range exceeds descriptor table"))

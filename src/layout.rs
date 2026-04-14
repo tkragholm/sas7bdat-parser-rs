@@ -6,13 +6,11 @@ use crate::{
         read_u32, read_u64,
     },
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
+    pages::walk_pages,
     types::RowLength,
 };
 use encoding_rs::{Encoding, UTF_8};
-use std::{
-    convert::TryFrom,
-    io::{Read, Seek, SeekFrom},
-};
+use std::{convert::TryFrom, io::{Read, Seek}};
 
 const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
 const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
@@ -158,21 +156,11 @@ pub fn parse_layout<R: Read + Seek>(
         ..MetadataState::default()
     };
 
-    for page_index in 0..header.page_count {
-        let page_offset = header.data_offset + page_index * u64::from(header.page_size);
-        reader
-            .seek(SeekFrom::Start(page_offset))
-            .map_err(|e| Error::metadata_io(&e))?;
-
-        let mut page = vec![0u8; usize::from(header.page_size)];
-        reader
-            .read_exact(&mut page)
-            .map_err(|e| Error::metadata_io(&e))?;
-
+    walk_pages(reader, &header, |_page_index, page| {
         let page_type = read_u16(
             header.endianness,
             get_range(
-                &page,
+                page,
                 header.page_header_size as usize - 8,
                 header.page_header_size as usize - 6,
                 "page type",
@@ -181,11 +169,12 @@ pub fn parse_layout<R: Read + Seek>(
 
         match classify_page(page_type) {
             PageKind::Meta | PageKind::Mix | PageKind::Meta2 | PageKind::Amd => {
-                parse_page_subheaders(&header, &page, &mut state)?;
+                parse_page_subheaders(&header, page, &mut state)?;
             }
             PageKind::Data | PageKind::Comp | PageKind::CompTable | PageKind::Unknown => {}
         }
-    }
+        Ok(())
+    })?;
 
     let row_info = state
         .row_info

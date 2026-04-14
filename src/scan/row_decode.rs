@@ -88,7 +88,7 @@ impl RowDecodePlan {
                         .collect::<Vec<_>>(),
                 )
             },
-            |names| Arc::from(names),
+            Arc::from,
         );
 
         let encoding = resolve_encoding(builder.ds.metadata.encoding.as_deref());

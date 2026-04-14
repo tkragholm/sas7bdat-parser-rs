@@ -62,6 +62,33 @@ fn run() -> Result<(), String> {
     let mut rows_last = 0usize;
     let mut batches_last = 0usize;
 
+    let prime_start = Instant::now();
+    {
+        let mut scan = ds.scan();
+        if let Some(projection) = projection.as_ref() {
+            scan = scan.with_projection(projection);
+        }
+        if let Some(limit) = limit {
+            scan =
+                scan.limit(u64::try_from(limit).map_err(|_| "row limit exceeds u64".to_owned())?);
+        }
+        scan = scan.with_batch_hint(BatchHint::Rows(batch_rows));
+
+        let mut rows = 0usize;
+        let mut batches = 0usize;
+        scan.visit_batches(|batch| {
+            batches += 1;
+            rows += batch.row_count;
+            std::hint::black_box(batch.row_count);
+            std::hint::black_box(batch.columns.len());
+            Ok(std::ops::ControlFlow::Continue(()))
+        })
+        .map_err(|err| err.to_string())?;
+        rows_last = rows;
+        batches_last = batches;
+    }
+    let priming_ns = prime_start.elapsed().as_nanos();
+
     for _ in 0..repeat {
         let mut scan = ds.scan();
         if let Some(projection) = projection.as_ref() {
@@ -76,11 +103,11 @@ fn run() -> Result<(), String> {
         let start = Instant::now();
         let mut rows = 0usize;
         let mut batches = 0usize;
-        scan.visit_arrow_batches(|batch| {
+        scan.visit_batches(|batch| {
             batches += 1;
-            rows += batch.num_rows();
-            std::hint::black_box(batch.num_rows());
-            std::hint::black_box(batch.num_columns());
+            rows += batch.row_count;
+            std::hint::black_box(batch.row_count);
+            std::hint::black_box(batch.columns.len());
             Ok(std::ops::ControlFlow::Continue(()))
         })
         .map_err(|err| err.to_string())?;
@@ -110,6 +137,7 @@ fn run() -> Result<(), String> {
             "repeat": repeat,
             "batch_rows": batch_rows,
             "limit": limit,
+            "priming_ns": priming_ns,
             "elapsed_ns_total": elapsed_total,
             "elapsed_ns_avg": elapsed_avg,
             "rows_last": rows_last,

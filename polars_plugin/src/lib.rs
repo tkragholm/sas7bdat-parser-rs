@@ -310,28 +310,28 @@ fn run_scan(
         scan = scan.with_batch_hint(BatchHint::Rows(batch_size));
     }
 
-    // Build the polars-arrow schema once from metadata; clone the Arc per batch
-    // to avoid per-batch field-vec allocation and duplicate-name checks.
+    // Build the polars-arrow schema once from metadata and reuse it for each
+    // batch conversion.
     let arrow_schema = scan.arrow_schema()?;
-    let field_names: Vec<String> = arrow_schema
-        .fields()
-        .iter()
-        .map(|f| f.name().to_owned())
-        .collect();
-    let pl_schema = Arc::new(build_polars_schema(&arrow_schema, &field_names)?);
+    let pl_schema = Arc::new(build_polars_schema(&arrow_schema)?);
 
     if coalesce {
         // Accumulate every OwnedColumnarBatch → DataFrame in Rust; vstack into
         // one contiguous frame before handing control back to Python.
-        let mut frames: Vec<DataFrame> = Vec::new();
+        let mut combined: Option<DataFrame> = None;
         scan.visit_owned_batches(|batch| {
             let df = owned_batch_to_dataframe(batch, Arc::clone(&pl_schema))
                 .map_err(|e| Error::io(e.to_string()))?;
-            frames.push(df);
+            if let Some(existing) = combined.as_mut() {
+                existing
+                    .vstack_mut(&df)
+                    .map_err(|e| Error::io(e.to_string()))?;
+            } else {
+                combined = Some(df);
+            }
             Ok(std::ops::ControlFlow::Continue(()))
         })?;
-        if !frames.is_empty() {
-            let combined = vstack_frames(frames).map_err(|e| Error::io(e.to_string()))?;
+        if let Some(combined) = combined {
             let _ = tx.send(ReaderMessage::Batch(combined));
         }
     } else {
@@ -352,16 +352,14 @@ fn run_scan(
 #[cfg(feature = "arrow")]
 fn build_polars_schema(
     arrow_schema: &arrow_schema::Schema,
-    field_names: &[String],
 ) -> SasResult<ArrowSchema> {
     let fields: Vec<Field> = arrow_schema
         .fields()
         .iter()
-        .zip(field_names.iter())
-        .map(|(f, name)| {
+        .map(|f| {
             let dtype = arrow_dt_to_polars_arrow(f.data_type())
                 .map_err(Error::arrow)?;
-            Ok(Field::new(name.as_str().into(), dtype, true))
+            Ok(Field::new(f.name().as_str().into(), dtype, true))
         })
         .collect::<SasResult<Vec<_>>>()?;
     ArrowSchema::from_iter_check_duplicates(fields).map_err(|e| Error::arrow(e.to_string()))
@@ -384,20 +382,6 @@ fn arrow_dt_to_polars_arrow(dt: &DataType) -> Result<ArrowDataType, String> {
         }
         other => return Err(format!("unsupported Arrow type: {other:?}")),
     })
-}
-
-/// Vstack a non-empty list of `DataFrames` into one.  When there is only a
-/// single frame (most common for small files with one batch) no copy occurs.
-#[cfg(feature = "arrow")]
-fn vstack_frames(mut frames: Vec<DataFrame>) -> Result<DataFrame, polars::prelude::PolarsError> {
-    if frames.len() == 1 {
-        return Ok(frames.remove(0));
-    }
-    let mut out = frames.remove(0);
-    for frame in frames {
-        out.vstack_mut(&frame)?;
-    }
-    Ok(out)
 }
 
 /// Convert an [`OwnedColumnarBatch`] directly to a Polars [`DataFrame`] using

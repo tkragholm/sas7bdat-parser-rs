@@ -20,6 +20,18 @@ Typical usage after installation:
 corpus_profile <root> --format csv --out corpus_profile.csv
 ```
 
+## Current progress
+
+The workspace now has a split benchmark for the Python plugin and the raw Rust path, with cold-start and warm steady-state measurements separated.
+
+Recent results on `fixtures/ahs2013n.sas7bdat`:
+
+- `batch_reader` warm steady-state is close to the raw Rust scan path, at about `1.08x` the raw average.
+- `scan_sas` warm steady-state is still slower, at about `1.50x` the raw average.
+- Cold-start timings are still dominated by dataset open and first-scan setup, which is expected for the lazy descriptor cache.
+
+This means the remaining optimization work is in the Polars/DataFrame conversion and coalescing path, not the core SAS page scan.
+
 For full-scan profiling:
 
 ```text

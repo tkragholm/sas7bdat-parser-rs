@@ -5,7 +5,7 @@ use crate::{
     options::OpenOptions,
     types::{PageSize, RowLength},
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub struct MockDatasetBuilder {
     pub columns: Vec<ColumnMeta>,
@@ -125,14 +125,8 @@ impl MockDatasetBuilder {
                 encoding: self.encoding,
                 ..DatasetMetadata::default()
             }),
-            layout: Arc::new(layout.clone()),
-            descriptors: Arc::new(
-                crate::pages::compile_page_descriptors(
-                    &mut std::io::Cursor::new(self.bytes.as_ref()),
-                    &layout,
-                )
-                .expect("descriptors"),
-            ),
+            layout: Arc::new(layout),
+            descriptors: Arc::new(Mutex::new(None)),
         }
     }
 }
