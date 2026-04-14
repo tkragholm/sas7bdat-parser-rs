@@ -169,45 +169,63 @@ impl OwnedColumnBuffer {
 
     #[cfg(feature = "arrow")]
     pub fn into_arrow_array(self) -> Result<ArrayRef> {
+        self.as_borrowed().into_arrow_array()
+    }
+}
+
+#[cfg(feature = "arrow")]
+impl ColumnBuffer<'_> {
+    pub fn into_arrow_array(self) -> Result<ArrayRef> {
         match self {
-            Self::I32 { values, valid } => build_primitive_array::<Int32Type>(values, valid),
-            Self::I64 { values, valid } => build_primitive_array::<Int64Type>(values, valid),
-            Self::F64 { values, valid } => build_primitive_array::<Float64Type>(values, valid),
-            Self::Date { values, valid } => build_primitive_array::<Date32Type>(
-                values
-                    .into_iter()
-                    .map(|value| value.days_since_sas_epoch)
-                    .collect(),
-                valid,
-            ),
-            Self::DateTime { values, valid } => build_primitive_array::<TimestampSecondType>(
-                values
-                    .into_iter()
-                    .map(|value| value.seconds_since_sas_epoch)
-                    .collect(),
-                valid,
-            ),
-            Self::Time { values, valid } => build_primitive_array::<Time32SecondType>(
-                values
-                    .into_iter()
-                    .map(|value| {
+            Self::I32(PrimitiveBuffer { values, valid }) => {
+                build_primitive_array::<Int32Type, _, _>(values.iter().copied(), valid, |value| {
+                    Ok(value)
+                })
+            }
+            Self::I64(PrimitiveBuffer { values, valid }) => {
+                build_primitive_array::<Int64Type, _, _>(values.iter().copied(), valid, |value| {
+                    Ok(value)
+                })
+            }
+            Self::F64(PrimitiveBuffer { values, valid }) => {
+                build_primitive_array::<Float64Type, _, _>(values.iter().copied(), valid, |value| {
+                    Ok(value)
+                })
+            }
+            Self::Date(PrimitiveBuffer { values, valid }) => {
+                build_primitive_array::<Date32Type, _, _>(values.iter().copied(), valid, |value| {
+                    Ok(value.days_since_sas_epoch)
+                })
+            }
+            Self::DateTime(PrimitiveBuffer { values, valid }) => {
+                build_primitive_array::<TimestampSecondType, _, _>(
+                    values.iter().copied(),
+                    valid,
+                    |value| Ok(value.seconds_since_sas_epoch),
+                )
+            }
+            Self::Time(PrimitiveBuffer { values, valid }) => {
+                build_primitive_array::<Time32SecondType, _, _>(
+                    values.iter().copied(),
+                    valid,
+                    |value| {
                         i32::try_from(value.seconds_since_midnight)
                             .map_err(|_| Error::arrow("SAS time value exceeds Arrow Time32 range"))
-                    })
-                    .collect::<Result<Vec<_>>>()?,
-                valid,
-            ),
-            Self::Utf8 {
+                    },
+                )
+            }
+            Self::Utf8(Utf8Buffer {
                 offsets,
                 data,
                 valid,
                 dictionary_ids: _,
-            } => build_utf8_array(offsets, data, valid),
-            Self::RawBytes {
+                dictionary: _,
+            }) => build_utf8_array(offsets, data, valid),
+            Self::RawBytes(BytesBuffer {
                 offsets,
                 data,
                 valid,
-            } => build_binary_array(offsets, data, valid),
+            }) => build_binary_array(offsets, data, valid),
         }
     }
 }
@@ -247,15 +265,34 @@ impl OwnedColumnarBatch {
 }
 
 #[cfg(feature = "arrow")]
-fn build_primitive_array<T>(values: Vec<T::Native>, valid: Option<Vec<u64>>) -> Result<ArrayRef>
+impl ColumnarBatch<'_> {
+    pub fn into_arrow_record_batch(&self, schema: SchemaRef) -> Result<RecordBatch> {
+        let arrays = self
+            .columns
+            .iter()
+            .copied()
+            .map(ColumnBuffer::into_arrow_array)
+            .collect::<Result<Vec<_>>>()?;
+        RecordBatch::try_new(schema, arrays).map_err(|err| Error::arrow(err.to_string()))
+    }
+}
+
+#[cfg(feature = "arrow")]
+fn build_primitive_array<T, I, F>(
+    values: I,
+    valid: Option<BitSlice<'_>>,
+    mut map: F,
+) -> Result<ArrayRef>
 where
     T: ArrowPrimitiveType,
     T::Native: Copy,
+    I: IntoIterator,
+    F: FnMut(I::Item) -> Result<T::Native>,
 {
     let mut builder = PrimitiveBuilder::<T>::new();
     for (idx, value) in values.into_iter().enumerate() {
-        if row_is_valid(valid.as_deref(), idx) {
-            builder.append_value(value);
+        if row_is_valid(valid, idx) {
+            builder.append_value(map(value)?);
         } else {
             builder.append_null();
         }
@@ -264,11 +301,11 @@ where
 }
 
 #[cfg(feature = "arrow")]
-fn build_utf8_array(offsets: Vec<u32>, data: Vec<u8>, valid: Option<Vec<u64>>) -> Result<ArrayRef> {
+fn build_utf8_array(offsets: &[u32], data: &[u8], valid: Option<BitSlice<'_>>) -> Result<ArrayRef> {
     let mut builder = StringBuilder::new();
     let row_count = offsets.len().saturating_sub(1);
     for idx in 0..row_count {
-        if row_is_valid(valid.as_deref(), idx) {
+        if row_is_valid(valid, idx) {
             let start = usize::try_from(offsets[idx])
                 .map_err(|_| Error::arrow("utf8 offset exceeds platform usize"))?;
             let end = usize::try_from(offsets[idx + 1])
@@ -287,14 +324,14 @@ fn build_utf8_array(offsets: Vec<u32>, data: Vec<u8>, valid: Option<Vec<u64>>) -
 
 #[cfg(feature = "arrow")]
 fn build_binary_array(
-    offsets: Vec<u32>,
-    data: Vec<u8>,
-    valid: Option<Vec<u64>>,
+    offsets: &[u32],
+    data: &[u8],
+    valid: Option<BitSlice<'_>>,
 ) -> Result<ArrayRef> {
     let mut builder = BinaryBuilder::new();
     let row_count = offsets.len().saturating_sub(1);
     for idx in 0..row_count {
-        if row_is_valid(valid.as_deref(), idx) {
+        if row_is_valid(valid, idx) {
             let start = usize::try_from(offsets[idx])
                 .map_err(|_| Error::arrow("binary offset exceeds platform usize"))?;
             let end = usize::try_from(offsets[idx + 1])

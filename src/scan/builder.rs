@@ -184,6 +184,34 @@ impl<'a> ScanBuilder<'a> {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the scan or Arrow conversion fails.
+    #[cfg(feature = "arrow")]
+    pub fn visit_arrow_batches<F>(&self, mut f: F) -> Result<ScanStats>
+    where
+        F: FnMut(RecordBatch) -> Result<ControlFlow<()>>,
+    {
+        let schema = self.arrow_schema()?;
+        self.visit_batches(|batch| {
+            let record_batch = batch.into_arrow_record_batch(schema.clone())?;
+            f(record_batch)
+        })
+    }
+
+    /// Yields each decoded batch as an [`OwnedColumnarBatch`] without any intermediate
+    /// Arrow conversion, giving callers full ownership of the raw column buffers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan or batch decoding fails.
+    pub fn visit_owned_batches<F>(&self, mut f: F) -> Result<ScanStats>
+    where
+        F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+    {
+        self.scan_batches(&mut f)
+    }
+
     #[doc(hidden)]
     /// # Errors
     ///
@@ -221,11 +249,12 @@ impl<'a> ScanBuilder<'a> {
     /// Returns an error if scan planning, batch materialization, or Arrow conversion fails.
     #[cfg(feature = "arrow")]
     pub fn collect_arrow_batches(&self) -> Result<Vec<RecordBatch>> {
-        let schema = self.arrow_schema()?;
-        self.collect_batches()?
-            .into_iter()
-            .map(|batch| batch.into_arrow_record_batch(schema.clone()))
-            .collect()
+        let mut batches = Vec::new();
+        self.visit_arrow_batches(|batch| {
+            batches.push(batch);
+            Ok(ControlFlow::Continue(()))
+        })?;
+        Ok(batches)
     }
 
     /// # Errors

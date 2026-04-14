@@ -28,6 +28,18 @@ profile-sample fixture mode projection="full" repeat="50" limit="0" batch_rows="
 profile-leaks fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
     @leaks --atExit -- cargo run --release -p sas7bdat-profiler --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
 
+build-polars-plugin:
+    @uvx maturin build --release --manifest-path polars_plugin/Cargo.toml
+
+check-polars-plugin:
+    @cargo check --manifest-path polars_plugin/Cargo.toml
+
+test-polars-plugin:
+    @.venv/bin/pytest polars_plugin/tests
+
+bench-plugin-vs-raw fixture="fixtures/ahs2013n.sas7bdat" columns="CONTROL,DEGREE,LMED" repeat="5" batch_rows="4096":
+    @.venv/bin/python scripts/compare_plugin_vs_raw.py --fixture {{fixture}} --columns {{columns}} --repeat {{repeat}} --batch-rows {{batch_rows}}
+
 bench-tags tags projection="full" max_fixtures="999" catalog="fixtures/fixture_catalog.local.json":
     @/bin/zsh -lc 'args=(${=CRITERION_ARGS:-}); BENCH_TAGS={{tags}} BENCH_PROJECTION={{projection}} BENCH_CATALOG={{catalog}} BENCH_MAX_FIXTURES={{max_fixtures}} cargo bench --bench scan_hotpaths -- "${args[@]}"'
 

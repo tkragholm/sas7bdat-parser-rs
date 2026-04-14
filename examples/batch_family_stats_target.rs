@@ -96,11 +96,11 @@ fn discover_target_paths(min_size_bytes: u64) -> Vec<PathBuf> {
         collect_sas7bdat_files(&root, &mut files);
     }
     files.sort();
-    files.retain(|path| fs::metadata(path).map_or(false, |meta| meta.len() >= min_size_bytes));
+    files.retain(|path| fs::metadata(path).is_ok_and(|meta| meta.len() >= min_size_bytes));
     files
 }
 
-fn route_total(stats: &ScanStats) -> u64 {
+const fn route_total(stats: &ScanStats) -> u64 {
     stats
         .batch_staged_numeric_cells
         .saturating_add(stats.batch_direct_numeric_cells)
@@ -147,10 +147,10 @@ fn main() {
         };
 
         let routed = route_total(&stats);
-        let relative = path
-            .strip_prefix(&fixtures_root)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| path.display().to_string());
+        let relative = path.strip_prefix(&fixtures_root).map_or_else(
+            |_| path.display().to_string(),
+            |p| p.to_string_lossy().to_string(),
+        );
         let size_bytes = fs::metadata(&path).map_or(0, |meta| meta.len());
 
         file_summaries.push(FileSummary {

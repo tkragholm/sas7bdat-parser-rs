@@ -458,6 +458,32 @@ fn collect_arrow_batches_returns_record_batches() {
     assert_eq!(num.value(0), 3.25);
 }
 
+#[cfg(feature = "arrow")]
+#[test]
+fn visit_arrow_batches_streams_record_batches() {
+    let row_a = make_numeric_text_row(7.0, *b"EF  ");
+    let row_b = make_numeric_text_row(9.0, *b"GH  ");
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 2, 0, &[&row_a, &row_b], 64));
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
+
+    let mut seen = Vec::new();
+    let stats = ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(1))
+        .visit_arrow_batches(|batch| {
+            seen.push((batch.num_rows(), batch.num_columns()));
+            Ok(ControlFlow::Break(()))
+        })
+        .expect("arrow batch scan");
+
+    assert_eq!(seen, vec![(1, 2)]);
+    assert_eq!(stats.decode_batches, 1);
+    assert_eq!(stats.rows_emitted, 1);
+}
+
 #[test]
 fn collect_batches_stops_at_row_limit() {
     let row_a = make_numeric_text_row(1.0, *b"AA  ");

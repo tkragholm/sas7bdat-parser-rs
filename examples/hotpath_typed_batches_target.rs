@@ -1,8 +1,5 @@
-use sas7bdat_simd::{BatchHint, Dataset};
 use std::{
     env, fs,
-    hint::black_box,
-    ops::ControlFlow,
     path::{Path, PathBuf},
 };
 
