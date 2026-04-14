@@ -7,6 +7,8 @@ use super::{
     ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions, TemporalDecodeOptions,
     materialize_planned_cells,
 };
+#[cfg(feature = "arrow")]
+use arrow_schema::SchemaRef;
 use rayon::prelude::{ParallelIterator, ParallelSlice};
 
 fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
@@ -201,6 +203,15 @@ impl<'a> ScanBuilder<'a> {
             },
             tap,
         )
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error if scan planning fails.
+    #[cfg(feature = "arrow")]
+    pub fn arrow_schema(&self) -> Result<SchemaRef> {
+        let plan = ScanPlan::new(self)?;
+        Ok(super::plan::arrow_schema_for_plan(&plan))
     }
 
     /// # Errors

@@ -9,6 +9,10 @@ use crate::{
     row::OwnedCellValue,
     test_utils::*,
 };
+#[cfg(feature = "arrow")]
+use arrow_array::{Float64Array, StringArray};
+#[cfg(feature = "arrow")]
+use arrow_schema::DataType;
 use std::{ops::ControlFlow, sync::Arc};
 
 fn make_batch_plan(builder: &ScanBuilder<'_>) -> BatchDecodePlan {
@@ -384,6 +388,49 @@ fn collect_batches_materializes_columnar_values() {
         }
         other => panic!("unexpected utf8 batch column: {other:?}"),
     }
+}
+
+#[test]
+#[cfg(feature = "arrow")]
+fn collect_batches_to_arrow_record_batch_round_trips() {
+    let row = make_numeric_text_row(7.5, *b"AB  ");
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
+
+    let builder = ScanBuilder::new(&ds);
+    let schema = builder.arrow_schema().expect("arrow schema");
+    assert_eq!(schema.fields().len(), 2);
+    assert_eq!(schema.field(0).data_type(), &DataType::Float64);
+    assert_eq!(schema.field(1).data_type(), &DataType::Utf8);
+
+    let batch = builder
+        .with_batch_hint(crate::BatchHint::Rows(1))
+        .collect_batches()
+        .expect("columnar batch")
+        .into_iter()
+        .next()
+        .expect("one batch");
+    let record_batch = batch
+        .into_arrow_record_batch(schema)
+        .expect("arrow record batch");
+
+    assert_eq!(record_batch.num_columns(), 2);
+    let num = record_batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("float array");
+    assert_eq!(num.value(0), 7.5);
+    let txt = record_batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("string array");
+    assert_eq!(txt.value(0), "AB");
 }
 
 #[test]

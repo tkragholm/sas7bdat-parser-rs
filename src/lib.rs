@@ -28,8 +28,8 @@ pub mod types;
 
 pub use dataset::Dataset;
 pub use error::{
-    CompressionError, CorruptionError, DecodeError, Error, HeaderError, IoError, MetadataError,
-    ProjectionError, Result, UnsupportedError,
+    ArrowError, CompressionError, CorruptionError, DecodeError, Error, HeaderError, IoError,
+    MetadataError, ProjectionError, Result, UnsupportedError,
 };
 pub use metadata::{
     ColumnMeta, CompressionKind, DatasetMetadata, Endianness, LogicalType, SasDate, SasDateTime,

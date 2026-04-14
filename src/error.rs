@@ -68,6 +68,11 @@ pub struct CompressionError {
 }
 
 #[derive(Debug, Clone)]
+pub struct ArrowError {
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
 pub enum CorruptionError {
     PageOutOfBounds { index: u64, limit: u64 },
     PointerOutOfBounds { offset: usize, limit: usize },
@@ -109,6 +114,7 @@ pub enum Error {
     Projection(ProjectionError),
     Decode(DecodeError),
     Compression(CompressionError),
+    Arrow(ArrowError),
     Corruption(CorruptionError),
     Unsupported(UnsupportedError),
 }
@@ -166,6 +172,13 @@ impl Error {
     pub fn metadata_io(err: &std::io::Error) -> Self {
         Self::metadata_corruption(err.to_string())
     }
+
+    #[must_use]
+    pub fn arrow(message: impl Into<String>) -> Self {
+        Self::Arrow(ArrowError {
+            message: message.into(),
+        })
+    }
 }
 
 impl fmt::Display for Error {
@@ -177,6 +190,7 @@ impl fmt::Display for Error {
             Self::Projection(err) => write!(f, "projection error: {}", err.message),
             Self::Decode(err) => write!(f, "decode error: {}", err.message),
             Self::Compression(err) => write!(f, "compression error: {}", err.message),
+            Self::Arrow(err) => write!(f, "arrow error: {}", err.message),
             Self::Corruption(err) => write!(f, "corruption error: {err}"),
             Self::Unsupported(err) => write!(f, "unsupported: {}", err.feature),
         }

@@ -4,6 +4,10 @@ use super::{
     ProjectedColumnPlan, Result, RowDecodePlan, RowSelection, ScanBuilder, StringDecodeKernel,
     StringDecodeOptions, UTF_8, Utf8ValidationMode,
 };
+#[cfg(feature = "arrow")]
+use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
+#[cfg(feature = "arrow")]
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub(super) struct ScanPlan {
@@ -261,4 +265,30 @@ pub(super) fn effective_scan_row_capacity_hint(builder: &ScanBuilder<'_>) -> usi
         .row_limit
         .map_or(total_rows, |limit| total_rows.min(limit));
     usize::try_from(limited_rows).unwrap_or(usize::MAX).max(1)
+}
+
+#[cfg(feature = "arrow")]
+pub(super) fn arrow_schema_for_plan(plan: &ScanPlan) -> SchemaRef {
+    let fields = plan
+        .row
+        .names
+        .iter()
+        .zip(plan.batch.column_kinds.iter().copied())
+        .map(|(name, kind)| Field::new(name, arrow_data_type(kind), true))
+        .collect::<Vec<_>>();
+    Arc::new(Schema::new(fields))
+}
+
+#[cfg(feature = "arrow")]
+fn arrow_data_type(kind: ColumnMaterializationKind) -> DataType {
+    match kind {
+        ColumnMaterializationKind::I32 => DataType::Int32,
+        ColumnMaterializationKind::I64 => DataType::Int64,
+        ColumnMaterializationKind::F64 => DataType::Float64,
+        ColumnMaterializationKind::Date => DataType::Date32,
+        ColumnMaterializationKind::DateTime => DataType::Timestamp(TimeUnit::Second, None),
+        ColumnMaterializationKind::Time => DataType::Time32(TimeUnit::Second),
+        ColumnMaterializationKind::Utf8 => DataType::Utf8,
+        ColumnMaterializationKind::RawBytes => DataType::Binary,
+    }
 }

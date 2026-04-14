@@ -1,4 +1,19 @@
+#[cfg(feature = "arrow")]
+use crate::error::{Error, Result};
 use crate::metadata::{SasDate, SasDateTime, SasTime};
+#[cfg(feature = "arrow")]
+use arrow_array::{
+    ArrayRef, RecordBatch,
+    builder::{BinaryBuilder, PrimitiveBuilder, StringBuilder},
+    types::{
+        ArrowPrimitiveType, Date32Type, Float64Type, Int32Type, Int64Type, Time32SecondType,
+        TimestampSecondType,
+    },
+};
+#[cfg(feature = "arrow")]
+use arrow_schema::SchemaRef;
+#[cfg(feature = "arrow")]
+use std::sync::Arc;
 pub const BLANK_ID: u32 = 0;
 
 /// Bit-packed validity slice: each `u64` word holds 64 row-validity bits (LSB = first row).
@@ -151,6 +166,50 @@ impl OwnedColumnBuffer {
             }),
         }
     }
+
+    #[cfg(feature = "arrow")]
+    pub fn into_arrow_array(self) -> Result<ArrayRef> {
+        match self {
+            Self::I32 { values, valid } => build_primitive_array::<Int32Type>(values, valid),
+            Self::I64 { values, valid } => build_primitive_array::<Int64Type>(values, valid),
+            Self::F64 { values, valid } => build_primitive_array::<Float64Type>(values, valid),
+            Self::Date { values, valid } => build_primitive_array::<Date32Type>(
+                values
+                    .into_iter()
+                    .map(|value| value.days_since_sas_epoch)
+                    .collect(),
+                valid,
+            ),
+            Self::DateTime { values, valid } => build_primitive_array::<TimestampSecondType>(
+                values
+                    .into_iter()
+                    .map(|value| value.seconds_since_sas_epoch)
+                    .collect(),
+                valid,
+            ),
+            Self::Time { values, valid } => build_primitive_array::<Time32SecondType>(
+                values
+                    .into_iter()
+                    .map(|value| {
+                        i32::try_from(value.seconds_since_midnight)
+                            .map_err(|_| Error::arrow("SAS time value exceeds Arrow Time32 range"))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                valid,
+            ),
+            Self::Utf8 {
+                offsets,
+                data,
+                valid,
+                dictionary_ids: _,
+            } => build_utf8_array(offsets, data, valid),
+            Self::RawBytes {
+                offsets,
+                data,
+                valid,
+            } => build_binary_array(offsets, data, valid),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -174,5 +233,93 @@ impl OwnedColumnarBatch {
             .iter()
             .map(OwnedColumnBuffer::as_borrowed)
             .collect()
+    }
+
+    #[cfg(feature = "arrow")]
+    pub fn into_arrow_record_batch(self, schema: SchemaRef) -> Result<RecordBatch> {
+        let arrays = self
+            .columns
+            .into_iter()
+            .map(OwnedColumnBuffer::into_arrow_array)
+            .collect::<Result<Vec<_>>>()?;
+        RecordBatch::try_new(schema, arrays).map_err(|err| Error::arrow(err.to_string()))
+    }
+}
+
+#[cfg(feature = "arrow")]
+fn build_primitive_array<T>(values: Vec<T::Native>, valid: Option<Vec<u64>>) -> Result<ArrayRef>
+where
+    T: ArrowPrimitiveType,
+    T::Native: Copy,
+{
+    let mut builder = PrimitiveBuilder::<T>::new();
+    for (idx, value) in values.into_iter().enumerate() {
+        if row_is_valid(valid.as_deref(), idx) {
+            builder.append_value(value);
+        } else {
+            builder.append_null();
+        }
+    }
+    Ok(Arc::new(builder.finish()))
+}
+
+#[cfg(feature = "arrow")]
+fn build_utf8_array(offsets: Vec<u32>, data: Vec<u8>, valid: Option<Vec<u64>>) -> Result<ArrayRef> {
+    let mut builder = StringBuilder::new();
+    let row_count = offsets.len().saturating_sub(1);
+    for idx in 0..row_count {
+        if row_is_valid(valid.as_deref(), idx) {
+            let start = usize::try_from(offsets[idx])
+                .map_err(|_| Error::arrow("utf8 offset exceeds platform usize"))?;
+            let end = usize::try_from(offsets[idx + 1])
+                .map_err(|_| Error::arrow("utf8 offset exceeds platform usize"))?;
+            let slice = data
+                .get(start..end)
+                .ok_or_else(|| Error::arrow("utf8 slice exceeds buffer bounds"))?;
+            let value = std::str::from_utf8(slice).map_err(|err| Error::arrow(err.to_string()))?;
+            builder.append_value(value);
+        } else {
+            builder.append_null();
+        }
+    }
+    Ok(Arc::new(builder.finish()))
+}
+
+#[cfg(feature = "arrow")]
+fn build_binary_array(
+    offsets: Vec<u32>,
+    data: Vec<u8>,
+    valid: Option<Vec<u64>>,
+) -> Result<ArrayRef> {
+    let mut builder = BinaryBuilder::new();
+    let row_count = offsets.len().saturating_sub(1);
+    for idx in 0..row_count {
+        if row_is_valid(valid.as_deref(), idx) {
+            let start = usize::try_from(offsets[idx])
+                .map_err(|_| Error::arrow("binary offset exceeds platform usize"))?;
+            let end = usize::try_from(offsets[idx + 1])
+                .map_err(|_| Error::arrow("binary offset exceeds platform usize"))?;
+            let slice = data
+                .get(start..end)
+                .ok_or_else(|| Error::arrow("binary slice exceeds buffer bounds"))?;
+            builder.append_value(slice);
+        } else {
+            builder.append_null();
+        }
+    }
+    Ok(Arc::new(builder.finish()))
+}
+
+#[cfg(feature = "arrow")]
+fn row_is_valid(valid: Option<&[u64]>, idx: usize) -> bool {
+    match valid {
+        None => true,
+        Some(words) => {
+            let word = idx / 64;
+            let bit = idx % 64;
+            words
+                .get(word)
+                .is_some_and(|bits| (bits & (1u64 << bit)) != 0)
+        }
     }
 }
