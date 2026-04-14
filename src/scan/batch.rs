@@ -1,11 +1,11 @@
 use super::{
-    ColumnBuffer, ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel,
-    DateNumericValue, DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode,
-    OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
-    SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
-    TimeNumericValue, TrimMode, TrimmedString, TypedNumericValue, classify_date_numeric_value,
-    classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
-    decode_numeric_cell, materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
+    ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, DateNumericValue,
+    DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode, OwnedColumnBuffer,
+    OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, SasDate,
+    SasDateTime, SasTime, ScanBuilder, StringDecodeKernel, TimeNumericValue, TrimMode,
+    TrimmedString, TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
+    classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
+    materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
     staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
 use crate::define_owned_column_enum;
@@ -2132,10 +2132,6 @@ pub(super) const fn column_materialization_kind(
         CompiledDecodeKernel::DateTime => ColumnMaterializationKind::DateTime,
         CompiledDecodeKernel::Time => ColumnMaterializationKind::Time,
     }
-}
-
-pub(super) fn borrow_column_buffers(columns: &[OwnedColumnBuffer]) -> Vec<ColumnBuffer<'_>> {
-    columns.iter().map(OwnedColumnBuffer::as_borrowed).collect()
 }
 
 /// Set bit `pos` in the bit-packed validity word array (1 = valid).

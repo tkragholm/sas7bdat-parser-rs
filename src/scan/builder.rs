@@ -5,7 +5,7 @@ use super::{
     ControlFlow, Dataset, DecodeMode, Error, FileSource, OrderingMode, OwnedColumnarBatch,
     OwnedRow, Parallelism, Projection, RawRow, RawRowSink, Result, RowSelection, RowSink, RowView,
     ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions, TemporalDecodeOptions,
-    borrow_column_buffers, materialize_planned_cells,
+    materialize_planned_cells,
 };
 use rayon::prelude::{ParallelIterator, ParallelSlice};
 
@@ -170,7 +170,7 @@ impl<'a> ScanBuilder<'a> {
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
     {
         self.scan_batches(&mut |batch| {
-            let columns = borrow_column_buffers(&batch.columns);
+            let columns = batch.borrowed_columns();
             let batch = ColumnarBatch {
                 row_base: batch.row_base,
                 row_count: batch.row_count,
@@ -191,7 +191,7 @@ impl<'a> ScanBuilder<'a> {
     {
         self.scan_batches_with_tap(
             &mut |batch| {
-                let columns = borrow_column_buffers(&batch.columns);
+                let columns = batch.borrowed_columns();
                 let batch = ColumnarBatch {
                     row_base: batch.row_base,
                     row_count: batch.row_count,

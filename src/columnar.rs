@@ -166,3 +166,13 @@ pub struct OwnedColumnarBatch {
     pub row_count: usize,
     pub columns: Vec<OwnedColumnBuffer>,
 }
+
+impl OwnedColumnarBatch {
+    #[must_use]
+    pub fn borrowed_columns(&self) -> Vec<ColumnBuffer<'_>> {
+        self.columns
+            .iter()
+            .map(OwnedColumnBuffer::as_borrowed)
+            .collect()
+    }
+}

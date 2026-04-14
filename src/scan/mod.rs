@@ -32,7 +32,7 @@ mod string;
 
 pub use builder::ScanBuilder;
 
-use batch::{BatchAccumulator, BatchDecodePlan, borrow_column_buffers, unexpected_batch_cell};
+use batch::{BatchAccumulator, BatchDecodePlan, unexpected_batch_cell};
 use numeric::{
     DateNumericValue, DateTimeNumericValue, SAS_NUMERIC_MISSING_SENTINEL, TimeNumericValue,
     TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
