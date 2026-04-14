@@ -19,6 +19,7 @@ pub(super) struct BatchDecodePlan {
     pub(super) column_kinds: Vec<ColumnMaterializationKind>,
     pub(super) families: BatchColumnFamilies,
     pub(super) staged_numeric_ops: Vec<StagedNumericOp>,
+    pub(super) staged_string_lookup_indices: Vec<usize>,
     pub(super) direct_numeric_integer: Vec<usize>,
     pub(super) direct_numeric_floatlike: Vec<usize>,
     pub(super) direct_numeric_date: Vec<usize>,
@@ -429,6 +430,8 @@ impl BatchDecodePlan {
                 }
             })
             .collect::<Vec<_>>();
+        let staged_string_lookup_indices =
+            compile_staged_string_lookup_indices(&families, &row_plan);
         let DirectNumericGroups {
             integer: direct_numeric_integer,
             floatlike: direct_numeric_floatlike,
@@ -457,6 +460,7 @@ impl BatchDecodePlan {
             column_kinds,
             families,
             staged_numeric_ops,
+            staged_string_lookup_indices,
             direct_numeric_integer,
             direct_numeric_floatlike,
             direct_numeric_date,
@@ -594,36 +598,35 @@ fn compile_plan_flags(families: &BatchColumnFamilies, row_plan: &RowDecodePlan) 
     flags
 }
 
-fn build_staged_string_lookups(plan: &BatchDecodePlan) -> Vec<Option<StagedStringLookup>> {
-    let mut lookups = Vec::with_capacity(plan.row_plan.columns.len());
-    let allow_staging = match plan.row_plan.string_options.dictionary_staging {
+fn compile_staged_string_lookup_indices(
+    families: &BatchColumnFamilies,
+    row_plan: &RowDecodePlan,
+) -> Vec<usize> {
+    let allow_staging = match row_plan.string_options.dictionary_staging {
         DictionaryStaging::Off => false,
         DictionaryStaging::On => true,
         DictionaryStaging::Auto => {
-            !matches!(
-                plan.direct_utf8_owned_mode,
-                Some(DirectUtf8OwnedMode::Utf8Lenient)
-            ) && !matches!(plan.row_plan.string_options.trim_mode, TrimMode::Preserve)
+            !matches!(row_plan.string_kernel, StringDecodeKernel::Utf8Lenient)
+                && !matches!(row_plan.string_options.trim_mode, TrimMode::Preserve)
         }
     };
-    for (idx, column) in plan.row_plan.columns.iter().enumerate() {
-        let width_ok = match plan.row_plan.string_options.dictionary_staging {
+    if !allow_staging {
+        return Vec::new();
+    }
+    let mut indices = Vec::with_capacity(families.direct_utf8_owned.len());
+    for &idx in &families.direct_utf8_owned {
+        let column = &row_plan.columns[idx];
+        let width_ok = match row_plan.string_options.dictionary_staging {
             DictionaryStaging::On => column.width > 0,
             DictionaryStaging::Auto | DictionaryStaging::Off => {
                 column.width > 0 && column.width <= MAX_STAGED_STRING_WIDTH
             }
         };
-        let should_stage = allow_staging
-            && plan.families.direct_utf8_owned.contains(&idx)
-            && width_ok
-            && matches!(column.kernel, CompiledDecodeKernel::Utf8);
-        if should_stage {
-            lookups.push(Some(StagedStringLookup::new()));
-        } else {
-            lookups.push(None);
+        if matches!(column.kernel, CompiledDecodeKernel::Utf8) && width_ok {
+            indices.push(idx);
         }
     }
-    lookups
+    indices
 }
 
 impl BatchAccumulator {
@@ -632,7 +635,11 @@ impl BatchAccumulator {
         target_rows: usize,
         capacity_hint_rows: usize,
     ) -> Self {
-        let staged_string_lookups = build_staged_string_lookups(&plan);
+        let mut staged_string_lookups = Vec::with_capacity(plan.row_plan.columns.len());
+        staged_string_lookups.resize_with(plan.row_plan.columns.len(), || None);
+        for &idx in &plan.staged_string_lookup_indices {
+            staged_string_lookups[idx] = Some(StagedStringLookup::new());
+        }
         let mut columns: Vec<OwnedBatchColumnBuilder> = plan
             .row_plan
             .columns
