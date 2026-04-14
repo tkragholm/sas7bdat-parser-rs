@@ -390,8 +390,8 @@ fn collect_batches_materializes_columnar_values() {
     }
 }
 
-#[test]
 #[cfg(feature = "arrow")]
+#[test]
 fn collect_batches_to_arrow_record_batch_round_trips() {
     let row = make_numeric_text_row(7.5, *b"AB  ");
     let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
@@ -431,6 +431,31 @@ fn collect_batches_to_arrow_record_batch_round_trips() {
         .downcast_ref::<StringArray>()
         .expect("string array");
     assert_eq!(txt.value(0), "AB");
+}
+
+#[cfg(feature = "arrow")]
+#[test]
+fn collect_arrow_batches_returns_record_batches() {
+    let row = make_numeric_text_row(3.25, *b"CD  ");
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 64));
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .build();
+
+    let record_batches = ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(1))
+        .collect_arrow_batches()
+        .expect("arrow batches");
+    assert_eq!(record_batches.len(), 1);
+    let batch = &record_batches[0];
+    let num = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("float array");
+    assert_eq!(num.value(0), 3.25);
 }
 
 #[test]

@@ -8,6 +8,8 @@ use super::{
     materialize_planned_cells,
 };
 #[cfg(feature = "arrow")]
+use arrow_array::RecordBatch;
+#[cfg(feature = "arrow")]
 use arrow_schema::SchemaRef;
 use rayon::prelude::{ParallelIterator, ParallelSlice};
 
@@ -212,6 +214,18 @@ impl<'a> ScanBuilder<'a> {
     pub fn arrow_schema(&self) -> Result<SchemaRef> {
         let plan = ScanPlan::new(self)?;
         Ok(super::plan::arrow_schema_for_plan(&plan))
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error if scan planning, batch materialization, or Arrow conversion fails.
+    #[cfg(feature = "arrow")]
+    pub fn collect_arrow_batches(&self) -> Result<Vec<RecordBatch>> {
+        let schema = self.arrow_schema()?;
+        self.collect_batches()?
+            .into_iter()
+            .map(|batch| batch.into_arrow_record_batch(schema.clone()))
+            .collect()
     }
 
     /// # Errors
