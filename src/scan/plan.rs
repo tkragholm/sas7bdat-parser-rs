@@ -1,3 +1,4 @@
+use super::raw::RawScanPlan;
 use super::{
     BatchDecodePlan, BatchHint, ColumnMeta, DecodeMode, Encoding, Error, LogicalType,
     ProjectedColumnPlan, Result, RowDecodePlan, RowSelection, ScanBuilder, StringDecodeKernel,
@@ -6,6 +7,7 @@ use super::{
 
 #[derive(Debug)]
 pub(super) struct ScanPlan {
+    pub(super) raw: RawScanPlan,
     pub(super) row: RowDecodePlan,
     pub(super) batch: BatchDecodePlan,
     pub(super) batch_row_capacity: usize,
@@ -14,11 +16,16 @@ pub(super) struct ScanPlan {
 
 impl ScanPlan {
     pub(super) fn new(builder: &ScanBuilder<'_>) -> Result<Self> {
-        let row = RowDecodePlan::new(builder)?;
+        let raw = RawScanPlan::compile(builder);
+        let projection = builder.projection;
+        let projection_plan = projection.map(|projection| projection.inner.as_ref());
+        let projection_names = projection.map(|projection| projection.names.as_ref());
+        let row = RowDecodePlan::new_with_projection(builder, projection_plan, projection_names)?;
         let batch_row_capacity = resolve_batch_row_capacity(builder)?;
         let capacity_hint_rows = effective_scan_row_capacity_hint(builder).min(batch_row_capacity);
         let batch = BatchDecodePlan::new(builder, row.clone())?;
         Ok(Self {
+            raw,
             row,
             batch,
             batch_row_capacity,

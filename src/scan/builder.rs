@@ -1,10 +1,11 @@
 use super::plan::ScanPlan;
+use super::raw::{scan_raw_rows_with_plan, scan_row_bytes_with_plan};
 use super::{
     BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch,
     ControlFlow, Dataset, DecodeMode, Error, FileSource, OrderingMode, OwnedColumnarBatch,
     OwnedRow, Parallelism, Projection, RawRow, RawRowSink, Result, RowSelection, RowSink, RowView,
     ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions, TemporalDecodeOptions,
-    borrow_column_buffers, materialize_planned_cells, scan_raw_rows, scan_row_bytes,
+    borrow_column_buffers, materialize_planned_cells,
 };
 use rayon::prelude::{ParallelIterator, ParallelSlice};
 
@@ -216,7 +217,7 @@ impl<'a> ScanBuilder<'a> {
         let mut rows = Vec::with_capacity(usize::try_from(self.ds.metadata.row_count).unwrap_or(0));
         match plan.row.decode_mode {
             DecodeMode::Typed | DecodeMode::TypedLossless => {
-                scan_row_bytes(self, &mut |row_index, bytes| {
+                scan_row_bytes_with_plan(self, &plan.raw, &mut |row_index, bytes| {
                     plan.row.validate_row_bounds(bytes)?;
                     let mut cells = Vec::with_capacity(plan.row.columns.len());
                     for (column, kind) in plan.row.columns.iter().zip(&plan.row.owned_kinds) {
@@ -261,7 +262,7 @@ impl<'a> ScanBuilder<'a> {
         )
         .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
 
-        let _stats = scan_row_bytes(self, &mut |row_index, bytes| {
+        let _stats = scan_row_bytes_with_plan(self, &plan.raw, &mut |row_index, bytes| {
             batch_accumulator.push_row(row_index.into(), bytes)?;
             if batch_accumulator.is_full() {
                 batches.push(batch_accumulator.take_batch());
@@ -317,7 +318,6 @@ impl ScanBuilder<'_> {
         };
 
         let worker_capacity_hint = plan.capacity_hint_rows.div_ceil(workers).max(1);
-        let raw_plan = super::raw::RawScanPlan::compile(self);
         super::raw::RawScanPlan::validate_builder(self)?;
         if usize::from(self.ds.layout.row_len) == 0 {
             return Ok(Some(Vec::new()));
@@ -334,7 +334,7 @@ impl ScanBuilder<'_> {
                     self,
                     file_bytes,
                     chunk,
-                    &raw_plan,
+                    &plan.raw,
                     &plan.batch,
                     plan.batch_row_capacity,
                     worker_capacity_hint,
@@ -411,7 +411,8 @@ impl ScanBuilder<'_> {
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
     {
-        scan_raw_rows(self, f)
+        let plan = ScanPlan::new(self)?;
+        scan_raw_rows_with_plan(self, &plan.raw, f)
     }
 
     fn scan_raw_rows_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
@@ -419,7 +420,8 @@ impl ScanBuilder<'_> {
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
     {
-        scan_raw_rows(self, &mut |raw| {
+        let plan = ScanPlan::new(self)?;
+        scan_raw_rows_with_plan(self, &plan.raw, &mut |raw| {
             tap(raw.row_index.into(), raw.bytes);
             f(raw)
         })
@@ -438,7 +440,7 @@ impl ScanBuilder<'_> {
 
         let plan = ScanPlan::new(self)?;
         let mut owned_strings = Vec::new();
-        self.scan_raw_rows(&mut |raw| {
+        scan_raw_rows_with_plan(self, &plan.raw, &mut |raw| {
             let planned = plan.row.plan_cells(raw.bytes, &mut owned_strings)?;
             let cells = materialize_planned_cells(&planned, &owned_strings)?;
             let row = RowView {
@@ -463,19 +465,17 @@ impl ScanBuilder<'_> {
 
         let plan = ScanPlan::new(self)?;
         let mut owned_strings = Vec::new();
-        self.scan_raw_rows_with_tap(
-            &mut |raw| {
-                let planned = plan.row.plan_cells(raw.bytes, &mut owned_strings)?;
-                let cells = materialize_planned_cells(&planned, &owned_strings)?;
-                let row = RowView {
-                    row_index: raw.row_index,
-                    names: plan.row.names.as_ref(),
-                    cells: &cells,
-                };
-                f(row)
-            },
-            tap,
-        )
+        scan_raw_rows_with_plan(self, &plan.raw, &mut |raw| {
+            tap(raw.row_index.into(), raw.bytes);
+            let planned = plan.row.plan_cells(raw.bytes, &mut owned_strings)?;
+            let cells = materialize_planned_cells(&planned, &owned_strings)?;
+            let row = RowView {
+                row_index: raw.row_index,
+                names: plan.row.names.as_ref(),
+                cells: &cells,
+            };
+            f(row)
+        })
     }
 
     fn scan_batches<F>(&self, f: &mut F) -> Result<ScanStats>
@@ -524,7 +524,7 @@ impl ScanBuilder<'_> {
         let mut decode_batches = 0u64;
         let mut stop_after_current_batch = false;
 
-        let mut stats = scan_row_bytes(self, &mut |row_index, bytes| {
+        let mut stats = scan_row_bytes_with_plan(self, &plan.raw, &mut |row_index, bytes| {
             tap(row_index.into(), bytes);
             batcher.push_row(row_index.into(), bytes)?;
             if batcher.is_full() {

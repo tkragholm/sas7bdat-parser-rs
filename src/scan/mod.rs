@@ -45,7 +45,6 @@ use plan::{
     OwnedCellMaterializationKind, compile_column_plan, compile_compiled_projection_column_plan,
     compile_owned_materialization_kind, compile_string_decode_kernel,
 };
-use raw::{scan_raw_rows, scan_row_bytes};
 use row_decode::{
     DecodedUtf8BatchValue, PlannedCell, RowDecodePlan, StringDecodeKernel, TrimmedString,
     materialize_planned_cells,

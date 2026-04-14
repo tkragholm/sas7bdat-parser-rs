@@ -9,6 +9,7 @@ use super::{
     maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes, numeric_bits,
     resolve_encoding, trim_and_classify_for_mode,
 };
+use crate::internal::ProjectionPlan;
 use bstr::ByteSlice;
 
 #[derive(Debug, Clone)]
@@ -59,8 +60,23 @@ pub(super) enum StringDecodeKernel {
 }
 
 impl RowDecodePlan {
+    #[cfg(test)]
     pub(super) fn new(builder: &ScanBuilder<'_>) -> Result<Self> {
-        let names: Arc<[String]> = builder.projection.map_or_else(
+        let projection = builder
+            .projection
+            .map(|projection| projection.inner.as_ref());
+        let projection_names = builder
+            .projection
+            .map(|projection| projection.names.as_ref());
+        Self::new_with_projection(builder, projection, projection_names)
+    }
+
+    pub(super) fn new_with_projection(
+        builder: &ScanBuilder<'_>,
+        projection: Option<&ProjectionPlan>,
+        projection_names: Option<&[String]>,
+    ) -> Result<Self> {
+        let names: Arc<[String]> = projection_names.map_or_else(
             || {
                 Arc::from(
                     builder
@@ -72,11 +88,11 @@ impl RowDecodePlan {
                         .collect::<Vec<_>>(),
                 )
             },
-            |projection| Arc::clone(&projection.names),
+            |names| Arc::from(names),
         );
 
         let encoding = resolve_encoding(builder.ds.metadata.encoding.as_deref());
-        let (columns, max_end) = builder.projection.map_or_else(
+        let (columns, max_end) = projection.map_or_else(
             || {
                 let columns = builder
                     .ds
@@ -91,12 +107,11 @@ impl RowDecodePlan {
             |projection| {
                 Ok((
                     projection
-                        .inner
                         .columns
                         .iter()
                         .map(|column| compile_compiled_projection_column_plan(builder, column))
                         .collect::<Vec<_>>(),
-                    usize::from(projection.inner.max_end),
+                    usize::from(projection.max_end),
                 ))
             },
         )?;

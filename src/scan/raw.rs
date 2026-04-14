@@ -5,25 +5,33 @@ use super::{
 use crate::types::{PageIndex, RowIndex};
 use std::io::Read;
 
-pub(super) fn scan_raw_rows<F>(builder: &ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
+pub(super) fn scan_raw_rows_with_plan<F>(
+    builder: &ScanBuilder<'_>,
+    plan: &RawScanPlan,
+    f: &mut F,
+) -> Result<ScanStats>
 where
     F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
 {
-    scan_row_bytes(builder, &mut |row_index, bytes| {
+    scan_row_bytes_with_plan(builder, plan, &mut |row_index, bytes| {
         f(RawRow { row_index, bytes })
     })
 }
 
-pub(super) fn scan_row_bytes<F>(builder: &ScanBuilder<'_>, f: &mut F) -> Result<ScanStats>
+pub(super) fn scan_row_bytes_with_plan<F>(
+    builder: &ScanBuilder<'_>,
+    plan: &RawScanPlan,
+    f: &mut F,
+) -> Result<ScanStats>
 where
     F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
     match &builder.ds.file.source {
-        FileSource::Bytes(bytes) => scan_row_bytes_in_memory(builder, bytes.as_ref(), f),
-        FileSource::Mmap(mmap) => scan_row_bytes_in_memory(builder, &mmap[..], f),
+        FileSource::Bytes(bytes) => scan_row_bytes_in_memory(builder, plan, bytes.as_ref(), f),
+        FileSource::Mmap(mmap) => scan_row_bytes_in_memory(builder, plan, &mmap[..], f),
         FileSource::Path(_) => {
             let mut reader = open_scan_reader(builder.ds)?;
-            scan_row_bytes_with_reader(builder, &mut reader, f)
+            scan_row_bytes_with_reader(builder, plan, &mut reader, f)
         }
     }
 }
@@ -57,6 +65,7 @@ impl ScanLoopContext {
 
 pub(super) fn scan_row_bytes_with_reader<R, F>(
     builder: &ScanBuilder<'_>,
+    plan: &RawScanPlan,
     reader: &mut R,
     f: &mut F,
 ) -> Result<ScanStats>
@@ -64,7 +73,6 @@ where
     R: Read + Seek,
     F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
-    let plan = RawScanPlan::compile(builder);
     if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
@@ -104,13 +112,13 @@ where
 
 pub(super) fn scan_row_bytes_in_memory<F>(
     builder: &ScanBuilder<'_>,
+    plan: &RawScanPlan,
     file_bytes: &[u8],
     f: &mut F,
 ) -> Result<ScanStats>
 where
     F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
-    let plan = RawScanPlan::compile(builder);
     if plan.row_len == 0 {
         return Ok(ScanStats::default());
     }
