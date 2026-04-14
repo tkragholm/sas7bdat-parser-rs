@@ -11,6 +11,11 @@ use crate::{
 };
 use std::{ops::ControlFlow, sync::Arc};
 
+fn make_batch_plan(builder: &ScanBuilder<'_>) -> BatchDecodePlan {
+    let row_plan = super::RowDecodePlan::new(builder).expect("row plan");
+    BatchDecodePlan::new(builder, row_plan).expect("batch plan")
+}
+
 #[test]
 fn raw_scan_visits_rows_from_fused_pages() {
     let bytes = Arc::<[u8]>::from(make_pages());
@@ -305,39 +310,36 @@ fn dictionary_staging_policy_controls_lookup_construction() {
     let row = make_numeric_text_row(1.0, *b"A  \xC4");
     let ds = make_windows1252_test_dataset(&row);
 
-    let plan_off = BatchDecodePlan::new(&ScanBuilder::new(&ds).with_string_options(
+    let plan_off = make_batch_plan(&ScanBuilder::new(&ds).with_string_options(
         crate::StringDecodeOptions {
             trim_mode: crate::TrimMode::RTrim,
             utf8_validation: crate::Utf8ValidationMode::Strict,
             mojibake_fix: crate::MojibakePolicy::Auto,
             dictionary_staging: crate::DictionaryStaging::Off,
         },
-    ))
-    .expect("plan off");
+    ));
     let acc_off = BatchAccumulator::new(plan_off, 1, 1);
     assert!(!acc_off.has_staged_string_lookup_for(1));
 
-    let plan_on = BatchDecodePlan::new(&ScanBuilder::new(&ds).with_string_options(
+    let plan_on = make_batch_plan(&ScanBuilder::new(&ds).with_string_options(
         crate::StringDecodeOptions {
             trim_mode: crate::TrimMode::Preserve,
             utf8_validation: crate::Utf8ValidationMode::Strict,
             mojibake_fix: crate::MojibakePolicy::Auto,
             dictionary_staging: crate::DictionaryStaging::On,
         },
-    ))
-    .expect("plan on");
+    ));
     let acc_on = BatchAccumulator::new(plan_on, 1, 1);
     assert!(acc_on.has_staged_string_lookup_for(1));
 
-    let plan_auto = BatchDecodePlan::new(&ScanBuilder::new(&ds).with_string_options(
+    let plan_auto = make_batch_plan(&ScanBuilder::new(&ds).with_string_options(
         crate::StringDecodeOptions {
             trim_mode: crate::TrimMode::Preserve,
             utf8_validation: crate::Utf8ValidationMode::Strict,
             mojibake_fix: crate::MojibakePolicy::Auto,
             dictionary_staging: crate::DictionaryStaging::Auto,
         },
-    ))
-    .expect("plan auto");
+    ));
     let acc_auto = BatchAccumulator::new(plan_auto, 1, 1);
     assert!(!acc_auto.has_staged_string_lookup_for(1));
 }
@@ -530,7 +532,7 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
     let builder = ScanBuilder::new(&ds)
         .with_projection(&projection)
         .with_batch_hint(crate::BatchHint::Rows(1));
-    let plan = BatchDecodePlan::new(&builder).expect("batch plan");
+    let plan = make_batch_plan(&builder);
 
     assert_eq!(plan.families.staged_numeric, vec![0, 2]);
     assert!(plan.families.direct_utf8_borrowed.is_empty());
@@ -551,12 +553,11 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
     let row = make_numeric_text_row(42.0, *b"ZX  ");
     let ds = make_standard_test_dataset(&row);
 
-    let plan = BatchDecodePlan::new(
+    let plan = make_batch_plan(
         &ScanBuilder::new(&ds)
             .with_decode_mode(crate::DecodeMode::TypedLossless)
             .with_batch_hint(crate::BatchHint::Rows(1)),
-    )
-    .expect("batch plan");
+    );
 
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert_eq!(plan.families.direct_raw_bytes, vec![1]);
@@ -574,7 +575,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
     let row = make_numeric_text_row(1.0, *b"pear");
     let ds = make_standard_test_dataset(&row);
 
-    let plan = BatchDecodePlan::new(
+    let plan = make_batch_plan(
         &ScanBuilder::new(&ds)
             .with_string_options(crate::StringDecodeOptions {
                 trim_mode: crate::TrimMode::RTrim,
@@ -583,8 +584,7 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
                 dictionary_staging: crate::DictionaryStaging::Auto,
             })
             .with_batch_hint(crate::BatchHint::Rows(1)),
-    )
-    .expect("batch plan");
+    );
 
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert_eq!(plan.families.direct_utf8_borrowed, vec![1]);
@@ -615,9 +615,7 @@ fn make_single_byte_test_dataset(compression: CompressionKind) -> crate::dataset
 fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_scan() {
     let ds = make_single_byte_test_dataset(CompressionKind::None);
 
-    let plan =
-        BatchDecodePlan::new(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)))
-            .expect("batch plan");
+    let plan = make_batch_plan(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)));
 
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert!(plan.families.direct_utf8_single_byte.is_empty());
@@ -634,9 +632,7 @@ fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_s
 fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
     let ds = make_single_byte_test_dataset(CompressionKind::Row);
 
-    let plan =
-        BatchDecodePlan::new(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)))
-            .expect("batch plan");
+    let plan = make_batch_plan(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)));
 
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert_eq!(plan.families.direct_utf8_single_byte, vec![1]);

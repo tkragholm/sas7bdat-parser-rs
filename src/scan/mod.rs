@@ -44,7 +44,6 @@ use plan::{
     ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, NumericTileMode,
     OwnedCellMaterializationKind, compile_column_plan, compile_compiled_projection_column_plan,
     compile_owned_materialization_kind, compile_string_decode_kernel,
-    effective_scan_row_capacity_hint, resolve_batch_row_capacity,
 };
 use raw::{scan_raw_rows, scan_row_bytes};
 use row_decode::{

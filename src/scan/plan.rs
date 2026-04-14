@@ -1,7 +1,31 @@
 use super::{
-    BatchHint, ColumnMeta, DecodeMode, Encoding, Error, LogicalType, ProjectedColumnPlan, Result,
-    RowSelection, ScanBuilder, StringDecodeKernel, StringDecodeOptions, UTF_8, Utf8ValidationMode,
+    BatchDecodePlan, BatchHint, ColumnMeta, DecodeMode, Encoding, Error, LogicalType,
+    ProjectedColumnPlan, Result, RowDecodePlan, RowSelection, ScanBuilder, StringDecodeKernel,
+    StringDecodeOptions, UTF_8, Utf8ValidationMode,
 };
+
+#[derive(Debug)]
+pub(super) struct ScanPlan {
+    pub(super) row: RowDecodePlan,
+    pub(super) batch: BatchDecodePlan,
+    pub(super) batch_row_capacity: usize,
+    pub(super) capacity_hint_rows: usize,
+}
+
+impl ScanPlan {
+    pub(super) fn new(builder: &ScanBuilder<'_>) -> Result<Self> {
+        let row = RowDecodePlan::new(builder)?;
+        let batch_row_capacity = resolve_batch_row_capacity(builder)?;
+        let capacity_hint_rows = effective_scan_row_capacity_hint(builder).min(batch_row_capacity);
+        let batch = BatchDecodePlan::new(builder, row.clone())?;
+        Ok(Self {
+            row,
+            batch,
+            batch_row_capacity,
+            capacity_hint_rows,
+        })
+    }
+}
 
 const AUTO_BATCH_ROWS_MIN: usize = 4096;
 #[derive(Debug, Clone)]

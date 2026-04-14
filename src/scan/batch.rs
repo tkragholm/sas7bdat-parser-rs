@@ -13,7 +13,7 @@ use crate::{BLANK_ID, DictionaryStaging};
 use encoding_rs::WINDOWS_1252;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct BatchDecodePlan {
     pub(super) row_plan: RowDecodePlan,
     pub(super) column_kinds: Vec<ColumnMaterializationKind>,
@@ -398,8 +398,7 @@ define_owned_column_enum! {
 }
 
 impl BatchDecodePlan {
-    pub(super) fn new(builder: &ScanBuilder<'_>) -> Result<Self> {
-        let row_plan = RowDecodePlan::new(builder)?;
+    pub(super) fn new(builder: &ScanBuilder<'_>, row_plan: RowDecodePlan) -> Result<Self> {
         let column_kinds = row_plan
             .columns
             .iter()

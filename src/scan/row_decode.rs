@@ -11,7 +11,7 @@ use super::{
 };
 use bstr::ByteSlice;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct RowDecodePlan {
     pub(super) columns: Vec<CompiledColumnPlan>,
     pub(super) owned_kinds: Vec<OwnedCellMaterializationKind>,
