@@ -88,9 +88,8 @@ impl SasDataset {
         let ds = py
             .detach(|| Dataset::open(path))
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        let arrow_schema = ds.scan().arrow_schema().map_err(convert::py_err)?;
-        let polars_schema =
-            Arc::new(convert::build_polars_schema(arrow_schema.as_ref()).map_err(convert::py_err)?);
+        let arrow_schema = scan::full_arrow_schema_for_dataset(&ds).map_err(convert::py_err)?;
+        let polars_schema = scan::full_polars_schema_for_dataset(&ds).map_err(convert::py_err)?;
         Ok(Self {
             ds: Arc::new(ds),
             arrow_schema,
@@ -342,10 +341,7 @@ fn benchmark_scan_to_dataframes(
     let dataset_open_ns = open_start.elapsed().as_nanos();
     let projection_columns = with_columns.clone();
     let projection = build_projection(ds.as_ref(), with_columns)?;
-    let full_schema = Arc::new(
-        convert::build_polars_schema(ds.scan().arrow_schema().map_err(convert::py_err)?.as_ref())
-            .map_err(convert::py_err)?,
-    );
+    let full_schema = scan::full_polars_schema_for_dataset(ds.as_ref()).map_err(convert::py_err)?;
 
     let priming_start = Instant::now();
     let priming_stats = run_scan_to_dataframes_once(
@@ -496,10 +492,7 @@ fn prepare_warm_batches(
     if let Some(batch_size) = batch_size {
         scan = scan.with_batch_hint(BatchHint::Rows(batch_size));
     }
-    let full_schema = Arc::new(
-        convert::build_polars_schema(ds.scan().arrow_schema().map_err(convert::py_err)?.as_ref())
-            .map_err(convert::py_err)?,
-    );
+    let full_schema = scan::full_polars_schema_for_dataset(&ds).map_err(convert::py_err)?;
     let schema =
         resolve_polars_schema_from_full(&full_schema, projection_columns.as_deref(), &scan)
             .map_err(convert::py_err)?;

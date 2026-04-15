@@ -26,7 +26,7 @@ pub use columnar::{
 };
 pub mod types;
 
-pub use dataset::Dataset;
+pub use dataset::{Dataset, OpenBreakdown};
 pub use error::{
     ArrowError, CompressionError, CorruptionError, DecodeError, Error, HeaderError, IoError,
     MetadataError, ProjectionError, Result, UnsupportedError,

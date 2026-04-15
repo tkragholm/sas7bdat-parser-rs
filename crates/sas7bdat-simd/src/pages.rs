@@ -7,7 +7,10 @@ use crate::{
     },
     types::{ByteOffset, PageIndex, PageSlice, RowIndex},
 };
-use std::io::{Read, Seek, SeekFrom};
+use std::{
+    io::{Read, Seek, SeekFrom},
+    ops::ControlFlow,
+};
 
 const SUBHEADER_POINTER_OFFSET: usize = 8;
 const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
@@ -28,6 +31,21 @@ where
     R: Read + Seek,
     F: FnMut(u64, &[u8]) -> Result<()>,
 {
+    walk_pages_until(reader, header, |page_index, page| {
+        visit(page_index, page)?;
+        Ok(ControlFlow::Continue(()))
+    })
+}
+
+pub fn walk_pages_until<R, F>(
+    reader: &mut R,
+    header: &crate::internal::HeaderInfo,
+    mut visit: F,
+) -> Result<()>
+where
+    R: Read + Seek,
+    F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
+{
     let mut page = vec![0u8; usize::from(header.page_size)];
     for page_index in 0..header.page_count {
         let page_offset = header.data_offset + page_index * u64::from(header.page_size);
@@ -37,7 +55,9 @@ where
         reader
             .read_exact(&mut page)
             .map_err(|e| page_io_error(&e))?;
-        visit(page_index, &page)?;
+        if let ControlFlow::Break(()) = visit(page_index, &page)? {
+            break;
+        }
     }
     Ok(())
 }

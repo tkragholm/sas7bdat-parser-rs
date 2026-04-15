@@ -15,7 +15,20 @@ use std::{
     io::{Cursor, Read, Seek},
     path::Path,
     sync::{Arc, Mutex},
+    time::Instant,
 };
+
+#[derive(Debug, Clone)]
+pub struct OpenBreakdown {
+    pub metadata_ns: u128,
+    pub file_open_ns: u128,
+    pub mmap_ns: Option<u128>,
+    pub probe_header_ns: u128,
+    pub rewind_ns: u128,
+    pub parse_layout_ns: u128,
+    pub total_ns: u128,
+    pub used_mmap: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct Dataset {
@@ -26,6 +39,92 @@ pub struct Dataset {
 }
 
 impl Dataset {
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened, mapped, or its
+    /// SAS7BDAT structure cannot be parsed.
+    pub fn open_breakdown(path: impl AsRef<Path>, options: OpenOptions) -> Result<OpenBreakdown> {
+        let path = path.as_ref();
+
+        let metadata_start = Instant::now();
+        let _meta = fs::metadata(path).map_err(|err| Error::io_error_with_path(path, &err))?;
+        let metadata_ns = metadata_start.elapsed().as_nanos();
+
+        let file_open_start = Instant::now();
+        let file = File::open(path).map_err(|err| Error::io_error_with_path(path, &err))?;
+        let file_open_ns = file_open_start.elapsed().as_nanos();
+
+        if should_try_mmap(options.io_backend) {
+            let mmap_start = Instant::now();
+            if let Some(mmap) = try_map_file(path, &file)? {
+                let mmap_ns = mmap_start.elapsed().as_nanos();
+                let mut cursor = Cursor::new(&mmap[..]);
+
+                let probe_start = Instant::now();
+                let (header, metadata) = probe_header(&mut cursor)?;
+                let probe_header_ns = probe_start.elapsed().as_nanos();
+
+                let rewind_start = Instant::now();
+                cursor.rewind().map_err(|err| Error::io_error(&err))?;
+                let rewind_ns = rewind_start.elapsed().as_nanos();
+
+                let layout_start = Instant::now();
+                let _ = parse_layout(&mut cursor, header, metadata)?;
+                let parse_layout_ns = layout_start.elapsed().as_nanos();
+
+                return Ok(OpenBreakdown {
+                    metadata_ns,
+                    file_open_ns,
+                    mmap_ns: Some(mmap_ns),
+                    probe_header_ns,
+                    rewind_ns,
+                    parse_layout_ns,
+                    total_ns: metadata_ns
+                        + file_open_ns
+                        + mmap_ns
+                        + probe_header_ns
+                        + rewind_ns
+                        + parse_layout_ns,
+                    used_mmap: true,
+                });
+            }
+        }
+
+        let probe_start = Instant::now();
+        let mut file = file;
+        let (header, metadata) = probe_header(&mut file).map_err(|mut err| {
+            if let Error::Io(ref mut io_err) = err {
+                io_err.path = Some(path.to_path_buf());
+            }
+            err
+        })?;
+        let probe_header_ns = probe_start.elapsed().as_nanos();
+
+        let rewind_start = Instant::now();
+        file.rewind().map_err(|err| Error::io_error_with_path(path, &err))?;
+        let rewind_ns = rewind_start.elapsed().as_nanos();
+
+        let layout_start = Instant::now();
+        let _ = parse_layout(&mut file, header, metadata).map_err(|mut err| {
+            if let Error::Io(ref mut io_err) = err {
+                io_err.path = Some(path.to_path_buf());
+            }
+            err
+        })?;
+        let parse_layout_ns = layout_start.elapsed().as_nanos();
+
+        Ok(OpenBreakdown {
+            metadata_ns,
+            file_open_ns,
+            mmap_ns: None,
+            probe_header_ns,
+            rewind_ns,
+            parse_layout_ns,
+            total_ns: metadata_ns + file_open_ns + probe_header_ns + rewind_ns + parse_layout_ns,
+            used_mmap: false,
+        })
+    }
+
     /// # Errors
     ///
     /// Returns an error if the file cannot be opened or its SAS7BDAT

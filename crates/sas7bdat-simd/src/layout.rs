@@ -6,13 +6,14 @@ use crate::{
         read_u32, read_u64,
     },
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
-    pages::walk_pages,
+    pages::walk_pages_until,
     types::RowLength,
 };
 use encoding_rs::{Encoding, UTF_8};
 use std::{
     convert::TryFrom,
     io::{Read, Seek},
+    ops::ControlFlow,
 };
 
 const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
@@ -90,6 +91,18 @@ impl TextStore {
         let text = text.trim().to_owned();
         if text.is_empty() { None } else { Some(text) }
     }
+
+    fn can_resolve(&self, text_ref: TextRef) -> bool {
+        if text_ref.length == 0 {
+            return true;
+        }
+        let Some(blob) = self.blob(text_ref.index as usize) else {
+            return false;
+        };
+        let end = usize::from(text_ref.offset.saturating_add(text_ref.length));
+        let start = usize::from(text_ref.offset);
+        blob.get(start..end).is_some()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +159,34 @@ impl MetadataState {
         column.index = index;
         column
     }
+
+    fn is_complete(&self) -> bool {
+        let Some(row_info) = self.row_info else {
+            return false;
+        };
+        let Some(column_count_u32) = self.column_count else {
+            return false;
+        };
+        let Ok(column_count) = usize::try_from(column_count_u32) else {
+            return false;
+        };
+        if self.names_seen < column_count || self.attrs_seen < column_count || self.formats_seen < column_count {
+            return false;
+        }
+        if !self.text_store.can_resolve(row_info.compression_ref)
+            || !self.text_store.can_resolve(row_info.label_ref)
+        {
+            return false;
+        }
+        self.columns
+            .iter()
+            .take(column_count)
+            .all(|column| {
+                self.text_store.can_resolve(column.name_ref)
+                    && self.text_store.can_resolve(column.label_ref)
+                    && self.text_store.can_resolve(column.format_ref)
+            })
+    }
 }
 
 pub fn parse_layout<R: Read + Seek>(
@@ -159,7 +200,7 @@ pub fn parse_layout<R: Read + Seek>(
         ..MetadataState::default()
     };
 
-    walk_pages(reader, &header, |_page_index, page| {
+    walk_pages_until(reader, &header, |_page_index, page| {
         let page_type = read_u16(
             header.endianness,
             get_range(
@@ -176,7 +217,11 @@ pub fn parse_layout<R: Read + Seek>(
             }
             PageKind::Data | PageKind::Comp | PageKind::CompTable | PageKind::Unknown => {}
         }
-        Ok(())
+        if state.is_complete() {
+            Ok(ControlFlow::Break(()))
+        } else {
+            Ok(ControlFlow::Continue(()))
+        }
     })?;
 
     let row_info = state

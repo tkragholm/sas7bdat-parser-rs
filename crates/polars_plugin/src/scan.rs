@@ -7,7 +7,7 @@ use super::predicate::{PredicateExpr, append_unique_columns, filter_dataframe, p
 #[cfg(feature = "arrow")]
 use super::{BatchReader, ReaderMessage, SasIoSource};
 #[cfg(feature = "arrow")]
-use arrow_schema::Schema as ArrowSchema;
+use arrow_schema::{DataType as ArrowSchemaDataType, Field as ArrowSchemaField, Schema as ArrowSchema, TimeUnit as ArrowSchemaTimeUnit};
 #[cfg(feature = "arrow")]
 use polars::frame::DataFrame;
 #[cfg(feature = "arrow")]
@@ -16,7 +16,7 @@ use pyo3::{
     types::{PyDict, PyModule},
 };
 #[cfg(feature = "arrow")]
-use sas7bdat_simd::{BatchHint, Error, Projection, Result as SasResult};
+use sas7bdat_simd::{BatchHint, Error, LogicalType, Projection, Result as SasResult};
 #[cfg(feature = "arrow")]
 use std::{
     sync::{Arc, mpsc},
@@ -34,6 +34,45 @@ pub struct BatchReaderRequest {
 }
 
 #[cfg(feature = "arrow")]
+pub fn full_arrow_schema_for_dataset(ds: &Dataset) -> SasResult<Arc<ArrowSchema>> {
+    let fields = ds
+        .columns()
+        .iter()
+        .map(|column| {
+            Ok(ArrowSchemaField::new(
+                column.name.clone(),
+                arrow_data_type_for_logical_type(column.logical_type),
+                true,
+            ))
+        })
+        .collect::<SasResult<Vec<_>>>()?;
+    Ok(Arc::new(ArrowSchema::new(fields)))
+}
+
+#[cfg(feature = "arrow")]
+pub fn full_polars_schema_for_dataset(
+    ds: &Dataset,
+) -> SasResult<Arc<polars_arrow::datatypes::ArrowSchema>> {
+    let schema = full_arrow_schema_for_dataset(ds)?;
+    Ok(Arc::new(build_polars_schema(schema.as_ref())?))
+}
+
+#[cfg(feature = "arrow")]
+const fn arrow_data_type_for_logical_type(logical_type: LogicalType) -> ArrowSchemaDataType {
+    match logical_type {
+        LogicalType::Integer => ArrowSchemaDataType::Int64,
+        LogicalType::Float => ArrowSchemaDataType::Float64,
+        LogicalType::String => ArrowSchemaDataType::Utf8,
+        LogicalType::Date => ArrowSchemaDataType::Date32,
+        LogicalType::DateTime => {
+            ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None)
+        }
+        LogicalType::Time => ArrowSchemaDataType::Time32(ArrowSchemaTimeUnit::Second),
+        LogicalType::Bytes => ArrowSchemaDataType::Binary,
+    }
+}
+
+#[cfg(feature = "arrow")]
 struct ScanRequest {
     full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
     with_columns: Option<Vec<String>>,
@@ -44,7 +83,7 @@ struct ScanRequest {
 
 #[cfg(feature = "arrow")]
 pub fn schema_for_dataset(py: Python<'_>, ds: &Dataset) -> PyResult<Py<PyAny>> {
-    let schema = ds.scan().arrow_schema().map_err(py_err)?;
+    let schema = full_arrow_schema_for_dataset(ds).map_err(py_err)?;
     schema_from_arrow_schema(py, &schema)
 }
 
@@ -68,8 +107,7 @@ pub fn register_io_source(
     let full_schema = if let Some(full_schema) = full_schema {
         full_schema
     } else {
-        let arrow_schema = ds.scan().arrow_schema().map_err(py_err)?;
-        Arc::new(build_polars_schema(&arrow_schema).map_err(py_err)?)
+        full_polars_schema_for_dataset(ds.as_ref()).map_err(py_err)?
     };
     let io_source = Py::new(py, SasIoSource { ds, full_schema })?;
     let register_io_source =
