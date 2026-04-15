@@ -4,4 +4,4 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 #[inline]
-pub fn init_profiler_runtime() {}
+pub const fn init_profiler_runtime() {}

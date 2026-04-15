@@ -40,6 +40,7 @@ struct ColumnStringStats {
 }
 
 impl ColumnStringStats {
+    #[allow(clippy::cast_precision_loss)]
     fn avg_trimmed_len(&self) -> f64 {
         if self.sampled_cells == 0 {
             0.0
@@ -49,6 +50,7 @@ impl ColumnStringStats {
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
 #[derive(Debug, Serialize)]
 struct PrintableColumnStringStats {
     index: usize,
@@ -63,6 +65,7 @@ struct PrintableColumnStringStats {
     max_trimmed_len: u64,
 }
 
+#[allow(clippy::cast_precision_loss)]
 #[derive(Debug, Serialize)]
 struct PrintableWidthBucket {
     width: u32,
@@ -87,6 +90,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run() -> std::result::Result<(), String> {
     let mut args = env::args_os().skip(1);
     let mut fixture: Option<PathBuf> = None;
@@ -127,7 +131,8 @@ fn run() -> std::result::Result<(), String> {
         .map(|(idx, column)| (idx, column.name.clone(), column.physical_width))
         .collect();
 
-    let sample_rows = sample_rows.min(ds.metadata().row_count as usize);
+    let sample_rows =
+        sample_rows.min(usize::try_from(ds.metadata().row_count).unwrap_or(usize::MAX));
     let projection = string_columns
         .iter()
         .fold(ds.projection(), |builder, (idx, _, _)| {
@@ -301,6 +306,7 @@ fn printable_column(stats: ColumnStringStats) -> PrintableColumnStringStats {
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn ratio(part: u64, total: u64) -> f64 {
     if total == 0 {
         0.0
@@ -309,6 +315,7 @@ fn ratio(part: u64, total: u64) -> f64 {
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn avg(total: u64, count: u64) -> f64 {
     if count == 0 {
         0.0

@@ -5,16 +5,16 @@ edition = "2024"
 
 [lib]
 name = "sas7bdat_polars"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-arrow-schema = { version = "58.1.0", optional = true }
-pyo3 = { version = "0.27", features = ["extension-module"] }
-pyo3-polars = "0.26.0"
-polars = "0.53.0"
-polars-arrow = "0.53.0"
-polars-plan = { version = "0.53.0", features = ["serde"] }
-rmp-serde = "1"
+arrow-schema = { workspace = true, optional = true }
+pyo3 = { workspace = true }
+pyo3-polars = { workspace = true }
+polars = { workspace = true }
+polars-arrow = { workspace = true }
+polars-plan = { workspace = true }
+rmp-serde = { workspace = true }
 sas7bdat-simd = { path = "../sas7bdat-simd", features = ["arrow"] }
 
 [features]

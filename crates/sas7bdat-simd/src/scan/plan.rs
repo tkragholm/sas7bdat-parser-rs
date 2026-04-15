@@ -280,7 +280,7 @@ pub(super) fn arrow_schema_for_plan(plan: &ScanPlan) -> SchemaRef {
 }
 
 #[cfg(feature = "arrow")]
-fn arrow_data_type(kind: ColumnMaterializationKind) -> DataType {
+const fn arrow_data_type(kind: ColumnMaterializationKind) -> DataType {
     match kind {
         ColumnMaterializationKind::I32 => DataType::Int32,
         ColumnMaterializationKind::I64 => DataType::Int64,

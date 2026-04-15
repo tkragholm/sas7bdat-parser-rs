@@ -168,6 +168,12 @@ impl OwnedColumnBuffer {
     }
 
     #[cfg(feature = "arrow")]
+    /// Convert the owned column buffer into an Arrow array.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the data cannot be encoded as the selected Arrow
+    /// array type.
     pub fn into_arrow_array(self) -> Result<ArrayRef> {
         self.as_borrowed().into_arrow_array()
     }
@@ -175,6 +181,12 @@ impl OwnedColumnBuffer {
 
 #[cfg(feature = "arrow")]
 impl ColumnBuffer<'_> {
+    /// Convert the borrowed column buffer into an Arrow array.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the data cannot be encoded as the selected Arrow
+    /// array type.
     pub fn into_arrow_array(self) -> Result<ArrayRef> {
         match self {
             Self::I32(PrimitiveBuffer { values, valid }) => {
@@ -254,6 +266,12 @@ impl OwnedColumnarBatch {
     }
 
     #[cfg(feature = "arrow")]
+    /// Convert the owned batch into an Arrow record batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if one of the columns cannot be converted or if the
+    /// resulting arrays do not match the provided schema.
     pub fn into_arrow_record_batch(self, schema: SchemaRef) -> Result<RecordBatch> {
         let arrays = self
             .columns
@@ -266,6 +284,12 @@ impl OwnedColumnarBatch {
 
 #[cfg(feature = "arrow")]
 impl ColumnarBatch<'_> {
+    /// Convert the borrowed batch into an Arrow record batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if one of the columns cannot be converted or if the
+    /// resulting arrays do not match the provided schema.
     pub fn into_arrow_record_batch(&self, schema: SchemaRef) -> Result<RecordBatch> {
         let arrays = self
             .columns
@@ -349,14 +373,11 @@ fn build_binary_array(
 
 #[cfg(feature = "arrow")]
 fn row_is_valid(valid: Option<&[u64]>, idx: usize) -> bool {
-    match valid {
-        None => true,
-        Some(words) => {
-            let word = idx / 64;
-            let bit = idx % 64;
-            words
-                .get(word)
-                .is_some_and(|bits| (bits & (1u64 << bit)) != 0)
-        }
-    }
+    valid.is_none_or(|words| {
+        let word = idx / 64;
+        let bit = idx % 64;
+        words
+            .get(word)
+            .is_some_and(|bits| (bits & (1u64 << bit)) != 0)
+    })
 }

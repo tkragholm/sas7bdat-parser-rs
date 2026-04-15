@@ -301,6 +301,7 @@ struct ScanSummary {
     largest_by_raw_bytes: Vec<ScanRankedFile>,
 }
 
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Copy, Default)]
 struct ProjectedScanShape {
     projected_columns: usize,
@@ -1360,10 +1361,12 @@ fn source_group(path: &Path) -> String {
     )
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn round_metric(value: f64) -> f64 {
     (value * 1_000_000.0).round() / 1_000_000.0
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn bytes_to_megabytes(bytes: u64) -> f64 {
     round_metric(bytes as f64 / 1_000_000.0)
 }
@@ -1391,6 +1394,7 @@ fn width_class(profile: &FixtureProfile) -> String {
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn content_class(profile: &FixtureProfile) -> String {
     let total = profile.column_count;
     if total == 0 {
@@ -1439,6 +1443,7 @@ fn structural_companion_csv_path(scan_csv_path: &Path) -> PathBuf {
     scan_csv_path.with_file_name(file_name)
 }
 
+#[allow(clippy::format_push_string)]
 fn render_summary_txt(summary: &CorpusSummary, roots: &[String], sample_rows: usize) -> String {
     let mut out = String::new();
     out.push_str("Corpus Profile Summary\n");
@@ -1916,6 +1921,7 @@ const fn apply_scan_stats(row: &mut CorpusScanCsvRow, stats: ScanStatsSummary) {
     row.decode_batches = stats.decode_batches;
 }
 
+#[allow(clippy::format_push_string)]
 fn render_scan_summary_txt(
     summary: &ScanSummary,
     roots: &[String],
@@ -2161,6 +2167,7 @@ fn width_class_from_shape(column_count: usize, row_len: u32) -> String {
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn content_class_from_counts(
     string_like: usize,
     numeric_like: usize,
