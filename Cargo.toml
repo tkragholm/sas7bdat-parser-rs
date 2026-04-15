@@ -5,6 +5,7 @@ resolver = "2"
 [workspace.dependencies]
 arrow-array = "58.1.0"
 arrow-schema = "58.1.0"
+bytemuck = { version = "1", features = ["derive"] }
 bstr = "1"
 criterion = "0.8.2"
 csv = "1"

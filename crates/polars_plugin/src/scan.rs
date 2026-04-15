@@ -59,7 +59,7 @@ pub fn batch_reader_from_dataset(
     batch_size: Option<usize>,
     coalesce: bool,
 ) -> BatchReader {
-    let (tx, rx) = mpsc::channel::<ReaderMessage>();
+    let (tx, rx) = mpsc::sync_channel::<ReaderMessage>(4);
     let ds = Arc::clone(ds);
     let (rust_predicate, python_predicate) = prepare_predicate(py, ds.as_ref(), predicate);
     let with_columns = match (
@@ -107,7 +107,7 @@ pub fn run_scan(
     batch_size: Option<usize>,
     coalesce: bool,
     predicate: Option<&PredicateExpr>,
-    tx: &mpsc::Sender<ReaderMessage>,
+    tx: &mpsc::SyncSender<ReaderMessage>,
 ) -> SasResult<()> {
     let projection = build_projection(ds, with_columns)?;
     let mut scan = ds.scan();

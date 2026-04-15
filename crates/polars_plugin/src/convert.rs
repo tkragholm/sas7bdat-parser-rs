@@ -88,7 +88,7 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::Date { values, valid } => {
-                let i32s: Vec<i32> = values.into_iter().map(|d| d.days_since_sas_epoch).collect();
+                let i32s: Vec<i32> = bytemuck::cast_vec(values);
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
                 Box::new(PrimitiveArray::new(
                     ArrowDataType::Date32,
@@ -97,10 +97,7 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::DateTime { values, valid } => {
-                let i64s: Vec<i64> = values
-                    .into_iter()
-                    .map(|d| d.seconds_since_sas_epoch)
-                    .collect();
+                let i64s: Vec<i64> = bytemuck::cast_vec(values);
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
                 let dtype = ArrowDataType::Timestamp(PlTimeUnit::Second, None);
                 Box::new(PrimitiveArray::new(dtype, i64s.into(), bitmap))
@@ -156,9 +153,13 @@ pub(super) fn owned_batch_to_dataframe(
 
 #[cfg(feature = "arrow")]
 pub(super) fn bits_to_bitmap(bits: &[u64], len: usize) -> polars_arrow::bitmap::Bitmap {
-    let bytes: Vec<u8> = bits.iter().flat_map(|word| word.to_le_bytes()).collect();
+    let mut bytes = Vec::with_capacity(bits.len() * 8);
+    for word in bits {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
     MutableBitmap::from_vec(bytes, len).into()
 }
+
 
 #[cfg(feature = "arrow")]
 pub(super) fn polars_dtype(

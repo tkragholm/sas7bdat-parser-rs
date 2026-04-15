@@ -30,12 +30,14 @@ pub enum LogicalType {
     Bytes,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SasDate {
     pub days_since_sas_epoch: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SasDateTime {
     pub seconds_since_sas_epoch: i64,
 }
