@@ -104,11 +104,13 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::Time { values, valid } => {
+                #[allow(clippy::cast_possible_truncation)]
                 let i32s: Vec<i32> = values
                     .into_iter()
                     .map(|t| {
                         debug_assert!(
-                            (i32::MIN as i64..=i32::MAX as i64).contains(&t.seconds_since_midnight),
+                            (i64::from(i32::MIN)..=i64::from(i32::MAX))
+                                .contains(&t.seconds_since_midnight),
                             "SAS time value exceeds Arrow Time32 range"
                         );
                         t.seconds_since_midnight as i32

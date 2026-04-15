@@ -24,6 +24,25 @@ use std::{
 };
 
 #[cfg(feature = "arrow")]
+pub struct BatchReaderRequest {
+    pub full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
+    pub with_columns: Option<Vec<String>>,
+    pub predicate: Option<Py<PyAny>>,
+    pub n_rows: Option<usize>,
+    pub batch_size: Option<usize>,
+    pub coalesce: bool,
+}
+
+#[cfg(feature = "arrow")]
+struct ScanRequest {
+    full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
+    with_columns: Option<Vec<String>>,
+    n_rows: Option<usize>,
+    batch_size: Option<usize>,
+    coalesce: bool,
+}
+
+#[cfg(feature = "arrow")]
 pub fn schema_for_dataset(py: Python<'_>, ds: &Dataset) -> PyResult<Py<PyAny>> {
     let schema = ds.scan().arrow_schema().map_err(py_err)?;
     schema_from_arrow_schema(py, &schema)
@@ -46,12 +65,11 @@ pub fn register_io_source(
     full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
     schema: Py<PyAny>,
 ) -> PyResult<Py<PyAny>> {
-    let full_schema = match full_schema {
-        Some(full_schema) => full_schema,
-        None => {
-            let arrow_schema = ds.scan().arrow_schema().map_err(py_err)?;
-            Arc::new(build_polars_schema(&arrow_schema).map_err(py_err)?)
-        }
+    let full_schema = if let Some(full_schema) = full_schema {
+        full_schema
+    } else {
+        let arrow_schema = ds.scan().arrow_schema().map_err(py_err)?;
+        Arc::new(build_polars_schema(&arrow_schema).map_err(py_err)?)
     };
     let io_source = Py::new(py, SasIoSource { ds, full_schema })?;
     let register_io_source =
@@ -68,18 +86,13 @@ pub fn register_io_source(
 pub fn batch_reader_from_dataset(
     py: Python<'_>,
     ds: &Arc<Dataset>,
-    full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
-    with_columns: Option<Vec<String>>,
-    predicate: Option<Py<PyAny>>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-    coalesce: bool,
+    request: BatchReaderRequest,
 ) -> BatchReader {
     let (tx, rx) = mpsc::sync_channel::<ReaderMessage>(4);
     let ds = Arc::clone(ds);
-    let (rust_predicate, python_predicate) = prepare_predicate(py, ds.as_ref(), predicate);
+    let (rust_predicate, python_predicate) = prepare_predicate(py, ds.as_ref(), request.predicate);
     let with_columns = match (
-        with_columns,
+        request.with_columns,
         rust_predicate.as_ref(),
         python_predicate.is_some(),
     ) {
@@ -93,18 +106,16 @@ pub fn batch_reader_from_dataset(
         (_, None, true) => None,
         (with_columns, _, _) => with_columns,
     };
+    let scan_request = ScanRequest {
+        full_schema: request.full_schema,
+        with_columns,
+        n_rows: request.n_rows,
+        batch_size: request.batch_size,
+        coalesce: request.coalesce,
+    };
 
     thread::spawn(move || {
-        let result = run_scan(
-            &ds,
-            full_schema.as_ref(),
-            with_columns,
-            n_rows,
-            batch_size,
-            coalesce,
-            rust_predicate.as_ref(),
-            &tx,
-        );
+        let result = run_scan(&ds, &scan_request, rust_predicate.as_ref(), &tx);
         if let Err(err) = result {
             let _ = tx.send(ReaderMessage::Error(err.to_string()));
         }
@@ -117,33 +128,33 @@ pub fn batch_reader_from_dataset(
 }
 
 #[cfg(feature = "arrow")]
-pub fn run_scan(
+fn run_scan(
     ds: &Dataset,
-    full_schema: Option<&Arc<polars_arrow::datatypes::ArrowSchema>>,
-    with_columns: Option<Vec<String>>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-    coalesce: bool,
+    request: &ScanRequest,
     predicate: Option<&PredicateExpr>,
     tx: &mpsc::SyncSender<ReaderMessage>,
 ) -> SasResult<()> {
-    let projection_columns = with_columns.clone();
-    let projection = build_projection(ds, with_columns)?;
+    let projection_columns = request.with_columns.clone();
+    let projection = build_projection(ds, request.with_columns.clone())?;
     let mut scan = ds.scan();
     if let Some(ref projection) = projection {
         scan = scan.with_projection(projection);
     }
-    if let Some(n_rows) = n_rows {
+    if let Some(n_rows) = request.n_rows {
         scan = scan
             .limit(u64::try_from(n_rows).map_err(|_| Error::unsupported("row limit exceeds u64"))?);
     }
-    if let Some(batch_size) = batch_size {
+    if let Some(batch_size) = request.batch_size {
         scan = scan.with_batch_hint(BatchHint::Rows(batch_size));
     }
 
-    let pl_schema = resolve_polars_schema(full_schema, projection_columns.as_deref(), &scan)?;
+    let pl_schema = resolve_polars_schema(
+        request.full_schema.as_ref(),
+        projection_columns.as_deref(),
+        &scan,
+    )?;
 
-    if coalesce {
+    if request.coalesce {
         let mut combined: Option<DataFrame> = None;
         scan.visit_owned_batches(|batch| {
             let mut df = owned_batch_to_dataframe(batch, Arc::clone(&pl_schema))

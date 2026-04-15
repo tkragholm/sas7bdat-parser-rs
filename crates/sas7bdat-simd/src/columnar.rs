@@ -47,10 +47,22 @@ impl TrustedOffsets {
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.offsets.len()
     }
 
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.offsets.is_empty()
+    }
+
+    /// Validates that the offsets start at zero, never decrease, and end at `data_len`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the offsets are missing the required initial zero offset, decrease at
+    /// any point, end at a different value than `data_len`, or if `data_len` exceeds the `i64`
+    /// range required by Arrow-style large offsets.
     pub fn validate_for_values_len(&self, data_len: usize) -> crate::error::Result<()> {
         let expected_end = i64::try_from(data_len)
             .map_err(|_| Error::unsupported("columnar variable buffer exceeds i64 offset range"))?;
@@ -82,6 +94,11 @@ impl TrustedOffsets {
         Ok(())
     }
 
+    /// Debug-validates the offset invariants against the provided values length.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if `Self::validate_for_values_len` fails.
     pub fn debug_assert_valid_for_values_len(&self, data_len: usize) {
         #[cfg(debug_assertions)]
         if let Err(err) = self.validate_for_values_len(data_len) {
@@ -92,6 +109,12 @@ impl TrustedOffsets {
         let _ = data_len;
     }
 
+    /// Appends the current variable-width data length as the next offset.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `data_len` exceeds the `i64` range required by Arrow-style large
+    /// offsets.
     pub fn push_current_data_len(&mut self, data_len: usize) -> crate::error::Result<()> {
         let next_offset = i64::try_from(data_len)
             .map_err(|_| Error::unsupported("columnar variable buffer exceeds i64 offset range"))?;
@@ -100,6 +123,11 @@ impl TrustedOffsets {
         Ok(())
     }
 
+    /// Repeats the last offset value, preserving the current variable-width data length.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the invariant that offsets always contain the initial zero value has been broken.
     pub fn push_repeat_last(&mut self) {
         let last = *self
             .offsets
@@ -109,6 +137,11 @@ impl TrustedOffsets {
     }
 
     #[must_use]
+    /// Returns the current trailing offset.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the invariant that offsets always contain the initial zero value has been broken.
     pub fn last(&self) -> i64 {
         *self
             .offsets

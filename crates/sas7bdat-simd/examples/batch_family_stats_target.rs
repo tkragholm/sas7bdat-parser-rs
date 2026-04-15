@@ -39,6 +39,7 @@ struct FileSummary {
     direct_utf8_single_byte_cells: u64,
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn pct(part: u64, total: u64) -> f64 {
     if total == 0 {
         0.0
@@ -111,6 +112,7 @@ const fn route_total(stats: &ScanStats) -> u64 {
         .saturating_add(stats.batch_fallback_cells)
 }
 
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 fn main() {
     let batch_rows = env::var("BATCH_ROWS")
         .ok()

@@ -431,7 +431,7 @@ fn collect_batches_to_arrow_record_batch_round_trips() {
         .as_any()
         .downcast_ref::<Float64Array>()
         .expect("float array");
-    assert_eq!(num.value(0), 7.5);
+    assert!((num.value(0) - 7.5).abs() < f64::EPSILON);
     let txt = record_batch
         .column(1)
         .as_any()
@@ -462,7 +462,7 @@ fn collect_arrow_batches_returns_record_batches() {
         .as_any()
         .downcast_ref::<Float64Array>()
         .expect("float array");
-    assert_eq!(num.value(0), 3.25);
+    assert!((num.value(0) - 3.25).abs() < f64::EPSILON);
 }
 
 #[cfg(feature = "arrow")]

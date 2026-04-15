@@ -1862,140 +1862,71 @@ fn append_windows_1252_single_byte_utf8(
     push_variable_valid(offsets, data, valid, &encoded[..len])
 }
 
-#[inline]
+const WINDOWS_1252_REPLACEMENT_UTF8: [u8; 3] = [0xEF, 0xBF, 0xBD];
+
+fn strict_windows_1252_decode_error() -> Error {
+    Error::Decode(crate::error::DecodeError {
+        message: "string decode failed under strict validation".to_owned(),
+    })
+}
+
+const fn windows_1252_special_case(byte: u8) -> Option<[u8; 3]> {
+    match byte {
+        0x80 => Some([0xE2, 0x82, 0xAC]),
+        0x81 | 0x8D | 0x8F | 0x90 | 0x9D => None,
+        0x82 => Some([0xE2, 0x80, 0x9A]),
+        0x83 => Some([0xC6, 0x92, 0]),
+        0x84 => Some([0xE2, 0x80, 0x9E]),
+        0x85 => Some([0xE2, 0x80, 0xA6]),
+        0x86 => Some([0xE2, 0x80, 0xA0]),
+        0x87 => Some([0xE2, 0x80, 0xA1]),
+        0x88 => Some([0xCB, 0x86, 0]),
+        0x89 => Some([0xE2, 0x80, 0xB0]),
+        0x8A => Some([0xC5, 0xA0, 0]),
+        0x8B => Some([0xE2, 0x80, 0xB9]),
+        0x8C => Some([0xC5, 0x92, 0]),
+        0x8E => Some([0xC5, 0xBD, 0]),
+        0x91 => Some([0xE2, 0x80, 0x98]),
+        0x92 => Some([0xE2, 0x80, 0x99]),
+        0x93 => Some([0xE2, 0x80, 0x9C]),
+        0x94 => Some([0xE2, 0x80, 0x9D]),
+        0x95 => Some([0xE2, 0x80, 0xA2]),
+        0x96 => Some([0xE2, 0x80, 0x93]),
+        0x97 => Some([0xE2, 0x80, 0x94]),
+        0x98 => Some([0xCB, 0x9C, 0]),
+        0x99 => Some([0xE2, 0x84, 0xA2]),
+        0x9A => Some([0xC5, 0xA1, 0]),
+        0x9B => Some([0xE2, 0x80, 0xBA]),
+        0x9C => Some([0xC5, 0x93, 0]),
+        0x9E => Some([0xC5, 0xBE, 0]),
+        0x9F => Some([0xC5, 0xB8, 0]),
+        _ => Some([0, 0, 0]),
+    }
+}
+
 fn encode_windows_1252_single_byte_utf8(
     byte: u8,
     strict: bool,
     out: &mut [u8; 3],
 ) -> Result<usize> {
-    let len = match byte {
-        0x80 => {
-            *out = [0xE2, 0x82, 0xAC];
-            3
+    if let Some(encoded) = windows_1252_special_case(byte) {
+        if encoded != [0, 0, 0] {
+            *out = encoded;
+            return Ok(if encoded[2] == 0 { 2 } else { 3 });
         }
-        0x81 | 0x8D | 0x8F | 0x90 | 0x9D => {
-            if strict {
-                return Err(Error::Decode(crate::error::DecodeError {
-                    message: "string decode failed under strict validation".to_owned(),
-                }));
-            }
-            *out = [0xEF, 0xBF, 0xBD];
-            3
-        }
-        0x82 => {
-            *out = [0xE2, 0x80, 0x9A];
-            3
-        }
-        0x83 => {
-            *out = [0xC6, 0x92, 0];
-            2
-        }
-        0x84 => {
-            *out = [0xE2, 0x80, 0x9E];
-            3
-        }
-        0x85 => {
-            *out = [0xE2, 0x80, 0xA6];
-            3
-        }
-        0x86 => {
-            *out = [0xE2, 0x80, 0xA0];
-            3
-        }
-        0x87 => {
-            *out = [0xE2, 0x80, 0xA1];
-            3
-        }
-        0x88 => {
-            *out = [0xCB, 0x86, 0];
-            2
-        }
-        0x89 => {
-            *out = [0xE2, 0x80, 0xB0];
-            3
-        }
-        0x8A => {
-            *out = [0xC5, 0xA0, 0];
-            2
-        }
-        0x8B => {
-            *out = [0xE2, 0x80, 0xB9];
-            3
-        }
-        0x8C => {
-            *out = [0xC5, 0x92, 0];
-            2
-        }
-        0x8E => {
-            *out = [0xC5, 0xBD, 0];
-            2
-        }
-        0x91 => {
-            *out = [0xE2, 0x80, 0x98];
-            3
-        }
-        0x92 => {
-            *out = [0xE2, 0x80, 0x99];
-            3
-        }
-        0x93 => {
-            *out = [0xE2, 0x80, 0x9C];
-            3
-        }
-        0x94 => {
-            *out = [0xE2, 0x80, 0x9D];
-            3
-        }
-        0x95 => {
-            *out = [0xE2, 0x80, 0xA2];
-            3
-        }
-        0x96 => {
-            *out = [0xE2, 0x80, 0x93];
-            3
-        }
-        0x97 => {
-            *out = [0xE2, 0x80, 0x94];
-            3
-        }
-        0x98 => {
-            *out = [0xCB, 0x9C, 0];
-            2
-        }
-        0x99 => {
-            *out = [0xE2, 0x84, 0xA2];
-            3
-        }
-        0x9A => {
-            *out = [0xC5, 0xA1, 0];
-            2
-        }
-        0x9B => {
-            *out = [0xE2, 0x80, 0xBA];
-            3
-        }
-        0x9C => {
-            *out = [0xC5, 0x93, 0];
-            2
-        }
-        0x9E => {
-            *out = [0xC5, 0xBE, 0];
-            2
-        }
-        0x9F => {
-            *out = [0xC5, 0xB8, 0];
-            2
-        }
-        0xA0..=0xBF => {
-            *out = [0xC2, byte, 0];
-            2
-        }
-        _ => {
-            *out = [0xC3, byte - 64, 0];
-            2
-        }
-    };
-    Ok(len)
+    } else if strict {
+        return Err(strict_windows_1252_decode_error());
+    } else {
+        *out = WINDOWS_1252_REPLACEMENT_UTF8;
+        return Ok(3);
+    }
+
+    if (0xA0..=0xBF).contains(&byte) {
+        *out = [0xC2, byte, 0];
+    } else {
+        *out = [0xC3, byte - 64, 0];
+    }
+    Ok(2)
 }
 
 #[inline]

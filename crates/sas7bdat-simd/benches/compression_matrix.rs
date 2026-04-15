@@ -125,7 +125,7 @@ fn sanitize_name(name: &str) -> String {
 }
 
 const fn fnv1a32(bytes: &[u8]) -> u32 {
-    let mut hash = 0x811c9dc5u32;
+    let mut hash = 0x811c_9dc5_u32;
     let mut i = 0usize;
     while i < bytes.len() {
         hash ^= bytes[i] as u32;

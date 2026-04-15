@@ -12,6 +12,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 fn run() -> Result<(), String> {
     let mut args = env::args_os().skip(1);
     let mut fixture: Option<PathBuf> = None;

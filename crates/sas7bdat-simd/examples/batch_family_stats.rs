@@ -1,6 +1,7 @@
 use sas7bdat_simd::{BatchHint, Dataset};
 use std::{env, ops::ControlFlow, path::PathBuf};
 
+#[allow(clippy::cast_precision_loss)]
 fn pct(part: u64, total: u64) -> f64 {
     if total == 0 {
         0.0

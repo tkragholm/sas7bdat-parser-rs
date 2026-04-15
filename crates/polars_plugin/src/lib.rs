@@ -3,6 +3,8 @@ mod predicate;
 mod scan;
 
 #[cfg(feature = "arrow")]
+use crate::scan::BatchReaderRequest;
+#[cfg(feature = "arrow")]
 use std::{
     convert::TryFrom,
     hint::black_box,
@@ -111,12 +113,14 @@ impl SasDataset {
         scan::batch_reader_from_dataset(
             py,
             &self.ds,
-            Some(Arc::clone(&self.polars_schema)),
-            with_columns,
-            predicate,
-            n_rows,
-            batch_size,
-            false,
+            BatchReaderRequest {
+                full_schema: Some(Arc::clone(&self.polars_schema)),
+                with_columns,
+                predicate,
+                n_rows,
+                batch_size,
+                coalesce: false,
+            },
         )
     }
 
@@ -154,12 +158,14 @@ impl SasIoSource {
         scan::batch_reader_from_dataset(
             py,
             &self.ds,
-            Some(Arc::clone(&self.full_schema)),
-            with_columns,
-            predicate,
-            n_rows,
-            batch_size,
-            false,
+            BatchReaderRequest {
+                full_schema: Some(Arc::clone(&self.full_schema)),
+                with_columns,
+                predicate,
+                n_rows,
+                batch_size,
+                coalesce: false,
+            },
         )
     }
 }
@@ -235,12 +241,14 @@ fn batch_reader(
     Ok(scan::batch_reader_from_dataset(
         py,
         &ds,
-        None,
-        with_columns,
-        predicate,
-        n_rows,
-        batch_size,
-        false,
+        BatchReaderRequest {
+            full_schema: None,
+            with_columns,
+            predicate,
+            n_rows,
+            batch_size,
+            coalesce: false,
+        },
     ))
 }
 
@@ -286,7 +294,7 @@ fn benchmark_batch_to_dataframe(
     })?;
     let stats = py.detach({
         let schema = Arc::clone(&prepared.schema);
-        let batches = prepared.batches.clone();
+        let batches = prepared.batches;
         move || -> PyResult<BatchBenchmarkStats> {
             let mut elapsed_total = 0u128;
             let mut rows_last = 0usize;
@@ -417,7 +425,7 @@ fn benchmark_dataframe_to_python(
     let priming_rows = prepared.rows;
     let dataframes = py.detach({
         let schema = Arc::clone(&prepared.schema);
-        let batches = prepared.batches.clone();
+        let batches = prepared.batches;
         move || -> PyResult<Vec<DataFrame>> {
             batches
                 .into_iter()
@@ -577,8 +585,7 @@ fn resolve_polars_schema_from_full(
     scan: &sas7bdat_simd::ScanBuilder<'_>,
 ) -> Result<Arc<polars_arrow::datatypes::ArrowSchema>, Error> {
     let cached = match projection_columns {
-        None => Some(Arc::clone(full_schema)),
-        Some(columns) if columns.is_empty() => Some(Arc::clone(full_schema)),
+        None | Some([]) => Some(Arc::clone(full_schema)),
         Some(columns) => {
             let fields = columns
                 .iter()
@@ -606,6 +613,7 @@ fn resolve_polars_schema_from_full(
 }
 
 #[cfg(feature = "arrow")]
+#[allow(clippy::cast_precision_loss)]
 fn batch_benchmark_dict(
     py: Python<'_>,
     path: &str,

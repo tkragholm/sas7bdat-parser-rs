@@ -16,6 +16,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const BATCH_ROWS_SMALL: usize = 256;
+const BATCH_ROWS_MEDIUM: usize = 4096;
+const BATCH_ROWS_LARGE: usize = 16384;
+const PARALLEL_THREADS: usize = 4;
+
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("fixtures")
@@ -38,6 +43,7 @@ fn load_dataset_path(path: &Path) -> Option<Dataset> {
     Dataset::from_bytes(bytes).ok()
 }
 
+#[allow(clippy::too_many_lines)]
 fn bench_dataset_scans(
     c: &mut Criterion,
     name: &str,
@@ -48,10 +54,6 @@ fn bench_dataset_scans(
 ) {
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Elements(dataset.metadata().row_count));
-    const BATCH_ROWS_SMALL: usize = 256;
-    const BATCH_ROWS_MEDIUM: usize = 4096;
-    const BATCH_ROWS_LARGE: usize = 16384;
-    const PARALLEL_THREADS: usize = 4;
 
     if bench_raw {
         group.bench_function(BenchmarkId::new("raw_rows", "all"), |b| {
@@ -168,13 +170,10 @@ fn bench_dataset_scans(
     group.finish();
 }
 
+#[allow(clippy::too_many_lines)]
 fn bench_projected_scans(c: &mut Criterion, name: &str, dataset: Dataset, projection: Projection) {
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Elements(dataset.metadata().row_count));
-    const BATCH_ROWS_SMALL: usize = 256;
-    const BATCH_ROWS_MEDIUM: usize = 4096;
-    const BATCH_ROWS_LARGE: usize = 16384;
-    const PARALLEL_THREADS: usize = 4;
 
     group.bench_function(BenchmarkId::new("typed_rows", "projected"), |b| {
         b.iter(|| {
