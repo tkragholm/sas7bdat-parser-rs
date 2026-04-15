@@ -40,8 +40,12 @@ test-polars-plugin:
 test-polars-plugin-rust:
     @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib
 
-bench-plugin-vs-raw fixture="fixtures/ahs2013n.sas7bdat" columns="CONTROL,DEGREE,LMED" repeat="5" batch_rows="4096":
-    @.venv/bin/python scripts/compare_plugin_vs_raw.py --fixture {{fixture}} --columns {{columns}} --repeat {{repeat}} --batch-rows {{batch_rows}}
+bench-plugin-vs-raw fixture="fixtures/ahs2013n.sas7bdat" columns="CONTROL,DEGREE,LMED" repeat="5" batch_rows="4096" limit="0":
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml
+    @.venv/bin/python scripts/compare_plugin_vs_raw.py --fixture {{fixture}} --columns {{columns}} --repeat {{repeat}} --batch-rows {{batch_rows}} --limit {{limit}}
+
+bench-plugin-vs-raw-string-heavy fixture="fixtures/raw_data/ahs2013/owner.sas7bdat" columns="__ALL__" repeat="10" batch_rows="4096" limit="0":
+    @just bench-plugin-vs-raw {{fixture}} "{{columns}}" {{repeat}} {{batch_rows}} {{limit}}
 
 bench-tags tags projection="full" max_fixtures="999" catalog="fixtures/fixture_catalog.local.json":
     @/bin/zsh -lc 'args=(${=CRITERION_ARGS:-}); BENCH_TAGS={{tags}} BENCH_PROJECTION={{projection}} BENCH_CATALOG={{catalog}} BENCH_MAX_FIXTURES={{max_fixtures}} cargo bench -p sas7bdat-simd --bench scan_hotpaths -- "${args[@]}"'

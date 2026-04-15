@@ -1,11 +1,9 @@
 from pathlib import Path
 
 import polars as pl
-
 import sas7bdat_polars as sp
 
-
-FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "ahs2013n.sas7bdat"
+FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "ahs2013n.sas7bdat"
 
 
 def test_scan_sas_head_collects():
@@ -46,12 +44,7 @@ def test_sasdataset_reuses_open_dataset_for_schema_and_scan():
 def test_scan_sas_projection_collects_requested_columns():
     assert FIXTURE.exists(), f"missing fixture: {FIXTURE}"
 
-    df = (
-        sp.scan_sas(str(FIXTURE))
-        .select(["CONTROL", "DEGREE"])
-        .head(3)
-        .collect()
-    )
+    df = sp.scan_sas(str(FIXTURE)).select(["CONTROL", "DEGREE"]).head(3).collect()
 
     assert df.columns == ["CONTROL", "DEGREE"]
     assert df.height == 3
@@ -197,3 +190,21 @@ def test_batch_reader_empty_filter_returns_no_rows():
     frames = list(reader)
 
     assert frames == []
+
+
+def test_sasdataset_repeated_scans_and_batch_readers_reuse_cached_schema():
+    assert FIXTURE.exists(), f"missing fixture: {FIXTURE}"
+
+    ds = sp.SasDataset(str(FIXTURE))
+
+    first = ds.scan_sas().select(["CONTROL", "DEGREE"]).head(2).collect()
+    second = ds.scan_sas().select(["CONTROL", "DEGREE"]).head(2).collect()
+
+    assert first.to_dict(as_series=False) == second.to_dict(as_series=False)
+
+    first_batches = list(ds.batch_reader(["CONTROL", "DEGREE"], None, 2, 64))
+    second_batches = list(ds.batch_reader(["CONTROL", "DEGREE"], None, 2, 64))
+
+    assert pl.concat(first_batches).to_dict(as_series=False) == pl.concat(
+        second_batches
+    ).to_dict(as_series=False)

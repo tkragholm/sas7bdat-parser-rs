@@ -34,7 +34,7 @@ pub struct Utf8Dictionary<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Utf8Buffer<'a> {
-    pub offsets: &'a [u32],
+    pub offsets: &'a [i64],
     pub data: &'a [u8],
     pub valid: Option<BitSlice<'a>>,
     pub dictionary_ids: Option<&'a [u32]>,
@@ -43,7 +43,7 @@ pub struct Utf8Buffer<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct BytesBuffer<'a> {
-    pub offsets: &'a [u32],
+    pub offsets: &'a [i64],
     pub data: &'a [u8],
     pub valid: Option<BitSlice<'a>>,
 }
@@ -95,13 +95,13 @@ macro_rules! define_owned_column_enum {
                 valid: Option<Vec<u64>>,
             },
             Utf8 {
-                offsets: Vec<u32>,
+                offsets: Vec<i64>,
                 data: Vec<u8>,
                 valid: Option<Vec<u64>>,
                 dictionary_ids: Option<Vec<u32>>,
             },
             RawBytes {
-                offsets: Vec<u32>,
+                offsets: Vec<i64>,
                 data: Vec<u8>,
                 valid: Option<Vec<u64>>,
             },
@@ -325,7 +325,7 @@ where
 }
 
 #[cfg(feature = "arrow")]
-fn build_utf8_array(offsets: &[u32], data: &[u8], valid: Option<BitSlice<'_>>) -> Result<ArrayRef> {
+fn build_utf8_array(offsets: &[i64], data: &[u8], valid: Option<BitSlice<'_>>) -> Result<ArrayRef> {
     let mut builder = StringBuilder::new();
     let row_count = offsets.len().saturating_sub(1);
     for idx in 0..row_count {
@@ -348,7 +348,7 @@ fn build_utf8_array(offsets: &[u32], data: &[u8], valid: Option<BitSlice<'_>>) -
 
 #[cfg(feature = "arrow")]
 fn build_binary_array(
-    offsets: &[u32],
+    offsets: &[i64],
     data: &[u8],
     valid: Option<BitSlice<'_>>,
 ) -> Result<ArrayRef> {

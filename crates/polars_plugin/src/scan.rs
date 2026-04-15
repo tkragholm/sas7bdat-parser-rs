@@ -7,6 +7,8 @@ use super::predicate::{PredicateExpr, append_unique_columns, filter_dataframe, p
 #[cfg(feature = "arrow")]
 use super::{BatchReader, ReaderMessage, SasIoSource};
 #[cfg(feature = "arrow")]
+use arrow_schema::Schema as ArrowSchema;
+#[cfg(feature = "arrow")]
 use polars::frame::DataFrame;
 #[cfg(feature = "arrow")]
 use pyo3::{
@@ -17,13 +19,18 @@ use pyo3::{
 use sas7bdat_simd::{BatchHint, Error, Projection, Result as SasResult};
 #[cfg(feature = "arrow")]
 use std::{
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, mpsc},
     thread,
 };
 
 #[cfg(feature = "arrow")]
 pub fn schema_for_dataset(py: Python<'_>, ds: &Dataset) -> PyResult<Py<PyAny>> {
     let schema = ds.scan().arrow_schema().map_err(py_err)?;
+    schema_from_arrow_schema(py, &schema)
+}
+
+#[cfg(feature = "arrow")]
+pub fn schema_from_arrow_schema(py: Python<'_>, schema: &ArrowSchema) -> PyResult<Py<PyAny>> {
     let polars = PyModule::import(py, "polars")?;
     let dict = PyDict::new(py);
     for field in schema.fields() {
@@ -36,15 +43,23 @@ pub fn schema_for_dataset(py: Python<'_>, ds: &Dataset) -> PyResult<Py<PyAny>> {
 pub fn register_io_source(
     py: Python<'_>,
     ds: Arc<Dataset>,
+    full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
     schema: Py<PyAny>,
 ) -> PyResult<Py<PyAny>> {
-    let io_source = Py::new(py, SasIoSource { ds })?;
+    let full_schema = match full_schema {
+        Some(full_schema) => full_schema,
+        None => {
+            let arrow_schema = ds.scan().arrow_schema().map_err(py_err)?;
+            Arc::new(build_polars_schema(&arrow_schema).map_err(py_err)?)
+        }
+    };
+    let io_source = Py::new(py, SasIoSource { ds, full_schema })?;
     let register_io_source =
         PyModule::import(py, "polars.io.plugins")?.getattr("register_io_source")?;
     let kwargs = PyDict::new(py);
     kwargs.set_item("io_source", io_source)?;
     kwargs.set_item("schema", schema)?;
-    kwargs.set_item("validate_schema", true)?;
+    kwargs.set_item("validate_schema", false)?;
     kwargs.set_item("is_pure", true)?;
     Ok(register_io_source.call((), Some(&kwargs))?.unbind())
 }
@@ -53,6 +68,7 @@ pub fn register_io_source(
 pub fn batch_reader_from_dataset(
     py: Python<'_>,
     ds: &Arc<Dataset>,
+    full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
     with_columns: Option<Vec<String>>,
     predicate: Option<Py<PyAny>>,
     n_rows: Option<usize>,
@@ -81,6 +97,7 @@ pub fn batch_reader_from_dataset(
     thread::spawn(move || {
         let result = run_scan(
             &ds,
+            full_schema.as_ref(),
             with_columns,
             n_rows,
             batch_size,
@@ -94,7 +111,7 @@ pub fn batch_reader_from_dataset(
     });
 
     BatchReader {
-        rx: Mutex::new(rx),
+        rx,
         predicate: python_predicate,
     }
 }
@@ -102,6 +119,7 @@ pub fn batch_reader_from_dataset(
 #[cfg(feature = "arrow")]
 pub fn run_scan(
     ds: &Dataset,
+    full_schema: Option<&Arc<polars_arrow::datatypes::ArrowSchema>>,
     with_columns: Option<Vec<String>>,
     n_rows: Option<usize>,
     batch_size: Option<usize>,
@@ -109,6 +127,7 @@ pub fn run_scan(
     predicate: Option<&PredicateExpr>,
     tx: &mpsc::SyncSender<ReaderMessage>,
 ) -> SasResult<()> {
+    let projection_columns = with_columns.clone();
     let projection = build_projection(ds, with_columns)?;
     let mut scan = ds.scan();
     if let Some(ref projection) = projection {
@@ -122,8 +141,7 @@ pub fn run_scan(
         scan = scan.with_batch_hint(BatchHint::Rows(batch_size));
     }
 
-    let arrow_schema = scan.arrow_schema()?;
-    let pl_schema = Arc::new(build_polars_schema(&arrow_schema)?);
+    let pl_schema = resolve_polars_schema(full_schema, projection_columns.as_deref(), &scan)?;
 
     if coalesce {
         let mut combined: Option<DataFrame> = None;
@@ -164,6 +182,35 @@ pub fn run_scan(
         })?;
     }
     Ok(())
+}
+
+#[cfg(feature = "arrow")]
+fn resolve_polars_schema(
+    full_schema: Option<&Arc<polars_arrow::datatypes::ArrowSchema>>,
+    projection_columns: Option<&[String]>,
+    scan: &sas7bdat_simd::ScanBuilder<'_>,
+) -> SasResult<Arc<polars_arrow::datatypes::ArrowSchema>> {
+    match (projection_columns, full_schema) {
+        (None, Some(full_schema)) => Ok(Arc::clone(full_schema)),
+        (Some(columns), Some(full_schema)) if !columns.is_empty() => {
+            let fields = columns
+                .iter()
+                .map(|name| {
+                    full_schema.get(name).cloned().ok_or_else(|| {
+                        Error::arrow(format!("missing projected column in cached schema: {name}"))
+                    })
+                })
+                .collect::<SasResult<Vec<_>>>()?;
+            Ok(Arc::new(
+                polars_arrow::datatypes::ArrowSchema::from_iter_check_duplicates(fields)
+                    .map_err(|err| Error::arrow(err.to_string()))?,
+            ))
+        }
+        _ => {
+            let arrow_schema = scan.arrow_schema()?;
+            Ok(Arc::new(build_polars_schema(&arrow_schema)?))
+        }
+    }
 }
 
 #[cfg(feature = "arrow")]

@@ -64,52 +64,60 @@ pub(super) fn owned_batch_to_dataframe(
     for col in batch.columns {
         let array: Box<dyn Array> = match col {
             OwnedColumnBuffer::I32 { values, valid } => {
-                let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(PrimitiveArray::new(
+                Box::new(primitive_array_with_optional_validity(
                     ArrowDataType::Int32,
-                    values.into(),
-                    bitmap,
+                    values,
+                    valid,
+                    row_count,
                 ))
             }
             OwnedColumnBuffer::I64 { values, valid } => {
-                let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(PrimitiveArray::new(
+                Box::new(primitive_array_with_optional_validity(
                     ArrowDataType::Int64,
-                    values.into(),
-                    bitmap,
+                    values,
+                    valid,
+                    row_count,
                 ))
             }
             OwnedColumnBuffer::F64 { values, valid } => {
-                let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(PrimitiveArray::new(
+                Box::new(primitive_array_with_optional_validity(
                     ArrowDataType::Float64,
-                    values.into(),
-                    bitmap,
+                    values,
+                    valid,
+                    row_count,
                 ))
             }
             OwnedColumnBuffer::Date { values, valid } => {
                 let i32s: Vec<i32> = bytemuck::cast_vec(values);
-                let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(PrimitiveArray::new(
+                Box::new(primitive_array_with_optional_validity(
                     ArrowDataType::Date32,
-                    i32s.into(),
-                    bitmap,
+                    i32s,
+                    valid,
+                    row_count,
                 ))
             }
             OwnedColumnBuffer::DateTime { values, valid } => {
                 let i64s: Vec<i64> = bytemuck::cast_vec(values);
-                let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
                 let dtype = ArrowDataType::Timestamp(PlTimeUnit::Second, None);
-                Box::new(PrimitiveArray::new(dtype, i64s.into(), bitmap))
+                Box::new(primitive_array_with_optional_validity(
+                    dtype, i64s, valid, row_count,
+                ))
             }
             OwnedColumnBuffer::Time { values, valid } => {
                 let i32s: Vec<i32> = values
                     .into_iter()
-                    .map(|t| i32::try_from(t.seconds_since_midnight).unwrap_or(i32::MAX))
+                    .map(|t| {
+                        debug_assert!(
+                            (i32::MIN as i64..=i32::MAX as i64).contains(&t.seconds_since_midnight),
+                            "SAS time value exceeds Arrow Time32 range"
+                        );
+                        t.seconds_since_midnight as i32
+                    })
                     .collect();
-                let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
                 let dtype = ArrowDataType::Time32(PlTimeUnit::Second);
-                Box::new(PrimitiveArray::new(dtype, i32s.into(), bitmap))
+                Box::new(primitive_array_with_optional_validity(
+                    dtype, i32s, valid, row_count,
+                ))
             }
             OwnedColumnBuffer::Utf8 {
                 offsets,
@@ -117,8 +125,8 @@ pub(super) fn owned_batch_to_dataframe(
                 valid,
                 ..
             } => {
-                let i64_offs: Vec<i64> = offsets.into_iter().map(i64::from).collect();
-                let offs_buf = unsafe { OffsetsBuffer::new_unchecked(i64_offs.into()) };
+                let offs_buf = OffsetsBuffer::try_from(offsets)
+                    .map_err(|err| Error::arrow(err.to_string()))?;
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
                 Box::new(Utf8Array::<i64>::new(
                     ArrowDataType::LargeUtf8,
@@ -132,8 +140,8 @@ pub(super) fn owned_batch_to_dataframe(
                 data,
                 valid,
             } => {
-                let i64_offs: Vec<i64> = offsets.into_iter().map(i64::from).collect();
-                let offs_buf = unsafe { OffsetsBuffer::new_unchecked(i64_offs.into()) };
+                let offs_buf = OffsetsBuffer::try_from(offsets)
+                    .map_err(|err| Error::arrow(err.to_string()))?;
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
                 Box::new(BinaryArray::<i64>::new(
                     ArrowDataType::LargeBinary,
@@ -152,14 +160,37 @@ pub(super) fn owned_batch_to_dataframe(
 }
 
 #[cfg(feature = "arrow")]
+fn primitive_array_with_optional_validity<T: polars_arrow::types::NativeType>(
+    dtype: ArrowDataType,
+    values: Vec<T>,
+    valid: Option<Vec<u64>>,
+    row_count: usize,
+) -> PrimitiveArray<T> {
+    match valid {
+        Some(valid) => PrimitiveArray::new(
+            dtype,
+            values.into(),
+            Some(bits_to_bitmap(&valid, row_count)),
+        ),
+        None => PrimitiveArray::from_vec(values).to(dtype),
+    }
+}
+
+#[cfg(feature = "arrow")]
 pub(super) fn bits_to_bitmap(bits: &[u64], len: usize) -> polars_arrow::bitmap::Bitmap {
+    #[cfg(target_endian = "little")]
+    let bytes = bytemuck::cast_slice(bits).to_vec();
+
+    #[cfg(target_endian = "big")]
     let mut bytes = Vec::with_capacity(bits.len() * 8);
+
+    #[cfg(target_endian = "big")]
     for word in bits {
         bytes.extend_from_slice(&word.to_le_bytes());
     }
+
     MutableBitmap::from_vec(bytes, len).into()
 }
-
 
 #[cfg(feature = "arrow")]
 pub(super) fn polars_dtype(

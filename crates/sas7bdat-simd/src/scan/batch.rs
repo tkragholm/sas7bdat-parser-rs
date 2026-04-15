@@ -1653,7 +1653,7 @@ impl OwnedBatchColumnBuilder {
 
 #[inline]
 fn push_utf8_bytes_fast(
-    offsets: &mut Vec<u32>,
+    offsets: &mut Vec<i64>,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     value: &[u8],
@@ -1796,7 +1796,7 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
 #[inline]
 fn append_non_ascii_single_byte_utf8(
     row_plan: &RowDecodePlan,
-    offsets: &mut Vec<u32>,
+    offsets: &mut Vec<i64>,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     dictionary_ids: &mut Option<Vec<u32>>,
@@ -1859,7 +1859,7 @@ fn append_non_ascii_single_byte_utf8(
 
 #[inline]
 fn append_windows_1252_single_byte_utf8(
-    offsets: &mut Vec<u32>,
+    offsets: &mut Vec<i64>,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     byte: u8,
@@ -2193,15 +2193,15 @@ pub(super) fn push_primitive_null<T: Copy>(
 
 #[inline]
 pub(super) fn push_variable_valid(
-    offsets: &mut Vec<u32>,
+    offsets: &mut Vec<i64>,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     value: &[u8],
 ) -> Result<()> {
     let pos = offsets.len().saturating_sub(1);
     data.extend_from_slice(value);
-    let next_offset = u32::try_from(data.len())
-        .map_err(|_| Error::unsupported("columnar variable buffer exceeds u32 offset range"))?;
+    let next_offset = i64::try_from(data.len())
+        .map_err(|_| Error::unsupported("columnar variable buffer exceeds i64 offset range"))?;
     offsets.push(next_offset);
     if let Some(bits) = valid {
         set_valid_bit(bits, pos);
@@ -2211,23 +2211,20 @@ pub(super) fn push_variable_valid(
 
 #[inline]
 pub(super) fn push_variable_valid_without_validity(
-    offsets: &mut Vec<u32>,
+    offsets: &mut Vec<i64>,
     data: &mut Vec<u8>,
     value: &[u8],
 ) -> Result<()> {
-    let next_offset = (*offsets.last().unwrap_or(&0) as usize)
-        .checked_add(value.len())
-        .ok_or_else(|| Error::unsupported("columnar variable buffer exceeds platform usize"))?;
-    let next_offset_u32 = u32::try_from(next_offset)
-        .map_err(|_| Error::unsupported("columnar variable buffer exceeds u32 offset range"))?;
     data.extend_from_slice(value);
-    offsets.push(next_offset_u32);
+    let next_offset = i64::try_from(data.len())
+        .map_err(|_| Error::unsupported("columnar variable buffer exceeds i64 offset range"))?;
+    offsets.push(next_offset);
     Ok(())
 }
 
 #[inline]
 pub(super) fn push_variable_null(
-    offsets: &mut Vec<u32>,
+    offsets: &mut Vec<i64>,
     _data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
 ) {
