@@ -1,6 +1,6 @@
 use super::{
-    FixtureCatalog, IndexedParallelIterator, IoBackendPreference, OutputFormat, ProfileMode,
-    ProjectionPreset, ScanRunOptions, collect_fixture_entries, discover_fixture_paths,
+    FixtureCatalog, IoBackendPreference, OutputFormat, ProfileMode, ProjectionPreset,
+    ScanRunOptions, collect_fixture_entries, discover_fixture_paths,
     display_roots, load_failed_paths, parse_io_backend, print_usage, summarize_catalog,
 };
 use std::{env, path::PathBuf};
