@@ -1,5 +1,9 @@
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use super::{
+    CorpusCsvContext, CorpusCsvRow, CorpusProfileOutput, CorpusSummary, FixtureCatalog,
+    FixtureEntry, FixtureProfile, FixtureStatus, ParallelIterator, Serialize, bytes_to_megabytes,
+    content_class, encoding_class, join_named_counts, round_metric, size_class, summary_txt_path,
+    width_class,
+};
 use csv::Writer;
 use std::{fs, path::PathBuf};
 

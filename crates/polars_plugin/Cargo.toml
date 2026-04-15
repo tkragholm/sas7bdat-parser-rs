@@ -18,5 +18,6 @@ rmp-serde = { workspace = true }
 sas7bdat-simd = { path = "../sas7bdat-simd", features = ["arrow"] }
 
 [features]
-default = ["arrow"]
+default = ["arrow", "extension-module"]
 arrow = ["dep:arrow-schema", "sas7bdat-simd/arrow"]
+extension-module = ["pyo3/extension-module"]

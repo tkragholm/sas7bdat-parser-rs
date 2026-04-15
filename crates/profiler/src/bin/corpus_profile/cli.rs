@@ -1,5 +1,8 @@
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use super::{
+    FixtureCatalog, IndexedParallelIterator, IoBackendPreference, OutputFormat, ProfileMode,
+    ProjectionPreset, ScanRunOptions, collect_fixture_entries, discover_fixture_paths,
+    display_roots, load_failed_paths, parse_io_backend, print_usage, summarize_catalog,
+};
 use std::{env, path::PathBuf};
 
 #[derive(Debug)]
@@ -39,8 +42,7 @@ impl Default for CliConfig {
     }
 }
 
-#[allow(clippy::redundant_pub_crate)]
-pub(super) fn run() -> std::result::Result<(), String> {
+pub fn run() -> std::result::Result<(), String> {
     let config = parse_args()?;
     execute(&config)
 }

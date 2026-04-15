@@ -1,5 +1,15 @@
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use super::{
+    CorpusScanCsvRow, Dataset, FileProgressReporter, FixtureCatalog, FixtureEntry, FixtureStatus,
+    FullContentAccumulator, IndexedParallelIterator, OpenOptions, ParallelIterator,
+    ProjectedScanShape, ScanCsvContext, ScanProfileResult, ScanRankedFile, ScanRunOptions,
+    ScanSummary, Serialize, apply_scan_stats, build_projection, bytes_to_megabytes,
+    compression_name, content_class_from_counts, encoding_class_from_name, io_backend_name,
+    join_named_counts, logical_type_counts_for_scan, profile_dataset_with_sample,
+    projected_scan_shape, projection_name, round_metric, run_scan, size_class_from_page,
+    source_group, structural_companion_csv_path, summarize_catalog, summarize_scan_stats,
+    summary_txt_path, temporal_format_summary_for_scan, top_scan_ranked, width_class_from_shape,
+    width_summary_for_scan,
+};
 use csv::Writer;
 use std::{
     fs,

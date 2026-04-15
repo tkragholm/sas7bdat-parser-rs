@@ -37,6 +37,9 @@ check-polars-plugin:
 test-polars-plugin:
     @.venv/bin/pytest crates/polars_plugin/tests
 
+test-polars-plugin-rust:
+    @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib
+
 bench-plugin-vs-raw fixture="fixtures/ahs2013n.sas7bdat" columns="CONTROL,DEGREE,LMED" repeat="5" batch_rows="4096":
     @.venv/bin/python scripts/compare_plugin_vs_raw.py --fixture {{fixture}} --columns {{columns}} --repeat {{repeat}} --batch-rows {{batch_rows}}
 

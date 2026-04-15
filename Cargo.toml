@@ -16,7 +16,7 @@ mimalloc = { version = "0.1.48", default-features = false, features = ["secure",
 polars = "0.53.0"
 polars-arrow = "0.53.0"
 polars-plan = { version = "0.53.0", features = ["serde"] }
-pyo3 = { version = "0.27", features = ["extension-module"] }
+pyo3 = { version = "0.27" }
 pyo3-polars = "0.26.0"
 rayon = "1"
 rmp-serde = "1"
