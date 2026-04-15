@@ -59,8 +59,8 @@ fn run() -> Result<(), String> {
     let projection = build_projection(&ds, &columns)?;
 
     let mut elapsed_total = 0u128;
-    let mut rows_last = 0usize;
-    let mut batches_last = 0usize;
+    let mut rows_last: usize;
+    let mut batches_last: usize;
 
     let prime_start = Instant::now();
     {

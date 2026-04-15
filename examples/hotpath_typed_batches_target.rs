@@ -3,13 +3,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[allow(dead_code)]
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
+#[allow(dead_code)]
 const DEFAULT_OUTPUT_PATH: &str = "target/criterion/hotpath/typed_batches_target.json";
 
+#[allow(dead_code)]
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures")
 }
 
+#[allow(dead_code)]
 fn collect_sas7bdat_files(root: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
@@ -30,6 +34,7 @@ fn collect_sas7bdat_files(root: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+#[allow(dead_code)]
 fn discover_target_paths(min_size_bytes: u64, max_files: usize) -> Vec<PathBuf> {
     let fixtures_root = fixture_root();
     let mut roots = Vec::new();
