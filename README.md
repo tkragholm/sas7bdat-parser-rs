@@ -6,6 +6,7 @@ The workspace contains:
 
 - the `sas7bdat-simd` library crate
 - the `sas7bdat-profiler` binary package
+- the `sas7bdat-polars` Python extension package
 
 The profiler package ships Windows command-line executables including:
 
@@ -26,11 +27,15 @@ The workspace now has a split benchmark for the Python plugin and the raw Rust p
 
 Recent results on `fixtures/ahs2013n.sas7bdat`:
 
-- `batch_reader` warm steady-state is close to the raw Rust scan path, at about `1.08x` the raw average.
-- `scan_sas` warm steady-state is still slower, at about `1.50x` the raw average.
+- `batch_reader` warm steady-state is close to the raw Rust scan path, at about `1.1x` the raw average.
+- `scan_sas` warm steady-state is still slower, at about `1.5x` the raw average.
 - Cold-start timings are still dominated by dataset open and first-scan setup, which is expected for the lazy descriptor cache.
 
-This means the remaining optimization work is in the Polars/DataFrame conversion and coalescing path, not the core SAS page scan.
+This means the remaining optimization work is in the Polars/DataFrame conversion and Python handoff path, not the core SAS page scan.
+
+Roadmap: see [docs/ROADMAP.md](/Users/tobiaskragholm/dev/sas7bdat-simd/docs/ROADMAP.md) for the repo-wide plan and [docs/PLUGIN_ROADMAP.md](/Users/tobiaskragholm/dev/sas7bdat-simd/docs/PLUGIN_ROADMAP.md) for the plugin execution plan and benchmark matrix.
+
+Historical notes and superseded reports are kept in [docs/archive/README.md](/Users/tobiaskragholm/dev/sas7bdat-simd/docs/archive/README.md).
 
 For full-scan profiling:
 

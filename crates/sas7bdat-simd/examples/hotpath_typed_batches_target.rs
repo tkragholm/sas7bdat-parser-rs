@@ -1,7 +1,10 @@
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
+use std::{env, fs, path::{Path, PathBuf}};
+
+#[cfg(feature = "hotpath-profile")]
+use std::{hint::black_box, ops::ControlFlow};
+
+#[cfg(feature = "hotpath-profile")]
+use sas7bdat_simd::{BatchHint, Dataset};
 
 #[allow(dead_code)]
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
@@ -88,9 +91,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = HotpathGuardBuilder::new("hotpath_typed_batches_target")
         .format(Format::JsonPretty)
         .output_path(&output_path)
-        .with_functions_limit(200)
-        .with_threads_limit(20)
-        .with_sections(vec![Section::FunctionsTiming, Section::Threads])
+        .functions_limit(200)
+        .threads_limit(20)
+        .sections(vec![Section::FunctionsTiming, Section::Threads])
         .build();
 
     let fixtures_root = fixture_root();

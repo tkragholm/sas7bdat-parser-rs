@@ -116,9 +116,7 @@ impl Dataset {
 }
 
 impl Dataset {
-    fn parse_from_reader<R: Read + Seek>(
-        reader: &mut R,
-    ) -> Result<(LayoutPlan, DatasetMetadata)> {
+    fn parse_from_reader<R: Read + Seek>(reader: &mut R) -> Result<(LayoutPlan, DatasetMetadata)> {
         let (header, metadata) = probe_header(reader)?;
         reader.rewind().map_err(|err| Error::io_error(&err))?;
         let (layout, metadata) = parse_layout(reader, header, metadata)?;

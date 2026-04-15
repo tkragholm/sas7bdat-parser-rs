@@ -1,38 +1,6 @@
-[package]
-name = "sas7bdat-simd"
-version = "0.1.0"
-edition = "2024"
-
 [workspace]
-members = ["."]
+members = ["crates/sas7bdat-simd", "crates/profiler", "crates/polars_plugin"]
 resolver = "2"
-
-[dependencies]
-bstr = "1"
-arrow-array = { version = "58.1.0", optional = true }
-arrow-schema = { version = "58.1.0", optional = true }
-encoding_rs = "0.8"
-hotpath = { version = "0.14.1", optional = true, features = ["hotpath"] }
-memchr = "2.8"
-memmap2 = "0.9"
-rayon = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-[dev-dependencies]
-criterion = "0.8.2"
-
-[[bench]]
-name = "scan_hotpaths"
-harness = false
-
-[[bench]]
-name = "compression_matrix"
-harness = false
-
-[[bench]]
-name = "backend_matrix"
-harness = false
 
 [profile.release]
 lto = "thin"
@@ -45,8 +13,3 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
-
-[features]
-default = []
-arrow = ["dep:arrow-array", "dep:arrow-schema"]
-hotpath-profile = ["dep:hotpath"]

@@ -10,7 +10,10 @@ use crate::{
     types::RowLength,
 };
 use encoding_rs::{Encoding, UTF_8};
-use std::{convert::TryFrom, io::{Read, Seek}};
+use std::{
+    convert::TryFrom,
+    io::{Read, Seek},
+};
 
 const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
 const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;

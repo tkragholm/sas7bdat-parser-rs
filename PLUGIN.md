@@ -352,7 +352,7 @@ That keeps the plugin wrapper thin and avoids forcing a full `Vec<RecordBatch>` 
 
 ## Current implementation
 
-The repo now has an initial `sas7bdat-polars` extension crate under [`polars_plugin/`](./polars_plugin):
+The repo now has an initial `sas7bdat-polars` extension crate under [`crates/polars_plugin/`](./crates/polars_plugin):
 
 - `scan_sas(path)` registers a Polars IO source and returns a `LazyFrame`
 - `schema_for_file(path)` exposes the file schema as a Polars `Schema`

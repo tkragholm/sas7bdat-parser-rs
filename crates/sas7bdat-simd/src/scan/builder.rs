@@ -419,7 +419,9 @@ fn collect_batches_for_descriptor_chunk(
     descriptor_chunk: &[crate::internal::PageDescriptor],
     context: &DescriptorChunkContext<'_>,
 ) -> Result<Vec<OwnedColumnarBatch>> {
-    let target_rows_u64 = u64::try_from(context.target_rows).unwrap_or(u64::MAX).max(1);
+    let target_rows_u64 = u64::try_from(context.target_rows)
+        .unwrap_or(u64::MAX)
+        .max(1);
     let estimated_batches = context.row_count.div_ceil(target_rows_u64);
     let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
     let mut batch_accumulator = BatchAccumulator::new(

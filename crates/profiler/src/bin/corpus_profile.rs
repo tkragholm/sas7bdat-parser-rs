@@ -573,10 +573,7 @@ fn report_granularity_units(work_units: u64) -> u64 {
         return work_units.max(1);
     }
 
-    (work_units / 256)
-        .max(MIN_GRANULARITY)
-        .min(MAX_GRANULARITY)
-        .min(work_units)
+    (work_units / 256).clamp(MIN_GRANULARITY, MAX_GRANULARITY).min(work_units)
 }
 
 impl FullContentAccumulator {
@@ -1860,6 +1857,8 @@ fn build_scan_csv_row(
     }
 }
 
+type RowTap<'a> = Option<&'a mut dyn FnMut(u64, &[u8])>;
+
 fn run_scan(
     ds: &Dataset,
     mode: ProfileMode,
@@ -1867,7 +1866,7 @@ fn run_scan(
     batch_rows: usize,
     limit: Option<u64>,
     file_progress: Option<FileProgressReporter>,
-    mut row_tap: Option<&mut dyn FnMut(u64, &[u8])>,
+    mut row_tap: RowTap<'_>,
 ) -> sas7bdat_simd::Result<sas7bdat_simd::ScanStats> {
     let mut scan = ds.scan().with_decode_mode(mode.decode_mode());
     if let Some(projection) = projection {

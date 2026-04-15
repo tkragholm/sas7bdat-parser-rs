@@ -19,7 +19,11 @@ const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
 const SIG_COUNTS: u32 = 0xFFFF_FC00;
 const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
 
-pub fn walk_pages<R, F>(reader: &mut R, header: &crate::internal::HeaderInfo, mut visit: F) -> Result<()>
+pub fn walk_pages<R, F>(
+    reader: &mut R,
+    header: &crate::internal::HeaderInfo,
+    mut visit: F,
+) -> Result<()>
 where
     R: Read + Seek,
     F: FnMut(u64, &[u8]) -> Result<()>,

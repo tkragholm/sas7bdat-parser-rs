@@ -3,8 +3,6 @@ name = "sas7bdat-polars"
 version = "0.1.0"
 edition = "2024"
 
-[workspace]
-
 [lib]
 name = "sas7bdat_polars"
 crate-type = ["cdylib", "rlib"]
@@ -15,7 +13,9 @@ pyo3 = { version = "0.27", features = ["extension-module"] }
 pyo3-polars = "0.26.0"
 polars = "0.53.0"
 polars-arrow = "0.53.0"
-sas7bdat-simd = { path = "..", features = ["arrow"] }
+polars-plan = { version = "0.53.0", features = ["serde"] }
+rmp-serde = "1"
+sas7bdat-simd = { path = "../sas7bdat-simd", features = ["arrow"] }
 
 [features]
 default = ["arrow"]

@@ -17,4 +17,4 @@ classifiers = [
 
 [tool.maturin]
 bindings = "bin"
-manifest-path = "profiler/Cargo.toml"
+manifest-path = "crates/profiler/Cargo.toml"
