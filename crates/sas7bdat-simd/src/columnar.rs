@@ -1,5 +1,6 @@
+use crate::error::Error;
 #[cfg(feature = "arrow")]
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::metadata::{SasDate, SasDateTime, SasTime};
 #[cfg(feature = "arrow")]
 use arrow_array::{
@@ -20,6 +21,106 @@ pub const BLANK_ID: u32 = 0;
 /// Bit `i % 64` of word `i / 64` is 1 if row `i` is valid, 0 if null.
 /// Unused bits in the last word (when row count is not a multiple of 64) are 0.
 pub type BitSlice<'a> = &'a [u64];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustedOffsets {
+    offsets: Vec<i64>,
+}
+
+impl Default for TrustedOffsets {
+    fn default() -> Self {
+        Self::with_capacity_for_rows(0)
+    }
+}
+
+impl TrustedOffsets {
+    #[must_use]
+    pub fn with_capacity_for_rows(target_rows: usize) -> Self {
+        let mut offsets = Vec::with_capacity(target_rows.saturating_add(1));
+        offsets.push(0);
+        Self { offsets }
+    }
+
+    #[must_use]
+    pub fn as_slice(&self) -> &[i64] {
+        &self.offsets
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.offsets.len()
+    }
+
+    pub fn validate_for_values_len(&self, data_len: usize) -> crate::error::Result<()> {
+        let expected_end = i64::try_from(data_len)
+            .map_err(|_| Error::unsupported("columnar variable buffer exceeds i64 offset range"))?;
+        let Some(&first) = self.offsets.first() else {
+            return Err(Error::unsupported(
+                "trusted offsets must contain the initial zero offset",
+            ));
+        };
+        if first != 0 {
+            return Err(Error::unsupported("trusted offsets must start at zero"));
+        }
+
+        let mut previous = first;
+        for &offset in self.offsets.iter().skip(1) {
+            if offset < previous {
+                return Err(Error::unsupported(
+                    "trusted offsets must be monotonically non-decreasing",
+                ));
+            }
+            previous = offset;
+        }
+
+        if previous != expected_end {
+            return Err(Error::unsupported(
+                "trusted offsets final offset must match values length",
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub fn debug_assert_valid_for_values_len(&self, data_len: usize) {
+        #[cfg(debug_assertions)]
+        if let Err(err) = self.validate_for_values_len(data_len) {
+            panic!("TrustedOffsets invariant violated: {err}");
+        }
+
+        #[cfg(not(debug_assertions))]
+        let _ = data_len;
+    }
+
+    pub fn push_current_data_len(&mut self, data_len: usize) -> crate::error::Result<()> {
+        let next_offset = i64::try_from(data_len)
+            .map_err(|_| Error::unsupported("columnar variable buffer exceeds i64 offset range"))?;
+        debug_assert!(self.offsets.last().is_some_and(|last| *last <= next_offset));
+        self.offsets.push(next_offset);
+        Ok(())
+    }
+
+    pub fn push_repeat_last(&mut self) {
+        let last = *self
+            .offsets
+            .last()
+            .expect("trusted offsets always contain an initial zero");
+        self.offsets.push(last);
+    }
+
+    #[must_use]
+    pub fn last(&self) -> i64 {
+        *self
+            .offsets
+            .last()
+            .expect("trusted offsets always contain an initial zero")
+    }
+
+    #[must_use]
+    pub fn into_inner(self) -> Vec<i64> {
+        self.offsets
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct PrimitiveBuffer<'a, T> {
@@ -95,13 +196,13 @@ macro_rules! define_owned_column_enum {
                 valid: Option<Vec<u64>>,
             },
             Utf8 {
-                offsets: Vec<i64>,
+                offsets: $crate::columnar::TrustedOffsets,
                 data: Vec<u8>,
                 valid: Option<Vec<u64>>,
                 dictionary_ids: Option<Vec<u32>>,
             },
             RawBytes {
-                offsets: Vec<i64>,
+                offsets: $crate::columnar::TrustedOffsets,
                 data: Vec<u8>,
                 valid: Option<Vec<u64>>,
             },
@@ -149,7 +250,7 @@ impl OwnedColumnBuffer {
                 valid,
                 dictionary_ids,
             } => ColumnBuffer::Utf8(Utf8Buffer {
-                offsets,
+                offsets: offsets.as_slice(),
                 data,
                 valid: valid.as_deref(),
                 dictionary_ids: dictionary_ids.as_deref(),
@@ -160,7 +261,7 @@ impl OwnedColumnBuffer {
                 data,
                 valid,
             } => ColumnBuffer::RawBytes(BytesBuffer {
-                offsets,
+                offsets: offsets.as_slice(),
                 data,
                 valid: valid.as_deref(),
             }),
@@ -380,4 +481,34 @@ fn row_is_valid(valid: Option<&[u64]>, idx: usize) -> bool {
             .get(word)
             .is_some_and(|bits| (bits & (1u64 << bit)) != 0)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TrustedOffsets;
+
+    #[test]
+    fn trusted_offsets_default_has_initial_zero() {
+        let offsets = TrustedOffsets::default();
+        assert_eq!(offsets.as_slice(), &[0]);
+        offsets
+            .validate_for_values_len(0)
+            .expect("default trusted offsets should be valid");
+    }
+
+    #[test]
+    fn trusted_offsets_validate_rejects_non_zero_start() {
+        let offsets = TrustedOffsets {
+            offsets: vec![1, 3],
+        };
+        assert!(offsets.validate_for_values_len(3).is_err());
+    }
+
+    #[test]
+    fn trusted_offsets_validate_rejects_non_monotonic_offsets() {
+        let offsets = TrustedOffsets {
+            offsets: vec![0, 4, 2],
+        };
+        assert!(offsets.validate_for_values_len(2).is_err());
+    }
 }

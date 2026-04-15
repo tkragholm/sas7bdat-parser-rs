@@ -22,7 +22,7 @@ pub(crate) mod test_utils;
 
 pub use columnar::{
     BLANK_ID, BytesBuffer, ColumnBuffer, ColumnarBatch, OwnedColumnBuffer, OwnedColumnarBatch,
-    PrimitiveBuffer, Utf8Buffer, Utf8Dictionary,
+    PrimitiveBuffer, TrustedOffsets, Utf8Buffer, Utf8Dictionary,
 };
 pub mod types;
 

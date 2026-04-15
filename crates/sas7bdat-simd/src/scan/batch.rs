@@ -9,9 +9,10 @@ use super::{
     staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
 use crate::define_owned_column_enum;
-use crate::{BLANK_ID, DictionaryStaging};
+use crate::{BLANK_ID, DictionaryStaging, columnar::TrustedOffsets};
 use encoding_rs::WINDOWS_1252;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use simdutf8::basic::from_utf8 as simd_from_utf8;
 
 #[derive(Debug, Clone)]
 pub(super) struct BatchDecodePlan {
@@ -1152,19 +1153,18 @@ impl OwnedBatchColumnBuilder {
                 valid: None,
             },
             ColumnMaterializationKind::Utf8 => Self::Utf8 {
-                offsets: Vec::with_capacity(target_rows.saturating_add(1)),
+                offsets: TrustedOffsets::with_capacity_for_rows(target_rows),
                 data: Vec::with_capacity(utf8_variable_capacity),
                 valid: None,
                 dictionary_ids: None,
             },
             ColumnMaterializationKind::RawBytes => Self::RawBytes {
-                offsets: Vec::with_capacity(target_rows.saturating_add(1)),
+                offsets: TrustedOffsets::with_capacity_for_rows(target_rows),
                 data: Vec::with_capacity(base_variable_capacity),
                 valid: None,
             },
         }
         .with_numeric_tile(target_rows, numeric_tile)
-        .with_initial_offset()
     }
 
     pub(super) fn with_numeric_tile(
@@ -1180,14 +1180,6 @@ impl OwnedBatchColumnBuilder {
             },
             (builder, _) => builder,
         }
-    }
-
-    pub(super) fn with_initial_offset(mut self) -> Self {
-        match &mut self {
-            Self::Utf8 { offsets, .. } | Self::RawBytes { offsets, .. } => offsets.push(0),
-            _ => {}
-        }
-        self
     }
 
     pub(super) fn append_integer_fast(&mut self, number: Option<f64>) -> bool {
@@ -1653,7 +1645,7 @@ impl OwnedBatchColumnBuilder {
 
 #[inline]
 fn push_utf8_bytes_fast(
-    offsets: &mut Vec<i64>,
+    offsets: &mut TrustedOffsets,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     value: &[u8],
@@ -1682,7 +1674,7 @@ fn classify_trimmed_cell(slice: &[u8], mode: TrimMode) -> TrimmedCellClass<'_> {
     let trimmed = trim_and_classify_for_mode(slice, mode);
     let bytes = trimmed.bytes;
     let is_blank = bytes.is_empty()
-        || (matches!(mode, TrimMode::Preserve) && bytes.iter().all(|&byte| byte == b' '));
+        || (matches!(mode, TrimMode::Preserve) && super::is_blank_after_trim_mode(slice, mode));
     if is_blank {
         TrimmedCellClass::Blank
     } else if trimmed.is_ascii {
@@ -1796,7 +1788,7 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
 #[inline]
 fn append_non_ascii_single_byte_utf8(
     row_plan: &RowDecodePlan,
-    offsets: &mut Vec<i64>,
+    offsets: &mut TrustedOffsets,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     dictionary_ids: &mut Option<Vec<u32>>,
@@ -1859,61 +1851,151 @@ fn append_non_ascii_single_byte_utf8(
 
 #[inline]
 fn append_windows_1252_single_byte_utf8(
-    offsets: &mut Vec<i64>,
+    offsets: &mut TrustedOffsets,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     byte: u8,
     strict: bool,
 ) -> Result<()> {
-    let codepoint =
-        windows_1252_single_byte_to_codepoint(byte).unwrap_or(if strict { 0 } else { 0xFFFD });
-    if strict && codepoint == 0 {
-        return Err(Error::Decode(crate::error::DecodeError {
-            message: "string decode failed under strict validation".to_owned(),
-        }));
-    }
-
-    let scalar = char::from_u32(codepoint).ok_or_else(|| {
-        Error::unsupported("windows-1252 single-byte decode produced invalid scalar")
-    })?;
-    let mut scratch = [0_u8; 4];
-    let encoded = scalar.encode_utf8(&mut scratch);
-    push_variable_valid(offsets, data, valid, encoded.as_bytes())
+    let mut encoded = [0_u8; 3];
+    let len = encode_windows_1252_single_byte_utf8(byte, strict, &mut encoded)?;
+    push_variable_valid(offsets, data, valid, &encoded[..len])
 }
 
 #[inline]
-const fn windows_1252_single_byte_to_codepoint(byte: u8) -> Option<u32> {
-    match byte {
-        0x80 => Some(0x20AC),
-        0x81 | 0x8D | 0x8F | 0x90 | 0x9D => None,
-        0x82 => Some(0x201A),
-        0x83 => Some(0x0192),
-        0x84 => Some(0x201E),
-        0x85 => Some(0x2026),
-        0x86 => Some(0x2020),
-        0x87 => Some(0x2021),
-        0x88 => Some(0x02C6),
-        0x89 => Some(0x2030),
-        0x8A => Some(0x0160),
-        0x8B => Some(0x2039),
-        0x8C => Some(0x0152),
-        0x8E => Some(0x017D),
-        0x91 => Some(0x2018),
-        0x92 => Some(0x2019),
-        0x93 => Some(0x201C),
-        0x94 => Some(0x201D),
-        0x95 => Some(0x2022),
-        0x96 => Some(0x2013),
-        0x97 => Some(0x2014),
-        0x98 => Some(0x02DC),
-        0x99 => Some(0x2122),
-        0x9A => Some(0x0161),
-        0x9B => Some(0x203A),
-        0x9C => Some(0x0153),
-        0x9E => Some(0x017E),
-        0x9F => Some(0x0178),
-        _ => Some(byte as u32),
-    }
+fn encode_windows_1252_single_byte_utf8(
+    byte: u8,
+    strict: bool,
+    out: &mut [u8; 3],
+) -> Result<usize> {
+    let len = match byte {
+        0x80 => {
+            *out = [0xE2, 0x82, 0xAC];
+            3
+        }
+        0x81 | 0x8D | 0x8F | 0x90 | 0x9D => {
+            if strict {
+                return Err(Error::Decode(crate::error::DecodeError {
+                    message: "string decode failed under strict validation".to_owned(),
+                }));
+            }
+            *out = [0xEF, 0xBF, 0xBD];
+            3
+        }
+        0x82 => {
+            *out = [0xE2, 0x80, 0x9A];
+            3
+        }
+        0x83 => {
+            *out = [0xC6, 0x92, 0];
+            2
+        }
+        0x84 => {
+            *out = [0xE2, 0x80, 0x9E];
+            3
+        }
+        0x85 => {
+            *out = [0xE2, 0x80, 0xA6];
+            3
+        }
+        0x86 => {
+            *out = [0xE2, 0x80, 0xA0];
+            3
+        }
+        0x87 => {
+            *out = [0xE2, 0x80, 0xA1];
+            3
+        }
+        0x88 => {
+            *out = [0xCB, 0x86, 0];
+            2
+        }
+        0x89 => {
+            *out = [0xE2, 0x80, 0xB0];
+            3
+        }
+        0x8A => {
+            *out = [0xC5, 0xA0, 0];
+            2
+        }
+        0x8B => {
+            *out = [0xE2, 0x80, 0xB9];
+            3
+        }
+        0x8C => {
+            *out = [0xC5, 0x92, 0];
+            2
+        }
+        0x8E => {
+            *out = [0xC5, 0xBD, 0];
+            2
+        }
+        0x91 => {
+            *out = [0xE2, 0x80, 0x98];
+            3
+        }
+        0x92 => {
+            *out = [0xE2, 0x80, 0x99];
+            3
+        }
+        0x93 => {
+            *out = [0xE2, 0x80, 0x9C];
+            3
+        }
+        0x94 => {
+            *out = [0xE2, 0x80, 0x9D];
+            3
+        }
+        0x95 => {
+            *out = [0xE2, 0x80, 0xA2];
+            3
+        }
+        0x96 => {
+            *out = [0xE2, 0x80, 0x93];
+            3
+        }
+        0x97 => {
+            *out = [0xE2, 0x80, 0x94];
+            3
+        }
+        0x98 => {
+            *out = [0xCB, 0x9C, 0];
+            2
+        }
+        0x99 => {
+            *out = [0xE2, 0x84, 0xA2];
+            3
+        }
+        0x9A => {
+            *out = [0xC5, 0xA1, 0];
+            2
+        }
+        0x9B => {
+            *out = [0xE2, 0x80, 0xBA];
+            3
+        }
+        0x9C => {
+            *out = [0xC5, 0x93, 0];
+            2
+        }
+        0x9E => {
+            *out = [0xC5, 0xBE, 0];
+            2
+        }
+        0x9F => {
+            *out = [0xC5, 0xB8, 0];
+            2
+        }
+        0xA0..=0xBF => {
+            *out = [0xC2, byte, 0];
+            2
+        }
+        _ => {
+            *out = [0xC3, byte - 64, 0];
+            2
+        }
+    };
+    Ok(len)
 }
 
 #[inline]
@@ -1984,7 +2066,7 @@ fn append_direct_utf8_owned_batch_column(
                     TrimmedCellClass::NonAscii(trimmed) => (trimmed, trimmed.bytes),
                 };
 
-            if fast_valid_utf8_non_ascii && std::str::from_utf8(slice).is_ok() {
+            if fast_valid_utf8_non_ascii && simd_from_utf8(slice).is_ok() {
                 push_variable_valid(offsets, data, valid, slice)?;
                 push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 return Ok(true);
@@ -2193,16 +2275,14 @@ pub(super) fn push_primitive_null<T: Copy>(
 
 #[inline]
 pub(super) fn push_variable_valid(
-    offsets: &mut Vec<i64>,
+    offsets: &mut TrustedOffsets,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     value: &[u8],
 ) -> Result<()> {
     let pos = offsets.len().saturating_sub(1);
     data.extend_from_slice(value);
-    let next_offset = i64::try_from(data.len())
-        .map_err(|_| Error::unsupported("columnar variable buffer exceeds i64 offset range"))?;
-    offsets.push(next_offset);
+    offsets.push_current_data_len(data.len())?;
     if let Some(bits) = valid {
         set_valid_bit(bits, pos);
     }
@@ -2211,20 +2291,18 @@ pub(super) fn push_variable_valid(
 
 #[inline]
 pub(super) fn push_variable_valid_without_validity(
-    offsets: &mut Vec<i64>,
+    offsets: &mut TrustedOffsets,
     data: &mut Vec<u8>,
     value: &[u8],
 ) -> Result<()> {
     data.extend_from_slice(value);
-    let next_offset = i64::try_from(data.len())
-        .map_err(|_| Error::unsupported("columnar variable buffer exceeds i64 offset range"))?;
-    offsets.push(next_offset);
+    offsets.push_current_data_len(data.len())?;
     Ok(())
 }
 
 #[inline]
 pub(super) fn push_variable_null(
-    offsets: &mut Vec<i64>,
+    offsets: &mut TrustedOffsets,
     _data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
 ) {
@@ -2239,8 +2317,7 @@ pub(super) fn push_variable_null(
         }
         // bit at pos stays 0 (null)
     }
-    let last = *offsets.last().unwrap_or(&0);
-    offsets.push(last);
+    offsets.push_repeat_last();
 }
 
 pub(super) fn unexpected_batch_cell(expected: &str, actual: PlannedCell<'_>) -> Error {

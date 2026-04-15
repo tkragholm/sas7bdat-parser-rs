@@ -11,6 +11,7 @@ use super::{
 };
 use crate::internal::ProjectionPlan;
 use bstr::ByteSlice;
+use simdutf8::basic::from_utf8 as simd_from_utf8;
 
 #[derive(Debug, Clone)]
 pub(super) struct RowDecodePlan {
@@ -235,7 +236,7 @@ impl RowDecodePlan {
         }
 
         match self.string_kernel {
-            StringDecodeKernel::Utf8Strict => match std::str::from_utf8(slice) {
+            StringDecodeKernel::Utf8Strict => match simd_from_utf8(slice) {
                 Ok(_) => Ok(slice),
                 Err(_) => Err(Error::Decode(crate::error::DecodeError {
                     message: "invalid UTF-8 in fixed-width string cell".to_owned(),
@@ -258,7 +259,7 @@ impl RowDecodePlan {
             return DecodedUtf8BatchValue::Borrowed(slice);
         }
 
-        if std::str::from_utf8(slice).is_ok() {
+        if simd_from_utf8(slice).is_ok() {
             DecodedUtf8BatchValue::Borrowed(slice)
         } else {
             *scratch = maybe_fix_mojibake(
@@ -340,7 +341,7 @@ impl RowDecodePlan {
         owned_strings: &mut Vec<String>,
     ) -> Result<PlannedCell<'row>> {
         match self.string_kernel {
-            StringDecodeKernel::Utf8Strict => std::str::from_utf8(slice).map_or_else(
+            StringDecodeKernel::Utf8Strict => simd_from_utf8(slice).map_or_else(
                 |_| {
                     Err(Error::Decode(crate::error::DecodeError {
                         message: "invalid UTF-8 in fixed-width string cell".to_owned(),
@@ -348,7 +349,7 @@ impl RowDecodePlan {
                 },
                 |value| Ok(PlannedCell::StrBorrowed(value)),
             ),
-            StringDecodeKernel::Utf8Lenient => std::str::from_utf8(slice).map_or_else(
+            StringDecodeKernel::Utf8Lenient => simd_from_utf8(slice).map_or_else(
                 |_| {
                     owned_strings.push(maybe_fix_mojibake(
                         slice.to_str_lossy().into_owned(),
@@ -499,7 +500,7 @@ impl RowDecodePlan {
         }
 
         if self.encoding == UTF_8 {
-            return match std::str::from_utf8(slice) {
+            return match simd_from_utf8(slice) {
                 Ok(value) => Ok(crate::row::OwnedCellValue::String(value.to_owned())),
                 Err(_)
                     if matches!(

@@ -20,6 +20,13 @@ fn make_batch_plan(builder: &ScanBuilder<'_>) -> BatchDecodePlan {
     BatchDecodePlan::new(builder, row_plan).expect("batch plan")
 }
 
+fn assert_trusted_offsets(offsets: &crate::TrustedOffsets, expected: &[i64], data_len: usize) {
+    assert_eq!(offsets.as_slice(), expected);
+    offsets
+        .validate_for_values_len(data_len)
+        .expect("scanner should emit valid trusted offsets");
+}
+
 #[test]
 fn raw_scan_visits_rows_from_fused_pages() {
     let bytes = Arc::<[u8]>::from(make_pages());
@@ -381,7 +388,7 @@ fn collect_batches_materializes_columnar_values() {
             valid,
             dictionary_ids,
         } => {
-            assert_eq!(offsets, &vec![0, 2, 6]);
+            assert_trusted_offsets(offsets, &[0, 2, 6], data.len());
             assert_eq!(data, b"AABBBB");
             assert!(valid.is_none());
             assert!(dictionary_ids.is_none());
@@ -816,7 +823,7 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
             valid,
             dictionary_ids,
         } => {
-            assert_eq!(offsets, &vec![0, 4]);
+            assert_trusted_offsets(offsets, &[0, 4], data.len());
             assert_eq!(data, b"pear");
             assert!(valid.is_none());
             assert!(dictionary_ids.is_none() || dictionary_ids.as_deref() == Some(&[u32::MAX][..]));
@@ -872,7 +879,7 @@ fn collect_batches_typed_lossless_uses_f64_and_raw_bytes() {
             data,
             valid,
         } => {
-            assert_eq!(offsets, &vec![0, 4]);
+            assert_trusted_offsets(offsets, &[0, 4], data.len());
             assert_eq!(data, b"ZX  ");
             assert!(valid.is_none());
         }
@@ -993,7 +1000,7 @@ fn collect_batches_decodes_windows1252_single_byte_compressed_row() {
             valid,
             dictionary_ids,
         } => {
-            assert_eq!(offsets, &vec![0, 3]);
+            assert_trusted_offsets(offsets, &[0, 3], data.len());
             assert_eq!(data, &[0xE2, 0x80, 0x93]);
             assert!(valid.is_none());
             assert!(dictionary_ids.is_none());

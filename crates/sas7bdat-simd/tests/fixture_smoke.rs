@@ -4,7 +4,7 @@
     clippy::unreadable_literal
 )]
 
-use sas7bdat_simd::{BatchHint, Dataset, OwnedCellValue, OwnedColumnBuffer};
+use sas7bdat_simd::{BatchHint, Dataset, OwnedCellValue, OwnedColumnBuffer, TrustedOffsets};
 use std::{
     env,
     ops::ControlFlow,
@@ -12,6 +12,13 @@ use std::{
 };
 
 const EXCLUDED_FIXTURE_NAMES: &[&str] = &["corrupt.sas7bdat", "zero_variables.sas7bdat"];
+
+fn assert_trusted_offsets(offsets: &TrustedOffsets, expected: &[i64], data_len: usize) {
+    assert_eq!(offsets.as_slice(), expected);
+    offsets
+        .validate_for_values_len(data_len)
+        .expect("fixture scan should emit valid trusted offsets");
+}
 
 #[test]
 fn local_fixtures_open_and_scan() {
@@ -191,7 +198,7 @@ fn fixture_54_class_matches_expected_shape() {
             valid,
             dictionary_ids: _,
         } => {
-            assert_eq!(offsets, &vec![0, 6, 11, 18]);
+            assert_trusted_offsets(offsets, &[0, 6, 11, 18], data.len());
             assert_eq!(data, b"AlfredAliceBarbara");
             assert!(valid.is_none());
         }
@@ -236,7 +243,7 @@ fn fixture_test2_matches_expected_shape() {
             valid,
             dictionary_ids: _,
         } => {
-            assert_eq!(offsets, &vec![0, 4, 7]);
+            assert_trusted_offsets(offsets, &[0, 4, 7], data.len());
             assert_eq!(data, b"peardog");
             assert!(valid.is_none());
         }
@@ -287,7 +294,7 @@ fn fixture_max_sas_date_matches_expected_shape() {
             valid,
             dictionary_ids: _,
         } => {
-            assert_eq!(offsets, &vec![0, 3, 9]);
+            assert_trusted_offsets(offsets, &[0, 3, 9], data.len());
             assert_eq!(data, b"maxnormal");
             assert!(valid.is_none());
         }
@@ -344,7 +351,7 @@ fn fixture_charset_utf8_matches_expected_shape() {
             valid,
             dictionary_ids: _,
         } => {
-            assert_eq!(offsets, &vec![0, 11, 22, 33]);
+            assert_trusted_offsets(offsets, &[0, 11, 22, 33], data.len());
             assert_eq!(data, b"Iris-setosaIris-setosaIris-setosa");
             assert!(valid.is_none());
         }
@@ -389,7 +396,7 @@ fn fixture_cookie_matches_expected_shape() {
             valid,
             dictionary_ids: _,
         } => {
-            assert_eq!(offsets, &vec![0, 3, 7, 8]);
+            assert_trusted_offsets(offsets, &[0, 3, 7, 8], data.len());
             assert_eq!(data, b"9.015.1.");
             assert!(valid.is_none());
         }

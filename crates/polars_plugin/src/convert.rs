@@ -9,13 +9,13 @@ use polars_arrow::{
     array::{Array, BinaryArray, PrimitiveArray, Utf8Array},
     bitmap::MutableBitmap,
     datatypes::{ArrowDataType, ArrowSchema, Field, TimeUnit as PlTimeUnit},
-    offset::OffsetsBuffer,
+    offset::{Offsets, OffsetsBuffer},
     record_batch::RecordBatch as PolarsRecordBatch,
 };
 #[cfg(feature = "arrow")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule};
 #[cfg(feature = "arrow")]
-use sas7bdat_simd::{Error, OwnedColumnBuffer, Result as SasResult};
+use sas7bdat_simd::{Error, OwnedColumnBuffer, Result as SasResult, TrustedOffsets};
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
 
@@ -124,32 +124,12 @@ pub(super) fn owned_batch_to_dataframe(
                 data,
                 valid,
                 ..
-            } => {
-                let offs_buf = OffsetsBuffer::try_from(offsets)
-                    .map_err(|err| Error::arrow(err.to_string()))?;
-                let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(Utf8Array::<i64>::new(
-                    ArrowDataType::LargeUtf8,
-                    offs_buf,
-                    data.into(),
-                    bitmap,
-                ))
-            }
+            } => Box::new(trusted_large_utf8_array(offsets, data, valid, row_count)),
             OwnedColumnBuffer::RawBytes {
                 offsets,
                 data,
                 valid,
-            } => {
-                let offs_buf = OffsetsBuffer::try_from(offsets)
-                    .map_err(|err| Error::arrow(err.to_string()))?;
-                let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(BinaryArray::<i64>::new(
-                    ArrowDataType::LargeBinary,
-                    offs_buf,
-                    data.into(),
-                    bitmap,
-                ))
-            }
+            } => Box::new(trusted_large_binary_array(offsets, data, valid, row_count)),
         };
         arrays.push(array);
     }
@@ -157,6 +137,71 @@ pub(super) fn owned_batch_to_dataframe(
     let rec = PolarsRecordBatch::try_new(row_count, schema, arrays)
         .map_err(|err| Error::arrow(err.to_string()))?;
     Ok(DataFrame::from(rec))
+}
+
+#[cfg(feature = "arrow")]
+fn trusted_large_offsets_buffer(offsets: TrustedOffsets, data_len: usize) -> OffsetsBuffer<i64> {
+    offsets.debug_assert_valid_for_values_len(data_len);
+
+    // SAFETY:
+    // `TrustedOffsets` is only produced by the scanner's variable-width builders in
+    // `sas7bdat-simd`. Those builders:
+    // - initialize offsets with a single `0`
+    // - append the current data length after each pushed value
+    // - repeat the previous offset for nulls
+    // This guarantees non-negative, monotonically non-decreasing Arrow offsets.
+    // Debug builds re-check the final offset matches `data_len` at this boundary.
+    unsafe { Offsets::new_unchecked(offsets.into_inner()).into() }
+}
+
+#[cfg(feature = "arrow")]
+fn trusted_large_utf8_array(
+    offsets: TrustedOffsets,
+    data: Vec<u8>,
+    valid: Option<Vec<u64>>,
+    row_count: usize,
+) -> Utf8Array<i64> {
+    let offs_buf = trusted_large_offsets_buffer(offsets, data.len());
+    let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
+
+    #[cfg(debug_assertions)]
+    {
+        debug_assert!(
+            std::str::from_utf8(&data).is_ok(),
+            "scanner-produced Utf8 column must contain valid UTF-8 bytes"
+        );
+    }
+
+    // SAFETY:
+    // `TrustedOffsets` guarantees Arrow offset invariants for this `data` buffer.
+    // Scanner-produced `Utf8` buffers are built only from:
+    // - ASCII slices
+    // - source slices that passed `from_utf8`
+    // - decoded/encoded scratch strings from the configured encoding path
+    // - explicit scalar-to-UTF-8 encoding for windows-1252 single-byte decoding
+    // Therefore the concatenated `data` buffer is valid UTF-8, and debug builds
+    // assert that directly here.
+    unsafe {
+        Utf8Array::<i64>::new_unchecked(ArrowDataType::LargeUtf8, offs_buf, data.into(), bitmap)
+    }
+}
+
+#[cfg(feature = "arrow")]
+fn trusted_large_binary_array(
+    offsets: TrustedOffsets,
+    data: Vec<u8>,
+    valid: Option<Vec<u64>>,
+    row_count: usize,
+) -> BinaryArray<i64> {
+    let offs_buf = trusted_large_offsets_buffer(offsets, data.len());
+    let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
+
+    // SAFETY:
+    // `TrustedOffsets` guarantees Arrow offset invariants for this `data` buffer,
+    // and debug builds already checked the final offset against `data.len()`.
+    unsafe {
+        BinaryArray::<i64>::new_unchecked(ArrowDataType::LargeBinary, offs_buf, data.into(), bitmap)
+    }
 }
 
 #[cfg(feature = "arrow")]
