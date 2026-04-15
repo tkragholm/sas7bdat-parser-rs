@@ -2,7 +2,7 @@
 
 #[cfg(feature = "arrow")]
 use std::{
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
 };
 
@@ -14,10 +14,6 @@ use polars::prelude::{
     DataType as PlDataType, PlSmallStr, Scalar,
 };
 #[cfg(feature = "arrow")]
-use polars_plan::prelude::{
-    BooleanFunction, DataTypeExpr, Expr, FunctionExpr, LiteralValue, Operator,
-};
-#[cfg(feature = "arrow")]
 use polars_arrow::{
     array::{Array, BinaryArray, PrimitiveArray, Utf8Array},
     bitmap::MutableBitmap,
@@ -26,18 +22,24 @@ use polars_arrow::{
     record_batch::RecordBatch as PolarsRecordBatch,
 };
 #[cfg(feature = "arrow")]
+use polars_plan::prelude::{
+    BooleanFunction, DataTypeExpr, Expr, FunctionExpr, LiteralValue, Operator,
+};
+#[cfg(feature = "arrow")]
 use pyo3::{
+    IntoPyObjectExt,
     exceptions::{PyRuntimeError, PyStopIteration, PyValueError},
     prelude::*,
     types::{PyDict, PyModule},
-    IntoPyObjectExt,
 };
 #[cfg(feature = "arrow")]
 use pyo3_polars::types::PyDataFrame;
 #[cfg(feature = "arrow")]
 use rmp_serde::from_slice;
 #[cfg(feature = "arrow")]
-use sas7bdat_simd::{BatchHint, Dataset, Error, OwnedColumnBuffer, Projection, Result as SasResult};
+use sas7bdat_simd::{
+    BatchHint, Dataset, Error, OwnedColumnBuffer, Projection, Result as SasResult,
+};
 
 // ─── message types ────────────────────────────────────────────────────────────
 
@@ -118,9 +120,7 @@ impl SasDataset {
     #[new]
     fn open(py: Python<'_>, path: &str) -> PyResult<Self> {
         #[allow(deprecated)]
-        let ds = py
-            .allow_threads(|| Dataset::open(path))
-            .map_err(py_err)?;
+        let ds = py.allow_threads(|| Dataset::open(path)).map_err(py_err)?;
         Ok(Self { ds: Arc::new(ds) })
     }
 
@@ -138,7 +138,15 @@ impl SasDataset {
         n_rows: Option<usize>,
         batch_size: Option<usize>,
     ) -> BatchReader {
-        batch_reader_from_dataset(py, &self.ds, with_columns, predicate, n_rows, batch_size, false)
+        batch_reader_from_dataset(
+            py,
+            &self.ds,
+            with_columns,
+            predicate,
+            n_rows,
+            batch_size,
+            false,
+        )
     }
 
     /// Register this dataset as a Polars IO source and return a `LazyFrame`.
@@ -170,7 +178,15 @@ impl SasIoSource {
         n_rows: Option<usize>,
         batch_size: Option<usize>,
     ) -> BatchReader {
-        batch_reader_from_dataset(py, &self.ds, with_columns, predicate, n_rows, batch_size, false)
+        batch_reader_from_dataset(
+            py,
+            &self.ds,
+            with_columns,
+            predicate,
+            n_rows,
+            batch_size,
+            false,
+        )
     }
 }
 
@@ -211,8 +227,9 @@ impl BatchReader {
                         // DataFrame.filter() is cheaper than lazy().filter().collect()
                         // because it avoids creating an intermediate LazyFrame and
                         // running the full query planner per batch.
-                        let filtered =
-                            py_df.bind(py).call_method1("filter", (predicate.bind(py),))?;
+                        let filtered = py_df
+                            .bind(py)
+                            .call_method1("filter", (predicate.bind(py),))?;
                         if filtered.call_method0("is_empty")?.extract::<bool>()? {
                             continue;
                         }
@@ -278,11 +295,7 @@ fn scan_sas(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
 // ─── internal helpers ─────────────────────────────────────────────────────────
 
 #[cfg(feature = "arrow")]
-fn register_io_source(
-    py: Python<'_>,
-    ds: Arc<Dataset>,
-    schema: Py<PyAny>,
-) -> PyResult<Py<PyAny>> {
+fn register_io_source(py: Python<'_>, ds: Arc<Dataset>, schema: Py<PyAny>) -> PyResult<Py<PyAny>> {
     let io_source = Py::new(py, SasIoSource { ds })?;
     let register_io_source =
         PyModule::import(py, "polars.io.plugins")?.getattr("register_io_source")?;
@@ -320,7 +333,11 @@ fn batch_reader_from_dataset(
     let (tx, rx) = mpsc::channel::<ReaderMessage>();
     let ds = Arc::clone(ds);
     let (rust_predicate, python_predicate) = prepare_predicate(py, ds.as_ref(), predicate);
-    let with_columns = match (with_columns, rust_predicate.as_ref(), python_predicate.is_some()) {
+    let with_columns = match (
+        with_columns,
+        rust_predicate.as_ref(),
+        python_predicate.is_some(),
+    ) {
         (Some(with_columns), Some(predicate), _) => {
             let mut merged = with_columns;
             let mut predicate_columns = Vec::new();
@@ -363,8 +380,10 @@ fn prepare_predicate(
         return (None, None);
     };
 
-    predicate_from_python(py, ds, &predicate)
-        .map_or_else(|| (None, Some(predicate)), |predicate| (Some(predicate), None))
+    predicate_from_python(py, ds, &predicate).map_or_else(
+        || (None, Some(predicate)),
+        |predicate| (Some(predicate), None),
+    )
 }
 
 #[cfg(feature = "arrow")]
@@ -400,11 +419,13 @@ fn parse_predicate_expr(ds: &Dataset, expr: &Expr) -> Option<PredicateExpr> {
         Expr::Alias(inner, _) | Expr::KeepName(inner) | Expr::RenameAlias { expr: inner, .. } => {
             parse_predicate_expr(ds, inner)
         }
-        Expr::BinaryExpr { left, op, right } if op.is_comparison() => Some(PredicateExpr::Compare {
-            left: parse_predicate_operand(ds, left.as_ref())?,
-            op: compare_op(*op)?,
-            right: parse_predicate_operand(ds, right.as_ref())?,
-        }),
+        Expr::BinaryExpr { left, op, right } if op.is_comparison() => {
+            Some(PredicateExpr::Compare {
+                left: parse_predicate_operand(ds, left.as_ref())?,
+                op: compare_op(*op)?,
+                right: parse_predicate_operand(ds, right.as_ref())?,
+            })
+        }
         Expr::BinaryExpr {
             left,
             op: O::And | O::LogicalAnd,
@@ -437,9 +458,9 @@ fn parse_predicate_expr(ds: &Dataset, expr: &Expr) -> Option<PredicateExpr> {
             FunctionExpr::Boolean(B::IsInfinite) => Some(PredicateExpr::IsInfinite(
                 parse_predicate_operand(ds, &input[0])?,
             )),
-            FunctionExpr::Boolean(B::IsNan) => Some(PredicateExpr::IsNan(
-                parse_predicate_operand(ds, &input[0])?,
-            )),
+            FunctionExpr::Boolean(B::IsNan) => Some(PredicateExpr::IsNan(parse_predicate_operand(
+                ds, &input[0],
+            )?)),
             FunctionExpr::Boolean(B::IsNotNan) => Some(PredicateExpr::IsNotNan(
                 parse_predicate_operand(ds, &input[0])?,
             )),
@@ -459,14 +480,15 @@ fn parse_predicate_operand(ds: &Dataset, expr: &Expr) -> Option<PredicateOperand
                 cast: None,
             })
         }
-        Expr::Literal(literal) => literal_to_scalar(literal).map(|value| PredicateOperand::Scalar {
-            value,
-            cast: None,
-        }),
+        Expr::Literal(literal) => {
+            literal_to_scalar(literal).map(|value| PredicateOperand::Scalar { value, cast: None })
+        }
         Expr::Alias(inner, _) | Expr::KeepName(inner) | Expr::RenameAlias { expr: inner, .. } => {
             parse_predicate_operand(ds, inner)
         }
-        Expr::Cast { expr: inner, dtype, .. } => {
+        Expr::Cast {
+            expr: inner, dtype, ..
+        } => {
             let cast = match dtype {
                 DataTypeExpr::Literal(dtype) => Some(dtype.clone()),
                 _ => None,
@@ -545,9 +567,10 @@ impl PredicateExpr {
 impl PredicateOperand {
     fn collect_columns(&self, columns: &mut Vec<String>) {
         if let Self::Column { name, .. } = self
-            && !columns.iter().any(|existing| existing == name) {
-                columns.push(name.clone());
-            }
+            && !columns.iter().any(|existing| existing == name)
+        {
+            columns.push(name.clone());
+        }
     }
 
     fn set_cast(&mut self, cast: PlDataType) {
@@ -568,7 +591,9 @@ fn filter_dataframe(df: &DataFrame, predicate: &PredicateExpr) -> SasResult<Data
 #[cfg(feature = "arrow")]
 fn evaluate_predicate(df: &DataFrame, predicate: &PredicateExpr) -> SasResult<BooleanChunked> {
     match predicate {
-        PredicateExpr::Const(value) => Ok(BooleanChunked::full(PlSmallStr::EMPTY, *value, df.height())),
+        PredicateExpr::Const(value) => {
+            Ok(BooleanChunked::full(PlSmallStr::EMPTY, *value, df.height()))
+        }
         PredicateExpr::And(left, right) => {
             let left = evaluate_predicate(df, left)?;
             let right = evaluate_predicate(df, right)?;
@@ -607,9 +632,9 @@ fn evaluate_predicate(df: &DataFrame, predicate: &PredicateExpr) -> SasResult<Bo
         PredicateExpr::IsNan(operand) => resolve_operand(df, operand)?
             .is_nan()
             .map_err(|err| Error::io(err.to_string())),
-        PredicateExpr::IsNotNan(operand) => Ok(!resolve_operand(df, operand)?.is_nan().map_err(
-            |err| Error::io(err.to_string()),
-        )?),
+        PredicateExpr::IsNotNan(operand) => Ok(!resolve_operand(df, operand)?
+            .is_nan()
+            .map_err(|err| Error::io(err.to_string()))?),
     }
 }
 
@@ -622,14 +647,18 @@ fn resolve_operand(df: &DataFrame, operand: &PredicateOperand) -> SasResult<Colu
                 .map_err(|err| Error::io(err.to_string()))?
                 .clone();
             if let Some(dtype) = cast {
-                column = column.cast(dtype).map_err(|err| Error::io(err.to_string()))?;
+                column = column
+                    .cast(dtype)
+                    .map_err(|err| Error::io(err.to_string()))?;
             }
             Ok(column)
         }
         PredicateOperand::Scalar { value, cast } => {
             let mut column = Column::new_scalar(PlSmallStr::EMPTY, value.clone(), df.height());
             if let Some(dtype) = cast {
-                column = column.cast(dtype).map_err(|err| Error::io(err.to_string()))?;
+                column = column
+                    .cast(dtype)
+                    .map_err(|err| Error::io(err.to_string()))?;
             }
             Ok(column)
         }
@@ -719,15 +748,12 @@ fn run_scan(
 /// same dtype widening that `owned_batch_to_dataframe` uses (Utf8 → `LargeUtf8`,
 /// Binary → `LargeBinary`).
 #[cfg(feature = "arrow")]
-fn build_polars_schema(
-    arrow_schema: &arrow_schema::Schema,
-) -> SasResult<ArrowSchema> {
+fn build_polars_schema(arrow_schema: &arrow_schema::Schema) -> SasResult<ArrowSchema> {
     let fields: Vec<Field> = arrow_schema
         .fields()
         .iter()
         .map(|f| {
-            let dtype = arrow_dt_to_polars_arrow(f.data_type())
-                .map_err(Error::arrow)?;
+            let dtype = arrow_dt_to_polars_arrow(f.data_type()).map_err(Error::arrow)?;
             Ok(Field::new(f.name().as_str().into(), dtype, true))
         })
         .collect::<SasResult<Vec<_>>>()?;
@@ -778,27 +804,44 @@ fn owned_batch_to_dataframe(
         let array: Box<dyn Array> = match col {
             OwnedColumnBuffer::I32 { values, valid } => {
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(PrimitiveArray::new(ArrowDataType::Int32, values.into(), bitmap))
+                Box::new(PrimitiveArray::new(
+                    ArrowDataType::Int32,
+                    values.into(),
+                    bitmap,
+                ))
             }
             OwnedColumnBuffer::I64 { values, valid } => {
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(PrimitiveArray::new(ArrowDataType::Int64, values.into(), bitmap))
+                Box::new(PrimitiveArray::new(
+                    ArrowDataType::Int64,
+                    values.into(),
+                    bitmap,
+                ))
             }
             OwnedColumnBuffer::F64 { values, valid } => {
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(PrimitiveArray::new(ArrowDataType::Float64, values.into(), bitmap))
+                Box::new(PrimitiveArray::new(
+                    ArrowDataType::Float64,
+                    values.into(),
+                    bitmap,
+                ))
             }
             OwnedColumnBuffer::Date { values, valid } => {
                 // SasDate wraps i32 day-since-epoch; extract with one flat copy.
-                let i32s: Vec<i32> =
-                    values.into_iter().map(|d| d.days_since_sas_epoch).collect();
+                let i32s: Vec<i32> = values.into_iter().map(|d| d.days_since_sas_epoch).collect();
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
-                Box::new(PrimitiveArray::new(ArrowDataType::Date32, i32s.into(), bitmap))
+                Box::new(PrimitiveArray::new(
+                    ArrowDataType::Date32,
+                    i32s.into(),
+                    bitmap,
+                ))
             }
             OwnedColumnBuffer::DateTime { values, valid } => {
                 // SasDateTime wraps i64 seconds; extract with one flat copy.
-                let i64s: Vec<i64> =
-                    values.into_iter().map(|d| d.seconds_since_sas_epoch).collect();
+                let i64s: Vec<i64> = values
+                    .into_iter()
+                    .map(|d| d.seconds_since_sas_epoch)
+                    .collect();
                 let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
                 let dtype = ArrowDataType::Timestamp(PlTimeUnit::Second, None);
                 Box::new(PrimitiveArray::new(dtype, i64s.into(), bitmap))

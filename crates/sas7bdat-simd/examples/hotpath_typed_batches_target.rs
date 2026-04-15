@@ -1,4 +1,7 @@
-use std::{env, fs, path::{Path, PathBuf}};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 #[cfg(feature = "hotpath-profile")]
 use std::{hint::black_box, ops::ControlFlow};

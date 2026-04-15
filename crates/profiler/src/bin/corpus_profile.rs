@@ -1,4 +1,4 @@
-use csv::{ReaderBuilder, Writer};
+use csv::ReaderBuilder;
 use rayon::prelude::*;
 use sas7bdat_profiler::init_profiler_runtime;
 use sas7bdat_simd::{
@@ -13,18 +13,26 @@ use sas7bdat_simd::{
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     process::ExitCode,
     sync::{
         Arc, Once,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    time::Instant,
 };
 use tracing::Span;
 use tracing_indicatif::{IndicatifLayer, span_ext::IndicatifSpanExt, style::ProgressStyle};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[path = "corpus_profile/cli.rs"]
+mod corpus_cli;
+#[path = "corpus_profile/csv.rs"]
+mod corpus_csv;
+#[path = "corpus_profile/render.rs"]
+mod corpus_render;
+#[path = "corpus_profile/scan.rs"]
+mod corpus_scan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -93,7 +101,7 @@ struct CorpusProfileOutput {
     fixtures: Vec<FixtureEntry>,
 }
 
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 struct CorpusSummary {
     discovered_files: usize,
     profiled_files: usize,
@@ -122,7 +130,7 @@ struct RankedFile {
     value: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 struct CorpusCsvRow {
     corpus_roots: String,
     corpus_sample_rows: usize,
@@ -203,7 +211,7 @@ struct ScanRunOptions {
     limit: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 struct CorpusScanCsvRow {
     corpus_roots: String,
     corpus_mode: String,
@@ -542,6 +550,7 @@ fn format_progress_message(
     )
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -574,7 +583,9 @@ fn report_granularity_units(work_units: u64) -> u64 {
         return work_units.max(1);
     }
 
-    (work_units / 256).clamp(MIN_GRANULARITY, MAX_GRANULARITY).min(work_units)
+    (work_units / 256)
+        .clamp(MIN_GRANULARITY, MAX_GRANULARITY)
+        .min(work_units)
 }
 
 impl FullContentAccumulator {
@@ -736,16 +747,12 @@ fn collect_scan_rows(
         .par_iter()
         .map(|item| {
             progress.start_file("profiling corpus scans");
-            build_scan_csv_row(
-                &item.path,
-                context,
-                options,
-                Some(FileProgressReporter::new(
-                    progress.clone(),
-                    "profiling corpus scans",
-                    item.work_units,
-                )),
-            )
+            let file_progress = FileProgressReporter::new(
+                progress.clone(),
+                "profiling corpus scans",
+                item.work_units,
+            );
+            build_scan_csv_row(&item.path, context, options, Some(&file_progress))
         })
         .collect();
 
@@ -765,216 +772,29 @@ fn main() -> ExitCode {
 }
 
 fn run() -> std::result::Result<(), String> {
-    let mut args = env::args_os().skip(1);
-    let mut sample_rows = 256usize;
-    let mut out: Option<PathBuf> = None;
-    let mut failed_from: Option<PathBuf> = None;
-    let mut summary_only = false;
-    let mut format = OutputFormat::Json;
-    let mut format_explicit = false;
-    let mut scan_mode: Option<ProfileMode> = None;
-    let mut scan_projection = ProjectionPreset::Full;
-    let mut scan_batch_rows = 256usize;
-    let mut scan_io_backend = IoBackendPreference::Auto;
-    let mut scan_limit: Option<u64> = None;
-    let mut inputs = Vec::new();
-
-    while let Some(arg) = args.next() {
-        match arg.to_string_lossy().as_ref() {
-            "--sample-rows" => {
-                let Some(value) = args.next() else {
-                    return Err("missing value after --sample-rows".to_owned());
-                };
-                sample_rows = value
-                    .to_string_lossy()
-                    .parse()
-                    .map_err(|_| "invalid --sample-rows value".to_owned())?;
-            }
-            "--out" => {
-                let Some(value) = args.next() else {
-                    return Err("missing value after --out".to_owned());
-                };
-                out = Some(PathBuf::from(value));
-            }
-            "--failed-from" => {
-                let Some(value) = args.next() else {
-                    return Err("missing value after --failed-from".to_owned());
-                };
-                failed_from = Some(PathBuf::from(value));
-            }
-            "--format" => {
-                let Some(value) = args.next() else {
-                    return Err("missing value after --format".to_owned());
-                };
-                format = OutputFormat::parse(&value.to_string_lossy())?;
-                format_explicit = true;
-            }
-            "--scan-mode" | "--mode" => {
-                let Some(value) = args.next() else {
-                    return Err(format!("missing value after {}", arg.to_string_lossy()));
-                };
-                scan_mode = Some(
-                    ProfileMode::parse(&value.to_string_lossy())
-                        .ok_or_else(|| format!("invalid {} value", arg.to_string_lossy()))?,
-                );
-            }
-            "--scan-projection" | "--projection" => {
-                let Some(value) = args.next() else {
-                    return Err(format!("missing value after {}", arg.to_string_lossy()));
-                };
-                scan_projection = ProjectionPreset::parse(&value.to_string_lossy())
-                    .ok_or_else(|| format!("invalid {} value", arg.to_string_lossy()))?;
-            }
-            "--scan-batch-rows" | "--batch-rows" => {
-                let Some(value) = args.next() else {
-                    return Err(format!("missing value after {}", arg.to_string_lossy()));
-                };
-                scan_batch_rows = value
-                    .to_string_lossy()
-                    .parse()
-                    .map_err(|_| format!("invalid {} value", arg.to_string_lossy()))?;
-            }
-            "--scan-io-backend" | "--io-backend" => {
-                let Some(value) = args.next() else {
-                    return Err(format!("missing value after {}", arg.to_string_lossy()));
-                };
-                scan_io_backend = parse_io_backend(&value.to_string_lossy())
-                    .ok_or_else(|| format!("invalid {} value", arg.to_string_lossy()))?;
-            }
-            "--scan-limit" | "--limit" => {
-                let Some(value) = args.next() else {
-                    return Err(format!("missing value after {}", arg.to_string_lossy()));
-                };
-                let parsed: u64 = value
-                    .to_string_lossy()
-                    .parse()
-                    .map_err(|_| format!("invalid {} value", arg.to_string_lossy()))?;
-                scan_limit = (parsed != 0).then_some(parsed);
-            }
-            "--summary-only" => {
-                summary_only = true;
-            }
-            "--help" | "-h" => {
-                print_usage();
-                return Ok(());
-            }
-            value if value.starts_with("--") => {
-                return Err(format!("unexpected argument: {value}"));
-            }
-            value => inputs.push(PathBuf::from(value)),
-        }
-    }
-
-    if inputs.is_empty() && failed_from.is_none() {
-        return Err("usage requires at least one input path".to_owned());
-    }
-
-    let roots = display_roots(&inputs, failed_from.as_deref());
-    let paths = if let Some(failed_from) = failed_from.as_deref() {
-        load_failed_paths(failed_from, &inputs)?
-    } else {
-        discover_fixture_paths(&inputs).map_err(|err| err.to_string())?
-    };
-    if paths.is_empty() {
-        return Err("no files selected for profiling".to_owned());
-    }
-
-    if let Some(mode) = scan_mode {
-        if format_explicit && format != OutputFormat::Csv {
-            return Err("scan profiling currently supports only --format csv".to_owned());
-        }
-        if summary_only {
-            return Err("--summary-only is not supported with --scan-mode".to_owned());
-        }
-        return write_scan_profile(
-            &paths,
-            &roots,
-            out,
-            ScanRunOptions {
-                mode,
-                projection: scan_projection,
-                batch_rows: scan_batch_rows,
-                io_backend: scan_io_backend,
-                limit: scan_limit,
-            },
-        );
-    }
-
-    let catalog = FixtureCatalog {
-        roots: roots.clone(),
-        sample_rows,
-        fixtures: collect_fixture_entries(&paths, sample_rows),
-    };
-
-    let summary = summarize_catalog(&catalog);
-    match format {
-        OutputFormat::Json => write_json(catalog, roots, sample_rows, summary, summary_only, out),
-        OutputFormat::Csv => write_csv(catalog, roots, sample_rows, summary, summary_only, out),
-    }
+    corpus_cli::run()
 }
 
 fn write_json(
-    catalog: FixtureCatalog,
-    roots: Vec<String>,
+    catalog: &FixtureCatalog,
+    roots: &[String],
     sample_rows: usize,
-    summary: CorpusSummary,
+    summary: &CorpusSummary,
     summary_only: bool,
     out: Option<PathBuf>,
 ) -> std::result::Result<(), String> {
-    let output = CorpusProfileOutput {
-        roots,
-        sample_rows,
-        summary,
-        fixtures: if summary_only {
-            Vec::new()
-        } else {
-            catalog.fixtures
-        },
-    };
-
-    let json = serde_json::to_string_pretty(&output).map_err(|err| err.to_string())?;
-    if let Some(path) = out {
-        fs::write(path, json).map_err(|err| err.to_string())?;
-    } else {
-        println!("{json}");
-    }
-    Ok(())
+    corpus_csv::write_json(catalog, roots, sample_rows, summary, summary_only, out)
 }
 
 fn write_csv(
-    catalog: FixtureCatalog,
-    roots: Vec<String>,
+    catalog: &FixtureCatalog,
+    roots: &[String],
     sample_rows: usize,
-    summary: CorpusSummary,
+    summary: &CorpusSummary,
     summary_only: bool,
     out: Option<PathBuf>,
 ) -> std::result::Result<(), String> {
-    let context = CorpusCsvContext {
-        roots: roots.join("|"),
-        sample_rows,
-    };
-    let rows = build_csv_rows(&catalog.fixtures, &context, summary_only);
-
-    if let Some(path) = out {
-        let mut writer = Writer::from_path(&path).map_err(|err| err.to_string())?;
-        for row in rows {
-            writer.serialize(row).map_err(|err| err.to_string())?;
-        }
-        writer.flush().map_err(|err| err.to_string())?;
-        let summary_path = summary_txt_path(&path);
-        fs::write(
-            summary_path,
-            render_summary_txt(&summary, &roots, sample_rows),
-        )
-        .map_err(|err| err.to_string())
-    } else {
-        let stdout = std::io::stdout();
-        let mut writer = Writer::from_writer(stdout.lock());
-        for row in rows {
-            writer.serialize(row).map_err(|err| err.to_string())?;
-        }
-        writer.flush().map_err(|err| err.to_string())
-    }
+    corpus_csv::write_csv(catalog, roots, sample_rows, summary, summary_only, out)
 }
 
 fn summarize_catalog(catalog: &FixtureCatalog) -> CorpusSummary {
@@ -1076,151 +896,6 @@ fn accumulate_profile(
         let key = format!("source:{source_group}");
         *summary.tag_counts.entry(key).or_default() += 1;
     }
-}
-
-fn build_csv_rows(
-    fixtures: &[FixtureEntry],
-    context: &CorpusCsvContext,
-    summary_only: bool,
-) -> Vec<CorpusCsvRow> {
-    if summary_only {
-        return vec![build_csv_row(None, context)];
-    }
-    fixtures
-        .iter()
-        .map(|fixture| build_csv_row(Some(fixture), context))
-        .collect()
-}
-
-fn build_csv_row(fixture: Option<&FixtureEntry>, context: &CorpusCsvContext) -> CorpusCsvRow {
-    let mut row = CorpusCsvRow {
-        corpus_roots: context.roots.clone(),
-        corpus_sample_rows: context.sample_rows,
-        path: String::new(),
-        file_name: String::new(),
-        source_group: String::new(),
-        status: String::new(),
-        error: String::new(),
-        size_megabytes: 0.0,
-        table_name: String::new(),
-        encoding: String::new(),
-        compression: String::new(),
-        row_count: 0,
-        column_count: 0,
-        row_len: 0,
-        page_size: 0,
-        page_count: 0,
-        string_columns: 0,
-        integer_columns: 0,
-        float_columns: 0,
-        date_columns: 0,
-        datetime_columns: 0,
-        time_columns: 0,
-        bytes_columns: 0,
-        numeric_like_columns: 0,
-        string_width_sum: 0,
-        string_width_max: 0,
-        numeric_width_sum: 0,
-        numeric_width_max: 0,
-        date_format_columns: 0,
-        datetime_format_columns: 0,
-        time_format_columns: 0,
-        date_formats: String::new(),
-        datetime_formats: String::new(),
-        time_formats: String::new(),
-        rows_sampled: 0,
-        string_cells: 0,
-        empty_string_cells: 0,
-        empty_string_ratio: 0.0,
-        ascii_string_cells: 0,
-        ascii_ratio: 0.0,
-        non_ascii_string_cells: 0,
-        avg_trimmed_string_len: 0.0,
-        max_trimmed_string_len: 0,
-        numeric_like_cells: 0,
-        null_numeric_like_cells: 0,
-        missing_numeric_ratio: 0.0,
-        compression_class: String::new(),
-        encoding_class: String::new(),
-        size_class: String::new(),
-        width_class: String::new(),
-        content_class: String::new(),
-        categorical_heavy: false,
-    };
-
-    let Some(fixture) = fixture else {
-        return row;
-    };
-
-    row.path = fixture.path.clone();
-    row.file_name = fixture.file_name.clone();
-    row.source_group = fixture.source_group.clone();
-    row.size_megabytes = bytes_to_megabytes(fixture.size_bytes);
-
-    match &fixture.status {
-        FixtureStatus::Profiled(profile) => {
-            row.status = "profiled".to_owned();
-            row.table_name = profile.table_name.clone().unwrap_or_default();
-            row.encoding = profile.encoding.clone().unwrap_or_default();
-            row.compression = profile.compression.clone();
-            row.row_count = profile.row_count;
-            row.column_count = profile.column_count;
-            row.row_len = profile.row_len;
-            row.page_size = profile.page_size;
-            row.page_count = profile.page_count;
-            row.string_columns = profile.logical_types.string;
-            row.integer_columns = profile.logical_types.integer;
-            row.float_columns = profile.logical_types.float;
-            row.date_columns = profile.logical_types.date;
-            row.datetime_columns = profile.logical_types.datetime;
-            row.time_columns = profile.logical_types.time;
-            row.bytes_columns = profile.logical_types.bytes;
-            row.numeric_like_columns = profile.logical_types.integer
-                + profile.logical_types.float
-                + profile.logical_types.date
-                + profile.logical_types.datetime
-                + profile.logical_types.time;
-            row.string_width_sum = profile.widths.string_width_sum;
-            row.string_width_max = profile.widths.string_width_max;
-            row.numeric_width_sum = profile.widths.numeric_width_sum;
-            row.numeric_width_max = profile.widths.numeric_width_max;
-            row.date_format_columns = profile.temporal_formats.date_format_columns;
-            row.datetime_format_columns = profile.temporal_formats.datetime_format_columns;
-            row.time_format_columns = profile.temporal_formats.time_format_columns;
-            row.date_formats = join_named_counts(&profile.temporal_formats.date_formats);
-            row.datetime_formats = join_named_counts(&profile.temporal_formats.datetime_formats);
-            row.time_formats = join_named_counts(&profile.temporal_formats.time_formats);
-            row.rows_sampled = profile.sample.rows_sampled;
-            row.string_cells = profile.sample.string_cells;
-            row.empty_string_cells = profile.sample.empty_string_cells;
-            row.empty_string_ratio = round_metric(profile.sample.empty_string_ratio());
-            row.ascii_string_cells = profile.sample.ascii_string_cells;
-            row.ascii_ratio = round_metric(profile.sample.ascii_ratio());
-            row.non_ascii_string_cells = profile.sample.non_ascii_string_cells;
-            row.avg_trimmed_string_len = round_metric(profile.sample.avg_trimmed_string_len());
-            row.max_trimmed_string_len = profile.sample.max_trimmed_string_len;
-            row.numeric_like_cells = profile.sample.numeric_like_cells;
-            row.null_numeric_like_cells = profile.sample.null_numeric_like_cells;
-            row.missing_numeric_ratio = round_metric(profile.sample.missing_numeric_ratio());
-            row.compression_class = profile.compression.clone();
-            row.encoding_class = encoding_class(profile);
-            row.size_class = size_class(profile);
-            row.width_class = width_class(profile);
-            row.content_class = content_class(profile);
-            row.categorical_heavy = profile.tags.iter().any(|tag| tag == "categorical-heavy");
-        }
-        FixtureStatus::Error { error } => {
-            row.status = "error".to_owned();
-            row.error = error.clone();
-            row.compression_class = "unknown".to_owned();
-            row.encoding_class = "unknown".to_owned();
-            row.size_class = "unknown".to_owned();
-            row.width_class = "unknown".to_owned();
-            row.content_class = "unknown".to_owned();
-        }
-    }
-
-    row
 }
 
 fn join_map(values: &BTreeMap<String, u64>) -> String {
@@ -1430,11 +1105,10 @@ fn structural_companion_csv_path(scan_csv_path: &Path) -> PathBuf {
         .and_then(|value| value.to_str())
         .unwrap_or("corpus_scan_profile");
     let ext = scan_csv_path.extension().and_then(|value| value.to_str());
-    let companion_stem = if let Some(prefix) = stem.strip_suffix("_scan_profile") {
-        format!("{prefix}_profile")
-    } else {
-        format!("{stem}_structural")
-    };
+    let companion_stem = stem.strip_suffix("_scan_profile").map_or_else(
+        || format!("{stem}_structural"),
+        |prefix| format!("{prefix}_profile"),
+    );
     let file_name = if let Some(ext) = ext {
         format!("{companion_stem}.{ext}")
     } else {
@@ -1444,72 +1118,6 @@ fn structural_companion_csv_path(scan_csv_path: &Path) -> PathBuf {
 }
 
 #[allow(clippy::format_push_string)]
-fn render_summary_txt(summary: &CorpusSummary, roots: &[String], sample_rows: usize) -> String {
-    let mut out = String::new();
-    out.push_str("Corpus Profile Summary\n");
-    out.push_str("======================\n\n");
-    out.push_str(&format!("roots: {}\n", roots.join(", ")));
-    out.push_str(&format!("sample_rows: {sample_rows}\n"));
-    out.push_str(&format!("discovered_files: {}\n", summary.discovered_files));
-    out.push_str(&format!("profiled_files: {}\n", summary.profiled_files));
-    out.push_str(&format!("failed_files: {}\n", summary.failed_files));
-    out.push_str(&format!(
-        "total_size_megabytes: {}\n",
-        bytes_to_megabytes(summary.total_size_bytes)
-    ));
-    out.push_str(&format!("total_rows: {}\n", summary.total_rows));
-    out.push_str(&format!("total_columns: {}\n", summary.total_columns));
-    out.push_str(&format!(
-        "total_string_columns: {}\n",
-        summary.total_string_columns
-    ));
-    out.push_str(&format!(
-        "total_numeric_like_columns: {}\n",
-        summary.total_numeric_like_columns
-    ));
-    out.push_str(&format!(
-        "total_sampled_string_cells: {}\n",
-        summary.total_sampled_string_cells
-    ));
-    out.push_str(&format!(
-        "total_sampled_empty_string_cells: {}\n",
-        summary.total_sampled_empty_string_cells
-    ));
-    out.push_str(&format!(
-        "total_sampled_ascii_string_cells: {}\n\n",
-        summary.total_sampled_ascii_string_cells
-    ));
-    out.push_str(&format!(
-        "compression_counts: {}\n",
-        join_map(&summary.compression_counts)
-    ));
-    out.push_str(&format!(
-        "encoding_counts: {}\n",
-        join_map(&summary.encoding_counts)
-    ));
-    out.push_str(&format!(
-        "tag_counts: {}\n\n",
-        join_map(&summary.tag_counts)
-    ));
-    out.push_str(&format!(
-        "top_by_size_megabytes: {}\n",
-        join_ranked_files_megabytes(&summary.top_by_size_bytes)
-    ));
-    out.push_str(&format!(
-        "top_by_row_count: {}\n",
-        join_ranked_files(&summary.top_by_row_count)
-    ));
-    out.push_str(&format!(
-        "top_by_column_count: {}\n",
-        join_ranked_files(&summary.top_by_column_count)
-    ));
-    out.push_str(&format!(
-        "top_by_string_columns: {}\n",
-        join_ranked_files(&summary.top_by_string_columns)
-    ));
-    out
-}
-
 fn top_n(mut ranked: Vec<RankedFile>, n: usize) -> Vec<RankedFile> {
     ranked.sort_by(|left, right| {
         right
@@ -1527,339 +1135,16 @@ fn write_scan_profile(
     out: Option<PathBuf>,
     options: ScanRunOptions,
 ) -> std::result::Result<(), String> {
-    let context = ScanCsvContext {
-        roots: roots.join("|"),
-        mode: options.mode.as_str().to_owned(),
-        projection: projection_name(options.projection).to_owned(),
-        io_backend: io_backend_name(options.io_backend).to_owned(),
-        batch_rows: options.batch_rows,
-        limit: options
-            .limit
-            .map_or_else(String::new, |value| value.to_string()),
-    };
-
-    let results = collect_scan_rows(paths, &context, options);
-    let rows: Vec<CorpusScanCsvRow> = results
-        .iter()
-        .map(|result| result.scan_row.clone())
-        .collect();
-    let mut summary = ScanSummary {
-        discovered_files: paths.len(),
-        ..ScanSummary::default()
-    };
-
-    for row in &rows {
-        if row.status == "profiled" {
-            summary.profiled_files += 1;
-            summary.total_elapsed_ns = summary.total_elapsed_ns.saturating_add(row.elapsed_ns);
-            summary.total_rows_emitted =
-                summary.total_rows_emitted.saturating_add(row.rows_emitted);
-            summary.total_raw_bytes_read = summary
-                .total_raw_bytes_read
-                .saturating_add(row.raw_bytes_read);
-            summary.total_row_bytes_materialized = summary
-                .total_row_bytes_materialized
-                .saturating_add(row.row_bytes_materialized);
-            summary.total_pages_seen = summary.total_pages_seen.saturating_add(row.pages_seen);
-            summary.total_compressed_pages = summary
-                .total_compressed_pages
-                .saturating_add(row.compressed_pages);
-            summary.slowest_by_elapsed.push(ScanRankedFile {
-                path: row.path.clone(),
-                file_name: row.file_name.clone(),
-                value: row.elapsed_ns,
-            });
-            summary.largest_by_raw_bytes.push(ScanRankedFile {
-                path: row.path.clone(),
-                file_name: row.file_name.clone(),
-                value: u128::from(row.raw_bytes_read),
-            });
-        } else {
-            summary.failed_files += 1;
-        }
-    }
-
-    summary.slowest_by_elapsed = top_scan_ranked(summary.slowest_by_elapsed, 20);
-    summary.largest_by_raw_bytes = top_scan_ranked(summary.largest_by_raw_bytes, 20);
-
-    if let Some(path) = out {
-        let mut writer = Writer::from_path(&path).map_err(|err| err.to_string())?;
-        for row in &rows {
-            writer.serialize(row).map_err(|err| err.to_string())?;
-        }
-        writer.flush().map_err(|err| err.to_string())?;
-        let summary_path = summary_txt_path(&path);
-        fs::write(
-            summary_path,
-            render_scan_summary_txt(&summary, roots, &context),
-        )
-        .map_err(|err| err.to_string())?;
-
-        let structural_path = structural_companion_csv_path(&path);
-        let structural_fixtures: Vec<FixtureEntry> = results
-            .into_iter()
-            .map(|result| result.structural_entry)
-            .collect();
-        let catalog = FixtureCatalog {
-            roots: roots.to_vec(),
-            sample_rows: 0,
-            fixtures: structural_fixtures,
-        };
-        let structural_summary = summarize_catalog(&catalog);
-        write_csv(
-            catalog,
-            roots.to_vec(),
-            0,
-            structural_summary,
-            false,
-            Some(structural_path),
-        )
-    } else {
-        let stdout = std::io::stdout();
-        let mut writer = Writer::from_writer(stdout.lock());
-        for row in &rows {
-            writer.serialize(row).map_err(|err| err.to_string())?;
-        }
-        writer.flush().map_err(|err| err.to_string())
-    }
+    corpus_scan::write_scan_profile(paths, roots, out, options)
 }
 
 fn build_scan_csv_row(
     path: &Path,
     context: &ScanCsvContext,
     options: ScanRunOptions,
-    file_progress: Option<FileProgressReporter>,
+    file_progress: Option<&FileProgressReporter>,
 ) -> ScanProfileResult {
-    let path_string = path.display().to_string();
-    let file_name = path
-        .file_name()
-        .map_or_else(String::new, |value| value.to_string_lossy().into_owned());
-    let source_group = source_group(path);
-    let size_bytes = fs::metadata(path).map_or(0, |meta| meta.len());
-
-    let mut row = CorpusScanCsvRow {
-        corpus_roots: context.roots.clone(),
-        corpus_mode: context.mode.clone(),
-        corpus_projection: context.projection.clone(),
-        corpus_io_backend: context.io_backend.clone(),
-        corpus_batch_rows: context.batch_rows,
-        corpus_limit: context.limit.clone(),
-        path: path_string,
-        file_name,
-        source_group,
-        status: "error".to_owned(),
-        error: String::new(),
-        size_megabytes: bytes_to_megabytes(size_bytes),
-        table_name: String::new(),
-        encoding: String::new(),
-        compression: String::new(),
-        row_count: 0,
-        column_count: 0,
-        row_len: 0,
-        page_size: 0,
-        page_count: 0,
-        string_columns: 0,
-        integer_columns: 0,
-        float_columns: 0,
-        date_columns: 0,
-        datetime_columns: 0,
-        time_columns: 0,
-        bytes_columns: 0,
-        numeric_like_columns: 0,
-        string_width_sum: 0,
-        string_width_max: 0,
-        numeric_width_sum: 0,
-        numeric_width_max: 0,
-        date_format_columns: 0,
-        datetime_format_columns: 0,
-        time_format_columns: 0,
-        date_formats: String::new(),
-        datetime_formats: String::new(),
-        time_formats: String::new(),
-        projected_columns: 0,
-        projected_string_columns: 0,
-        projected_numeric_like_columns: 0,
-        projected_physical_width_sum: 0,
-        projected_string_width_sum: 0,
-        projected_numeric_width_sum: 0,
-        compression_class: "unknown".to_owned(),
-        encoding_class: "unknown".to_owned(),
-        size_class: "unknown".to_owned(),
-        width_class: "unknown".to_owned(),
-        content_class: "unknown".to_owned(),
-        elapsed_ns: 0,
-        rows_per_second: 0.0,
-        bytes_per_second: 0.0,
-        rows_seen: 0,
-        rows_emitted: 0,
-        pages_seen: 0,
-        fused_pages: 0,
-        indexed_pages: 0,
-        compressed_pages: 0,
-        raw_bytes_read: 0,
-        row_bytes_materialized: 0,
-        decode_batches: 0,
-        pages_per_second: 0.0,
-        rows_per_page: 0.0,
-        raw_bytes_per_row: 0.0,
-        materialized_bytes_per_row: 0.0,
-        materialization_ratio: 0.0,
-    };
-
-    let ds = match Dataset::open_with(
-        path,
-        OpenOptions {
-            io_backend: options.io_backend,
-            ..OpenOptions::default()
-        },
-    ) {
-        Ok(ds) => ds,
-        Err(err) => {
-            row.error = err.to_string();
-            let error = row.error.clone();
-            let file_name = row.file_name.clone();
-            let source_group = row.source_group.clone();
-            return ScanProfileResult {
-                scan_row: row,
-                structural_entry: FixtureEntry {
-                    path: path.display().to_string(),
-                    file_name,
-                    source_group,
-                    size_bytes,
-                    status: FixtureStatus::Error { error },
-                },
-            };
-        }
-    };
-
-    row.status = "profiled".to_owned();
-    row.table_name = ds.metadata().table_name.clone().unwrap_or_default();
-    row.encoding = ds.metadata().encoding.clone().unwrap_or_default();
-    row.compression = compression_name(ds.metadata().compression).to_owned();
-    row.row_count = ds.metadata().row_count;
-    row.column_count = ds.columns().len();
-    row.row_len = ds.metadata().row_len;
-    row.page_size = ds.metadata().page_size;
-    row.page_count = ds.metadata().page_count;
-
-    let logical_types = logical_type_counts_for_scan(&ds);
-    let widths = width_summary_for_scan(&ds);
-    let temporal_formats = temporal_format_summary_for_scan(&ds);
-    row.string_columns = logical_types.string;
-    row.integer_columns = logical_types.integer;
-    row.float_columns = logical_types.float;
-    row.date_columns = logical_types.date;
-    row.datetime_columns = logical_types.datetime;
-    row.time_columns = logical_types.time;
-    row.bytes_columns = logical_types.bytes;
-    row.numeric_like_columns = logical_types.integer
-        + logical_types.float
-        + logical_types.date
-        + logical_types.datetime
-        + logical_types.time;
-    row.string_width_sum = widths.string_width_sum;
-    row.string_width_max = widths.string_width_max;
-    row.numeric_width_sum = widths.numeric_width_sum;
-    row.numeric_width_max = widths.numeric_width_max;
-    row.date_format_columns = temporal_formats.date_format_columns;
-    row.datetime_format_columns = temporal_formats.datetime_format_columns;
-    row.time_format_columns = temporal_formats.time_format_columns;
-    row.date_formats = join_named_counts(&temporal_formats.date_formats);
-    row.datetime_formats = join_named_counts(&temporal_formats.datetime_formats);
-    row.time_formats = join_named_counts(&temporal_formats.time_formats);
-    row.compression_class = row.compression.clone();
-    row.encoding_class = encoding_class_from_name(&row.encoding);
-    row.size_class = size_class_from_page(row.page_size, row.page_count);
-    row.width_class = width_class_from_shape(row.column_count, row.row_len);
-    row.content_class = content_class_from_counts(
-        logical_types.string + logical_types.bytes,
-        row.numeric_like_columns,
-        row.column_count,
-    );
-
-    let projection_obj = build_projection(&ds, options.projection);
-    let projected_shape = projected_scan_shape(&ds, projection_obj.as_ref());
-    row.projected_columns = projected_shape.projected_columns;
-    row.projected_string_columns = projected_shape.projected_string_columns;
-    row.projected_numeric_like_columns = projected_shape.projected_numeric_like_columns;
-    row.projected_physical_width_sum = projected_shape.projected_physical_width_sum;
-    row.projected_string_width_sum = projected_shape.projected_string_width_sum;
-    row.projected_numeric_width_sum = projected_shape.projected_numeric_width_sum;
-    let mut full_content = FullContentAccumulator::new(&ds);
-    let start = Instant::now();
-    let stats = match run_scan(
-        &ds,
-        options.mode,
-        projection_obj.as_ref(),
-        options.batch_rows,
-        options.limit,
-        file_progress.clone(),
-        Some(&mut |_, bytes| full_content.observe_row(bytes)),
-    ) {
-        Ok(stats) => stats,
-        Err(err) => {
-            row.status = "error".to_owned();
-            row.error = err.to_string();
-            row.compression_class = "unknown".to_owned();
-            row.encoding_class = "unknown".to_owned();
-            row.size_class = "unknown".to_owned();
-            row.width_class = "unknown".to_owned();
-            row.content_class = "unknown".to_owned();
-            if let Some(file_progress) = &file_progress {
-                file_progress.finish();
-            }
-            let error = row.error.clone();
-            let file_name = row.file_name.clone();
-            let source_group = row.source_group.clone();
-            return ScanProfileResult {
-                scan_row: row,
-                structural_entry: FixtureEntry {
-                    path: path.display().to_string(),
-                    file_name,
-                    source_group,
-                    size_bytes,
-                    status: FixtureStatus::Error { error },
-                },
-            };
-        }
-    };
-    if let Some(file_progress) = &file_progress {
-        file_progress.finish();
-    }
-    row.elapsed_ns = start.elapsed().as_nanos();
-    apply_scan_stats(&mut row, summarize_scan_stats(&stats));
-    if row.elapsed_ns > 0 {
-        let seconds = row.elapsed_ns as f64 / 1_000_000_000.0;
-        row.rows_per_second = round_metric(row.rows_emitted as f64 / seconds);
-        row.bytes_per_second = round_metric(row.raw_bytes_read as f64 / seconds);
-        row.pages_per_second = round_metric(row.pages_seen as f64 / seconds);
-    }
-    if row.pages_seen > 0 {
-        row.rows_per_page = round_metric(row.rows_emitted as f64 / row.pages_seen as f64);
-    }
-    if row.rows_emitted > 0 {
-        row.raw_bytes_per_row = round_metric(row.raw_bytes_read as f64 / row.rows_emitted as f64);
-        row.materialized_bytes_per_row =
-            round_metric(row.row_bytes_materialized as f64 / row.rows_emitted as f64);
-    }
-    if row.raw_bytes_read > 0 {
-        row.materialization_ratio =
-            round_metric(row.row_bytes_materialized as f64 / row.raw_bytes_read as f64);
-    }
-
-    let exact_profile = profile_dataset_with_sample(&ds, full_content.into_sample());
-    let structural_entry = FixtureEntry {
-        path: path.display().to_string(),
-        file_name: row.file_name.clone(),
-        source_group: row.source_group.clone(),
-        size_bytes,
-        status: FixtureStatus::Profiled(Box::new(exact_profile)),
-    };
-
-    ScanProfileResult {
-        scan_row: row,
-        structural_entry,
-    }
+    corpus_scan::build_scan_csv_row(path, context, options, file_progress)
 }
 
 type RowTap<'a> = Option<&'a mut dyn FnMut(u64, &[u8])>;
@@ -1922,59 +1207,6 @@ const fn apply_scan_stats(row: &mut CorpusScanCsvRow, stats: ScanStatsSummary) {
 }
 
 #[allow(clippy::format_push_string)]
-fn render_scan_summary_txt(
-    summary: &ScanSummary,
-    roots: &[String],
-    context: &ScanCsvContext,
-) -> String {
-    let mut out = String::new();
-    out.push_str("Corpus Scan Profile Summary\n");
-    out.push_str("==========================\n\n");
-    out.push_str(&format!("roots: {}\n", roots.join(", ")));
-    out.push_str(&format!("mode: {}\n", context.mode));
-    out.push_str(&format!("projection: {}\n", context.projection));
-    out.push_str(&format!("io_backend: {}\n", context.io_backend));
-    out.push_str(&format!("batch_rows: {}\n", context.batch_rows));
-    out.push_str(&format!(
-        "limit: {}\n\n",
-        if context.limit.is_empty() {
-            "all"
-        } else {
-            &context.limit
-        }
-    ));
-    out.push_str(&format!("discovered_files: {}\n", summary.discovered_files));
-    out.push_str(&format!("profiled_files: {}\n", summary.profiled_files));
-    out.push_str(&format!("failed_files: {}\n", summary.failed_files));
-    out.push_str(&format!("total_elapsed_ns: {}\n", summary.total_elapsed_ns));
-    out.push_str(&format!(
-        "total_rows_emitted: {}\n",
-        summary.total_rows_emitted
-    ));
-    out.push_str(&format!(
-        "total_raw_bytes_read: {}\n",
-        summary.total_raw_bytes_read
-    ));
-    out.push_str(&format!(
-        "total_row_bytes_materialized: {}\n",
-        summary.total_row_bytes_materialized
-    ));
-    out.push_str(&format!("total_pages_seen: {}\n", summary.total_pages_seen));
-    out.push_str(&format!(
-        "total_compressed_pages: {}\n\n",
-        summary.total_compressed_pages
-    ));
-    out.push_str(&format!(
-        "slowest_by_elapsed: {}\n",
-        join_scan_ranked_files(&summary.slowest_by_elapsed)
-    ));
-    out.push_str(&format!(
-        "largest_by_raw_bytes: {}\n",
-        join_scan_ranked_files(&summary.largest_by_raw_bytes)
-    ));
-    out
-}
-
 fn join_scan_ranked_files(files: &[ScanRankedFile]) -> String {
     files
         .iter()
