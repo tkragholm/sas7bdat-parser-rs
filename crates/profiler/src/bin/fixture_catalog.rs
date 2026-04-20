@@ -1,5 +1,5 @@
 use sas7bdat_profiler::init_profiler_runtime;
-use sas7bdat_simd::fixture_catalog::{build_catalog, discover_fixture_paths};
+use sas7bdat_simd::{build_catalog, discover_fixture_paths};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 fn main() -> ExitCode {

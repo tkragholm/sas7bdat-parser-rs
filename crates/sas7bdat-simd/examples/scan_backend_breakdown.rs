@@ -46,10 +46,7 @@ fn main() -> Result<(), String> {
     let open_start = Instant::now();
     let ds = Dataset::open_with(
         Path::new(&path),
-        OpenOptions {
-            io_backend: backend,
-            ..OpenOptions::default()
-        },
+        OpenOptions::builder().io_backend(backend).build(),
     )
     .map_err(|err| err.to_string())?;
     let open_ns = open_start.elapsed().as_nanos();

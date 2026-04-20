@@ -29,10 +29,10 @@ pub enum ValidationMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptions {
-    pub io_backend: IoBackendPreference,
-    pub prefetch: PrefetchPolicy,
-    pub page_cache: PageCachePolicy,
-    pub validation: ValidationMode,
+    pub(crate) io_backend: IoBackendPreference,
+    pub(crate) prefetch: PrefetchPolicy,
+    pub(crate) page_cache: PageCachePolicy,
+    pub(crate) validation: ValidationMode,
 }
 
 impl Default for OpenOptions {
@@ -43,6 +43,73 @@ impl Default for OpenOptions {
             page_cache: PageCachePolicy::Auto,
             validation: ValidationMode::Strict,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenOptionsBuilder {
+    io_backend: IoBackendPreference,
+    prefetch: PrefetchPolicy,
+    page_cache: PageCachePolicy,
+    validation: ValidationMode,
+}
+
+impl OpenOptions {
+    #[must_use]
+    pub const fn builder() -> OpenOptionsBuilder {
+        OpenOptionsBuilder::new()
+    }
+}
+
+impl OpenOptionsBuilder {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            io_backend: IoBackendPreference::Auto,
+            prefetch: PrefetchPolicy::Auto,
+            page_cache: PageCachePolicy::Auto,
+            validation: ValidationMode::Strict,
+        }
+    }
+
+    #[must_use]
+    pub const fn io_backend(mut self, io_backend: IoBackendPreference) -> Self {
+        self.io_backend = io_backend;
+        self
+    }
+
+    #[must_use]
+    pub const fn prefetch(mut self, prefetch: PrefetchPolicy) -> Self {
+        self.prefetch = prefetch;
+        self
+    }
+
+    #[must_use]
+    pub const fn page_cache(mut self, page_cache: PageCachePolicy) -> Self {
+        self.page_cache = page_cache;
+        self
+    }
+
+    #[must_use]
+    pub const fn validation(mut self, validation: ValidationMode) -> Self {
+        self.validation = validation;
+        self
+    }
+
+    #[must_use]
+    pub const fn build(self) -> OpenOptions {
+        OpenOptions {
+            io_backend: self.io_backend,
+            prefetch: self.prefetch,
+            page_cache: self.page_cache,
+            validation: self.validation,
+        }
+    }
+}
+
+impl Default for OpenOptionsBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -82,10 +149,10 @@ pub enum TrimMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StringDecodeOptions {
-    pub trim_mode: TrimMode,
-    pub utf8_validation: Utf8ValidationMode,
-    pub mojibake_fix: MojibakePolicy,
-    pub dictionary_staging: DictionaryStaging,
+    pub(crate) trim_mode: TrimMode,
+    pub(crate) utf8_validation: Utf8ValidationMode,
+    pub(crate) mojibake_fix: MojibakePolicy,
+    pub(crate) dictionary_staging: DictionaryStaging,
 }
 
 impl Default for StringDecodeOptions {
@@ -100,10 +167,77 @@ impl Default for StringDecodeOptions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StringDecodeOptionsBuilder {
+    trim_mode: TrimMode,
+    utf8_validation: Utf8ValidationMode,
+    mojibake_fix: MojibakePolicy,
+    dictionary_staging: DictionaryStaging,
+}
+
+impl StringDecodeOptions {
+    #[must_use]
+    pub const fn builder() -> StringDecodeOptionsBuilder {
+        StringDecodeOptionsBuilder::new()
+    }
+}
+
+impl StringDecodeOptionsBuilder {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            trim_mode: TrimMode::RTrim,
+            utf8_validation: Utf8ValidationMode::Auto,
+            mojibake_fix: MojibakePolicy::Auto,
+            dictionary_staging: DictionaryStaging::Auto,
+        }
+    }
+
+    #[must_use]
+    pub const fn trim_mode(mut self, trim_mode: TrimMode) -> Self {
+        self.trim_mode = trim_mode;
+        self
+    }
+
+    #[must_use]
+    pub const fn utf8_validation(mut self, utf8_validation: Utf8ValidationMode) -> Self {
+        self.utf8_validation = utf8_validation;
+        self
+    }
+
+    #[must_use]
+    pub const fn mojibake_fix(mut self, mojibake_fix: MojibakePolicy) -> Self {
+        self.mojibake_fix = mojibake_fix;
+        self
+    }
+
+    #[must_use]
+    pub const fn dictionary_staging(mut self, dictionary_staging: DictionaryStaging) -> Self {
+        self.dictionary_staging = dictionary_staging;
+        self
+    }
+
+    #[must_use]
+    pub const fn build(self) -> StringDecodeOptions {
+        StringDecodeOptions {
+            trim_mode: self.trim_mode,
+            utf8_validation: self.utf8_validation,
+            mojibake_fix: self.mojibake_fix,
+            dictionary_staging: self.dictionary_staging,
+        }
+    }
+}
+
+impl Default for StringDecodeOptionsBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TemporalDecodeOptions {
-    pub decode_dates: bool,
-    pub decode_datetimes: bool,
-    pub decode_times: bool,
+    pub(crate) decode_dates: bool,
+    pub(crate) decode_datetimes: bool,
+    pub(crate) decode_times: bool,
 }
 
 impl Default for TemporalDecodeOptions {
@@ -113,6 +247,64 @@ impl Default for TemporalDecodeOptions {
             decode_datetimes: true,
             decode_times: true,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TemporalDecodeOptionsBuilder {
+    decode_dates: bool,
+    decode_datetimes: bool,
+    decode_times: bool,
+}
+
+impl TemporalDecodeOptions {
+    #[must_use]
+    pub const fn builder() -> TemporalDecodeOptionsBuilder {
+        TemporalDecodeOptionsBuilder::new()
+    }
+}
+
+impl TemporalDecodeOptionsBuilder {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            decode_dates: true,
+            decode_datetimes: true,
+            decode_times: true,
+        }
+    }
+
+    #[must_use]
+    pub const fn decode_dates(mut self, decode_dates: bool) -> Self {
+        self.decode_dates = decode_dates;
+        self
+    }
+
+    #[must_use]
+    pub const fn decode_datetimes(mut self, decode_datetimes: bool) -> Self {
+        self.decode_datetimes = decode_datetimes;
+        self
+    }
+
+    #[must_use]
+    pub const fn decode_times(mut self, decode_times: bool) -> Self {
+        self.decode_times = decode_times;
+        self
+    }
+
+    #[must_use]
+    pub const fn build(self) -> TemporalDecodeOptions {
+        TemporalDecodeOptions {
+            decode_dates: self.decode_dates,
+            decode_datetimes: self.decode_datetimes,
+            decode_times: self.decode_times,
+        }
+    }
+}
+
+impl Default for TemporalDecodeOptionsBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

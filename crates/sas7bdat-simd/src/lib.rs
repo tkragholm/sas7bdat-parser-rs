@@ -5,8 +5,7 @@ mod compression;
 mod dataset;
 mod encoding;
 mod error;
-#[doc(hidden)]
-pub mod fixture_catalog;
+mod fixture_catalog;
 mod internal;
 mod layout;
 mod metadata;
@@ -32,15 +31,21 @@ pub use error::{
     ArrowError, CompressionError, CorruptionError, DecodeError, Error, HeaderError, IoError,
     MetadataError, ProjectionError, Result, UnsupportedError,
 };
-pub use fixture_catalog::ScanStatsSummary;
+pub use fixture_catalog::{
+    FixtureCatalog, FixtureEntry, FixtureProfile, FixtureStatus, LogicalTypeCounts, NamedCount,
+    ProjectionPreset, SampleSummary, ScanStatsSummary, TemporalFormatSummary, WidthSummary,
+    build_catalog, build_projection, discover_fixture_paths, profile_dataset_with_sample,
+    profile_fixture, summarize_scan_stats,
+};
 pub use metadata::{
     ColumnMeta, CompressionKind, DatasetMetadata, Endianness, LogicalType, SasDate, SasDateTime,
     SasTime, Timestamp,
 };
 pub use options::{
     BatchHint, DecodeMode, DictionaryStaging, IoBackendPreference, MojibakePolicy, OpenOptions,
-    OrderingMode, PageCachePolicy, Parallelism, PrefetchPolicy, RowSelection, StringDecodeOptions,
-    TemporalDecodeOptions, TrimMode, Utf8ValidationMode, ValidationMode,
+    OpenOptionsBuilder, OrderingMode, PageCachePolicy, Parallelism, PrefetchPolicy, RowSelection,
+    StringDecodeOptions, StringDecodeOptionsBuilder, TemporalDecodeOptions,
+    TemporalDecodeOptionsBuilder, TrimMode, Utf8ValidationMode, ValidationMode,
 };
 pub use pages::DescriptorBreakdown;
 pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};

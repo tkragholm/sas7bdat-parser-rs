@@ -12,14 +12,7 @@ fn fixture_path(relative: &str) -> PathBuf {
 
 fn open_dataset(relative: &str, io_backend: IoBackendPreference) -> Option<Dataset> {
     let path = fixture_path(relative);
-    Dataset::open_with(
-        &path,
-        OpenOptions {
-            io_backend,
-            ..OpenOptions::default()
-        },
-    )
-    .ok()
+    Dataset::open_with(&path, OpenOptions::builder().io_backend(io_backend).build()).ok()
 }
 
 const fn backend_label(io_backend: IoBackendPreference) -> &'static str {

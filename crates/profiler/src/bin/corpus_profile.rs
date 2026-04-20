@@ -2,13 +2,11 @@ use csv::ReaderBuilder;
 use rayon::prelude::*;
 use sas7bdat_profiler::init_profiler_runtime;
 use sas7bdat_simd::{
-    BatchHint, Dataset, DecodeMode, Endianness, IoBackendPreference, LogicalType, OpenOptions,
-    Projection, ScanProgress,
-    fixture_catalog::{
-        FixtureCatalog, FixtureEntry, FixtureProfile, FixtureStatus, LogicalTypeCounts, NamedCount,
-        ProjectionPreset, SampleSummary, ScanStatsSummary, WidthSummary, build_projection,
-        discover_fixture_paths, profile_dataset_with_sample, profile_fixture, summarize_scan_stats,
-    },
+    BatchHint, Dataset, DecodeMode, Endianness, FixtureCatalog, FixtureEntry, FixtureProfile,
+    FixtureStatus, IoBackendPreference, LogicalType, LogicalTypeCounts, NamedCount, OpenOptions,
+    Projection, ProjectionPreset, SampleSummary, ScanProgress, ScanStatsSummary,
+    TemporalFormatSummary, WidthSummary, build_projection, discover_fixture_paths,
+    profile_dataset_with_sample, profile_fixture, summarize_scan_stats,
 };
 use serde::Serialize;
 use std::{
@@ -1304,10 +1302,8 @@ fn accumulate_projected_column(
     }
 }
 
-fn temporal_format_summary_for_scan(
-    ds: &Dataset,
-) -> sas7bdat_simd::fixture_catalog::TemporalFormatSummary {
-    let mut summary = sas7bdat_simd::fixture_catalog::TemporalFormatSummary::default();
+fn temporal_format_summary_for_scan(ds: &Dataset) -> TemporalFormatSummary {
+    let mut summary = TemporalFormatSummary::default();
     let mut date_formats = BTreeMap::<String, usize>::new();
     let mut datetime_formats = BTreeMap::<String, usize>::new();
     let mut time_formats = BTreeMap::<String, usize>::new();

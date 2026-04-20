@@ -2,8 +2,8 @@
 
 use sas7bdat_profiler::init_profiler_runtime;
 use sas7bdat_simd::{
-    BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions,
-    fixture_catalog::{ProjectionPreset, ScanStatsSummary, build_projection, summarize_scan_stats},
+    BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions, ProjectionPreset,
+    ScanStatsSummary, build_projection, summarize_scan_stats,
 };
 use serde::Serialize;
 use std::{env, path::PathBuf, process::ExitCode, time::Instant};
@@ -135,10 +135,7 @@ fn run() -> std::result::Result<(), String> {
     let fixture = fixture.ok_or_else(|| "missing required --fixture".to_owned())?;
     let ds = Dataset::open_with(
         &fixture,
-        OpenOptions {
-            io_backend,
-            ..OpenOptions::default()
-        },
+        OpenOptions::builder().io_backend(io_backend).build(),
     )
     .map_err(|err| err.to_string())?;
     let projection_obj = build_projection(&ds, projection);

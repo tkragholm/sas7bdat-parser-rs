@@ -136,10 +136,9 @@ pub fn build_scan_csv_row(
 
     let ds = match Dataset::open_with(
         path,
-        OpenOptions {
-            io_backend: options.io_backend,
-            ..OpenOptions::default()
-        },
+        OpenOptions::builder()
+            .io_backend(options.io_backend)
+            .build(),
     ) {
         Ok(ds) => ds,
         Err(err) => {

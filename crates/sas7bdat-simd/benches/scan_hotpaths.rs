@@ -7,8 +7,8 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use sas7bdat_simd::{
-    BatchHint, Dataset, Parallelism, Projection, RowSelection,
-    fixture_catalog::{FixtureCatalog, FixtureStatus, ProjectionPreset, build_projection},
+    BatchHint, Dataset, FixtureCatalog, FixtureStatus, Parallelism, Projection, ProjectionPreset,
+    RowSelection, build_projection,
 };
 use std::{
     env, fs,
