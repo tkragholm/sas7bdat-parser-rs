@@ -96,6 +96,10 @@ impl ScanStats {
 }
 
 #[doc(hidden)]
+/// Timing breakdown for owned batch scans.
+///
+/// This stays public because it is used by profiling and backend comparison
+/// tools to inspect the scan pipeline without exposing the internal accumulator.
 #[derive(Debug, Clone, Default)]
 pub struct OwnedBatchScanBreakdown {
     pub total_ns: u128,

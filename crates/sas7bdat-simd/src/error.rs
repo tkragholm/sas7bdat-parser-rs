@@ -120,6 +120,10 @@ pub enum Error {
 }
 
 impl Error {
+    /// Constructor helpers for downstream adapters and convenience wrappers.
+    ///
+    /// These remain public so external crates can lift non-SAS failures into the
+    /// crate's error type without matching on internal variants.
     #[must_use]
     pub fn io(message: impl Into<String>) -> Self {
         Self::Io(IoError {
