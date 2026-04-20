@@ -354,10 +354,7 @@ impl ColumnBuffer<'_> {
                 build_primitive_array::<Time32SecondType, _, _>(
                     values.iter().copied(),
                     valid,
-                    |value| {
-                        i32::try_from(value.seconds_since_midnight)
-                            .map_err(|_| Error::arrow("SAS time value exceeds Arrow Time32 range"))
-                    },
+                    |value| Ok(value.seconds_since_midnight),
                 )
             }
             Self::Utf8(Utf8Buffer {

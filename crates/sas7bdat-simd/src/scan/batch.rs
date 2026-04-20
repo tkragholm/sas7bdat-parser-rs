@@ -1565,11 +1565,7 @@ impl OwnedBatchColumnBuilder {
             Self::Time { values, valid } => Self::F64 {
                 values: values
                     .into_iter()
-                    .map(|value| {
-                        #[allow(clippy::cast_precision_loss)]
-                        let v = value.seconds_since_midnight as f64;
-                        v
-                    })
+                    .map(|value| f64::from(value.seconds_since_midnight))
                     .collect(),
                 valid,
             },

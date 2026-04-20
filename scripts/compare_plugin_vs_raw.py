@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import subprocess
 import time
@@ -55,6 +56,12 @@ def parse_args() -> argparse.Namespace:
         default="fixtures/fixture_catalog.local.json",
         help="Fixture catalog path used for corpus-local suite selection",
     )
+    parser.add_argument(
+        "--external-readers",
+        choices=["none", "auto", "polars-native"],
+        default="auto",
+        help="Benchmark optional external readers alongside the plugin",
+    )
     return parser.parse_args()
 
 
@@ -98,6 +105,21 @@ def resolve_projection_columns(fixture: str, preset: str) -> list[str]:
     raise ValueError(f"unsupported projection preset: {preset}")
 
 
+def module_available(name: str) -> bool:
+    return importlib.util.find_spec(name) is not None
+
+
+def resolve_external_readers(mode: str) -> list[str]:
+    if mode == "none":
+        return []
+
+    candidates = ["polars_readstat", "polars_io"]
+    if mode == "polars-native":
+        return candidates
+
+    return [name for name in candidates if module_available(name)]
+
+
 def fixture_numeric_count(fixture: dict[str, Any]) -> int:
     logical_types = fixture.get("logical_types", {})
     return sum(
@@ -117,6 +139,7 @@ def choose_fixture(
 
 def build_corpus_suite_cases(catalog_path: Path) -> list[dict[str, Any]]:
     fixtures = load_catalog(catalog_path)
+    numeric_throughput_rows_floor = 10_000
     cases = [
         {
             "name": "macro_mixed_projection",
@@ -161,7 +184,24 @@ def build_corpus_suite_cases(catalog_path: Path) -> list[dict[str, Any]]:
             "summary_included": True,
         },
         {
-            "name": "legacy_numeric_heavy_wide",
+            "name": "legacy_numeric_heavy_throughput",
+            "fixture": choose_fixture(
+                fixtures,
+                lambda fixture: "benchmark-standard" in fixture.get("tags", [])
+                and "numeric-heavy" in fixture.get("tags", [])
+                and "legacy-encoding" in fixture.get("tags", [])
+                and fixture.get("row_count", 0) >= numeric_throughput_rows_floor,
+                sort_key=lambda fixture: (
+                    fixture.get("row_count", 0),
+                    fixture_numeric_count(fixture),
+                    fixture.get("size_bytes", 0),
+                ),
+            )["path"],
+            "projection": "numeric",
+            "summary_included": True,
+        },
+        {
+            "name": "legacy_numeric_heavy_wide_probe",
             "fixture": choose_fixture(
                 fixtures,
                 lambda fixture: "benchmark-standard" in fixture.get("tags", [])
@@ -175,7 +215,7 @@ def build_corpus_suite_cases(catalog_path: Path) -> list[dict[str, Any]]:
                 ),
             )["path"],
             "projection": "numeric",
-            "summary_included": True,
+            "summary_included": False,
         },
         {
             "name": "legacy_non_ascii_probe",
@@ -461,6 +501,12 @@ def run_plugin_cold_lazy_collect(
     }
 
 
+def run_plugin_cold_lazy_collect_once(
+    fixture: str, columns: list[str], limit: int
+) -> dict[str, object]:
+    return run_plugin_cold_lazy_collect(fixture, columns, 1, limit)
+
+
 def run_plugin_warm_lazy_collect(
     fixture: str, columns: list[str], repeat: int, limit: int
 ) -> dict[str, object]:
@@ -508,6 +554,123 @@ def run_plugin_warm_lazy_collect(
     }
 
 
+def run_polars_readstat_lazy_collect(
+    fixture: str, columns: list[str], repeat: int, limit: int
+) -> dict[str, object]:
+    from polars_readstat import scan_readstat  # noqa: E402
+
+    start = time.perf_counter_ns()
+    rows_last = 0
+    for _ in range(repeat):
+        lf = scan_readstat(fixture)
+        if columns:
+            lf = lf.select(columns)
+        if limit > 0:
+            lf = lf.head(limit)
+        df = lf.collect()
+        rows_last = df.height
+    elapsed_total = time.perf_counter_ns() - start
+    elapsed_avg = elapsed_total // repeat
+    seconds = elapsed_avg / 1_000_000_000.0
+    rows_per_second = rows_last / seconds if seconds > 0.0 else 0.0
+    return {
+        "fixture": fixture,
+        "columns": columns,
+        "repeat": repeat,
+        "limit": None if limit <= 0 else limit,
+        "elapsed_ns_total": elapsed_total,
+        "elapsed_ns_avg": elapsed_avg,
+        "rows_last": rows_last,
+        "rows_per_second": rows_per_second,
+    }
+
+
+def run_polars_readstat_lazy_collect_once(
+    fixture: str, columns: list[str], limit: int
+) -> dict[str, object]:
+    return run_polars_readstat_lazy_collect(fixture, columns, 1, limit)
+
+
+def run_polars_io_lazy_collect(
+    fixture: str, columns: list[str], repeat: int, limit: int
+) -> dict[str, object]:
+    import polars_io as pio  # noqa: E402
+
+    start = time.perf_counter_ns()
+    rows_last = 0
+    for _ in range(repeat):
+        lf = pio.scan_sas7bdat(fixture)
+        if columns:
+            lf = lf.select(columns)
+        if limit > 0:
+            lf = lf.head(limit)
+        df = lf.collect()
+        rows_last = df.height
+    elapsed_total = time.perf_counter_ns() - start
+    elapsed_avg = elapsed_total // repeat
+    seconds = elapsed_avg / 1_000_000_000.0
+    rows_per_second = rows_last / seconds if seconds > 0.0 else 0.0
+    return {
+        "fixture": fixture,
+        "columns": columns,
+        "repeat": repeat,
+        "limit": None if limit <= 0 else limit,
+        "elapsed_ns_total": elapsed_total,
+        "elapsed_ns_avg": elapsed_avg,
+        "rows_last": rows_last,
+        "rows_per_second": rows_per_second,
+    }
+
+
+def run_polars_io_lazy_collect_once(
+    fixture: str, columns: list[str], limit: int
+) -> dict[str, object]:
+    return run_polars_io_lazy_collect(fixture, columns, 1, limit)
+
+
+def benchmark_external_readers(
+    fixture: str,
+    columns: list[str],
+    repeat: int,
+    limit: int,
+    requested_readers: list[str],
+) -> dict[str, Any]:
+    runners = {
+        "polars_readstat": (
+            run_polars_readstat_lazy_collect_once,
+            run_polars_readstat_lazy_collect,
+        ),
+        "polars_io": (
+            run_polars_io_lazy_collect_once,
+            run_polars_io_lazy_collect,
+        ),
+    }
+    results: dict[str, Any] = {}
+    for reader in requested_readers:
+        if not module_available(reader):
+            results[reader] = {
+                "status": "unavailable",
+                "reason": f"module {reader} is not installed",
+            }
+            continue
+
+        run_once, run_repeated = runners[reader]
+        try:
+            results[reader] = {
+                "status": "ok",
+                "cold_lazy_collect_once": run_once(fixture, columns, limit),
+                "repeated_fresh_lazy_collect": run_repeated(
+                    fixture, columns, repeat, limit
+                ),
+            }
+        except Exception as err:  # noqa: BLE001
+            results[reader] = {
+                "status": "error",
+                "reason": str(err),
+            }
+    return results
+
+
 def benchmark_case(
     repo_root: Path,
     fixture: str,
@@ -515,6 +678,7 @@ def benchmark_case(
     repeat: int,
     batch_rows: int,
     limit: int,
+    external_readers: list[str],
 ) -> dict[str, Any]:
     columns_arg = ",".join(columns)
     raw = run_raw(repo_root, fixture, columns_arg, repeat, batch_rows, limit)
@@ -537,12 +701,18 @@ def benchmark_case(
     plugin_cold_lazy_collect = run_plugin_cold_lazy_collect(
         fixture, columns, repeat, limit
     )
+    plugin_cold_lazy_collect_once = run_plugin_cold_lazy_collect_once(
+        fixture, columns, limit
+    )
     plugin_warm_lazy_collect = run_plugin_warm_lazy_collect(
         fixture, columns, repeat, limit
     )
+    external = benchmark_external_readers(
+        fixture, columns, repeat, limit, external_readers
+    )
 
     raw_avg = raw["elapsed_ns_avg"]
-    return {
+    result = {
         "raw": raw,
         "raw_owned": raw_owned,
         "plugin_cold_batch_reader": plugin_cold_batch_reader,
@@ -551,6 +721,7 @@ def benchmark_case(
         "plugin_inner_scan_to_dataframes": plugin_inner_scan_to_dataframes,
         "plugin_inner_dataframe_to_python": plugin_inner_dataframe_to_python,
         "plugin_cold_lazy_collect": plugin_cold_lazy_collect,
+        "plugin_cold_lazy_collect_once": plugin_cold_lazy_collect_once,
         "plugin_warm_lazy_collect": plugin_warm_lazy_collect,
         "ratios": {
             "raw_owned_over_raw_avg": raw_owned["elapsed_ns_avg"] / raw_avg if raw_avg else None,
@@ -601,11 +772,17 @@ def benchmark_case(
             "cold_lazy_collect_over_raw_avg": (
                 plugin_cold_lazy_collect["elapsed_ns_avg"] / raw_avg if raw_avg else None
             ),
+            "cold_lazy_collect_once_over_raw_avg": (
+                plugin_cold_lazy_collect_once["elapsed_ns_avg"] / raw_avg if raw_avg else None
+            ),
             "warm_lazy_collect_over_raw_avg": (
                 plugin_warm_lazy_collect["steady_elapsed_ns_avg"] / raw_avg if raw_avg else None
             ),
         },
     }
+    if external:
+        result["external_readers"] = external
+    return result
 
 
 def compact_case_result_for_suite(result: dict[str, Any]) -> dict[str, Any]:
@@ -621,6 +798,7 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     if args.suite == "corpus-local":
         catalog_path = (repo_root / args.catalog).resolve()
+        external_readers = resolve_external_readers(args.external_readers)
         cases = []
         for case in build_corpus_suite_cases(catalog_path):
             columns = resolve_projection_columns(case["fixture"], case["projection"])
@@ -644,6 +822,7 @@ def main() -> int:
                             args.repeat,
                             args.batch_rows,
                             args.limit,
+                            external_readers,
                         )
                     ),
                 }
@@ -677,6 +856,8 @@ def main() -> int:
                     "repeat": args.repeat,
                     "batch_rows": args.batch_rows,
                     "limit": None if args.limit <= 0 else args.limit,
+                    "external_readers_requested": args.external_readers,
+                    "external_readers_resolved": external_readers,
                     "cases": cases,
                     "summary": summary,
                 },
@@ -688,6 +869,7 @@ def main() -> int:
 
     columns_arg = "" if args.columns == "__ALL__" else args.columns
     columns = [column.strip() for column in columns_arg.split(",") if column.strip()]
+    external_readers = resolve_external_readers(args.external_readers)
     print(
         json.dumps(
             benchmark_case(
@@ -697,6 +879,7 @@ def main() -> int:
                 args.repeat,
                 args.batch_rows,
                 args.limit,
+                external_readers,
             ),
             indent=2,
             sort_keys=True,

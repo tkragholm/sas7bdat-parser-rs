@@ -44,7 +44,10 @@ pub(super) fn arrow_dt_to_polars_arrow(dt: &ArrowSchemaDataType) -> Result<Arrow
         }
         ArrowSchemaDataType::Date32 => ArrowDataType::Date32,
         ArrowSchemaDataType::Time32(ArrowSchemaTimeUnit::Second) => {
-            ArrowDataType::Time32(PlTimeUnit::Second)
+            ArrowDataType::Time64(PlTimeUnit::Nanosecond)
+        }
+        ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond) => {
+            ArrowDataType::Time64(PlTimeUnit::Nanosecond)
         }
         ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None) => {
             ArrowDataType::Timestamp(PlTimeUnit::Second, None)
@@ -104,21 +107,13 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::Time { values, valid } => {
-                #[allow(clippy::cast_possible_truncation)]
-                let i32s: Vec<i32> = values
+                let nanos = values
                     .into_iter()
-                    .map(|t| {
-                        debug_assert!(
-                            (i64::from(i32::MIN)..=i64::from(i32::MAX))
-                                .contains(&t.seconds_since_midnight),
-                            "SAS time value exceeds Arrow Time32 range"
-                        );
-                        t.seconds_since_midnight as i32
-                    })
+                    .map(|value| i64::from(value.seconds_since_midnight) * 1_000_000_000)
                     .collect();
-                let dtype = ArrowDataType::Time32(PlTimeUnit::Second);
+                let dtype = ArrowDataType::Time64(PlTimeUnit::Nanosecond);
                 Box::new(primitive_array_with_optional_validity(
-                    dtype, i32s, valid, row_count,
+                    dtype, nanos, valid, row_count,
                 ))
             }
             OwnedColumnBuffer::Utf8 {
@@ -219,7 +214,7 @@ fn primitive_array_with_optional_validity<T: polars_arrow::types::NativeType>(
             values.into(),
             Some(bits_to_bitmap(&valid, row_count)),
         ),
-        None => PrimitiveArray::from_vec(values).to(dtype),
+        None => PrimitiveArray::new(dtype, values.into(), None),
     }
 }
 
@@ -251,7 +246,8 @@ pub(super) fn polars_dtype(
         ArrowSchemaDataType::Utf8 => polars.getattr("Utf8")?.unbind(),
         ArrowSchemaDataType::Binary => polars.getattr("Binary")?.unbind(),
         ArrowSchemaDataType::Date32 => polars.getattr("Date")?.unbind(),
-        ArrowSchemaDataType::Time32(ArrowSchemaTimeUnit::Second) => {
+        ArrowSchemaDataType::Time32(ArrowSchemaTimeUnit::Second)
+        | ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond) => {
             polars.getattr("Time")?.unbind()
         }
         ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None) => {

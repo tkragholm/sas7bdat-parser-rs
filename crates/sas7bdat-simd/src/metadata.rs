@@ -42,9 +42,10 @@ pub struct SasDateTime {
     pub seconds_since_sas_epoch: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SasTime {
-    pub seconds_since_midnight: i64,
+    pub seconds_since_midnight: i32,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -1,13 +1,19 @@
 use crate::{
+    columnar::OwnedColumnarBatch,
     error::{Error, Result},
     internal::{FileInner, FileSource, LayoutPlan, PageDescriptorTable},
     layout::parse_layout,
     metadata::{ColumnMeta, DatasetMetadata},
-    options::{IoBackendPreference, OpenOptions},
-    pages::compile_page_descriptors,
+    options::{BatchHint, IoBackendPreference, OpenOptions, RowSelection},
+    pages::{
+        DescriptorBreakdown, compile_page_descriptors, compile_page_descriptors_breakdown,
+        compile_page_descriptors_breakdown_in_memory, compile_page_descriptors_in_memory,
+    },
     probe::probe_header,
-    projection::ProjectionBuilder,
+    projection::{Projection, ProjectionBuilder},
+    row::OwnedRow,
     scan::ScanBuilder,
+    scan::ScanStats,
 };
 use memmap2::Mmap;
 use std::{
@@ -101,7 +107,8 @@ impl Dataset {
         let probe_header_ns = probe_start.elapsed().as_nanos();
 
         let rewind_start = Instant::now();
-        file.rewind().map_err(|err| Error::io_error_with_path(path, &err))?;
+        file.rewind()
+            .map_err(|err| Error::io_error_with_path(path, &err))?;
         let rewind_ns = rewind_start.elapsed().as_nanos();
 
         let layout_start = Instant::now();
@@ -133,6 +140,47 @@ impl Dataset {
         Self::open_with(path, OpenOptions::default())
     }
 
+    /// Builds a dataset from any `Read` implementor by buffering the input in memory first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the input or parsing the SAS7BDAT payload fails.
+    pub fn from_reader<R: Read>(reader: R) -> Result<Self> {
+        Self::from_reader_with_options(reader, OpenOptions::default())
+    }
+
+    /// Builds a dataset from any `Read` implementor by buffering the input in memory first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the input or parsing the SAS7BDAT payload fails.
+    pub fn from_reader_with_options<R: Read>(mut reader: R, options: OpenOptions) -> Result<Self> {
+        let mut bytes = Vec::new();
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|err| Error::io_error(&err))?;
+        Self::from_bytes_with_options(bytes, options)
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error if descriptor compilation fails for the dataset source.
+    pub fn descriptor_breakdown(&self) -> Result<DescriptorBreakdown> {
+        match &self.file.source {
+            FileSource::Bytes(bytes) => {
+                compile_page_descriptors_breakdown_in_memory(bytes.as_ref(), &self.layout)
+            }
+            FileSource::Mmap(mmap) => {
+                compile_page_descriptors_breakdown_in_memory(&mmap[..], &self.layout)
+            }
+            FileSource::Path(path) => {
+                let mut file =
+                    File::open(path).map_err(|err| Error::io_error_with_path(path, &err))?;
+                compile_page_descriptors_breakdown(&mut file, &self.layout)
+            }
+        }
+    }
+
     /// # Errors
     ///
     /// Returns an error if the file cannot be opened, mapped, or its
@@ -155,13 +203,17 @@ impl Dataset {
     /// Returns an error if the provided bytes do not contain a valid
     /// SAS7BDAT payload.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
+        Self::from_bytes_with_options(bytes, OpenOptions::default())
+    }
+
+    fn from_bytes_with_options(bytes: Vec<u8>, options: OpenOptions) -> Result<Self> {
         let bytes = Arc::<[u8]>::from(bytes);
         let mut cursor = Cursor::new(&*bytes);
         let (layout, metadata) = Self::parse_from_reader(&mut cursor)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Bytes(Arc::clone(&bytes)),
-                options: OpenOptions::default(),
+                options,
             }),
             metadata: Arc::new(metadata),
             layout: Arc::new(layout),
@@ -194,6 +246,116 @@ impl Dataset {
     #[must_use]
     pub fn scan(&self) -> ScanBuilder<'_> {
         ScanBuilder::new(self)
+    }
+
+    /// Scans raw rows and returns the collected scan statistics.
+    pub fn visit_raw_rows<F>(&self, f: F) -> Result<ScanStats>
+    where
+        F: FnMut(crate::RawRow<'_>) -> Result<std::ops::ControlFlow<()>>,
+    {
+        self.scan().visit_raw_rows(f)
+    }
+
+    /// Scans decoded rows and returns the collected scan statistics.
+    pub fn visit_rows<F>(&self, f: F) -> Result<ScanStats>
+    where
+        F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
+    {
+        self.scan().visit_rows(f)
+    }
+
+    /// Legacy-friendly alias for [`Dataset::visit_rows`].
+    ///
+    /// The returned [`crate::RowView`] already exposes column names through
+    /// [`crate::RowView::get_by_name`], so this is purely a naming convenience.
+    pub fn rows_named<F>(&self, f: F) -> Result<ScanStats>
+    where
+        F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
+    {
+        self.visit_rows(f)
+    }
+
+    /// Scans decoded rows after applying a named projection.
+    pub fn rows_with_projection<F>(&self, names: &[&str], f: F) -> Result<ScanStats>
+    where
+        F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
+    {
+        let projection = self.select_with(names)?;
+        self.scan().with_projection(&projection).visit_rows(f)
+    }
+
+    /// Scans decoded rows after applying a row window.
+    pub fn rows_windowed<F>(&self, selection: RowSelection, f: F) -> Result<ScanStats>
+    where
+        F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
+    {
+        self.scan().select(selection).visit_rows(f)
+    }
+
+    /// Scans decoded batches and returns the collected scan statistics.
+    pub fn visit_batches<F>(&self, f: F) -> Result<ScanStats>
+    where
+        F: FnMut(crate::ColumnarBatch<'_>) -> Result<std::ops::ControlFlow<()>>,
+    {
+        self.scan().visit_batches(f)
+    }
+
+    /// Collects decoded rows into owned row values.
+    pub fn collect_rows(&self) -> Result<Vec<OwnedRow>> {
+        self.scan().collect_rows()
+    }
+
+    /// Legacy-friendly alias for [`Dataset::collect_rows`].
+    pub fn collect_frame(&self) -> Result<Vec<OwnedRow>> {
+        self.collect_rows()
+    }
+
+    /// Collects decoded rows for a named projection into owned row values.
+    pub fn collect_rows_with_projection(&self, names: &[&str]) -> Result<Vec<OwnedRow>> {
+        let projection = self.select_with(names)?;
+        self.scan().with_projection(&projection).collect_rows()
+    }
+
+    /// Collects decoded rows within a row window into owned row values.
+    pub fn collect_rows_windowed(&self, selection: RowSelection) -> Result<Vec<OwnedRow>> {
+        self.scan().select(selection).collect_rows()
+    }
+
+    /// Collects decoded batches into owned columnar batches.
+    pub fn collect_batches(&self) -> Result<Vec<OwnedColumnarBatch>> {
+        self.scan().collect_batches()
+    }
+
+    /// Legacy-friendly alias for [`Dataset::collect_batches`].
+    pub fn collect_frame_batches(&self) -> Result<Vec<OwnedColumnarBatch>> {
+        self.collect_batches()
+    }
+
+    /// Collects decoded batches using a fixed target batch size.
+    pub fn collect_batches_with_rows(&self, batch_rows: usize) -> Result<Vec<OwnedColumnarBatch>> {
+        self.scan()
+            .with_batch_hint(BatchHint::Rows(batch_rows))
+            .collect_batches()
+    }
+
+    /// Collects decoded batches for a named projection.
+    pub fn collect_batches_with_projection(
+        &self,
+        names: &[&str],
+    ) -> Result<Vec<OwnedColumnarBatch>> {
+        let projection = self.select_with(names)?;
+        self.scan().with_projection(&projection).collect_batches()
+    }
+
+    /// Returns the projection builder used by the ergonomic convenience methods.
+    #[must_use]
+    pub const fn select_columns(&self) -> ProjectionBuilder<'_> {
+        self.projection()
+    }
+
+    /// Builds a named projection from the provided column names.
+    pub fn select_with(&self, names: &[&str]) -> Result<Projection> {
+        self.projection().columns(names.iter().copied()).build()
     }
 
     pub(crate) fn descriptors(&self) -> Result<Arc<PageDescriptorTable>> {
@@ -258,13 +420,9 @@ impl Dataset {
     fn load_descriptors(&self) -> Result<PageDescriptorTable> {
         match &self.file.source {
             FileSource::Bytes(bytes) => {
-                let mut cursor = Cursor::new(bytes.as_ref());
-                compile_page_descriptors(&mut cursor, &self.layout)
+                compile_page_descriptors_in_memory(bytes.as_ref(), &self.layout)
             }
-            FileSource::Mmap(mmap) => {
-                let mut cursor = Cursor::new(&mmap[..]);
-                compile_page_descriptors(&mut cursor, &self.layout)
-            }
+            FileSource::Mmap(mmap) => compile_page_descriptors_in_memory(&mmap[..], &self.layout),
             FileSource::Path(path) => {
                 let mut file =
                     File::open(path).map_err(|err| Error::io_error_with_path(path, &err))?;
@@ -299,6 +457,7 @@ fn try_map_file(path: &Path, file: &File) -> Result<Option<Mmap>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn open_with_mmap_preferred_uses_mapped_source_when_fixture_is_available() {
@@ -338,5 +497,111 @@ mod tests {
         .expect("buffered-only dataset open");
 
         assert!(matches!(ds.file.source, FileSource::Path(_)));
+    }
+
+    #[test]
+    fn from_reader_matches_open_on_fixture_when_fixture_is_available() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/raw_data/other/cars.sas7bdat");
+        if !path.exists() {
+            return;
+        }
+
+        let bytes = std::fs::read(&path).expect("fixture bytes");
+        let from_reader = Dataset::from_reader(Cursor::new(bytes)).expect("reader dataset");
+        let opened = Dataset::open(&path).expect("opened dataset");
+
+        assert_eq!(
+            from_reader.metadata().row_count,
+            opened.metadata().row_count
+        );
+        assert_eq!(from_reader.columns().len(), opened.columns().len());
+    }
+
+    #[test]
+    fn collect_batches_with_rows_matches_scan_builder_when_fixture_is_available() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/raw_data/other/cars.sas7bdat");
+        if !path.exists() {
+            return;
+        }
+
+        let ds = Dataset::open(&path).expect("opened dataset");
+        let aliased = ds.collect_batches_with_rows(128).expect("alias batches");
+        let direct = ds
+            .scan()
+            .with_batch_hint(BatchHint::Rows(128))
+            .collect_batches()
+            .expect("direct batches");
+
+        assert_eq!(aliased.len(), direct.len());
+        assert_eq!(
+            aliased.iter().map(|batch| batch.row_count).sum::<usize>(),
+            direct.iter().map(|batch| batch.row_count).sum::<usize>()
+        );
+    }
+
+    #[test]
+    fn rows_with_projection_matches_collect_rows_with_projection_when_fixture_is_available() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/raw_data/other/cars.sas7bdat");
+        if !path.exists() {
+            return;
+        }
+
+        let ds = Dataset::open(&path).expect("opened dataset");
+        let names: Vec<String> = ds
+            .columns()
+            .iter()
+            .take(2)
+            .map(|column| column.borrowed_name().to_owned())
+            .collect();
+        if names.is_empty() {
+            return;
+        }
+
+        let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let projection = ds.select_with(&name_refs).expect("projection");
+        assert_eq!(projection.columns().len(), name_refs.len());
+
+        let collected = ds
+            .collect_rows_with_projection(&name_refs)
+            .expect("projected rows");
+        let mut visited = 0usize;
+        let stats = ds
+            .rows_with_projection(&name_refs, |row| {
+                visited += 1;
+                assert_eq!(row.len(), name_refs.len());
+                Ok(std::ops::ControlFlow::Continue(()))
+            })
+            .expect("projected row scan");
+
+        assert_eq!(visited, collected.len());
+        assert_eq!(stats.rows_emitted, collected.len() as u64);
+    }
+
+    #[test]
+    fn collect_frame_aliases_match_core_collectors_when_fixture_is_available() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/raw_data/other/cars.sas7bdat");
+        if !path.exists() {
+            return;
+        }
+
+        let ds = Dataset::open(&path).expect("opened dataset");
+        let frame = ds.collect_frame().expect("frame rows");
+        let rows = ds.collect_rows().expect("rows");
+        let frame_batches = ds.collect_frame_batches().expect("frame batches");
+        let batches = ds.collect_batches().expect("batches");
+
+        assert_eq!(frame.len(), rows.len());
+        assert_eq!(frame_batches.len(), batches.len());
+        assert_eq!(
+            frame_batches
+                .iter()
+                .map(|batch| batch.row_count)
+                .sum::<usize>(),
+            batches.iter().map(|batch| batch.row_count).sum::<usize>()
+        );
     }
 }

@@ -2,16 +2,17 @@ use super::plan::ScanPlan;
 use super::raw::{scan_raw_rows_with_plan, scan_row_bytes_with_plan};
 use super::{
     BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnarBatch,
-    ControlFlow, Dataset, DecodeMode, Error, FileSource, OrderingMode, OwnedColumnarBatch,
-    OwnedRow, Parallelism, Projection, RawRow, RawRowSink, Result, RowSelection, RowSink, RowView,
-    ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions, TemporalDecodeOptions,
-    materialize_planned_cells,
+    ControlFlow, Dataset, DecodeMode, Error, FileSource, OrderingMode, OwnedBatchScanBreakdown,
+    OwnedColumnarBatch, OwnedRow, Parallelism, Projection, RawRow, RawRowSink, Result,
+    RowSelection, RowSink, RowView, ScanProgress, ScanProgressObserver, ScanStats,
+    StringDecodeOptions, TemporalDecodeOptions, materialize_planned_cells,
 };
 #[cfg(feature = "arrow")]
 use arrow_array::RecordBatch;
 #[cfg(feature = "arrow")]
 use arrow_schema::SchemaRef;
 use rayon::prelude::{ParallelIterator, ParallelSlice};
+use std::time::Instant;
 
 fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
     match parallelism {
@@ -624,5 +625,83 @@ impl ScanBuilder<'_> {
             counters.direct_utf8_owned_seen_once_promotions;
         stats.batch_fallback_cells = counters.fallback;
         Ok(stats)
+    }
+
+    #[doc(hidden)]
+    /// # Errors
+    ///
+    /// Returns an error if the owned-batch scan fails.
+    pub fn owned_batch_scan_breakdown(&self) -> Result<OwnedBatchScanBreakdown> {
+        if matches!(self.decode, DecodeMode::Raw) {
+            return Err(Error::unsupported(
+                "visit_batches does not support DecodeMode::Raw",
+            ));
+        }
+
+        let total_start = Instant::now();
+        let plan_start = Instant::now();
+        let plan = ScanPlan::new(self)?;
+        let plan_ns = plan_start.elapsed().as_nanos();
+
+        let mut batcher = BatchAccumulator::new(
+            plan.batch.clone(),
+            plan.batch_row_capacity,
+            plan.capacity_hint_rows,
+        )
+        .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
+        let mut decode_batches = 0u64;
+        let mut push_row_ns = 0u128;
+        let mut take_batch_ns = 0u128;
+        let mut reset_after_flush_ns = 0u128;
+
+        let scan_start = Instant::now();
+        let mut stats = scan_row_bytes_with_plan(self, &plan.raw, &mut |row_index, bytes| {
+            let push_start = Instant::now();
+            batcher.push_row(row_index.into(), bytes)?;
+            push_row_ns += push_start.elapsed().as_nanos();
+            if batcher.is_full() {
+                let take_start = Instant::now();
+                let _batch = batcher.take_batch();
+                take_batch_ns += take_start.elapsed().as_nanos();
+                decode_batches = decode_batches.saturating_add(1);
+
+                let reset_start = Instant::now();
+                batcher.reset_after_flush();
+                reset_after_flush_ns += reset_start.elapsed().as_nanos();
+            }
+            Ok(ControlFlow::Continue(()))
+        })?;
+        let scan_row_bytes_ns = scan_start.elapsed().as_nanos();
+
+        if !batcher.is_empty() {
+            let take_start = Instant::now();
+            let _batch = batcher.take_batch();
+            take_batch_ns += take_start.elapsed().as_nanos();
+            decode_batches = decode_batches.saturating_add(1);
+        }
+
+        let counters = batcher.counters();
+        stats.decode_batches = decode_batches;
+        stats.batch_staged_numeric_cells = counters.staged_numeric;
+        stats.batch_direct_numeric_cells = counters.direct_numeric;
+        stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;
+        stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
+        stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
+        stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned;
+        stats.batch_direct_utf8_owned_interned_hits = counters.direct_utf8_owned_interned_hits;
+        stats.batch_direct_utf8_owned_seen_once_promotions =
+            counters.direct_utf8_owned_seen_once_promotions;
+        stats.batch_fallback_cells = counters.fallback;
+
+        Ok(OwnedBatchScanBreakdown {
+            total_ns: total_start.elapsed().as_nanos(),
+            plan_ns,
+            scan_row_bytes_ns,
+            push_row_ns,
+            take_batch_ns,
+            reset_after_flush_ns,
+            batches_emitted: decode_batches,
+            stats,
+        })
     }
 }

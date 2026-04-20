@@ -40,6 +40,9 @@ pub use options::{
     OrderingMode, PageCachePolicy, Parallelism, PrefetchPolicy, RowSelection, StringDecodeOptions,
     TemporalDecodeOptions, TrimMode, Utf8ValidationMode, ValidationMode,
 };
+pub use pages::DescriptorBreakdown;
 pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};
 pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
-pub use scan::{BatchSink, RawRowSink, RowSink, ScanBuilder, ScanProgress, ScanStats};
+pub use scan::{
+    BatchSink, OwnedBatchScanBreakdown, RawRowSink, RowSink, ScanBuilder, ScanProgress, ScanStats,
+};

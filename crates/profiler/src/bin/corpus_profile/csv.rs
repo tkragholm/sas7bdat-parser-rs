@@ -1,7 +1,7 @@
 use super::{
     CorpusCsvContext, CorpusCsvRow, CorpusProfileOutput, CorpusSummary, FixtureCatalog,
-    FixtureEntry, FixtureProfile, FixtureStatus, bytes_to_megabytes, content_class,
-    encoding_class, join_named_counts, round_metric, size_class, summary_txt_path, width_class,
+    FixtureEntry, FixtureProfile, FixtureStatus, bytes_to_megabytes, content_class, encoding_class,
+    join_named_counts, round_metric, size_class, summary_txt_path, width_class,
 };
 use csv::Writer;
 use std::{fs, path::PathBuf};

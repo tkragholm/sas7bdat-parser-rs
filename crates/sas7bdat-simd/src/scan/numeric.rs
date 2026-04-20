@@ -431,10 +431,10 @@ pub(super) fn materialize_staged_time_or_f64_column(
     valid: Option<Vec<u64>>,
 ) -> OwnedColumnBuffer {
     type F64x8 = Simd<f64, 8>;
-    type I64x8 = Simd<i64, 8>;
+    type I32x8 = Simd<i32, 8>;
     type U64x8 = Simd<u64, 8>;
 
-    if first_non_integral_in_range_index_simd(&raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
+    if first_non_integral_in_range_index_simd(&raw_bits, valid.as_deref(), I32_MIN_F64, I32_MAX_F64)
         .is_some()
     {
         return materialize_staged_f64_column(raw_bits, valid);
@@ -445,8 +445,7 @@ pub(super) fn materialize_staged_time_or_f64_column(
         None => {
             let mut raw_chunks = raw_bits.chunks_exact(8);
             for raw_chunk in &mut raw_chunks {
-                #[allow(clippy::cast_possible_truncation)]
-                let converted: I64x8 =
+                let converted: I32x8 =
                     F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(converted.to_array().map(|x| SasTime {
@@ -456,19 +455,18 @@ pub(super) fn materialize_staged_time_or_f64_column(
             for &bits in raw_chunks.remainder() {
                 #[allow(clippy::cast_possible_truncation)]
                 values.push(SasTime {
-                    seconds_since_midnight: f64::from_bits(bits) as i64,
+                    seconds_since_midnight: f64::from_bits(bits) as i32,
                 });
             }
         }
         Some(validity) => {
-            let zeros = I64x8::splat(0);
+            let zeros = I32x8::splat(0);
             let mut raw_chunks = raw_bits.chunks_exact(8);
             for (chunk_idx, raw_chunk) in raw_chunks.by_ref().enumerate() {
                 let bit_base = chunk_idx * 8;
                 #[allow(clippy::cast_possible_truncation)]
                 let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
-                #[allow(clippy::cast_possible_truncation)]
-                let converted: I64x8 =
+                let converted: I32x8 =
                     F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(
@@ -486,7 +484,7 @@ pub(super) fn materialize_staged_time_or_f64_column(
                 values.push(if valid_bit(validity, idx) {
                     #[allow(clippy::cast_possible_truncation)]
                     SasTime {
-                        seconds_since_midnight: f64::from_bits(bits) as i64,
+                        seconds_since_midnight: f64::from_bits(bits) as i32,
                     }
                 } else {
                     SasTime {
@@ -659,8 +657,7 @@ pub(super) fn staged_numeric_raw_bits_from_planned_cell(cell: PlannedCell<'_>) -
             Ok(v.to_bits())
         }
         PlannedCell::Time(value) => {
-            #[allow(clippy::cast_precision_loss)]
-            let v = value.seconds_since_midnight as f64;
+            let v = f64::from(value.seconds_since_midnight);
             Ok(v.to_bits())
         }
         other => Err(unexpected_batch_cell("staged numeric bits", other)),
@@ -753,7 +750,7 @@ pub(super) fn classify_datetime_numeric_value(number: Option<f64>) -> DateTimeNu
 
 pub(super) fn classify_time_numeric_value(number: Option<f64>) -> TimeNumericValue {
     number.map_or(TimeNumericValue::Null, |number| {
-        try_i64_from_f64(number).map_or(TimeNumericValue::Float64(number), |seconds| {
+        try_i32_from_f64(number).map_or(TimeNumericValue::Float64(number), |seconds| {
             TimeNumericValue::Time(SasTime {
                 seconds_since_midnight: seconds,
             })

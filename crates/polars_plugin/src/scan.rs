@@ -7,7 +7,10 @@ use super::predicate::{PredicateExpr, append_unique_columns, filter_dataframe, p
 #[cfg(feature = "arrow")]
 use super::{BatchReader, ReaderMessage, SasIoSource};
 #[cfg(feature = "arrow")]
-use arrow_schema::{DataType as ArrowSchemaDataType, Field as ArrowSchemaField, Schema as ArrowSchema, TimeUnit as ArrowSchemaTimeUnit};
+use arrow_schema::{
+    DataType as ArrowSchemaDataType, Field as ArrowSchemaField, Schema as ArrowSchema,
+    TimeUnit as ArrowSchemaTimeUnit,
+};
 #[cfg(feature = "arrow")]
 use polars::frame::DataFrame;
 #[cfg(feature = "arrow")]
@@ -64,10 +67,8 @@ const fn arrow_data_type_for_logical_type(logical_type: LogicalType) -> ArrowSch
         LogicalType::Float => ArrowSchemaDataType::Float64,
         LogicalType::String => ArrowSchemaDataType::Utf8,
         LogicalType::Date => ArrowSchemaDataType::Date32,
-        LogicalType::DateTime => {
-            ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None)
-        }
-        LogicalType::Time => ArrowSchemaDataType::Time32(ArrowSchemaTimeUnit::Second),
+        LogicalType::DateTime => ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None),
+        LogicalType::Time => ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond),
         LogicalType::Bytes => ArrowSchemaDataType::Binary,
     }
 }

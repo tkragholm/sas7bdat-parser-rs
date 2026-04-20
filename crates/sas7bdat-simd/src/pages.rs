@@ -10,6 +10,7 @@ use crate::{
 use std::{
     io::{Read, Seek, SeekFrom},
     ops::ControlFlow,
+    time::Instant,
 };
 
 const SUBHEADER_POINTER_OFFSET: usize = 8;
@@ -29,21 +30,6 @@ pub fn walk_pages<R, F>(
 ) -> Result<()>
 where
     R: Read + Seek,
-    F: FnMut(u64, &[u8]) -> Result<()>,
-{
-    walk_pages_until(reader, header, |page_index, page| {
-        visit(page_index, page)?;
-        Ok(ControlFlow::Continue(()))
-    })
-}
-
-pub fn walk_pages_until<R, F>(
-    reader: &mut R,
-    header: &crate::internal::HeaderInfo,
-    mut visit: F,
-) -> Result<()>
-where
-    R: Read + Seek,
     F: FnMut(u64, &[u8]) -> Result<ControlFlow<()>>,
 {
     let mut page = vec![0u8; usize::from(header.page_size)];
@@ -55,7 +41,7 @@ where
         reader
             .read_exact(&mut page)
             .map_err(|e| page_io_error(&e))?;
-        if let ControlFlow::Break(()) = visit(page_index, &page)? {
+        if visit(page_index, &page)? == ControlFlow::Break(()) {
             break;
         }
     }
@@ -81,10 +67,54 @@ struct IndexedDescriptorInputs {
     remaining_rows: u64,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct DescriptorBreakdown {
+    pub page_read_ns: u128,
+    pub header_read_ns: u128,
+    pub classify_ns: u128,
+    pub total_ns: u128,
+    pub pages_seen: u64,
+    pub descriptors_emitted: usize,
+    pub row_spans_emitted: usize,
+    pub total_candidate_rows: u64,
+}
+
 pub fn compile_page_descriptors<R: Read + Seek>(
     reader: &mut R,
     layout: &LayoutPlan,
 ) -> Result<PageDescriptorTable> {
+    let (table, _) = compile_page_descriptors_profiled(reader, layout)?;
+    Ok(table)
+}
+
+pub fn compile_page_descriptors_in_memory(
+    file_bytes: &[u8],
+    layout: &LayoutPlan,
+) -> Result<PageDescriptorTable> {
+    let (table, _) = compile_page_descriptors_profiled_in_memory(file_bytes, layout)?;
+    Ok(table)
+}
+
+pub fn compile_page_descriptors_breakdown<R: Read + Seek>(
+    reader: &mut R,
+    layout: &LayoutPlan,
+) -> Result<DescriptorBreakdown> {
+    let (_, breakdown) = compile_page_descriptors_profiled(reader, layout)?;
+    Ok(breakdown)
+}
+
+pub fn compile_page_descriptors_breakdown_in_memory(
+    file_bytes: &[u8],
+    layout: &LayoutPlan,
+) -> Result<DescriptorBreakdown> {
+    let (_, breakdown) = compile_page_descriptors_profiled_in_memory(file_bytes, layout)?;
+    Ok(breakdown)
+}
+
+fn compile_page_descriptors_profiled<R: Read + Seek>(
+    reader: &mut R,
+    layout: &LayoutPlan,
+) -> Result<(PageDescriptorTable, DescriptorBreakdown)> {
     let header = &layout.header;
     if header.page_header_size > u32::from(header.page_size) {
         return Err(page_corruption(
@@ -92,16 +122,118 @@ pub fn compile_page_descriptors<R: Read + Seek>(
         ));
     }
     if u32::from(layout.row_len) == 0 {
-        return Ok(PageDescriptorTable::default());
+        return Ok((
+            PageDescriptorTable::default(),
+            DescriptorBreakdown::default(),
+        ));
     }
 
+    let total_start = Instant::now();
     let mut descriptors = Vec::with_capacity(
         usize::try_from(header.page_count)
             .map_err(|_| page_corruption("page count exceeds usize"))?,
     );
     let mut row_spans = Vec::new();
     let mut row_base = 0u64;
-    walk_pages(reader, header, |page_index, page| {
+    let mut breakdown = DescriptorBreakdown::default();
+    let mut page = vec![0u8; usize::from(header.page_size)];
+
+    for page_index in 0..header.page_count {
+        let read_start = Instant::now();
+        let page_offset = header.data_offset + page_index * u64::from(header.page_size);
+        reader
+            .seek(SeekFrom::Start(page_offset))
+            .map_err(|e| page_io_error(&e))?;
+        reader
+            .read_exact(&mut page)
+            .map_err(|e| page_io_error(&e))?;
+        breakdown.page_read_ns += read_start.elapsed().as_nanos();
+        breakdown.pages_seen += 1;
+
+        let header_start = Instant::now();
+        let page_type = read_header_u16(&page, header.page_header_size as usize - 8, layout)?;
+        let page_row_count = u64::from(read_header_u16(
+            &page,
+            header.page_header_size as usize - 6,
+            layout,
+        )?);
+        let subheader_count = u64::from(read_header_u16(
+            &page,
+            header.page_header_size as usize - 4,
+            layout,
+        )?);
+        breakdown.header_read_ns += header_start.elapsed().as_nanos();
+
+        let classify_start = Instant::now();
+        let descriptor = classify_descriptor(
+            layout,
+            &page,
+            DescriptorInputs {
+                page_index,
+                page_type,
+                page_row_count,
+                subheader_count,
+                row_base,
+            },
+            &mut row_spans,
+        )?;
+        breakdown.classify_ns += classify_start.elapsed().as_nanos();
+
+        row_base = row_base.saturating_add(u64::from(descriptor.row_count));
+        descriptors.push(descriptor);
+        if row_base >= layout.total_rows {
+            break;
+        }
+    }
+
+    breakdown.total_ns = total_start.elapsed().as_nanos();
+    breakdown.descriptors_emitted = descriptors.len();
+    breakdown.row_spans_emitted = row_spans.len();
+    breakdown.total_candidate_rows = row_base;
+
+    Ok((
+        PageDescriptorTable {
+            pages: descriptors.into_boxed_slice(),
+            row_spans: row_spans.into_boxed_slice(),
+            total_candidate_rows: row_base,
+        },
+        breakdown,
+    ))
+}
+
+fn compile_page_descriptors_profiled_in_memory(
+    file_bytes: &[u8],
+    layout: &LayoutPlan,
+) -> Result<(PageDescriptorTable, DescriptorBreakdown)> {
+    let header = &layout.header;
+    if header.page_header_size > u32::from(header.page_size) {
+        return Err(page_corruption(
+            "page header size exceeds configured page size",
+        ));
+    }
+    if u32::from(layout.row_len) == 0 {
+        return Ok((
+            PageDescriptorTable::default(),
+            DescriptorBreakdown::default(),
+        ));
+    }
+
+    let total_start = Instant::now();
+    let mut descriptors = Vec::with_capacity(
+        usize::try_from(header.page_count)
+            .map_err(|_| page_corruption("page count exceeds usize"))?,
+    );
+    let mut row_spans = Vec::new();
+    let mut row_base = 0u64;
+    let mut breakdown = DescriptorBreakdown::default();
+
+    for page_index in 0..header.page_count {
+        let read_start = Instant::now();
+        let page = page_slice(file_bytes, header, page_index)?;
+        breakdown.page_read_ns += read_start.elapsed().as_nanos();
+        breakdown.pages_seen += 1;
+
+        let header_start = Instant::now();
         let page_type = read_header_u16(page, header.page_header_size as usize - 8, layout)?;
         let page_row_count = u64::from(read_header_u16(
             page,
@@ -113,7 +245,9 @@ pub fn compile_page_descriptors<R: Read + Seek>(
             header.page_header_size as usize - 4,
             layout,
         )?);
+        breakdown.header_read_ns += header_start.elapsed().as_nanos();
 
+        let classify_start = Instant::now();
         let descriptor = classify_descriptor(
             layout,
             page,
@@ -126,17 +260,44 @@ pub fn compile_page_descriptors<R: Read + Seek>(
             },
             &mut row_spans,
         )?;
+        breakdown.classify_ns += classify_start.elapsed().as_nanos();
 
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);
-        Ok(())
-    })?;
+        if row_base >= layout.total_rows {
+            break;
+        }
+    }
 
-    Ok(PageDescriptorTable {
-        pages: descriptors.into_boxed_slice(),
-        row_spans: row_spans.into_boxed_slice(),
-        total_candidate_rows: row_base,
-    })
+    breakdown.total_ns = total_start.elapsed().as_nanos();
+    breakdown.descriptors_emitted = descriptors.len();
+    breakdown.row_spans_emitted = row_spans.len();
+    breakdown.total_candidate_rows = row_base;
+
+    Ok((
+        PageDescriptorTable {
+            pages: descriptors.into_boxed_slice(),
+            row_spans: row_spans.into_boxed_slice(),
+            total_candidate_rows: row_base,
+        },
+        breakdown,
+    ))
+}
+
+fn page_slice<'a>(
+    file_bytes: &'a [u8],
+    header: &crate::internal::HeaderInfo,
+    page_index: u64,
+) -> Result<&'a [u8]> {
+    let page_offset = header.data_offset + page_index * u64::from(header.page_size);
+    let start =
+        usize::try_from(page_offset).map_err(|_| page_corruption("page offset exceeds usize"))?;
+    let end = start
+        .checked_add(usize::from(header.page_size))
+        .ok_or_else(|| page_corruption("page end exceeds usize"))?;
+    file_bytes
+        .get(start..end)
+        .ok_or_else(|| page_corruption("page extends beyond backing buffer"))
 }
 
 fn empty_page_descriptor(

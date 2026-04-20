@@ -79,6 +79,19 @@ pub struct ScanStats {
 }
 
 #[doc(hidden)]
+#[derive(Debug, Clone, Default)]
+pub struct OwnedBatchScanBreakdown {
+    pub total_ns: u128,
+    pub plan_ns: u128,
+    pub scan_row_bytes_ns: u128,
+    pub push_row_ns: u128,
+    pub take_batch_ns: u128,
+    pub reset_after_flush_ns: u128,
+    pub batches_emitted: u64,
+    pub stats: ScanStats,
+}
+
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ScanProgress {
     pub pages_seen: u64,

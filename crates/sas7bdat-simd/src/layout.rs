@@ -6,7 +6,7 @@ use crate::{
         read_u32, read_u64,
     },
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
-    pages::walk_pages_until,
+    pages::walk_pages,
     types::RowLength,
 };
 use encoding_rs::{Encoding, UTF_8};
@@ -170,7 +170,10 @@ impl MetadataState {
         let Ok(column_count) = usize::try_from(column_count_u32) else {
             return false;
         };
-        if self.names_seen < column_count || self.attrs_seen < column_count || self.formats_seen < column_count {
+        if self.names_seen < column_count
+            || self.attrs_seen < column_count
+            || self.formats_seen < column_count
+        {
             return false;
         }
         if !self.text_store.can_resolve(row_info.compression_ref)
@@ -178,14 +181,11 @@ impl MetadataState {
         {
             return false;
         }
-        self.columns
-            .iter()
-            .take(column_count)
-            .all(|column| {
-                self.text_store.can_resolve(column.name_ref)
-                    && self.text_store.can_resolve(column.label_ref)
-                    && self.text_store.can_resolve(column.format_ref)
-            })
+        self.columns.iter().take(column_count).all(|column| {
+            self.text_store.can_resolve(column.name_ref)
+                && self.text_store.can_resolve(column.label_ref)
+                && self.text_store.can_resolve(column.format_ref)
+        })
     }
 }
 
@@ -200,7 +200,7 @@ pub fn parse_layout<R: Read + Seek>(
         ..MetadataState::default()
     };
 
-    walk_pages_until(reader, &header, |_page_index, page| {
+    walk_pages(reader, &header, |_page_index, page| {
         let page_type = read_u16(
             header.endianness,
             get_range(
