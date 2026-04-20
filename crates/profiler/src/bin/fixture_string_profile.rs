@@ -1,5 +1,5 @@
 use sas7bdat_profiler::init_profiler_runtime;
-use sas7bdat_simd::{Dataset, LogicalType, RowSelection, types::RowIndex};
+use sas7bdat_simd::{Dataset, LogicalType, RowIndex, RowSelection};
 use serde::Serialize;
 use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
 

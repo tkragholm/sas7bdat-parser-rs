@@ -113,7 +113,11 @@ impl<'a> ScanBuilder<'a> {
         self
     }
 
-    #[doc(hidden)]
+    /// Register a progress callback for long-running scans.
+    ///
+    /// The observer is called after each page is processed with a [`ScanProgress`] snapshot.
+    /// Useful for reporting progress on large files. The callback must be `Send + Sync` because
+    /// it may be invoked from a scan thread.
     #[must_use]
     pub fn with_progress<F>(mut self, observer: F) -> Self
     where
@@ -133,7 +137,10 @@ impl<'a> ScanBuilder<'a> {
         self.scan_raw_rows(&mut f)
     }
 
-    #[doc(hidden)]
+    /// Scans raw rows and calls `tap(row_offset, raw_page_bytes)` before each row decode.
+    /// Intended for profiling and corpus analysis tools that need access to the raw page
+    /// bytes alongside each row's position. Not part of the general-purpose scan API.
+    ///
     /// # Errors
     ///
     /// Returns an error if the scan fails.
@@ -155,7 +162,9 @@ impl<'a> ScanBuilder<'a> {
         self.scan_rows(&mut f)
     }
 
-    #[doc(hidden)]
+    /// Scans decoded rows and calls `tap(row_offset, raw_page_bytes)` before each row decode.
+    /// Intended for profiling and corpus analysis tools. Not part of the general-purpose scan API.
+    ///
     /// # Errors
     ///
     /// Returns an error if the scan or row decoding fails.
@@ -213,7 +222,9 @@ impl<'a> ScanBuilder<'a> {
         self.scan_batches(&mut f)
     }
 
-    #[doc(hidden)]
+    /// Scans decoded batches and calls `tap(row_offset, raw_page_bytes)` before each batch.
+    /// Intended for profiling and corpus analysis tools. Not part of the general-purpose scan API.
+    ///
     /// # Errors
     ///
     /// Returns an error if the scan or batch decoding fails.

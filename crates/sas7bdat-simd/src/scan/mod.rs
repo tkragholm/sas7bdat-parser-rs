@@ -103,8 +103,14 @@ pub struct ScanProgress {
     pub rows_emitted: u64,
 }
 
+/// A boxed progress callback registered via [`ScanBuilder::with_progress`].
 pub type ScanProgressObserver = Arc<dyn Fn(ScanProgress) + Send + Sync + 'static>;
 
+/// Push-based sink for raw (undecoded) rows.
+///
+/// Implement this trait to receive each row as its raw byte slice. Useful when
+/// you want to pass rows directly to another parser or write them verbatim.
+/// Use [`ScanBuilder::write_raw_rows`] to drive the scan.
 pub trait RawRowSink {
     /// # Errors
     ///
@@ -112,6 +118,11 @@ pub trait RawRowSink {
     fn push(&mut self, row: RawRow<'_>) -> Result<ControlFlow<()>>;
 }
 
+/// Push-based sink for decoded rows.
+///
+/// Implement this trait to receive each row as a [`RowView`]. This is the
+/// push-based alternative to the `visit_rows` callback. Use
+/// [`ScanBuilder::write_rows`] to drive the scan.
 pub trait RowSink {
     /// # Errors
     ///
@@ -119,6 +130,11 @@ pub trait RowSink {
     fn push(&mut self, row: RowView<'_>) -> Result<ControlFlow<()>>;
 }
 
+/// Push-based sink for decoded columnar batches.
+///
+/// Implement this trait to receive each batch as a [`ColumnarBatch`]. This is
+/// the push-based alternative to the `visit_batches` callback. Use
+/// [`ScanBuilder::write_batches`] to drive the scan.
 pub trait BatchSink {
     /// # Errors
     ///

@@ -298,6 +298,7 @@ pub(super) fn row_selected(selection: RowSelection, row_index: RowIndex) -> bool
     match selection {
         RowSelection::All => true,
         RowSelection::Range { start, end } => (start..end).contains(&row_index),
+        RowSelection::First(n) => row_index.0 < n,
     }
 }
 

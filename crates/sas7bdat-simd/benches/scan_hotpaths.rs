@@ -154,8 +154,8 @@ fn bench_dataset_scans(
             let stats = dataset
                 .scan()
                 .select(RowSelection::Range {
-                    start: sas7bdat_simd::types::RowIndex(0),
-                    end: sas7bdat_simd::types::RowIndex(8),
+                    start: sas7bdat_simd::RowIndex(0),
+                    end: sas7bdat_simd::RowIndex(8),
                 })
                 .visit_raw_rows(|row| {
                     black_box(row.row_index);

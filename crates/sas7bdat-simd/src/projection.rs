@@ -142,7 +142,7 @@ impl<'a> ProjectionBuilder<'a> {
         }
 
         selected.retain(|idx| {
-            let name = available[*idx].borrowed_name();
+            let name = available[*idx].name();
             !excludes.iter().any(|excluded| excluded == name)
         });
 
@@ -181,7 +181,7 @@ impl<'a> ProjectionBuilder<'a> {
 fn find_column(columns: &[ColumnMeta], name: &str) -> Result<usize> {
     columns
         .iter()
-        .position(|column| column.borrowed_name() == name)
+        .position(|column| column.name() == name)
         .ok_or_else(|| {
             Error::Projection(ProjectionError {
                 message: format!("unknown column {name:?}"),

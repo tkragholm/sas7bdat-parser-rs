@@ -235,7 +235,7 @@ impl Dataset {
     pub fn column(&self, name: &str) -> Option<&ColumnMeta> {
         self.columns()
             .iter()
-            .find(|column| column.borrowed_name() == name)
+            .find(|column| column.name() == name)
     }
 
     #[must_use]
@@ -243,6 +243,12 @@ impl Dataset {
         ProjectionBuilder::new(self)
     }
 
+    /// Create a scan builder for this dataset.
+    ///
+    /// This is the canonical entry point for all scan operations. Every shortcut method on
+    /// `Dataset` (`visit_rows`, `collect_batches`, etc.) calls `scan()` internally with
+    /// default settings. Use `scan()` directly when you need to configure projection, row
+    /// selection, batch sizing, or other scan options.
     #[must_use]
     pub fn scan(&self) -> ScanBuilder<'_> {
         ScanBuilder::new(self)
@@ -262,17 +268,6 @@ impl Dataset {
         F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
     {
         self.scan().visit_rows(f)
-    }
-
-    /// Legacy-friendly alias for [`Dataset::visit_rows`].
-    ///
-    /// The returned [`crate::RowView`] already exposes column names through
-    /// [`crate::RowView::get_by_name`], so this is purely a naming convenience.
-    pub fn rows_named<F>(&self, f: F) -> Result<ScanStats>
-    where
-        F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
-    {
-        self.visit_rows(f)
     }
 
     /// Scans decoded rows after applying a named projection.
@@ -305,11 +300,6 @@ impl Dataset {
         self.scan().collect_rows()
     }
 
-    /// Legacy-friendly alias for [`Dataset::collect_rows`].
-    pub fn collect_frame(&self) -> Result<Vec<OwnedRow>> {
-        self.collect_rows()
-    }
-
     /// Collects decoded rows for a named projection into owned row values.
     pub fn collect_rows_with_projection(&self, names: &[&str]) -> Result<Vec<OwnedRow>> {
         let projection = self.select_with(names)?;
@@ -324,11 +314,6 @@ impl Dataset {
     /// Collects decoded batches into owned columnar batches.
     pub fn collect_batches(&self) -> Result<Vec<OwnedColumnarBatch>> {
         self.scan().collect_batches()
-    }
-
-    /// Legacy-friendly alias for [`Dataset::collect_batches`].
-    pub fn collect_frame_batches(&self) -> Result<Vec<OwnedColumnarBatch>> {
-        self.collect_batches()
     }
 
     /// Collects decoded batches using a fixed target batch size.
@@ -347,14 +332,7 @@ impl Dataset {
         self.scan().with_projection(&projection).collect_batches()
     }
 
-    /// Returns the projection builder used by the ergonomic convenience methods.
-    #[must_use]
-    pub const fn select_columns(&self) -> ProjectionBuilder<'_> {
-        self.projection()
-    }
-
-    /// Builds a named projection from the provided column names.
-    pub fn select_with(&self, names: &[&str]) -> Result<Projection> {
+    pub(crate) fn select_with(&self, names: &[&str]) -> Result<Projection> {
         self.projection().columns(names.iter().copied()).build()
     }
 
@@ -554,7 +532,7 @@ mod tests {
             .columns()
             .iter()
             .take(2)
-            .map(|column| column.borrowed_name().to_owned())
+            .map(|column| column.name().to_owned())
             .collect();
         if names.is_empty() {
             return;
@@ -580,28 +558,4 @@ mod tests {
         assert_eq!(stats.rows_emitted, collected.len() as u64);
     }
 
-    #[test]
-    fn collect_frame_aliases_match_core_collectors_when_fixture_is_available() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../fixtures/raw_data/other/cars.sas7bdat");
-        if !path.exists() {
-            return;
-        }
-
-        let ds = Dataset::open(&path).expect("opened dataset");
-        let frame = ds.collect_frame().expect("frame rows");
-        let rows = ds.collect_rows().expect("rows");
-        let frame_batches = ds.collect_frame_batches().expect("frame batches");
-        let batches = ds.collect_batches().expect("batches");
-
-        assert_eq!(frame.len(), rows.len());
-        assert_eq!(frame_batches.len(), batches.len());
-        assert_eq!(
-            frame_batches
-                .iter()
-                .map(|batch| batch.row_count)
-                .sum::<usize>(),
-            batches.iter().map(|batch| batch.row_count).sum::<usize>()
-        );
-    }
 }

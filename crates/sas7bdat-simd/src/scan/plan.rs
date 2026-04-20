@@ -260,6 +260,7 @@ pub(super) fn effective_scan_row_capacity_hint(builder: &ScanBuilder<'_>) -> usi
             let start = u64::from(start).min(end);
             end.saturating_sub(start)
         }
+        RowSelection::First(n) => n.min(builder.ds.metadata.row_count),
     };
     let limited_rows = builder
         .row_limit

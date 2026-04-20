@@ -15,12 +15,12 @@ use arrow_array::{
 use arrow_schema::SchemaRef;
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
-pub const BLANK_ID: u32 = 0;
+pub(crate) const BLANK_ID: u32 = 0;
 
 /// Bit-packed validity slice: each `u64` word holds 64 row-validity bits (LSB = first row).
 /// Bit `i % 64` of word `i / 64` is 1 if row `i` is valid, 0 if null.
 /// Unused bits in the last word (when row count is not a multiple of 64) are 0.
-pub type BitSlice<'a> = &'a [u64];
+pub(crate) type BitSlice<'a> = &'a [u64];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedOffsets {
@@ -158,28 +158,42 @@ impl TrustedOffsets {
 #[derive(Debug, Clone, Copy)]
 pub struct PrimitiveBuffer<'a, T> {
     pub values: &'a [T],
-    pub valid: Option<BitSlice<'a>>,
+    /// Bit-packed validity: each `u64` holds 64 row-validity bits (LSB = first row).
+    pub valid: Option<&'a [u64]>,
 }
 
+/// The string vocabulary for a dictionary-encoded column.
+///
+/// Paired with [`Utf8Buffer::dictionary_ids`] when dictionary staging is active.
+/// Not yet populated in the current scan path — reserved for future dictionary-value exposure
+/// (e.g. Arrow `DictionaryArray` or Polars categoricals).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
-pub struct Utf8Dictionary<'a> {
-    pub values: &'a [&'a str],
+pub(crate) struct Utf8Dictionary<'a> {
+    pub(crate) values: &'a [&'a str],
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Utf8Buffer<'a> {
     pub offsets: &'a [i64],
     pub data: &'a [u8],
-    pub valid: Option<BitSlice<'a>>,
-    pub dictionary_ids: Option<&'a [u32]>,
-    pub dictionary: Option<&'a Utf8Dictionary<'a>>,
+    /// Bit-packed validity: each `u64` holds 64 row-validity bits (LSB = first row).
+    pub valid: Option<&'a [u64]>,
+    // IDs into the decoder's internal dictionary staging table; only populated when
+    // dictionary staging is active. Exposed for tests and diagnostic tooling.
+    #[allow(dead_code)]
+    pub(crate) dictionary_ids: Option<&'a [u32]>,
+    // String vocabulary paired with dictionary_ids; not yet populated.
+    #[allow(dead_code)]
+    pub(crate) dictionary: Option<&'a Utf8Dictionary<'a>>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct BytesBuffer<'a> {
     pub offsets: &'a [i64],
     pub data: &'a [u8],
-    pub valid: Option<BitSlice<'a>>,
+    /// Bit-packed validity: each `u64` holds 64 row-validity bits (LSB = first row).
+    pub valid: Option<&'a [u64]>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -192,6 +206,64 @@ pub enum ColumnBuffer<'a> {
     Time(PrimitiveBuffer<'a, SasTime>),
     Utf8(Utf8Buffer<'a>),
     RawBytes(BytesBuffer<'a>),
+}
+
+impl<'a> ColumnBuffer<'a> {
+    #[must_use]
+    pub fn is_nullable(&self) -> bool {
+        match self {
+            Self::I32(b) => b.valid.is_some(),
+            Self::I64(b) => b.valid.is_some(),
+            Self::F64(b) => b.valid.is_some(),
+            Self::Date(b) => b.valid.is_some(),
+            Self::DateTime(b) => b.valid.is_some(),
+            Self::Time(b) => b.valid.is_some(),
+            Self::Utf8(b) => b.valid.is_some(),
+            Self::RawBytes(b) => b.valid.is_some(),
+        }
+    }
+
+    #[must_use]
+    pub fn as_f64_slice(&self) -> Option<&'a [f64]> {
+        if let Self::F64(b) = self { Some(b.values) } else { None }
+    }
+
+    #[must_use]
+    pub fn as_i32_slice(&self) -> Option<&'a [i32]> {
+        if let Self::I32(b) = self { Some(b.values) } else { None }
+    }
+
+    #[must_use]
+    pub fn as_i64_slice(&self) -> Option<&'a [i64]> {
+        if let Self::I64(b) = self { Some(b.values) } else { None }
+    }
+
+    /// Iterate over string values. Yields `None` for null entries when the column is nullable.
+    /// For non-nullable columns every entry is `Some`.
+    #[must_use]
+    pub fn as_str_iter(&self) -> Option<impl Iterator<Item = Option<&str>>> {
+        if let Self::Utf8(b) = self {
+            let offsets = b.offsets;
+            let data = b.data;
+            let valid = b.valid;
+            let len = offsets.len().saturating_sub(1);
+            Some((0..len).map(move |i| {
+                let is_valid = valid.is_none_or(|v| {
+                    let word = i / 64;
+                    let bit = i % 64;
+                    word < v.len() && (v[word] >> bit) & 1 == 1
+                });
+                if !is_valid {
+                    return None;
+                }
+                let start = offsets[i] as usize;
+                let end = offsets[i + 1] as usize;
+                std::str::from_utf8(data.get(start..end)?).ok()
+            }))
+        } else {
+            None
+        }
+    }
 }
 
 #[macro_export]

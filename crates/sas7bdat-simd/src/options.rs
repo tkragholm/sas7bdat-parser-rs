@@ -143,4 +143,19 @@ pub enum RowSelection {
         start: crate::types::RowIndex,
         end: crate::types::RowIndex,
     },
+    /// Read only the first `n` rows. Equivalent to `.scan().limit(n)` but
+    /// expressible without the builder for the common "read a sample" pattern.
+    First(u64),
+}
+
+impl RowSelection {
+    /// Construct a row range from plain `u64` bounds without needing the
+    /// [`crate::RowIndex`] newtype.
+    #[must_use]
+    pub fn range(start: u64, end: u64) -> Self {
+        Self::Range {
+            start: crate::types::RowIndex(start),
+            end: crate::types::RowIndex(end),
+        }
+    }
 }

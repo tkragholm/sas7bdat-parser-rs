@@ -21,10 +21,11 @@ mod scan;
 pub(crate) mod test_utils;
 
 pub use columnar::{
-    BLANK_ID, BytesBuffer, ColumnBuffer, ColumnarBatch, OwnedColumnBuffer, OwnedColumnarBatch,
-    PrimitiveBuffer, TrustedOffsets, Utf8Buffer, Utf8Dictionary,
+    BytesBuffer, ColumnBuffer, ColumnarBatch, OwnedColumnBuffer, OwnedColumnarBatch,
+    PrimitiveBuffer, TrustedOffsets, Utf8Buffer,
 };
-pub mod types;
+pub use types::{ColumnIndex, RowIndex};
+pub(crate) mod types;
 
 pub use dataset::{Dataset, OpenBreakdown};
 pub use error::{

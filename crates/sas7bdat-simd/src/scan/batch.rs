@@ -9,7 +9,7 @@ use super::{
     staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
 use crate::define_owned_column_enum;
-use crate::{BLANK_ID, DictionaryStaging, columnar::TrustedOffsets};
+use crate::{DictionaryStaging, columnar::{BLANK_ID, TrustedOffsets}};
 use encoding_rs::WINDOWS_1252;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use simdutf8::basic::from_utf8 as simd_from_utf8;

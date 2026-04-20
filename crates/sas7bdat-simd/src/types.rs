@@ -2,7 +2,7 @@ use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct PageIndex(pub u64);
+pub(crate) struct PageIndex(pub(crate) u64);
 
 impl fmt::Display for PageIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -22,12 +22,7 @@ impl From<PageIndex> for u64 {
     }
 }
 
-impl PageIndex {
-    #[must_use]
-    pub const fn saturating_sub(self, rhs: u64) -> Self {
-        Self(self.0.saturating_sub(rhs))
-    }
-}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct RowIndex(pub u64);
@@ -105,7 +100,7 @@ impl From<ColumnIndex> for usize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct RowLength(pub u32);
+pub(crate) struct RowLength(pub(crate) u32);
 
 impl fmt::Display for RowLength {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -138,7 +133,7 @@ impl From<RowLength> for usize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct PageSize(pub u32);
+pub(crate) struct PageSize(pub(crate) u32);
 
 impl fmt::Display for PageSize {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -171,7 +166,7 @@ impl From<PageSize> for usize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct ByteOffset(pub u32);
+pub(crate) struct ByteOffset(pub(crate) u32);
 
 impl fmt::Display for ByteOffset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -212,8 +207,8 @@ impl Sub<u32> for ByteOffset {
 }
 
 /// A safe wrapper around raw page bytes.
-pub struct PageSlice<'a> {
-    pub bytes: &'a [u8],
+pub(crate) struct PageSlice<'a> {
+    pub(crate) bytes: &'a [u8],
 }
 
 impl<'a> PageSlice<'a> {
@@ -237,39 +232,6 @@ impl<'a> PageSlice<'a> {
         })
     }
 
-    #[must_use]
-    pub fn get_u32(
-        &self,
-        offset: ByteOffset,
-        endianness: crate::metadata::Endianness,
-    ) -> Option<u32> {
-        let start = usize::from(offset);
-        let end = start + 4;
-        let bytes = self.bytes.get(start..end)?;
-        let mut buf = [0u8; 4];
-        buf.copy_from_slice(bytes);
-        Some(match endianness {
-            crate::metadata::Endianness::Little => u32::from_le_bytes(buf),
-            crate::metadata::Endianness::Big => u32::from_be_bytes(buf),
-        })
-    }
 }
 
-/// A safe wrapper around raw row bytes.
-pub struct RowSlice<'a> {
-    pub bytes: &'a [u8],
-}
 
-impl<'a> RowSlice<'a> {
-    #[must_use]
-    pub const fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes }
-    }
-
-    #[must_use]
-    pub fn column_slice(&self, offset: ByteOffset, width: u32) -> Option<&'a [u8]> {
-        let start = usize::from(offset);
-        let end = start + width as usize;
-        self.bytes.get(start..end)
-    }
-}

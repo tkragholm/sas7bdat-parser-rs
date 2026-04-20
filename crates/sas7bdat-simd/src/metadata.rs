@@ -76,7 +76,7 @@ pub struct ColumnMeta {
 
 impl ColumnMeta {
     #[must_use]
-    pub fn borrowed_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
     }
 }
