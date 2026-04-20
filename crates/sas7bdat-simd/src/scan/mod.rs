@@ -14,6 +14,7 @@ use crate::{
     row::{OwnedRow, RawRow, RowView},
 };
 use encoding_rs::{Encoding, UTF_8};
+use serde::Serialize;
 use std::{
     fs::File,
     io::{Cursor, Seek, SeekFrom},
@@ -31,6 +32,27 @@ mod row_decode;
 mod string;
 
 pub use builder::ScanBuilder;
+
+/// User-facing scan statistics returned by all public scan methods.
+///
+/// `fused_pages` and `indexed_pages` describe SAS7BDAT page layout classes
+/// (contiguous uncompressed vs. indexed pointer rows) and are meaningful to
+/// users benchmarking on varied corpora. Internal decode-pipeline counters are
+/// not exposed here.
+#[derive(Debug, Clone, Copy, Serialize, Default)]
+pub struct ScanStatsSummary {
+    pub rows_seen: u64,
+    pub rows_emitted: u64,
+    pub pages_seen: u64,
+    /// Contiguous uncompressed pages — reflects SAS file structure.
+    pub fused_pages: u64,
+    /// Indexed pointer pages — reflects SAS file structure.
+    pub indexed_pages: u64,
+    pub compressed_pages: u64,
+    pub raw_bytes_read: u64,
+    pub row_bytes_materialized: u64,
+    pub decode_batches: u64,
+}
 
 use batch::{BatchAccumulator, BatchDecodePlan, unexpected_batch_cell};
 use numeric::{
@@ -95,11 +117,11 @@ impl ScanStats {
     }
 }
 
-#[doc(hidden)]
 /// Timing breakdown for owned batch scans.
 ///
-/// This stays public because it is used by profiling and backend comparison
-/// tools to inspect the scan pipeline without exposing the internal accumulator.
+/// Used by profiling and backend comparison tools to inspect the scan pipeline
+/// without exposing the internal accumulator. Not part of the general-purpose
+/// scan API.
 #[derive(Debug, Clone, Default)]
 pub struct OwnedBatchScanBreakdown {
     pub total_ns: u128,
@@ -112,7 +134,7 @@ pub struct OwnedBatchScanBreakdown {
     pub stats: crate::ScanStatsSummary,
 }
 
-#[doc(hidden)]
+/// A progress snapshot delivered to the observer registered with [`ScanBuilder::with_progress`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ScanProgress {
     pub pages_seen: u64,

@@ -33,7 +33,7 @@ pub use error::{
 };
 pub use fixture_catalog::{
     FixtureCatalog, FixtureEntry, FixtureProfile, FixtureStatus, LogicalTypeCounts, NamedCount,
-    ProjectionPreset, SampleSummary, ScanStatsSummary, TemporalFormatSummary, WidthSummary,
+    ProjectionPreset, SampleSummary, TemporalFormatSummary, WidthSummary,
     build_catalog, build_projection, discover_fixture_paths, profile_dataset_with_sample,
     profile_fixture, summarize_scan_stats,
 };
@@ -52,4 +52,5 @@ pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};
 pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
 pub use scan::{
     BatchSink, OwnedBatchScanBreakdown, RawRowSink, RowSink, ScanBuilder, ScanProgress,
+    ScanStatsSummary,
 };

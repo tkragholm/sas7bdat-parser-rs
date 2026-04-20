@@ -2,7 +2,7 @@ use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub(crate) struct PageIndex(pub(crate) u64);
+pub struct PageIndex(pub(crate) u64);
 
 impl fmt::Display for PageIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -98,7 +98,7 @@ impl From<ColumnIndex> for usize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub(crate) struct RowLength(pub(crate) u32);
+pub struct RowLength(pub u32);
 
 impl fmt::Display for RowLength {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -131,7 +131,7 @@ impl From<RowLength> for usize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub(crate) struct PageSize(pub(crate) u32);
+pub struct PageSize(pub u32);
 
 impl fmt::Display for PageSize {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -164,7 +164,7 @@ impl From<PageSize> for usize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub(crate) struct ByteOffset(pub(crate) u32);
+pub struct ByteOffset(pub u32);
 
 impl fmt::Display for ByteOffset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -205,8 +205,8 @@ impl Sub<u32> for ByteOffset {
 }
 
 /// A safe wrapper around raw page bytes.
-pub(crate) struct PageSlice<'a> {
-    pub(crate) bytes: &'a [u8],
+pub struct PageSlice<'a> {
+    pub bytes: &'a [u8],
 }
 
 impl<'a> PageSlice<'a> {

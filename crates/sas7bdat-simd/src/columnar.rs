@@ -15,12 +15,13 @@ use arrow_array::{
 use arrow_schema::SchemaRef;
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
-pub(crate) const BLANK_ID: u32 = 0;
+pub const BLANK_ID: u32 = 0;
 
 /// Bit-packed validity slice: each `u64` word holds 64 row-validity bits (LSB = first row).
 /// Bit `i % 64` of word `i / 64` is 1 if row `i` is valid, 0 if null.
 /// Unused bits in the last word (when row count is not a multiple of 64) are 0.
-pub(crate) type BitSlice<'a> = &'a [u64];
+#[cfg_attr(not(feature = "arrow"), allow(dead_code))]
+pub type BitSlice<'a> = &'a [u64];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedOffsets {
@@ -169,7 +170,7 @@ pub struct PrimitiveBuffer<'a, T> {
 /// (e.g. Arrow `DictionaryArray` or Polars categoricals).
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Utf8Dictionary<'a> {
+pub struct Utf8Dictionary<'a> {
     pub(crate) values: &'a [&'a str],
 }
 
@@ -210,7 +211,7 @@ pub enum ColumnBuffer<'a> {
 
 impl<'a> ColumnBuffer<'a> {
     #[must_use]
-    pub fn is_nullable(&self) -> bool {
+    pub const fn is_nullable(&self) -> bool {
         match self {
             Self::I32(b) => b.valid.is_some(),
             Self::I64(b) => b.valid.is_some(),
@@ -224,7 +225,7 @@ impl<'a> ColumnBuffer<'a> {
     }
 
     #[must_use]
-    pub fn as_f64_slice(&self) -> Option<&'a [f64]> {
+    pub const fn as_f64_slice(&self) -> Option<&'a [f64]> {
         if let Self::F64(b) = self {
             Some(b.values)
         } else {
@@ -233,7 +234,7 @@ impl<'a> ColumnBuffer<'a> {
     }
 
     #[must_use]
-    pub fn as_i32_slice(&self) -> Option<&'a [i32]> {
+    pub const fn as_i32_slice(&self) -> Option<&'a [i32]> {
         if let Self::I32(b) = self {
             Some(b.values)
         } else {
@@ -242,7 +243,7 @@ impl<'a> ColumnBuffer<'a> {
     }
 
     #[must_use]
-    pub fn as_i64_slice(&self) -> Option<&'a [i64]> {
+    pub const fn as_i64_slice(&self) -> Option<&'a [i64]> {
         if let Self::I64(b) = self {
             Some(b.values)
         } else {
@@ -252,6 +253,11 @@ impl<'a> ColumnBuffer<'a> {
 
     /// Iterate over string values. Yields `None` for null entries when the column is nullable.
     /// For non-nullable columns every entry is `Some`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal offset buffer contains a negative value, which violates the
+    /// [`TrustedOffsets`] invariant and indicates a corrupt batch.
     #[must_use]
     pub fn as_str_iter(&self) -> Option<impl Iterator<Item = Option<&str>>> {
         if let Self::Utf8(b) = self {
@@ -268,8 +274,8 @@ impl<'a> ColumnBuffer<'a> {
                 if !is_valid {
                     return None;
                 }
-                let start = offsets[i] as usize;
-                let end = offsets[i + 1] as usize;
+                let start = usize::try_from(offsets[i]).expect("trusted offset is non-negative");
+                let end = usize::try_from(offsets[i + 1]).expect("trusted offset is non-negative");
                 std::str::from_utf8(data.get(start..end)?).ok()
             }))
         } else {

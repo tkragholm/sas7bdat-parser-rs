@@ -1,4 +1,4 @@
-use crate::{CellValue, Dataset, LogicalType, Projection, Result, RowSelection};
+use crate::{CellValue, Dataset, LogicalType, Projection, Result, RowSelection, ScanStatsSummary};
 use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
@@ -144,6 +144,9 @@ impl SampleSummary {
     }
 }
 
+/// # Errors
+///
+/// Returns an error if any input path cannot be read or directory traversal fails.
 pub fn discover_fixture_paths(inputs: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for input in inputs {
@@ -563,18 +566,6 @@ pub const fn summarize_scan_stats(stats: &ScanStatsSummary) -> ScanStatsSummary 
     *stats
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Default)]
-pub struct ScanStatsSummary {
-    pub rows_seen: u64,
-    pub rows_emitted: u64,
-    pub pages_seen: u64,
-    pub fused_pages: u64,
-    pub indexed_pages: u64,
-    pub compressed_pages: u64,
-    pub raw_bytes_read: u64,
-    pub row_bytes_materialized: u64,
-    pub decode_batches: u64,
-}
 
 #[must_use]
 pub fn build_projection(ds: &Dataset, preset: ProjectionPreset) -> Option<Projection> {

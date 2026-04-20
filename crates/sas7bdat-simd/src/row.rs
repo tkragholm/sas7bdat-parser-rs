@@ -107,12 +107,12 @@ impl OwnedRow {
 
 impl<'a> CellValue<'a> {
     #[must_use]
-    pub fn is_null(&self) -> bool {
+    pub const fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }
 
     #[must_use]
-    pub fn as_str(&self) -> Option<&'a str> {
+    pub const fn as_str(&self) -> Option<&'a str> {
         if let Self::Str(s) = self {
             Some(s)
         } else {
@@ -121,7 +121,7 @@ impl<'a> CellValue<'a> {
     }
 
     #[must_use]
-    pub fn as_f64(&self) -> Option<f64> {
+    pub const fn as_f64(&self) -> Option<f64> {
         if let Self::Float64(v) = self {
             Some(*v)
         } else {
@@ -130,7 +130,7 @@ impl<'a> CellValue<'a> {
     }
 
     #[must_use]
-    pub fn as_i32(&self) -> Option<i32> {
+    pub const fn as_i32(&self) -> Option<i32> {
         if let Self::Int32(v) = self {
             Some(*v)
         } else {
@@ -139,7 +139,7 @@ impl<'a> CellValue<'a> {
     }
 
     #[must_use]
-    pub fn as_i64(&self) -> Option<i64> {
+    pub const fn as_i64(&self) -> Option<i64> {
         if let Self::Int64(v) = self {
             Some(*v)
         } else {
@@ -148,7 +148,7 @@ impl<'a> CellValue<'a> {
     }
 
     #[must_use]
-    pub fn as_bytes(&self) -> Option<&'a [u8]> {
+    pub const fn as_bytes(&self) -> Option<&'a [u8]> {
         if let Self::Bytes(b) = self {
             Some(b)
         } else {
@@ -157,7 +157,7 @@ impl<'a> CellValue<'a> {
     }
 
     #[must_use]
-    pub fn as_date(&self) -> Option<SasDate> {
+    pub const fn as_date(&self) -> Option<SasDate> {
         if let Self::Date(d) = self {
             Some(*d)
         } else {
@@ -166,7 +166,7 @@ impl<'a> CellValue<'a> {
     }
 
     #[must_use]
-    pub fn as_datetime(&self) -> Option<SasDateTime> {
+    pub const fn as_datetime(&self) -> Option<SasDateTime> {
         if let Self::DateTime(d) = self {
             Some(*d)
         } else {
@@ -175,7 +175,7 @@ impl<'a> CellValue<'a> {
     }
 
     #[must_use]
-    pub fn as_time(&self) -> Option<SasTime> {
+    pub const fn as_time(&self) -> Option<SasTime> {
         if let Self::Time(t) = self {
             Some(*t)
         } else {
@@ -201,7 +201,7 @@ impl<'a> CellValue<'a> {
 
 impl OwnedCellValue {
     #[must_use]
-    pub fn is_null(&self) -> bool {
+    pub const fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }
 
@@ -215,7 +215,7 @@ impl OwnedCellValue {
     }
 
     #[must_use]
-    pub fn as_f64(&self) -> Option<f64> {
+    pub const fn as_f64(&self) -> Option<f64> {
         if let Self::Float64(v) = self {
             Some(*v)
         } else {
@@ -224,7 +224,7 @@ impl OwnedCellValue {
     }
 
     #[must_use]
-    pub fn as_i32(&self) -> Option<i32> {
+    pub const fn as_i32(&self) -> Option<i32> {
         if let Self::Int32(v) = self {
             Some(*v)
         } else {
@@ -233,7 +233,7 @@ impl OwnedCellValue {
     }
 
     #[must_use]
-    pub fn as_i64(&self) -> Option<i64> {
+    pub const fn as_i64(&self) -> Option<i64> {
         if let Self::Int64(v) = self {
             Some(*v)
         } else {
@@ -251,7 +251,7 @@ impl OwnedCellValue {
     }
 
     #[must_use]
-    pub fn as_date(&self) -> Option<SasDate> {
+    pub const fn as_date(&self) -> Option<SasDate> {
         if let Self::Date(d) = self {
             Some(*d)
         } else {
@@ -260,7 +260,7 @@ impl OwnedCellValue {
     }
 
     #[must_use]
-    pub fn as_datetime(&self) -> Option<SasDateTime> {
+    pub const fn as_datetime(&self) -> Option<SasDateTime> {
         if let Self::DateTime(d) = self {
             Some(*d)
         } else {
@@ -269,7 +269,7 @@ impl OwnedCellValue {
     }
 
     #[must_use]
-    pub fn as_time(&self) -> Option<SasTime> {
+    pub const fn as_time(&self) -> Option<SasTime> {
         if let Self::Time(t) = self {
             Some(*t)
         } else {

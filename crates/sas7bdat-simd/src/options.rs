@@ -344,7 +344,7 @@ impl RowSelection {
     /// Construct a row range from plain `u64` bounds without needing the
     /// [`crate::RowIndex`] newtype.
     #[must_use]
-    pub fn range(start: u64, end: u64) -> Self {
+    pub const fn range(start: u64, end: u64) -> Self {
         Self::Range {
             start: crate::types::RowIndex(start),
             end: crate::types::RowIndex(end),

@@ -252,6 +252,10 @@ impl Dataset {
     }
 
     /// Scans raw rows and returns the collected scan statistics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan fails due to I/O or decompression errors.
     pub fn visit_raw_rows<F>(&self, f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::RawRow<'_>) -> Result<std::ops::ControlFlow<()>>,
@@ -260,6 +264,10 @@ impl Dataset {
     }
 
     /// Scans decoded rows and returns the collected scan statistics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan or row decoding fails.
     pub fn visit_rows<F>(&self, f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
@@ -268,6 +276,10 @@ impl Dataset {
     }
 
     /// Scans decoded rows after applying a named projection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name is not found, or if the scan fails.
     pub fn rows_with_projection<F>(&self, names: &[&str], f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
@@ -277,6 +289,10 @@ impl Dataset {
     }
 
     /// Scans decoded rows after applying a row window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan or row decoding fails.
     pub fn rows_windowed<F>(&self, selection: RowSelection, f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
@@ -285,6 +301,10 @@ impl Dataset {
     }
 
     /// Scans decoded batches and returns the collected scan statistics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan or batch decoding fails.
     pub fn visit_batches<F>(&self, f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::ColumnarBatch<'_>) -> Result<std::ops::ControlFlow<()>>,
@@ -293,27 +313,47 @@ impl Dataset {
     }
 
     /// Collects decoded rows into owned row values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan or row decoding fails.
     pub fn collect_rows(&self) -> Result<Vec<OwnedRow>> {
         self.scan().collect_rows()
     }
 
     /// Collects decoded rows for a named projection into owned row values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name is not found, or if the scan fails.
     pub fn collect_rows_with_projection(&self, names: &[&str]) -> Result<Vec<OwnedRow>> {
         let projection = self.select_with(names)?;
         self.scan().with_projection(&projection).collect_rows()
     }
 
     /// Collects decoded rows within a row window into owned row values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan or row decoding fails.
     pub fn collect_rows_windowed(&self, selection: RowSelection) -> Result<Vec<OwnedRow>> {
         self.scan().select(selection).collect_rows()
     }
 
     /// Collects decoded batches into owned columnar batches.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan or batch decoding fails.
     pub fn collect_batches(&self) -> Result<Vec<OwnedColumnarBatch>> {
         self.scan().collect_batches()
     }
 
     /// Collects decoded batches using a fixed target batch size.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scan or batch decoding fails.
     pub fn collect_batches_with_rows(&self, batch_rows: usize) -> Result<Vec<OwnedColumnarBatch>> {
         self.scan()
             .with_batch_hint(BatchHint::Rows(batch_rows))
@@ -321,6 +361,10 @@ impl Dataset {
     }
 
     /// Collects decoded batches for a named projection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any column name is not found, or if the scan fails.
     pub fn collect_batches_with_projection(
         &self,
         names: &[&str],

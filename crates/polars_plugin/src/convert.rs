@@ -43,10 +43,8 @@ pub(super) fn arrow_dt_to_polars_arrow(dt: &ArrowSchemaDataType) -> Result<Arrow
             ArrowDataType::LargeBinary
         }
         ArrowSchemaDataType::Date32 => ArrowDataType::Date32,
-        ArrowSchemaDataType::Time32(ArrowSchemaTimeUnit::Second) => {
-            ArrowDataType::Time64(PlTimeUnit::Nanosecond)
-        }
-        ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond) => {
+        ArrowSchemaDataType::Time32(ArrowSchemaTimeUnit::Second)
+        | ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond) => {
             ArrowDataType::Time64(PlTimeUnit::Nanosecond)
         }
         ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None) => {
