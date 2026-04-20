@@ -1,3 +1,28 @@
+//! A high-performance SAS7BDAT parser built around SIMD-accelerated page decoding.
+//!
+//! # Quick start
+//!
+//! ```no_run
+//! use sas7bdat_simd::{Dataset, Result};
+//! use std::ops::ControlFlow;
+//!
+//! fn main() -> Result<()> {
+//!     let ds = Dataset::open("data.sas7bdat")?;
+//!     ds.scan().visit_rows(|row| {
+//!         println!("{row:?}");
+//!         Ok(ControlFlow::Continue(()))
+//!     })?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Feature flags
+//!
+//! - **`arrow`** — enables [`ScanBuilder::visit_arrow_batches`] and [`Dataset::arrow_schema`].
+//!   When active, the crate pulls in `arrow-schema` and `polars-arrow` and exposes Arrow
+//!   `RecordBatch` conversion helpers. When absent, those APIs do not exist and the rest of
+//!   the crate is unchanged.
+
 #![feature(portable_simd)]
 
 mod columnar;
