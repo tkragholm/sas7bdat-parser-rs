@@ -12,7 +12,15 @@ use arrow_array::RecordBatch;
 #[cfg(feature = "arrow")]
 use arrow_schema::SchemaRef;
 use rayon::prelude::{ParallelIterator, ParallelSlice};
-use std::time::Instant;
+use std::{
+    collections::VecDeque,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{SyncSender, sync_channel},
+    },
+    time::Instant,
+};
 
 fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
     match parallelism {
@@ -193,16 +201,8 @@ impl<'a> ScanBuilder<'a> {
     where
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
     {
-        self.scan_batches(&mut |batch| {
-            let columns = batch.borrowed_columns();
-            let batch = ColumnarBatch {
-                row_base: batch.row_base,
-                row_count: batch.row_count,
-                columns: &columns,
-            };
-            f(batch)
-        })
-        .map(|stats| stats.summary())
+        self.scan_batches_borrowed_with_tap(&mut f, &mut |_, _| {})
+            .map(|stats| stats.summary())
     }
 
     /// # Errors
@@ -248,19 +248,8 @@ impl<'a> ScanBuilder<'a> {
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
     {
-        self.scan_batches_with_tap(
-            &mut |batch| {
-                let columns = batch.borrowed_columns();
-                let batch = ColumnarBatch {
-                    row_base: batch.row_base,
-                    row_count: batch.row_count,
-                    columns: &columns,
-                };
-                f(batch)
-            },
-            tap,
-        )
-        .map(|stats| stats.summary())
+        self.scan_batches_borrowed_with_tap(&mut f, tap)
+            .map(|stats| stats.summary())
     }
 
     /// # Errors
@@ -492,6 +481,142 @@ fn collect_batches_for_descriptor_chunk(
     Ok(batches)
 }
 
+enum StreamedBatchMessage {
+    Batch {
+        chunk_idx: usize,
+        batch: OwnedColumnarBatch,
+    },
+    Finished {
+        chunk_idx: usize,
+    },
+    Error(Error),
+}
+
+fn stream_batches_for_descriptor_chunk(
+    file_bytes: &[u8],
+    descriptor_chunk: &[crate::internal::PageDescriptor],
+    chunk_idx: usize,
+    context: &DescriptorChunkContext<'_>,
+    tx: SyncSender<StreamedBatchMessage>,
+    stop: &AtomicBool,
+) -> ScanStats {
+    let mut batch_accumulator = BatchAccumulator::new(
+        context.batch_plan.clone(),
+        context.target_rows,
+        context.capacity_hint_rows,
+    )
+    .with_materialize_threads(1);
+    let mut stats = ScanStats::default();
+    let mut decompressed_row = Vec::new();
+    let mut decode_batches = 0u64;
+
+    for &descriptor in descriptor_chunk {
+        if stop.load(Ordering::Relaxed) {
+            let _ = tx.send(StreamedBatchMessage::Finished { chunk_idx });
+            return stats;
+        }
+        let page = match super::raw::page_slice(file_bytes, context.raw_plan, descriptor) {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = tx.send(StreamedBatchMessage::Error(e));
+                return stats;
+            }
+        };
+        stats.pages_seen = stats.pages_seen.saturating_add(1);
+        stats.raw_bytes_read = stats
+            .raw_bytes_read
+            .saturating_add(u64::try_from(page.len()).unwrap_or(u64::MAX));
+        let result = super::raw::emit_rows_from_page(
+            context.raw_plan,
+            context.descriptor_table,
+            descriptor,
+            page,
+            &mut decompressed_row,
+            &mut stats,
+            &mut |row_index: crate::types::RowIndex, bytes| {
+                batch_accumulator.push_row(row_index.into(), bytes)?;
+                if batch_accumulator.is_full() {
+                    let batch = batch_accumulator.take_batch();
+                    decode_batches = decode_batches.saturating_add(1);
+                    batch_accumulator.reset_after_flush();
+                    if tx
+                        .send(StreamedBatchMessage::Batch { chunk_idx, batch })
+                        .is_err()
+                        || stop.load(Ordering::Relaxed)
+                    {
+                        return Ok(ControlFlow::Break(()));
+                    }
+                }
+                Ok(ControlFlow::Continue(()))
+            },
+        );
+        if let Err(e) = result {
+            let _ = tx.send(StreamedBatchMessage::Error(e));
+            return stats;
+        }
+    }
+
+    if !stop.load(Ordering::Relaxed) && !batch_accumulator.is_empty() {
+        let batch = batch_accumulator.take_batch();
+        decode_batches = decode_batches.saturating_add(1);
+        let _ = tx.send(StreamedBatchMessage::Batch { chunk_idx, batch });
+    }
+
+    let counters = batch_accumulator.counters();
+    stats.decode_batches = decode_batches;
+    stats.batch_staged_numeric_cells = counters.staged_numeric;
+    stats.batch_direct_numeric_cells = counters.direct_numeric;
+    stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;
+    stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
+    stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
+    stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned;
+    stats.batch_direct_utf8_owned_interned_hits = counters.direct_utf8_owned_interned_hits;
+    stats.batch_direct_utf8_owned_seen_once_promotions =
+        counters.direct_utf8_owned_seen_once_promotions;
+    stats.batch_fallback_cells = counters.fallback;
+    let _ = tx.send(StreamedBatchMessage::Finished { chunk_idx });
+    stats
+}
+
+const fn merge_scan_stats(into: &mut ScanStats, from: ScanStats) {
+    into.rows_seen = into.rows_seen.saturating_add(from.rows_seen);
+    into.rows_emitted = into.rows_emitted.saturating_add(from.rows_emitted);
+    into.pages_seen = into.pages_seen.saturating_add(from.pages_seen);
+    into.fused_pages = into.fused_pages.saturating_add(from.fused_pages);
+    into.indexed_pages = into.indexed_pages.saturating_add(from.indexed_pages);
+    into.compressed_pages = into.compressed_pages.saturating_add(from.compressed_pages);
+    into.raw_bytes_read = into.raw_bytes_read.saturating_add(from.raw_bytes_read);
+    into.row_bytes_materialized = into
+        .row_bytes_materialized
+        .saturating_add(from.row_bytes_materialized);
+    into.decode_batches = into.decode_batches.saturating_add(from.decode_batches);
+    into.batch_staged_numeric_cells = into
+        .batch_staged_numeric_cells
+        .saturating_add(from.batch_staged_numeric_cells);
+    into.batch_direct_numeric_cells = into
+        .batch_direct_numeric_cells
+        .saturating_add(from.batch_direct_numeric_cells);
+    into.batch_direct_raw_bytes_cells = into
+        .batch_direct_raw_bytes_cells
+        .saturating_add(from.batch_direct_raw_bytes_cells);
+    into.batch_direct_utf8_single_byte_cells = into
+        .batch_direct_utf8_single_byte_cells
+        .saturating_add(from.batch_direct_utf8_single_byte_cells);
+    into.batch_direct_utf8_borrowed_cells = into
+        .batch_direct_utf8_borrowed_cells
+        .saturating_add(from.batch_direct_utf8_borrowed_cells);
+    into.batch_direct_utf8_owned_cells = into
+        .batch_direct_utf8_owned_cells
+        .saturating_add(from.batch_direct_utf8_owned_cells);
+    into.batch_direct_utf8_owned_interned_hits = into
+        .batch_direct_utf8_owned_interned_hits
+        .saturating_add(from.batch_direct_utf8_owned_interned_hits);
+    into.batch_direct_utf8_owned_seen_once_promotions = into
+        .batch_direct_utf8_owned_seen_once_promotions
+        .saturating_add(from.batch_direct_utf8_owned_seen_once_promotions);
+    into.batch_fallback_cells = into.batch_fallback_cells.saturating_add(from.batch_fallback_cells);
+}
+
 const fn _keep_type_imports_alive<'a>(_columns: &'a [ColumnBuffer<'a>], _dataset: &'a Dataset) {}
 
 impl ScanBuilder<'_> {
@@ -572,23 +697,223 @@ impl ScanBuilder<'_> {
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
         let plan = ScanPlan::new(self)?;
-        if let Some(batches) = self.try_collect_batches_parallel(&plan)? {
-            let mut stats = ScanStats {
-                decode_batches: u64::try_from(batches.len()).unwrap_or(u64::MAX),
-                ..ScanStats::default()
-            };
-            for batch in batches {
-                stats.rows_emitted = stats
-                    .rows_emitted
-                    .saturating_add(u64::try_from(batch.row_count).unwrap_or(u64::MAX));
-                match f(batch)? {
-                    ControlFlow::Continue(()) => {}
-                    ControlFlow::Break(()) => break,
-                }
-            }
+        if let Some(stats) = self.try_stream_batches_parallel(&plan, f)? {
             return Ok(stats);
         }
         self.scan_batches_with_tap(f, &mut |_, _| {})
+    }
+
+    fn try_stream_batches_parallel<F>(&self, plan: &ScanPlan, f: &mut F) -> Result<Option<ScanStats>>
+    where
+        F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+    {
+        let descriptors = self.ds.descriptors()?;
+        let page_count = descriptors.pages.len();
+        let workers = resolved_parallel_workers(self.parallelism, page_count);
+        if workers <= 1 || page_count <= 1 || self.row_limit.is_some() {
+            return Ok(None);
+        }
+
+        let file_bytes: &[u8] = match &self.ds.file.source {
+            FileSource::Bytes(bytes) => bytes.as_ref(),
+            FileSource::Mmap(mmap) => &mmap[..],
+            FileSource::Path(_) => return Ok(None),
+        };
+
+        let worker_capacity_hint = plan.capacity_hint_rows.div_ceil(workers).max(1);
+        super::raw::RawScanPlan::validate_builder(self)?;
+        if usize::from(self.ds.layout.row_len) == 0 {
+            return Ok(Some(ScanStats::default()));
+        }
+
+        let chunk_size = page_count.div_ceil(workers).max(1);
+        let chunk_count = descriptors.pages.chunks(chunk_size).len();
+        let context = DescriptorChunkContext {
+            descriptor_table: descriptors.as_ref(),
+            raw_plan: &plan.raw,
+            batch_plan: &plan.batch,
+            row_count: self.ds.metadata.row_count,
+            target_rows: plan.batch_row_capacity,
+            capacity_hint_rows: worker_capacity_hint,
+        };
+
+        let total_stats = std::thread::scope(|scope| -> Result<ScanStats> {
+            let channel_bound = workers.saturating_mul(2).max(1);
+            let (tx, rx) = sync_channel(channel_bound);
+            let stop = Arc::new(AtomicBool::new(false));
+            let mut handles = Vec::with_capacity(chunk_count);
+
+            for (chunk_idx, chunk) in descriptors.pages.chunks(chunk_size).enumerate() {
+                let tx = tx.clone();
+                let stop = stop.clone();
+                let context = &context;
+                handles.push(scope.spawn(move || {
+                    stream_batches_for_descriptor_chunk(
+                        file_bytes,
+                        chunk,
+                        chunk_idx,
+                        context,
+                        tx,
+                        stop.as_ref(),
+                    )
+                }));
+            }
+            drop(tx);
+
+            let mut buffered = (0..chunk_count)
+                .map(|_| VecDeque::<OwnedColumnarBatch>::new())
+                .collect::<Vec<_>>();
+            let mut finished = vec![false; chunk_count];
+            let mut next_chunk = 0usize;
+            let mut delivered_batches = 0u64;
+            let mut delivered_rows = 0u64;
+
+            while let Ok(message) = rx.recv() {
+                match message {
+                    StreamedBatchMessage::Batch { chunk_idx, batch } => {
+                        if matches!(self.ordering, OrderingMode::Unordered) {
+                            delivered_batches = delivered_batches.saturating_add(1);
+                            delivered_rows = delivered_rows
+                                .saturating_add(u64::try_from(batch.row_count).unwrap_or(u64::MAX));
+                            match f(batch)? {
+                                ControlFlow::Continue(()) => {}
+                                ControlFlow::Break(()) => {
+                                    stop.store(true, Ordering::Relaxed);
+                                    break;
+                                }
+                            }
+                        } else {
+                            buffered[chunk_idx].push_back(batch);
+                            while next_chunk < chunk_count {
+                                if let Some(batch) = buffered[next_chunk].pop_front() {
+                                    delivered_batches = delivered_batches.saturating_add(1);
+                                    delivered_rows = delivered_rows.saturating_add(
+                                        u64::try_from(batch.row_count).unwrap_or(u64::MAX),
+                                    );
+                                    match f(batch)? {
+                                        ControlFlow::Continue(()) => {}
+                                        ControlFlow::Break(()) => {
+                                            stop.store(true, Ordering::Relaxed);
+                                            drop(rx);
+                                            let mut total = ScanStats::default();
+                                            for handle in handles {
+                                                let worker_stats = handle.join().map_err(|_| {
+                                                    Error::unsupported(
+                                                        "parallel batch worker panicked",
+                                                    )
+                                                })?;
+                                                merge_scan_stats(&mut total, worker_stats);
+                                            }
+                                            total.decode_batches = delivered_batches;
+                                            total.rows_emitted = delivered_rows;
+                                            return Ok(total);
+                                        }
+                                    }
+                                } else if finished[next_chunk] {
+                                    next_chunk += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    StreamedBatchMessage::Finished { chunk_idx } => {
+                        finished[chunk_idx] = true;
+                        if matches!(self.ordering, OrderingMode::Stable) {
+                            while next_chunk < chunk_count
+                                && finished[next_chunk]
+                                && buffered[next_chunk].is_empty()
+                            {
+                                next_chunk += 1;
+                            }
+                        }
+                    }
+                    StreamedBatchMessage::Error(err) => {
+                        stop.store(true, Ordering::Relaxed);
+                        drop(rx);
+                        for handle in handles {
+                            let _ = handle.join();
+                        }
+                        return Err(err);
+                    }
+                }
+            }
+
+            drop(rx);
+            let mut total = ScanStats::default();
+            for handle in handles {
+                let worker_stats = handle
+                    .join()
+                    .map_err(|_| Error::unsupported("parallel batch worker panicked"))?;
+                merge_scan_stats(&mut total, worker_stats);
+            }
+            total.decode_batches = delivered_batches;
+            total.rows_emitted = delivered_rows;
+            Ok(total)
+        })?;
+        Ok(Some(total_stats))
+    }
+
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
+    fn scan_batches_borrowed_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
+    where
+        F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
+        T: FnMut(u64, &[u8]),
+    {
+        if matches!(self.decode, DecodeMode::Raw) {
+            return Err(Error::unsupported(
+                "visit_batches does not support DecodeMode::Raw",
+            ));
+        }
+
+        let plan = ScanPlan::new(self)?;
+        let mut batcher = BatchAccumulator::new(
+            plan.batch.clone(),
+            plan.batch_row_capacity,
+            plan.capacity_hint_rows,
+        )
+        .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
+        let mut staged_scratch: Vec<crate::OwnedColumnBuffer> =
+            Vec::with_capacity(batcher.staged_numeric_count());
+        let mut decode_batches = 0u64;
+        let mut stop_after_current_batch = false;
+
+        let mut stats = scan_row_bytes_with_plan(self, &plan.raw, &mut |row_index, bytes| {
+            tap(row_index.into(), bytes);
+            batcher.push_row(row_index.into(), bytes)?;
+            if batcher.is_full() {
+                match batcher.flush_borrowed_and_reset(&mut staged_scratch, f)? {
+                    ControlFlow::Continue(()) => {
+                        decode_batches = decode_batches.saturating_add(1);
+                    }
+                    ControlFlow::Break(()) => {
+                        decode_batches = decode_batches.saturating_add(1);
+                        stop_after_current_batch = true;
+                        return Ok(ControlFlow::Break(()));
+                    }
+                }
+            }
+            Ok(ControlFlow::Continue(()))
+        })?;
+
+        if !stop_after_current_batch && !batcher.is_empty() {
+            decode_batches = decode_batches.saturating_add(1);
+            let _ = batcher.flush_borrowed_and_reset(&mut staged_scratch, f)?;
+        }
+
+        let counters = batcher.counters();
+        stats.decode_batches = decode_batches;
+        stats.batch_staged_numeric_cells = counters.staged_numeric;
+        stats.batch_direct_numeric_cells = counters.direct_numeric;
+        stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;
+        stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
+        stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
+        stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned;
+        stats.batch_direct_utf8_owned_interned_hits = counters.direct_utf8_owned_interned_hits;
+        stats.batch_direct_utf8_owned_seen_once_promotions =
+            counters.direct_utf8_owned_seen_once_promotions;
+        stats.batch_fallback_cells = counters.fallback;
+        Ok(stats)
     }
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]

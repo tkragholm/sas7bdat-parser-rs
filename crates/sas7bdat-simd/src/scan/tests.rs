@@ -650,6 +650,60 @@ fn visit_batches_parallel_in_memory_matches_serial_order() {
 }
 
 #[test]
+fn visit_owned_batches_parallel_in_memory_matches_serial_order() {
+    let row_a = make_numeric_text_row(1.0, *b"AA  ");
+    let row_b = make_numeric_text_row(2.0, *b"BB  ");
+    let row_c = make_numeric_text_row(3.0, *b"CC  ");
+    let row_d = make_numeric_text_row(4.0, *b"DD  ");
+    let mut bytes = make_page(0x0100, 2, 0, &[&row_a, &row_b], 64);
+    bytes.extend_from_slice(&make_page(0x0100, 2, 0, &[&row_c, &row_d], 64));
+    let ds = MockDatasetBuilder::new(Arc::<[u8]>::from(bytes))
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column("txt", LogicalType::String, 4, 8)
+        .with_row_len(12)
+        .with_total_rows(4)
+        .with_rows_per_page(2)
+        .build();
+
+    let mut serial_seen = Vec::new();
+    ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(2))
+        .visit_owned_batches(|batch| {
+            serial_seen.push((
+                batch.row_base,
+                batch.row_count,
+                match &batch.columns[1] {
+                    OwnedColumnBuffer::Utf8 { data, .. } => data.clone(),
+                    other => panic!("unexpected utf8 batch column: {other:?}"),
+                },
+            ));
+            Ok(ControlFlow::Continue(()))
+        })
+        .expect("serial owned visit");
+
+    let mut parallel_seen = Vec::new();
+    let stats = ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(2))
+        .with_parallelism(crate::Parallelism::Threads(2))
+        .visit_owned_batches(|batch| {
+            parallel_seen.push((
+                batch.row_base,
+                batch.row_count,
+                match &batch.columns[1] {
+                    OwnedColumnBuffer::Utf8 { data, .. } => data.clone(),
+                    other => panic!("unexpected utf8 batch column: {other:?}"),
+                },
+            ));
+            Ok(ControlFlow::Continue(()))
+        })
+        .expect("parallel owned visit");
+
+    assert_eq!(parallel_seen, serial_seen);
+    assert_eq!(stats.decode_batches, 2);
+    assert_eq!(stats.rows_emitted, 4);
+}
+
+#[test]
 fn batch_decode_plan_compiles_mixed_projected_families() {
     let row = {
         let mut bytes = Vec::with_capacity(16);
