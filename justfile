@@ -35,10 +35,16 @@ check-polars-plugin:
     @cargo check --manifest-path crates/polars_plugin/Cargo.toml
 
 test-polars-plugin:
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml --features arrow,extension-module
     @.venv/bin/pytest crates/polars_plugin/tests
 
 test-polars-plugin-rust:
     @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib
+
+test-core:
+    @cargo nextest run --release -p sas7bdat-simd -p sas7bdat-profiler
+
+test: test-core test-polars-plugin-rust test-polars-plugin
 
 install-polars-reader-baselines:
     @.venv/bin/python -m pip install polars-readstat polars_io

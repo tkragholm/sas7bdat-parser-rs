@@ -5,7 +5,7 @@ edition = "2024"
 
 [lib]
 name = "sas7bdat_polars"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 arrow-schema = { workspace = true, optional = true }
@@ -19,6 +19,6 @@ rmp-serde = { workspace = true }
 sas7bdat-simd = { path = "../sas7bdat-simd", features = ["arrow"] }
 
 [features]
-default = ["arrow", "extension-module"]
+default = ["arrow"]
 arrow = ["dep:arrow-schema", "sas7bdat-simd/arrow"]
 extension-module = ["pyo3/extension-module"]
