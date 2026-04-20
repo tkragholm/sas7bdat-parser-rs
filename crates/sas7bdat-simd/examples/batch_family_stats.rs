@@ -1,15 +1,6 @@
 use sas7bdat_simd::{BatchHint, Dataset};
 use std::{env, ops::ControlFlow, path::PathBuf};
 
-#[allow(clippy::cast_precision_loss)]
-fn pct(part: u64, total: u64) -> f64 {
-    if total == 0 {
-        0.0
-    } else {
-        (part as f64 * 100.0) / total as f64
-    }
-}
-
 fn main() {
     let path = env::args_os()
         .nth(1)
@@ -27,62 +18,15 @@ fn main() {
         .visit_batches(|_| Ok(ControlFlow::Continue(())))
         .expect("scan typed batches");
 
-    let total_cells = stats
-        .batch_staged_numeric_cells
-        .saturating_add(stats.batch_direct_numeric_cells)
-        .saturating_add(stats.batch_direct_raw_bytes_cells)
-        .saturating_add(stats.batch_direct_utf8_single_byte_cells)
-        .saturating_add(stats.batch_direct_utf8_borrowed_cells)
-        .saturating_add(stats.batch_direct_utf8_owned_cells)
-        .saturating_add(stats.batch_fallback_cells);
-
     println!("path={}", path.display());
     println!("row_count={}", ds.metadata().row_count);
     println!("column_count={}", ds.columns().len());
     println!("decode_batches={}", stats.decode_batches);
     println!("batch_rows={batch_rows}");
-    println!("total_routed_cells={total_cells}");
-    println!(
-        "staged_numeric_cells={} ({:.2}%)",
-        stats.batch_staged_numeric_cells,
-        pct(stats.batch_staged_numeric_cells, total_cells)
-    );
-    println!(
-        "direct_numeric_cells={} ({:.2}%)",
-        stats.batch_direct_numeric_cells,
-        pct(stats.batch_direct_numeric_cells, total_cells)
-    );
-    println!(
-        "direct_raw_bytes_cells={} ({:.2}%)",
-        stats.batch_direct_raw_bytes_cells,
-        pct(stats.batch_direct_raw_bytes_cells, total_cells)
-    );
-    println!(
-        "direct_utf8_single_byte_cells={} ({:.2}%)",
-        stats.batch_direct_utf8_single_byte_cells,
-        pct(stats.batch_direct_utf8_single_byte_cells, total_cells)
-    );
-    println!(
-        "direct_utf8_borrowed_cells={} ({:.2}%)",
-        stats.batch_direct_utf8_borrowed_cells,
-        pct(stats.batch_direct_utf8_borrowed_cells, total_cells)
-    );
-    println!(
-        "direct_utf8_owned_cells={} ({:.2}%)",
-        stats.batch_direct_utf8_owned_cells,
-        pct(stats.batch_direct_utf8_owned_cells, total_cells)
-    );
-    println!(
-        "direct_utf8_owned_interned_hits={}",
-        stats.batch_direct_utf8_owned_interned_hits
-    );
-    println!(
-        "direct_utf8_owned_seen_once_promotions={}",
-        stats.batch_direct_utf8_owned_seen_once_promotions
-    );
-    println!(
-        "fallback_cells={} ({:.2}%)",
-        stats.batch_fallback_cells,
-        pct(stats.batch_fallback_cells, total_cells)
-    );
+    println!("rows_seen={}", stats.rows_seen);
+    println!("rows_emitted={}", stats.rows_emitted);
+    println!("pages_seen={}", stats.pages_seen);
+    println!("compressed_pages={}", stats.compressed_pages);
+    println!("raw_bytes_read={}", stats.raw_bytes_read);
+    println!("row_bytes_materialized={}", stats.row_bytes_materialized);
 }

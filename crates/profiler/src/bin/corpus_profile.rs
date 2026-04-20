@@ -1157,7 +1157,7 @@ fn run_scan(
     limit: Option<u64>,
     file_progress: Option<FileProgressReporter>,
     mut row_tap: RowTap<'_>,
-) -> sas7bdat_simd::Result<sas7bdat_simd::ScanStats> {
+) -> sas7bdat_simd::Result<sas7bdat_simd::ScanStatsSummary> {
     let mut scan = ds.scan().with_decode_mode(mode.decode_mode());
     if let Some(projection) = projection {
         scan = scan.with_projection(projection);

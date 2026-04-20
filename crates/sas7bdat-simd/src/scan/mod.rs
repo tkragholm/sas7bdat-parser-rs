@@ -57,7 +57,7 @@ use string::{
 };
 
 #[derive(Debug, Clone, Default)]
-pub struct ScanStats {
+struct ScanStats {
     pub rows_seen: u64,
     pub rows_emitted: u64,
     pub pages_seen: u64,
@@ -78,6 +78,23 @@ pub struct ScanStats {
     pub batch_fallback_cells: u64,
 }
 
+impl ScanStats {
+    #[must_use]
+    pub(crate) const fn summary(&self) -> crate::ScanStatsSummary {
+        crate::ScanStatsSummary {
+            rows_seen: self.rows_seen,
+            rows_emitted: self.rows_emitted,
+            pages_seen: self.pages_seen,
+            fused_pages: self.fused_pages,
+            indexed_pages: self.indexed_pages,
+            compressed_pages: self.compressed_pages,
+            raw_bytes_read: self.raw_bytes_read,
+            row_bytes_materialized: self.row_bytes_materialized,
+            decode_batches: self.decode_batches,
+        }
+    }
+}
+
 #[doc(hidden)]
 #[derive(Debug, Clone, Default)]
 pub struct OwnedBatchScanBreakdown {
@@ -88,7 +105,7 @@ pub struct OwnedBatchScanBreakdown {
     pub take_batch_ns: u128,
     pub reset_after_flush_ns: u128,
     pub batches_emitted: u64,
-    pub stats: ScanStats,
+    pub stats: crate::ScanStatsSummary,
 }
 
 #[doc(hidden)]

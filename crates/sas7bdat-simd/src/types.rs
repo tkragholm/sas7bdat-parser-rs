@@ -22,8 +22,6 @@ impl From<PageIndex> for u64 {
     }
 }
 
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct RowIndex(pub u64);
 
@@ -231,7 +229,4 @@ impl<'a> PageSlice<'a> {
             crate::metadata::Endianness::Big => u16::from_be_bytes([bytes[0], bytes[1]]),
         })
     }
-
 }
-
-

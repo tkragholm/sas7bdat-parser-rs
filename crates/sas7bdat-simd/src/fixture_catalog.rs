@@ -1,4 +1,4 @@
-use crate::{CellValue, Dataset, LogicalType, Projection, Result, RowSelection, ScanStats};
+use crate::{CellValue, Dataset, LogicalType, Projection, Result, RowSelection};
 use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
@@ -559,18 +559,8 @@ fn source_group(path: &Path) -> String {
 }
 
 #[must_use]
-pub const fn summarize_scan_stats(stats: &ScanStats) -> ScanStatsSummary {
-    ScanStatsSummary {
-        rows_seen: stats.rows_seen,
-        rows_emitted: stats.rows_emitted,
-        pages_seen: stats.pages_seen,
-        fused_pages: stats.fused_pages,
-        indexed_pages: stats.indexed_pages,
-        compressed_pages: stats.compressed_pages,
-        raw_bytes_read: stats.raw_bytes_read,
-        row_bytes_materialized: stats.row_bytes_materialized,
-        decode_batches: stats.decode_batches,
-    }
+pub const fn summarize_scan_stats(stats: &ScanStatsSummary) -> ScanStatsSummary {
+    *stats
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Default)]

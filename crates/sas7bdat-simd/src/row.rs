@@ -113,42 +113,74 @@ impl<'a> CellValue<'a> {
 
     #[must_use]
     pub fn as_str(&self) -> Option<&'a str> {
-        if let Self::Str(s) = self { Some(s) } else { None }
+        if let Self::Str(s) = self {
+            Some(s)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_f64(&self) -> Option<f64> {
-        if let Self::Float64(v) = self { Some(*v) } else { None }
+        if let Self::Float64(v) = self {
+            Some(*v)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_i32(&self) -> Option<i32> {
-        if let Self::Int32(v) = self { Some(*v) } else { None }
+        if let Self::Int32(v) = self {
+            Some(*v)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_i64(&self) -> Option<i64> {
-        if let Self::Int64(v) = self { Some(*v) } else { None }
+        if let Self::Int64(v) = self {
+            Some(*v)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_bytes(&self) -> Option<&'a [u8]> {
-        if let Self::Bytes(b) = self { Some(b) } else { None }
+        if let Self::Bytes(b) = self {
+            Some(b)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_date(&self) -> Option<SasDate> {
-        if let Self::Date(d) = self { Some(*d) } else { None }
+        if let Self::Date(d) = self {
+            Some(*d)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_datetime(&self) -> Option<SasDateTime> {
-        if let Self::DateTime(d) = self { Some(*d) } else { None }
+        if let Self::DateTime(d) = self {
+            Some(*d)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_time(&self) -> Option<SasTime> {
-        if let Self::Time(t) = self { Some(*t) } else { None }
+        if let Self::Time(t) = self {
+            Some(*t)
+        } else {
+            None
+        }
     }
 
     #[must_use]
@@ -175,41 +207,73 @@ impl OwnedCellValue {
 
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
-        if let Self::String(s) = self { Some(s) } else { None }
+        if let Self::String(s) = self {
+            Some(s)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_f64(&self) -> Option<f64> {
-        if let Self::Float64(v) = self { Some(*v) } else { None }
+        if let Self::Float64(v) = self {
+            Some(*v)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_i32(&self) -> Option<i32> {
-        if let Self::Int32(v) = self { Some(*v) } else { None }
+        if let Self::Int32(v) = self {
+            Some(*v)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_i64(&self) -> Option<i64> {
-        if let Self::Int64(v) = self { Some(*v) } else { None }
+        if let Self::Int64(v) = self {
+            Some(*v)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_bytes(&self) -> Option<&[u8]> {
-        if let Self::Bytes(b) = self { Some(b) } else { None }
+        if let Self::Bytes(b) = self {
+            Some(b)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_date(&self) -> Option<SasDate> {
-        if let Self::Date(d) = self { Some(*d) } else { None }
+        if let Self::Date(d) = self {
+            Some(*d)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_datetime(&self) -> Option<SasDateTime> {
-        if let Self::DateTime(d) = self { Some(*d) } else { None }
+        if let Self::DateTime(d) = self {
+            Some(*d)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_time(&self) -> Option<SasTime> {
-        if let Self::Time(t) = self { Some(*t) } else { None }
+        if let Self::Time(t) = self {
+            Some(*t)
+        } else {
+            None
+        }
     }
 }

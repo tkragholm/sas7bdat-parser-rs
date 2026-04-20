@@ -1,7 +1,6 @@
-use sas7bdat_simd::{BatchHint, Dataset, ScanStats};
+use sas7bdat_simd::{BatchHint, Dataset};
 use std::{
     env, fs,
-    ops::ControlFlow,
     path::{Path, PathBuf},
 };
 
@@ -13,16 +12,10 @@ struct Aggregated {
     total_rows: u64,
     total_columns: u64,
     decode_batches: u64,
-    routed_cells: u64,
-    staged_numeric_cells: u64,
-    direct_numeric_cells: u64,
-    direct_raw_bytes_cells: u64,
-    direct_utf8_single_byte_cells: u64,
-    direct_utf8_borrowed_cells: u64,
-    direct_utf8_owned_cells: u64,
-    direct_utf8_owned_interned_hits: u64,
-    direct_utf8_owned_seen_once_promotions: u64,
-    fallback_cells: u64,
+    pages_seen: u64,
+    compressed_pages: u64,
+    raw_bytes_read: u64,
+    row_bytes_materialized: u64,
 }
 
 #[derive(Debug)]
@@ -31,21 +24,11 @@ struct FileSummary {
     size_bytes: u64,
     row_count: u64,
     column_count: usize,
-    routed_cells: u64,
-    fallback_cells: u64,
-    direct_utf8_owned_cells: u64,
-    direct_utf8_owned_interned_hits: u64,
-    direct_utf8_owned_seen_once_promotions: u64,
-    direct_utf8_single_byte_cells: u64,
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn pct(part: u64, total: u64) -> f64 {
-    if total == 0 {
-        0.0
-    } else {
-        (part as f64 * 100.0) / total as f64
-    }
+    pages_seen: u64,
+    compressed_pages: u64,
+    raw_bytes_read: u64,
+    row_bytes_materialized: u64,
+    decode_batches: u64,
 }
 
 fn fixture_root() -> PathBuf {
@@ -101,17 +84,6 @@ fn discover_target_paths(min_size_bytes: u64) -> Vec<PathBuf> {
     files
 }
 
-const fn route_total(stats: &ScanStats) -> u64 {
-    stats
-        .batch_staged_numeric_cells
-        .saturating_add(stats.batch_direct_numeric_cells)
-        .saturating_add(stats.batch_direct_raw_bytes_cells)
-        .saturating_add(stats.batch_direct_utf8_single_byte_cells)
-        .saturating_add(stats.batch_direct_utf8_borrowed_cells)
-        .saturating_add(stats.batch_direct_utf8_owned_cells)
-        .saturating_add(stats.batch_fallback_cells)
-}
-
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 fn main() {
     let batch_rows = env::var("BATCH_ROWS")
@@ -143,30 +115,28 @@ fn main() {
         let Ok(stats) = dataset
             .scan()
             .with_batch_hint(BatchHint::Rows(batch_rows))
-            .visit_batches(|_| Ok(ControlFlow::Continue(())))
+            .owned_batch_scan_breakdown()
         else {
             continue;
         };
 
-        let routed = route_total(&stats);
         let relative = path.strip_prefix(&fixtures_root).map_or_else(
             |_| path.display().to_string(),
             |p| p.to_string_lossy().to_string(),
         );
         let size_bytes = fs::metadata(&path).map_or(0, |meta| meta.len());
+        let stats_summary = stats.stats;
 
         file_summaries.push(FileSummary {
             relative,
             size_bytes,
             row_count: dataset.metadata().row_count,
             column_count: dataset.columns().len(),
-            routed_cells: routed,
-            fallback_cells: stats.batch_fallback_cells,
-            direct_utf8_owned_cells: stats.batch_direct_utf8_owned_cells,
-            direct_utf8_owned_interned_hits: stats.batch_direct_utf8_owned_interned_hits,
-            direct_utf8_owned_seen_once_promotions: stats
-                .batch_direct_utf8_owned_seen_once_promotions,
-            direct_utf8_single_byte_cells: stats.batch_direct_utf8_single_byte_cells,
+            pages_seen: stats_summary.pages_seen,
+            compressed_pages: stats_summary.compressed_pages,
+            raw_bytes_read: stats_summary.raw_bytes_read,
+            row_bytes_materialized: stats_summary.row_bytes_materialized,
+            decode_batches: stats_summary.decode_batches,
         });
 
         aggregated.files_scanned += 1;
@@ -178,162 +148,54 @@ fn main() {
             .saturating_add(u64::try_from(dataset.columns().len()).unwrap_or(0));
         aggregated.decode_batches = aggregated
             .decode_batches
-            .saturating_add(stats.decode_batches);
-        aggregated.routed_cells = aggregated.routed_cells.saturating_add(routed);
-        aggregated.staged_numeric_cells = aggregated
-            .staged_numeric_cells
-            .saturating_add(stats.batch_staged_numeric_cells);
-        aggregated.direct_numeric_cells = aggregated
-            .direct_numeric_cells
-            .saturating_add(stats.batch_direct_numeric_cells);
-        aggregated.direct_raw_bytes_cells = aggregated
-            .direct_raw_bytes_cells
-            .saturating_add(stats.batch_direct_raw_bytes_cells);
-        aggregated.direct_utf8_single_byte_cells = aggregated
-            .direct_utf8_single_byte_cells
-            .saturating_add(stats.batch_direct_utf8_single_byte_cells);
-        aggregated.direct_utf8_borrowed_cells = aggregated
-            .direct_utf8_borrowed_cells
-            .saturating_add(stats.batch_direct_utf8_borrowed_cells);
-        aggregated.direct_utf8_owned_cells = aggregated
-            .direct_utf8_owned_cells
-            .saturating_add(stats.batch_direct_utf8_owned_cells);
-        aggregated.direct_utf8_owned_interned_hits = aggregated
-            .direct_utf8_owned_interned_hits
-            .saturating_add(stats.batch_direct_utf8_owned_interned_hits);
-        aggregated.direct_utf8_owned_seen_once_promotions = aggregated
-            .direct_utf8_owned_seen_once_promotions
-            .saturating_add(stats.batch_direct_utf8_owned_seen_once_promotions);
-        aggregated.fallback_cells = aggregated
-            .fallback_cells
-            .saturating_add(stats.batch_fallback_cells);
+            .saturating_add(stats_summary.decode_batches);
+        aggregated.pages_seen = aggregated
+            .pages_seen
+            .saturating_add(stats_summary.pages_seen);
+        aggregated.compressed_pages = aggregated
+            .compressed_pages
+            .saturating_add(stats_summary.compressed_pages);
+        aggregated.raw_bytes_read = aggregated
+            .raw_bytes_read
+            .saturating_add(stats_summary.raw_bytes_read);
+        aggregated.row_bytes_materialized = aggregated
+            .row_bytes_materialized
+            .saturating_add(stats_summary.row_bytes_materialized);
     }
 
     println!("files_scanned={}", aggregated.files_scanned);
     println!("batch_rows={batch_rows}");
     println!("total_rows={}", aggregated.total_rows);
     println!("decode_batches={}", aggregated.decode_batches);
-    println!("total_routed_cells={}", aggregated.routed_cells);
+    println!("pages_seen={}", aggregated.pages_seen);
+    println!("compressed_pages={}", aggregated.compressed_pages);
+    println!("raw_bytes_read={}", aggregated.raw_bytes_read);
     println!(
-        "staged_numeric_cells={} ({:.2}%)",
-        aggregated.staged_numeric_cells,
-        pct(aggregated.staged_numeric_cells, aggregated.routed_cells)
-    );
-    println!(
-        "direct_numeric_cells={} ({:.2}%)",
-        aggregated.direct_numeric_cells,
-        pct(aggregated.direct_numeric_cells, aggregated.routed_cells)
-    );
-    println!(
-        "direct_raw_bytes_cells={} ({:.2}%)",
-        aggregated.direct_raw_bytes_cells,
-        pct(aggregated.direct_raw_bytes_cells, aggregated.routed_cells)
-    );
-    println!(
-        "direct_utf8_single_byte_cells={} ({:.2}%)",
-        aggregated.direct_utf8_single_byte_cells,
-        pct(
-            aggregated.direct_utf8_single_byte_cells,
-            aggregated.routed_cells
-        )
-    );
-    println!(
-        "direct_utf8_borrowed_cells={} ({:.2}%)",
-        aggregated.direct_utf8_borrowed_cells,
-        pct(
-            aggregated.direct_utf8_borrowed_cells,
-            aggregated.routed_cells
-        )
-    );
-    println!(
-        "direct_utf8_owned_cells={} ({:.2}%)",
-        aggregated.direct_utf8_owned_cells,
-        pct(aggregated.direct_utf8_owned_cells, aggregated.routed_cells)
-    );
-    println!(
-        "direct_utf8_owned_interned_hits={}",
-        aggregated.direct_utf8_owned_interned_hits
-    );
-    println!(
-        "direct_utf8_owned_seen_once_promotions={}",
-        aggregated.direct_utf8_owned_seen_once_promotions
-    );
-    println!(
-        "fallback_cells={} ({:.2}%)",
-        aggregated.fallback_cells,
-        pct(aggregated.fallback_cells, aggregated.routed_cells)
+        "row_bytes_materialized={}",
+        aggregated.row_bytes_materialized
     );
 
     file_summaries.sort_by(|left, right| {
         right
-            .fallback_cells
-            .cmp(&left.fallback_cells)
-            .then_with(|| {
-                right
-                    .direct_utf8_owned_interned_hits
-                    .cmp(&left.direct_utf8_owned_interned_hits)
-            })
-            .then_with(|| {
-                right
-                    .direct_utf8_owned_seen_once_promotions
-                    .cmp(&left.direct_utf8_owned_seen_once_promotions)
-            })
-            .then_with(|| {
-                right
-                    .direct_utf8_owned_cells
-                    .cmp(&left.direct_utf8_owned_cells)
-            })
-            .then_with(|| right.routed_cells.cmp(&left.routed_cells))
+            .row_bytes_materialized
+            .cmp(&left.row_bytes_materialized)
+            .then_with(|| right.raw_bytes_read.cmp(&left.raw_bytes_read))
+            .then_with(|| right.decode_batches.cmp(&left.decode_batches))
     });
 
-    println!("\nTop files by fallback/owned-utf8 pressure:");
+    println!("\nTop files by row materialization / I/O pressure:");
     for summary in file_summaries.iter().take(print_top) {
         println!(
-            "{} | size_mb={:.2} rows={} cols={} fallback={} ({:.2}%) utf8_owned={} ({:.2}%) utf8_single_byte={} ({:.2}%)",
+            "{} | size_mb={:.2} rows={} cols={} decode_batches={} row_bytes_materialized={} compressed_pages={} raw_bytes_read={} pages_seen={}",
             summary.relative,
             summary.size_bytes as f64 / (1024.0 * 1024.0),
             summary.row_count,
             summary.column_count,
-            summary.fallback_cells,
-            pct(summary.fallback_cells, summary.routed_cells),
-            summary.direct_utf8_owned_cells,
-            pct(summary.direct_utf8_owned_cells, summary.routed_cells),
-            summary.direct_utf8_single_byte_cells,
-            pct(summary.direct_utf8_single_byte_cells, summary.routed_cells),
-        );
-    }
-
-    println!("\nTop files by interned/promoted UTF-8 staging activity:");
-    file_summaries.sort_by(|left, right| {
-        right
-            .direct_utf8_owned_interned_hits
-            .cmp(&left.direct_utf8_owned_interned_hits)
-            .then_with(|| {
-                right
-                    .direct_utf8_owned_seen_once_promotions
-                    .cmp(&left.direct_utf8_owned_seen_once_promotions)
-            })
-            .then_with(|| {
-                right
-                    .direct_utf8_owned_cells
-                    .cmp(&left.direct_utf8_owned_cells)
-            })
-    });
-    for summary in file_summaries.iter().take(print_top) {
-        println!(
-            "{} | utf8_owned={} interned_hits={} ({:.2}% of owned) promotions={} ({:.2}% of owned)",
-            summary.relative,
-            summary.direct_utf8_owned_cells,
-            summary.direct_utf8_owned_interned_hits,
-            pct(
-                summary.direct_utf8_owned_interned_hits,
-                summary.direct_utf8_owned_cells
-            ),
-            summary.direct_utf8_owned_seen_once_promotions,
-            pct(
-                summary.direct_utf8_owned_seen_once_promotions,
-                summary.direct_utf8_owned_cells
-            )
+            summary.decode_batches,
+            summary.row_bytes_materialized,
+            summary.compressed_pages,
+            summary.raw_bytes_read,
+            summary.pages_seen,
         );
     }
 }

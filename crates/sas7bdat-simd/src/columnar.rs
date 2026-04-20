@@ -225,17 +225,29 @@ impl<'a> ColumnBuffer<'a> {
 
     #[must_use]
     pub fn as_f64_slice(&self) -> Option<&'a [f64]> {
-        if let Self::F64(b) = self { Some(b.values) } else { None }
+        if let Self::F64(b) = self {
+            Some(b.values)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_i32_slice(&self) -> Option<&'a [i32]> {
-        if let Self::I32(b) = self { Some(b.values) } else { None }
+        if let Self::I32(b) = self {
+            Some(b.values)
+        } else {
+            None
+        }
     }
 
     #[must_use]
     pub fn as_i64_slice(&self) -> Option<&'a [i64]> {
-        if let Self::I64(b) = self { Some(b.values) } else { None }
+        if let Self::I64(b) = self {
+            Some(b.values)
+        } else {
+            None
+        }
     }
 
     /// Iterate over string values. Yields `None` for null entries when the column is nullable.

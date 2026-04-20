@@ -32,6 +32,7 @@ pub use error::{
     ArrowError, CompressionError, CorruptionError, DecodeError, Error, HeaderError, IoError,
     MetadataError, ProjectionError, Result, UnsupportedError,
 };
+pub use fixture_catalog::ScanStatsSummary;
 pub use metadata::{
     ColumnMeta, CompressionKind, DatasetMetadata, Endianness, LogicalType, SasDate, SasDateTime,
     SasTime, Timestamp,
@@ -45,5 +46,5 @@ pub use pages::DescriptorBreakdown;
 pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};
 pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
 pub use scan::{
-    BatchSink, OwnedBatchScanBreakdown, RawRowSink, RowSink, ScanBuilder, ScanProgress, ScanStats,
+    BatchSink, OwnedBatchScanBreakdown, RawRowSink, RowSink, ScanBuilder, ScanProgress,
 };

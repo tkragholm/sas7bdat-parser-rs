@@ -130,11 +130,11 @@ impl<'a> ScanBuilder<'a> {
     /// # Errors
     ///
     /// Returns an error if the scan fails, such as due to I/O or decompression errors.
-    pub fn visit_raw_rows<F>(&self, mut f: F) -> Result<ScanStats>
+    pub fn visit_raw_rows<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
     {
-        self.scan_raw_rows(&mut f)
+        self.scan_raw_rows(&mut f).map(|stats| stats.summary())
     }
 
     /// Scans raw rows and calls `tap(row_offset, raw_page_bytes)` before each row decode.
@@ -144,22 +144,27 @@ impl<'a> ScanBuilder<'a> {
     /// # Errors
     ///
     /// Returns an error if the scan fails.
-    pub fn visit_raw_rows_with_tap<F, T>(&self, mut f: F, tap: &mut T) -> Result<ScanStats>
+    pub fn visit_raw_rows_with_tap<F, T>(
+        &self,
+        mut f: F,
+        tap: &mut T,
+    ) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
     {
         self.scan_raw_rows_with_tap(&mut f, tap)
+            .map(|stats| stats.summary())
     }
 
     /// # Errors
     ///
     /// Returns an error if the scan or row decoding fails.
-    pub fn visit_rows<F>(&self, mut f: F) -> Result<ScanStats>
+    pub fn visit_rows<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
     {
-        self.scan_rows(&mut f)
+        self.scan_rows(&mut f).map(|stats| stats.summary())
     }
 
     /// Scans decoded rows and calls `tap(row_offset, raw_page_bytes)` before each row decode.
@@ -168,18 +173,23 @@ impl<'a> ScanBuilder<'a> {
     /// # Errors
     ///
     /// Returns an error if the scan or row decoding fails.
-    pub fn visit_rows_with_tap<F, T>(&self, mut f: F, tap: &mut T) -> Result<ScanStats>
+    pub fn visit_rows_with_tap<F, T>(
+        &self,
+        mut f: F,
+        tap: &mut T,
+    ) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
     {
         self.scan_rows_with_tap(&mut f, tap)
+            .map(|stats| stats.summary())
     }
 
     /// # Errors
     ///
     /// Returns an error if the scan or batch decoding fails.
-    pub fn visit_batches<F>(&self, mut f: F) -> Result<ScanStats>
+    pub fn visit_batches<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
     {
@@ -192,13 +202,14 @@ impl<'a> ScanBuilder<'a> {
             };
             f(batch)
         })
+        .map(|stats| stats.summary())
     }
 
     /// # Errors
     ///
     /// Returns an error if the scan or Arrow conversion fails.
     #[cfg(feature = "arrow")]
-    pub fn visit_arrow_batches<F>(&self, mut f: F) -> Result<ScanStats>
+    pub fn visit_arrow_batches<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(RecordBatch) -> Result<ControlFlow<()>>,
     {
@@ -215,11 +226,11 @@ impl<'a> ScanBuilder<'a> {
     /// # Errors
     ///
     /// Returns an error if the scan or batch decoding fails.
-    pub fn visit_owned_batches<F>(&self, mut f: F) -> Result<ScanStats>
+    pub fn visit_owned_batches<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
-        self.scan_batches(&mut f)
+        self.scan_batches(&mut f).map(|stats| stats.summary())
     }
 
     /// Scans decoded batches and calls `tap(row_offset, raw_page_bytes)` before each batch.
@@ -228,7 +239,11 @@ impl<'a> ScanBuilder<'a> {
     /// # Errors
     ///
     /// Returns an error if the scan or batch decoding fails.
-    pub fn visit_batches_with_tap<F, T>(&self, mut f: F, tap: &mut T) -> Result<ScanStats>
+    pub fn visit_batches_with_tap<F, T>(
+        &self,
+        mut f: F,
+        tap: &mut T,
+    ) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
         T: FnMut(u64, &[u8]),
@@ -245,6 +260,7 @@ impl<'a> ScanBuilder<'a> {
             },
             tap,
         )
+        .map(|stats| stats.summary())
     }
 
     /// # Errors
@@ -347,21 +363,21 @@ impl<'a> ScanBuilder<'a> {
     /// # Errors
     ///
     /// Returns an error if the scan or sink fails.
-    pub fn write_raw_rows(&self, sink: &mut impl RawRowSink) -> Result<ScanStats> {
+    pub fn write_raw_rows(&self, sink: &mut impl RawRowSink) -> Result<crate::ScanStatsSummary> {
         self.visit_raw_rows(|row| sink.push(row))
     }
 
     /// # Errors
     ///
     /// Returns an error if the scan or sink fails.
-    pub fn write_rows(&self, sink: &mut impl RowSink) -> Result<ScanStats> {
+    pub fn write_rows(&self, sink: &mut impl RowSink) -> Result<crate::ScanStatsSummary> {
         self.visit_rows(|row| sink.push(row))
     }
 
     /// # Errors
     ///
     /// Returns an error if the scan or sink fails.
-    pub fn write_batches(&self, sink: &mut impl BatchSink) -> Result<ScanStats> {
+    pub fn write_batches(&self, sink: &mut impl BatchSink) -> Result<crate::ScanStatsSummary> {
         self.visit_batches(|batch| sink.push(batch))
     }
 }
@@ -712,7 +728,7 @@ impl ScanBuilder<'_> {
             take_batch_ns,
             reset_after_flush_ns,
             batches_emitted: decode_batches,
-            stats,
+            stats: stats.summary(),
         })
     }
 }

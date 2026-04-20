@@ -13,7 +13,6 @@ use crate::{
     projection::{Projection, ProjectionBuilder},
     row::OwnedRow,
     scan::ScanBuilder,
-    scan::ScanStats,
 };
 use memmap2::Mmap;
 use std::{
@@ -233,9 +232,7 @@ impl Dataset {
 
     #[must_use]
     pub fn column(&self, name: &str) -> Option<&ColumnMeta> {
-        self.columns()
-            .iter()
-            .find(|column| column.name() == name)
+        self.columns().iter().find(|column| column.name() == name)
     }
 
     #[must_use]
@@ -255,7 +252,7 @@ impl Dataset {
     }
 
     /// Scans raw rows and returns the collected scan statistics.
-    pub fn visit_raw_rows<F>(&self, f: F) -> Result<ScanStats>
+    pub fn visit_raw_rows<F>(&self, f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::RawRow<'_>) -> Result<std::ops::ControlFlow<()>>,
     {
@@ -263,7 +260,7 @@ impl Dataset {
     }
 
     /// Scans decoded rows and returns the collected scan statistics.
-    pub fn visit_rows<F>(&self, f: F) -> Result<ScanStats>
+    pub fn visit_rows<F>(&self, f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
     {
@@ -271,7 +268,7 @@ impl Dataset {
     }
 
     /// Scans decoded rows after applying a named projection.
-    pub fn rows_with_projection<F>(&self, names: &[&str], f: F) -> Result<ScanStats>
+    pub fn rows_with_projection<F>(&self, names: &[&str], f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
     {
@@ -280,7 +277,7 @@ impl Dataset {
     }
 
     /// Scans decoded rows after applying a row window.
-    pub fn rows_windowed<F>(&self, selection: RowSelection, f: F) -> Result<ScanStats>
+    pub fn rows_windowed<F>(&self, selection: RowSelection, f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::RowView<'_>) -> Result<std::ops::ControlFlow<()>>,
     {
@@ -288,7 +285,7 @@ impl Dataset {
     }
 
     /// Scans decoded batches and returns the collected scan statistics.
-    pub fn visit_batches<F>(&self, f: F) -> Result<ScanStats>
+    pub fn visit_batches<F>(&self, f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(crate::ColumnarBatch<'_>) -> Result<std::ops::ControlFlow<()>>,
     {
@@ -557,5 +554,4 @@ mod tests {
         assert_eq!(visited, collected.len());
         assert_eq!(stats.rows_emitted, collected.len() as u64);
     }
-
 }
