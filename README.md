@@ -49,6 +49,24 @@ For local development from the workspace root:
 cargo run -p sas7bdat-profiler --bin corpus_profile -- <root> --format csv --out corpus_profile.csv
 ```
 
+## Testing
+
+Use the `just` targets to keep the Rust core and the Python plugin tests separate:
+
+```text
+just test-core
+just test-polars-plugin-rust
+just test-polars-plugin
+just test
+```
+
+- `just test-core` runs the core Rust workspace tests with `cargo nextest`.
+- `just test-polars-plugin-rust` runs the plugin crate's Rust tests with the
+  PyO3 extension-module feature disabled.
+- `just test-polars-plugin` builds the extension module and runs the Python
+  smoke tests.
+- `just test` runs the full sequence.
+
 ## Production corpus target profile
 
 Based on [`Transfer_708245_310326/corpus_profile_nosizebytes.csv`](Transfer_708245_310326/corpus_profile_nosizebytes.csv) and local `corpus_*.csv` analysis:
