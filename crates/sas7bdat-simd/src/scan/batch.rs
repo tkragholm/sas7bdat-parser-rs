@@ -11,11 +11,12 @@ use super::{
 use crate::define_owned_column_enum;
 use crate::{
     DictionaryStaging,
-    columnar::{BLANK_ID, TrustedOffsets},
+    columnar::{BLANK_ID, ColumnBuffer, ColumnarBatch, TrustedOffsets},
 };
 use encoding_rs::WINDOWS_1252;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
+use std::ops::ControlFlow;
 
 #[derive(Debug, Clone)]
 pub(super) struct BatchDecodePlan {
@@ -1078,6 +1079,110 @@ impl BatchAccumulator {
         self.utf8_decode_scratch.clear();
     }
 
+    pub(super) const fn staged_numeric_count(&self) -> usize {
+        self.plan.families.staged_numeric.len()
+    }
+
+    /// Reset column buffers for reuse, preserving allocated capacity where possible.
+    /// Builders that have widened (e.g. I32 → F64) are recreated from the original plan.
+    pub(super) fn reset_for_reuse(&mut self) {
+        for (idx, col) in self.columns.iter_mut().enumerate() {
+            let planned_kind = self.plan.column_kinds[idx];
+            if col.matches_planned_kind(planned_kind) {
+                col.clear_for_reuse();
+            } else {
+                let column = &self.plan.row_plan.columns[idx];
+                let utf8_mult = if matches!(column.kernel, CompiledDecodeKernel::Utf8)
+                    && matches!(
+                        self.plan.row_plan.string_kernel,
+                        StringDecodeKernel::EncodedStrict | StringDecodeKernel::EncodedLenient
+                    ) {
+                    2
+                } else {
+                    1
+                };
+                *col = OwnedBatchColumnBuilder::with_capacity_hint(
+                    planned_kind,
+                    self.capacity_hint_rows,
+                    column.width,
+                    column.numeric_tile,
+                    utf8_mult,
+                );
+            }
+        }
+        for &idx in &self.plan.families.direct_utf8_owned {
+            if self
+                .staged_string_lookups
+                .get(idx)
+                .is_some_and(Option::is_some)
+                && let Some(OwnedBatchColumnBuilder::Utf8 { dictionary_ids, .. }) =
+                    self.columns.get_mut(idx)
+            {
+                match dictionary_ids {
+                    None => {
+                        dictionary_ids.replace(Vec::with_capacity(self.capacity_hint_rows.max(1)));
+                    }
+                    Some(ids) => ids.clear(),
+                }
+            }
+        }
+        self.owned_strings.clear();
+        self.utf8_decode_scratch.clear();
+        self.row_base = None;
+        self.row_count = 0;
+    }
+
+    /// Materialize a borrowed `ColumnarBatch<'_>` view, invoke `f`, then reset for reuse.
+    /// `StagedNumeric` columns are materialized into `staged_scratch` first.
+    /// `staged_scratch` must have capacity for `self.staged_numeric_count()` entries.
+    pub(super) fn flush_borrowed_and_reset<F>(
+        &mut self,
+        staged_scratch: &mut Vec<OwnedColumnBuffer>,
+        f: &mut F,
+    ) -> Result<ControlFlow<()>>
+    where
+        F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
+    {
+        staged_scratch.clear();
+        for &idx in &self.plan.families.staged_numeric {
+            if let OwnedBatchColumnBuilder::StagedNumeric {
+                raw_bits,
+                mode,
+                has_missing,
+            } = &self.columns[idx]
+            {
+                staged_scratch.push(materialize_staged_numeric_column(
+                    raw_bits,
+                    *mode,
+                    *has_missing,
+                ));
+            }
+        }
+
+        let mut views: Vec<ColumnBuffer<'_>> = Vec::with_capacity(self.columns.len());
+        let mut staged_idx = 0usize;
+        for col in &self.columns {
+            if let Some(view) = col.borrow_view() {
+                views.push(view);
+            } else {
+                views.push(staged_scratch[staged_idx].as_borrowed());
+                staged_idx += 1;
+            }
+        }
+
+        let row_base = crate::types::RowIndex(self.row_base.unwrap_or(0));
+        let row_count = self.row_count;
+        let result = f(ColumnarBatch {
+            row_base,
+            row_count,
+            columns: &views,
+        })?;
+
+        drop(views);
+        self.reset_for_reuse();
+        Ok(result)
+    }
+
     pub(super) const fn counters(&self) -> BatchFamilyCounters {
         self.counters
     }
@@ -1605,6 +1710,136 @@ impl OwnedBatchColumnBuilder {
         *self = widened;
     }
 
+    /// Borrow a `ColumnBuffer<'_>` view without consuming the builder.
+    /// Returns `None` for `StagedNumeric`, which requires external materialization first.
+    pub(super) fn borrow_view(&self) -> Option<ColumnBuffer<'_>> {
+        use crate::columnar::{BytesBuffer, PrimitiveBuffer, Utf8Buffer};
+        match self {
+            Self::I32 { values, valid } => Some(ColumnBuffer::I32(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            })),
+            Self::I64 { values, valid } => Some(ColumnBuffer::I64(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            })),
+            Self::F64 { values, valid } => Some(ColumnBuffer::F64(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            })),
+            Self::Date { values, valid } => Some(ColumnBuffer::Date(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            })),
+            Self::DateTime { values, valid } => Some(ColumnBuffer::DateTime(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            })),
+            Self::Time { values, valid } => Some(ColumnBuffer::Time(PrimitiveBuffer {
+                values,
+                valid: valid.as_deref(),
+            })),
+            Self::Utf8 {
+                offsets,
+                data,
+                valid,
+                dictionary_ids,
+            } => Some(ColumnBuffer::Utf8(Utf8Buffer {
+                offsets: offsets.as_slice(),
+                data,
+                valid: valid.as_deref(),
+                dictionary_ids: dictionary_ids.as_deref(),
+                dictionary: None,
+            })),
+            Self::RawBytes {
+                offsets,
+                data,
+                valid,
+            } => Some(ColumnBuffer::RawBytes(BytesBuffer {
+                offsets: offsets.as_slice(),
+                data,
+                valid: valid.as_deref(),
+            })),
+            Self::StagedNumeric { .. } => None,
+        }
+    }
+
+    /// Returns whether the builder's current discriminant matches the planned initial kind.
+    /// `StagedNumeric` always returns `true` — it cannot widen.
+    pub(super) const fn matches_planned_kind(&self, kind: ColumnMaterializationKind) -> bool {
+        match self {
+            Self::StagedNumeric { .. } => true,
+            Self::I32 { .. } => matches!(kind, ColumnMaterializationKind::I32),
+            Self::I64 { .. } => matches!(kind, ColumnMaterializationKind::I64),
+            Self::F64 { .. } => matches!(kind, ColumnMaterializationKind::F64),
+            Self::Date { .. } => matches!(kind, ColumnMaterializationKind::Date),
+            Self::DateTime { .. } => matches!(kind, ColumnMaterializationKind::DateTime),
+            Self::Time { .. } => matches!(kind, ColumnMaterializationKind::Time),
+            Self::Utf8 { .. } => matches!(kind, ColumnMaterializationKind::Utf8),
+            Self::RawBytes { .. } => matches!(kind, ColumnMaterializationKind::RawBytes),
+        }
+    }
+
+    /// Clear accumulated data while preserving allocated capacity for reuse.
+    pub(super) fn clear_for_reuse(&mut self) {
+        match self {
+            Self::I32 { values, valid } => {
+                values.clear();
+                *valid = None;
+            }
+            Self::I64 { values, valid } => {
+                values.clear();
+                *valid = None;
+            }
+            Self::F64 { values, valid } => {
+                values.clear();
+                *valid = None;
+            }
+            Self::Date { values, valid } => {
+                values.clear();
+                *valid = None;
+            }
+            Self::DateTime { values, valid } => {
+                values.clear();
+                *valid = None;
+            }
+            Self::Time { values, valid } => {
+                values.clear();
+                *valid = None;
+            }
+            Self::Utf8 {
+                offsets,
+                data,
+                valid,
+                dictionary_ids,
+            } => {
+                offsets.clear_for_reuse();
+                data.clear();
+                *valid = None;
+                if let Some(ids) = dictionary_ids {
+                    ids.clear();
+                }
+            }
+            Self::RawBytes {
+                offsets,
+                data,
+                valid,
+            } => {
+                offsets.clear_for_reuse();
+                data.clear();
+                *valid = None;
+            }
+            Self::StagedNumeric {
+                raw_bits,
+                has_missing,
+                ..
+            } => {
+                raw_bits.clear();
+                *has_missing = false;
+            }
+        }
+    }
+
     pub(super) fn finish(self) -> OwnedColumnBuffer {
         match self {
             Self::I32 { values, valid } => OwnedColumnBuffer::I32 { values, valid },
@@ -1614,7 +1849,7 @@ impl OwnedBatchColumnBuilder {
                 raw_bits,
                 mode,
                 has_missing,
-            } => materialize_staged_numeric_column(raw_bits, mode, has_missing),
+            } => materialize_staged_numeric_column(&raw_bits, mode, has_missing),
             Self::Date { values, valid } => OwnedColumnBuffer::Date { values, valid },
             Self::DateTime { values, valid } => OwnedColumnBuffer::DateTime { values, valid },
             Self::Time { values, valid } => OwnedColumnBuffer::Time { values, valid },

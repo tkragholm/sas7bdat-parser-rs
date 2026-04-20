@@ -105,14 +105,14 @@ fn numeric_bits_padded(slice: &[u8], endianness: Endianness) -> u64 {
 }
 
 pub(super) fn materialize_staged_numeric_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     mode: NumericTileMode,
     has_missing: bool,
 ) -> OwnedColumnBuffer {
     match mode {
         NumericTileMode::F64RawBits => {
             if has_missing {
-                let valid = classify_missing_raw_bits(&raw_bits);
+                let valid = classify_missing_raw_bits(raw_bits);
                 materialize_staged_f64_column(raw_bits, valid)
             } else {
                 materialize_staged_f64_column(raw_bits, None)
@@ -120,7 +120,7 @@ pub(super) fn materialize_staged_numeric_column(
         }
         NumericTileMode::IntegerWidth8 => {
             let valid = if has_missing {
-                classify_missing_raw_bits(&raw_bits)
+                classify_missing_raw_bits(raw_bits)
             } else {
                 None
             };
@@ -128,7 +128,7 @@ pub(super) fn materialize_staged_numeric_column(
         }
         NumericTileMode::Date => {
             let valid = if has_missing {
-                classify_missing_raw_bits(&raw_bits)
+                classify_missing_raw_bits(raw_bits)
             } else {
                 None
             };
@@ -136,7 +136,7 @@ pub(super) fn materialize_staged_numeric_column(
         }
         NumericTileMode::DateTime => {
             let valid = if has_missing {
-                classify_missing_raw_bits(&raw_bits)
+                classify_missing_raw_bits(raw_bits)
             } else {
                 None
             };
@@ -144,7 +144,7 @@ pub(super) fn materialize_staged_numeric_column(
         }
         NumericTileMode::Time => {
             let valid = if has_missing {
-                classify_missing_raw_bits(&raw_bits)
+                classify_missing_raw_bits(raw_bits)
             } else {
                 None
             };
@@ -160,14 +160,14 @@ fn valid_bit(validity: &[u64], index: usize) -> bool {
 }
 
 pub(super) fn materialize_staged_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u64>>,
 ) -> OwnedColumnBuffer {
     type U64x8 = Simd<u64, 8>;
 
     let mut values = Vec::with_capacity(raw_bits.len());
     if valid.is_none() {
-        values.extend(raw_bits.into_iter().map(f64::from_bits));
+        values.extend(raw_bits.iter().map(|b| f64::from_bits(*b)));
         return OwnedColumnBuffer::F64 { values, valid };
     }
 
@@ -215,14 +215,14 @@ fn expand_validity_byte(valid_byte: u8) -> <Simd<u64, 8> as SimdPartialEq>::Mask
 }
 
 pub(super) fn materialize_staged_i64_or_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u64>>,
 ) -> OwnedColumnBuffer {
     type F64x8 = Simd<f64, 8>;
     type I64x8 = Simd<i64, 8>;
     type U64x8 = Simd<u64, 8>;
 
-    if first_non_integral_in_range_index_simd(&raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
+    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
         .is_some()
     {
         return materialize_staged_f64_column(raw_bits, valid);
@@ -277,7 +277,7 @@ pub(super) fn materialize_staged_i64_or_f64_column(
 }
 
 pub(super) fn materialize_staged_date_or_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u64>>,
 ) -> OwnedColumnBuffer {
     // Converts via i64 to keep a single Mask<i64, 8> type across all typed materializers.
@@ -286,7 +286,7 @@ pub(super) fn materialize_staged_date_or_f64_column(
     type I64x8 = Simd<i64, 8>;
     type U64x8 = Simd<u64, 8>;
 
-    if first_non_integral_in_range_index_simd(&raw_bits, valid.as_deref(), I32_MIN_F64, I32_MAX_F64)
+    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I32_MIN_F64, I32_MAX_F64)
         .is_some()
     {
         return materialize_staged_f64_column(raw_bits, valid);
@@ -354,14 +354,14 @@ pub(super) fn materialize_staged_date_or_f64_column(
 }
 
 pub(super) fn materialize_staged_datetime_or_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u64>>,
 ) -> OwnedColumnBuffer {
     type F64x8 = Simd<f64, 8>;
     type I64x8 = Simd<i64, 8>;
     type U64x8 = Simd<u64, 8>;
 
-    if first_non_integral_in_range_index_simd(&raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
+    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
         .is_some()
     {
         return materialize_staged_f64_column(raw_bits, valid);
@@ -427,14 +427,14 @@ pub(super) fn materialize_staged_datetime_or_f64_column(
 }
 
 pub(super) fn materialize_staged_time_or_f64_column(
-    raw_bits: Vec<u64>,
+    raw_bits: &[u64],
     valid: Option<Vec<u64>>,
 ) -> OwnedColumnBuffer {
     type F64x8 = Simd<f64, 8>;
     type I32x8 = Simd<i32, 8>;
     type U64x8 = Simd<u64, 8>;
 
-    if first_non_integral_in_range_index_simd(&raw_bits, valid.as_deref(), I32_MIN_F64, I32_MAX_F64)
+    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I32_MIN_F64, I32_MAX_F64)
         .is_some()
     {
         return materialize_staged_f64_column(raw_bits, valid);

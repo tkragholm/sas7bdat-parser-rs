@@ -566,7 +566,6 @@ pub const fn summarize_scan_stats(stats: &ScanStatsSummary) -> ScanStatsSummary 
     *stats
 }
 
-
 #[must_use]
 pub fn build_projection(ds: &Dataset, preset: ProjectionPreset) -> Option<Projection> {
     match preset {

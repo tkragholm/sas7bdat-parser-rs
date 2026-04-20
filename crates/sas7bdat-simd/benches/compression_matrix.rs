@@ -1,11 +1,9 @@
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use sas7bdat_simd::{BatchHint, Dataset};
-use std::{
-    fs,
-    hint::black_box,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use sas7bdat_simd::{BatchHint, Dataset, discover_fixture_paths};
+use std::{fs, hint::black_box, time::Duration};
+
+mod common;
+use common::{bench_raw_rows, discover_target_roots, fixture_path, load_dataset};
 
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 const TYPED_BATCHES_MEASUREMENT_SECONDS: u64 = 30;
@@ -58,35 +56,10 @@ const NON_TARGET_FIXTURES: &[(&str, &str)] = &[
     ),
 ];
 
-fn fixture_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures")
-        .join(relative)
-}
-
-fn load_dataset(relative: &str) -> Option<Dataset> {
-    let path = fixture_path(relative);
-    let bytes = fs::read(path).ok()?;
-    Dataset::from_bytes(bytes).ok()
-}
-
 fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
     let mut group = c.benchmark_group(name);
-    group.throughput(Throughput::Elements(dataset.metadata().row_count));
 
-    group.bench_function(BenchmarkId::new("raw_rows", "all"), |b| {
-        b.iter(|| {
-            let stats = dataset
-                .scan()
-                .visit_raw_rows(|row| {
-                    black_box(row.row_index);
-                    black_box(row.bytes.len());
-                    Ok(std::ops::ControlFlow::Continue(()))
-                })
-                .expect("compressed raw scan");
-            black_box(stats.rows_emitted);
-        });
-    });
+    bench_raw_rows(&mut group, dataset, BenchmarkId::new("raw_rows", "all"));
 
     group.measurement_time(Duration::from_secs(TYPED_BATCHES_MEASUREMENT_SECONDS));
     for &batch_rows in DEFAULT_TYPED_BATCH_ROWS {
@@ -95,12 +68,15 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
             &batch_rows,
             |b, &rows| {
                 b.iter(|| {
-                    let batches = dataset
+                    let stats = dataset
                         .scan()
                         .with_batch_hint(BatchHint::Rows(rows))
-                        .collect_batches()
-                        .expect("compressed typed batches");
-                    black_box(batches.len());
+                        .visit_batches(|batch| {
+                            black_box(batch.row_count);
+                            Ok(std::ops::ControlFlow::Continue(()))
+                        })
+                        .expect("compressed typed batch scan");
+                    black_box(stats.decode_batches);
                 });
             },
         );
@@ -109,98 +85,19 @@ fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
     group.finish();
 }
 
-fn sanitize_name(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-        } else {
-            out.push('_');
-        }
-    }
-    while out.contains("__") {
-        out = out.replace("__", "_");
-    }
-    out.trim_matches('_').to_owned()
-}
-
-const fn fnv1a32(bytes: &[u8]) -> u32 {
-    let mut hash = 0x811c_9dc5_u32;
-    let mut i = 0usize;
-    while i < bytes.len() {
-        hash ^= bytes[i] as u32;
-        hash = hash.wrapping_mul(0x0100_0193);
-        i += 1;
-    }
-    hash
-}
-
 fn target_bench_name(relative: &str, dataset: &Dataset) -> String {
-    let mut parts = relative.split('/');
-    let source = parts.next().unwrap_or("source");
-    let file_stem = Path::new(relative)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or(relative);
-    let source = sanitize_name(source);
-    let file_stem = sanitize_name(file_stem);
-    let encoding = sanitize_name(dataset.metadata().encoding.as_deref().unwrap_or("unknown"));
-    let hash = fnv1a32(relative.as_bytes());
-    format!("target/{source}/{encoding}/{file_stem}_{hash:08x}")
-}
-
-fn discover_target_roots(fixtures_root: &Path) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    let Ok(entries) = fs::read_dir(fixtures_root) else {
-        return roots;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        if name == "raw_data" {
-            continue;
-        }
-        roots.push(path);
-    }
-    roots.sort();
-    roots
-}
-
-fn collect_sas7bdat_files(root: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_sas7bdat_files(&path, out);
-            continue;
-        }
-        let is_sas = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("sas7bdat"));
-        if is_sas {
-            out.push(path);
-        }
-    }
+    let column_count = dataset.columns().len();
+    let row_count = dataset.metadata().row_count;
+    format!("target/{relative}/{column_count}cols/{row_count}rows")
 }
 
 fn discover_target_paths(min_size_bytes: u64) -> Vec<(String, u64)> {
     let fixtures_root = fixture_path("");
     let target_roots = discover_target_roots(&fixtures_root);
-    let mut files = Vec::new();
 
-    for root in target_roots {
-        collect_sas7bdat_files(&root, &mut files);
-    }
-
-    files.sort();
+    let Ok(files) = discover_fixture_paths(&target_roots) else {
+        return Vec::new();
+    };
 
     let mut out = Vec::new();
     for path in files {

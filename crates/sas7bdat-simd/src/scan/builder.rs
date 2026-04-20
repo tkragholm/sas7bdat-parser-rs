@@ -497,7 +497,7 @@ fn stream_batches_for_descriptor_chunk(
     descriptor_chunk: &[crate::internal::PageDescriptor],
     chunk_idx: usize,
     context: &DescriptorChunkContext<'_>,
-    tx: SyncSender<StreamedBatchMessage>,
+    tx: &SyncSender<StreamedBatchMessage>,
     stop: &AtomicBool,
 ) -> ScanStats {
     let mut batch_accumulator = BatchAccumulator::new(
@@ -578,7 +578,7 @@ fn stream_batches_for_descriptor_chunk(
     stats
 }
 
-const fn merge_scan_stats(into: &mut ScanStats, from: ScanStats) {
+const fn merge_scan_stats(into: &mut ScanStats, from: &ScanStats) {
     into.rows_seen = into.rows_seen.saturating_add(from.rows_seen);
     into.rows_emitted = into.rows_emitted.saturating_add(from.rows_emitted);
     into.pages_seen = into.pages_seen.saturating_add(from.pages_seen);
@@ -614,7 +614,9 @@ const fn merge_scan_stats(into: &mut ScanStats, from: ScanStats) {
     into.batch_direct_utf8_owned_seen_once_promotions = into
         .batch_direct_utf8_owned_seen_once_promotions
         .saturating_add(from.batch_direct_utf8_owned_seen_once_promotions);
-    into.batch_fallback_cells = into.batch_fallback_cells.saturating_add(from.batch_fallback_cells);
+    into.batch_fallback_cells = into
+        .batch_fallback_cells
+        .saturating_add(from.batch_fallback_cells);
 }
 
 const fn _keep_type_imports_alive<'a>(_columns: &'a [ColumnBuffer<'a>], _dataset: &'a Dataset) {}
@@ -703,7 +705,12 @@ impl ScanBuilder<'_> {
         self.scan_batches_with_tap(f, &mut |_, _| {})
     }
 
-    fn try_stream_batches_parallel<F>(&self, plan: &ScanPlan, f: &mut F) -> Result<Option<ScanStats>>
+    #[allow(clippy::too_many_lines)]
+    fn try_stream_batches_parallel<F>(
+        &self,
+        plan: &ScanPlan,
+        f: &mut F,
+    ) -> Result<Option<ScanStats>>
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
@@ -753,7 +760,7 @@ impl ScanBuilder<'_> {
                         chunk,
                         chunk_idx,
                         context,
-                        tx,
+                        &tx,
                         stop.as_ref(),
                     )
                 }));
@@ -802,7 +809,7 @@ impl ScanBuilder<'_> {
                                                         "parallel batch worker panicked",
                                                     )
                                                 })?;
-                                                merge_scan_stats(&mut total, worker_stats);
+                                                merge_scan_stats(&mut total, &worker_stats);
                                             }
                                             total.decode_batches = delivered_batches;
                                             total.rows_emitted = delivered_rows;
@@ -845,7 +852,7 @@ impl ScanBuilder<'_> {
                 let worker_stats = handle
                     .join()
                     .map_err(|_| Error::unsupported("parallel batch worker panicked"))?;
-                merge_scan_stats(&mut total, worker_stats);
+                merge_scan_stats(&mut total, &worker_stats);
             }
             total.decode_batches = delivered_batches;
             total.rows_emitted = delivered_rows;

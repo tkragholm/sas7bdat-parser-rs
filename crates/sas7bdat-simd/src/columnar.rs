@@ -47,6 +47,11 @@ impl TrustedOffsets {
         &self.offsets
     }
 
+    pub fn clear_for_reuse(&mut self) {
+        self.offsets.clear();
+        self.offsets.push(0);
+    }
+
     #[must_use]
     pub const fn len(&self) -> usize {
         self.offsets.len()

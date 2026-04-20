@@ -20,6 +20,7 @@ fn run() -> Result<(), String> {
     let mut repeat = 1usize;
     let mut batch_rows = 4096usize;
     let mut limit: Option<usize> = None;
+    let mut owned = false;
 
     while let Some(arg) = args.next() {
         match arg.to_string_lossy().as_ref() {
@@ -47,6 +48,7 @@ fn run() -> Result<(), String> {
                     .map_err(|_| format!("invalid --limit value: {value}"))?;
                 limit = (parsed != 0).then_some(parsed);
             }
+            "--owned" => owned = true,
             "--help" | "-h" => {
                 print_usage();
                 return Ok(());
@@ -60,8 +62,8 @@ fn run() -> Result<(), String> {
     let projection = build_projection(&ds, &columns)?;
 
     let mut elapsed_total = 0u128;
-    let mut rows_last: usize;
-    let mut batches_last: usize;
+    let mut rows_last = 0usize;
+    let mut batches_last = 0usize;
 
     let prime_start = Instant::now();
     {
@@ -75,18 +77,23 @@ fn run() -> Result<(), String> {
         }
         scan = scan.with_batch_hint(BatchHint::Rows(batch_rows));
 
-        let mut rows = 0usize;
-        let mut batches = 0usize;
-        scan.visit_batches(|batch| {
-            batches += 1;
-            rows += batch.row_count;
-            std::hint::black_box(batch.row_count);
-            std::hint::black_box(batch.columns.len());
-            Ok(std::ops::ControlFlow::Continue(()))
-        })
-        .map_err(|err| err.to_string())?;
-        rows_last = rows;
-        batches_last = batches;
+        if owned {
+            scan.visit_owned_batches(|batch| {
+                batches_last += 1;
+                rows_last += batch.row_count;
+                std::hint::black_box(batch.row_count);
+                Ok(std::ops::ControlFlow::Continue(()))
+            })
+            .map_err(|err| err.to_string())?;
+        } else {
+            scan.visit_batches(|batch| {
+                batches_last += 1;
+                rows_last += batch.row_count;
+                std::hint::black_box(batch.row_count);
+                Ok(std::ops::ControlFlow::Continue(()))
+            })
+            .map_err(|err| err.to_string())?;
+        }
     }
     let priming_ns = prime_start.elapsed().as_nanos();
 
@@ -104,14 +111,23 @@ fn run() -> Result<(), String> {
         let start = Instant::now();
         let mut rows = 0usize;
         let mut batches = 0usize;
-        scan.visit_batches(|batch| {
-            batches += 1;
-            rows += batch.row_count;
-            std::hint::black_box(batch.row_count);
-            std::hint::black_box(batch.columns.len());
-            Ok(std::ops::ControlFlow::Continue(()))
-        })
-        .map_err(|err| err.to_string())?;
+        if owned {
+            scan.visit_owned_batches(|batch| {
+                batches += 1;
+                rows += batch.row_count;
+                std::hint::black_box(batch.row_count);
+                Ok(std::ops::ControlFlow::Continue(()))
+            })
+            .map_err(|err| err.to_string())?;
+        } else {
+            scan.visit_batches(|batch| {
+                batches += 1;
+                rows += batch.row_count;
+                std::hint::black_box(batch.row_count);
+                Ok(std::ops::ControlFlow::Continue(()))
+            })
+            .map_err(|err| err.to_string())?;
+        }
         elapsed_total += start.elapsed().as_nanos();
         rows_last = rows;
         batches_last = batches;
@@ -138,6 +154,7 @@ fn run() -> Result<(), String> {
             "repeat": repeat,
             "batch_rows": batch_rows,
             "limit": limit,
+            "owned": owned,
             "priming_ns": priming_ns,
             "elapsed_ns_total": elapsed_total,
             "elapsed_ns_avg": elapsed_avg,
@@ -185,6 +202,6 @@ fn next_value(
 
 fn print_usage() {
     eprintln!(
-        "usage: cargo run --release --example raw_batch_compare -- --fixture PATH [--columns COL1,COL2] [--repeat N] [--batch-rows N] [--limit N]"
+        "usage: cargo run --release --example raw_batch_compare -- --fixture PATH [--columns COL1,COL2] [--repeat N] [--batch-rows N] [--limit N] [--owned]"
     );
 }

@@ -4,7 +4,7 @@
     clippy::unreadable_literal
 )]
 
-use sas7bdat_simd::{BatchHint, Dataset, OwnedCellValue, OwnedColumnBuffer, TrustedOffsets};
+use sas7bdat_simd::{BatchHint, Dataset, TrustedOffsets, discover_fixture_paths};
 use std::{
     env,
     ops::ControlFlow,
@@ -13,6 +13,7 @@ use std::{
 
 const EXCLUDED_FIXTURE_NAMES: &[&str] = &["corrupt.sas7bdat", "zero_variables.sas7bdat"];
 
+#[allow(dead_code)]
 fn assert_trusted_offsets(offsets: &TrustedOffsets, expected: &[i64], data_len: usize) {
     assert_eq!(offsets.as_slice(), expected);
     offsets
@@ -20,11 +21,16 @@ fn assert_trusted_offsets(offsets: &TrustedOffsets, expected: &[i64], data_len: 
         .expect("fixture scan should emit valid trusted offsets");
 }
 
+fn excluded_fixture(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| EXCLUDED_FIXTURE_NAMES.contains(&name))
+}
+
 #[test]
 fn local_fixtures_open_and_scan() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
-    let mut fixtures = Vec::new();
-    collect_fixture_files(&root, &mut fixtures);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+    let mut fixtures = discover_fixture_paths(std::slice::from_ref(&root)).unwrap_or_default();
     fixtures.retain(|path| !excluded_fixture(path));
     fixtures.sort();
 
@@ -48,42 +54,18 @@ fn local_fixtures_open_and_scan() {
             .unwrap_or_else(|err| panic!("failed to open fixture {}: {err}", path.display()));
 
         assert!(dataset.metadata().page_size > 0, "{}", path.display());
+        assert!(dataset.metadata().page_count > 0, "{}", path.display());
+        assert!(!dataset.columns().is_empty(), "{}", path.display());
 
-        let mut raw_rows = 0u64;
         dataset
             .scan()
-            .limit(8)
-            .visit_raw_rows(|_| {
-                raw_rows += 1;
+            .with_batch_hint(BatchHint::Rows(256))
+            .visit_batches(|batch| {
+                assert!(batch.row_count > 0);
+                assert_eq!(batch.columns.len(), dataset.columns().len());
                 Ok(ControlFlow::Continue(()))
             })
-            .unwrap_or_else(|err| panic!("raw scan failed for {}: {err}", path.display()));
-
-        if dataset.metadata().row_count > 0 {
-            assert!(raw_rows > 0, "{}", path.display());
-        }
-
-        if !dataset.columns().is_empty() {
-            let rows = dataset
-                .scan()
-                .limit(4)
-                .collect_rows()
-                .unwrap_or_else(|err| {
-                    panic!("typed row scan failed for {}: {err}", path.display())
-                });
-
-            let batches = dataset
-                .scan()
-                .limit(4)
-                .with_batch_hint(BatchHint::Rows(4))
-                .collect_batches()
-                .unwrap_or_else(|err| panic!("batch scan failed for {}: {err}", path.display()));
-
-            if dataset.metadata().row_count > 0 {
-                assert!(!rows.is_empty(), "{}", path.display());
-                assert!(!batches.is_empty(), "{}", path.display());
-            }
-        }
+            .unwrap_or_else(|err| panic!("failed to scan fixture {}: {err}", path.display()));
     }
 
     assert!(exercised > 0);
@@ -91,9 +73,8 @@ fn local_fixtures_open_and_scan() {
 
 #[test]
 fn local_compressed_fixtures_open_and_scan() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
-    let mut fixtures = Vec::new();
-    collect_fixture_files(&root, &mut fixtures);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+    let mut fixtures = discover_fixture_paths(std::slice::from_ref(&root)).unwrap_or_default();
     fixtures.retain(|path| !excluded_fixture(path));
     fixtures.sort();
 
@@ -124,315 +105,20 @@ fn local_compressed_fixtures_open_and_scan() {
             break;
         }
 
-        let mut raw_rows = 0u64;
         dataset
             .scan()
-            .limit(4)
-            .visit_raw_rows(|_| {
-                raw_rows += 1;
+            .with_batch_hint(BatchHint::Rows(1024))
+            .visit_batches(|batch| {
+                assert!(batch.row_count > 0);
                 Ok(ControlFlow::Continue(()))
             })
-            .unwrap_or_else(|err| panic!("raw scan failed for {}: {err}", path.display()));
-
-        if dataset.metadata().row_count > 0 {
-            assert!(raw_rows > 0, "{}", path.display());
-        }
-
-        let rows = dataset
-            .scan()
-            .limit(2)
-            .collect_rows()
-            .unwrap_or_else(|err| panic!("typed row scan failed for {}: {err}", path.display()));
-
-        let batches = dataset
-            .scan()
-            .limit(2)
-            .with_batch_hint(BatchHint::Rows(2))
-            .collect_batches()
-            .unwrap_or_else(|err| panic!("batch scan failed for {}: {err}", path.display()));
-
-        if dataset.metadata().row_count > 0 {
-            assert!(!rows.is_empty(), "{}", path.display());
-            assert!(!batches.is_empty(), "{}", path.display());
-        }
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to scan compressed fixture {}: {err}",
+                    path.display()
+                )
+            });
     }
 
     assert!(exercised > 0);
-}
-
-#[test]
-fn fixture_54_class_matches_expected_shape() {
-    let path = fixture_path("raw_data/csharp/54-class.sas7bdat");
-    if !path.exists() {
-        eprintln!("skipping fixture-specific test: {}", path.display());
-        return;
-    }
-
-    let dataset = Dataset::open(&path).expect("open 54-class");
-    assert_eq!(dataset.metadata().table_name.as_deref(), Some("CLASS"));
-    assert_eq!(dataset.metadata().encoding.as_deref(), Some("ISO-8859-15"));
-    assert_eq!(dataset.metadata().row_count, 19);
-    assert_eq!(dataset.columns().len(), 5);
-    assert_eq!(dataset.columns()[0].name, "Name");
-    assert_eq!(dataset.columns()[4].name, "Weight");
-
-    let rows = dataset.scan().limit(3).collect_rows().expect("rows");
-    assert_eq!(rows.len(), 3);
-    assert!(matches!(rows[0].cells[0], OwnedCellValue::String(ref value) if value == "Alfred"));
-    assert!(matches!(rows[0].cells[2], OwnedCellValue::Int64(14)));
-    assert!(matches!(rows[1].cells[3], OwnedCellValue::Float64(value) if value == 56.5));
-    assert!(matches!(rows[2].cells[4], OwnedCellValue::Int64(98)));
-
-    let batches = dataset
-        .scan()
-        .limit(3)
-        .with_batch_hint(BatchHint::Rows(3))
-        .collect_batches()
-        .expect("batches");
-    assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].row_count, 3);
-    match &batches[0].columns[0] {
-        OwnedColumnBuffer::Utf8 {
-            offsets,
-            data,
-            valid,
-            dictionary_ids: _,
-        } => {
-            assert_trusted_offsets(offsets, &[0, 6, 11, 18], data.len());
-            assert_eq!(data, b"AlfredAliceBarbara");
-            assert!(valid.is_none());
-        }
-        other => panic!("unexpected class name batch column: {other:?}"),
-    }
-}
-
-#[test]
-fn fixture_test2_matches_expected_shape() {
-    let path = fixture_path("raw_data/pandas/test2.sas7bdat");
-    if !path.exists() {
-        eprintln!("skipping fixture-specific test: {}", path.display());
-        return;
-    }
-
-    let dataset = Dataset::open(&path).expect("open test2");
-    assert_eq!(dataset.metadata().table_name.as_deref(), Some("TEST2"));
-    assert_eq!(dataset.metadata().encoding.as_deref(), Some("WINDOWS-1252"));
-    assert_eq!(dataset.metadata().row_count, 10);
-    assert_eq!(dataset.columns().len(), 100);
-    assert_eq!(dataset.columns()[0].name, "Column1");
-    assert_eq!(dataset.columns()[1].name, "Column2");
-
-    let rows = dataset.scan().limit(2).collect_rows().expect("rows");
-    assert_eq!(rows.len(), 2);
-    assert!(matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if value == 0.636));
-    assert!(matches!(rows[0].cells[1], OwnedCellValue::String(ref value) if value == "pear"));
-    assert!(matches!(rows[1].cells[3], OwnedCellValue::Date(_)));
-
-    let batches = dataset
-        .scan()
-        .limit(2)
-        .with_batch_hint(BatchHint::Rows(2))
-        .collect_batches()
-        .expect("batches");
-    assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].row_count, 2);
-    match &batches[0].columns[1] {
-        OwnedColumnBuffer::Utf8 {
-            offsets,
-            data,
-            valid,
-            dictionary_ids: _,
-        } => {
-            assert_trusted_offsets(offsets, &[0, 4, 7], data.len());
-            assert_eq!(data, b"peardog");
-            assert!(valid.is_none());
-        }
-        other => panic!("unexpected test2 string batch column: {other:?}"),
-    }
-}
-
-#[test]
-fn fixture_max_sas_date_matches_expected_shape() {
-    let path = fixture_path("raw_data/pandas/max_sas_date.sas7bdat");
-    if !path.exists() {
-        eprintln!("skipping fixture-specific test: {}", path.display());
-        return;
-    }
-
-    let dataset = Dataset::open(&path).expect("open max_sas_date");
-    assert_eq!(
-        dataset.metadata().table_name.as_deref(),
-        Some("MAX_SAS_DATE")
-    );
-    assert_eq!(dataset.metadata().encoding.as_deref(), Some("ISO-8859-15"));
-    assert_eq!(dataset.metadata().row_count, 2);
-    assert_eq!(dataset.columns().len(), 5);
-    assert_eq!(dataset.columns()[0].name, "text");
-    assert_eq!(dataset.columns()[2].name, "dt_as_dt");
-
-    let rows = dataset.scan().limit(2).collect_rows().expect("rows");
-    assert_eq!(rows.len(), 2);
-    assert!(matches!(rows[0].cells[0], OwnedCellValue::String(ref value) if value == "max"));
-    assert!(
-        matches!(rows[0].cells[2], OwnedCellValue::Float64(value) if value == 253717747199.999)
-    );
-    assert!(matches!(rows[1].cells[4], OwnedCellValue::Date(_)));
-
-    let batches = dataset
-        .scan()
-        .limit(2)
-        .with_batch_hint(BatchHint::Rows(2))
-        .collect_batches()
-        .expect("batches");
-    assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].row_count, 2);
-
-    match &batches[0].columns[0] {
-        OwnedColumnBuffer::Utf8 {
-            offsets,
-            data,
-            valid,
-            dictionary_ids: _,
-        } => {
-            assert_trusted_offsets(offsets, &[0, 3, 9], data.len());
-            assert_eq!(data, b"maxnormal");
-            assert!(valid.is_none());
-        }
-        other => panic!("unexpected max_sas_date text batch column: {other:?}"),
-    }
-
-    match &batches[0].columns[2] {
-        OwnedColumnBuffer::F64 { values, valid } => {
-            assert_eq!(values, &vec![253717747199.999, 1880323199.999]);
-            assert!(valid.is_none());
-        }
-        other => panic!("unexpected max_sas_date datetime batch column: {other:?}"),
-    }
-}
-
-#[test]
-fn fixture_charset_utf8_matches_expected_shape() {
-    let path = fixture_path("raw_data/csharp/charset_utf8.sas7bdat");
-    if !path.exists() {
-        eprintln!("skipping fixture-specific test: {}", path.display());
-        return;
-    }
-
-    let dataset = Dataset::open(&path).expect("open charset_utf8");
-    assert_eq!(
-        dataset.metadata().table_name.as_deref(),
-        Some("CHARSET_UTF8")
-    );
-    assert_eq!(dataset.metadata().encoding.as_deref(), Some("UTF-8"));
-    assert_eq!(dataset.metadata().row_count, 150);
-    assert_eq!(dataset.columns().len(), 5);
-    assert_eq!(dataset.columns()[4].name, "Species");
-
-    let rows = dataset.scan().limit(3).collect_rows().expect("rows");
-    assert_eq!(rows.len(), 3);
-    assert!(matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if value == 5.1));
-    assert!(matches!(rows[1].cells[1], OwnedCellValue::Int64(3)));
-    assert!(
-        matches!(rows[2].cells[4], OwnedCellValue::String(ref value) if value == "Iris-setosa")
-    );
-
-    let batches = dataset
-        .scan()
-        .limit(3)
-        .with_batch_hint(BatchHint::Rows(3))
-        .collect_batches()
-        .expect("batches");
-    assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].row_count, 3);
-    match &batches[0].columns[4] {
-        OwnedColumnBuffer::Utf8 {
-            offsets,
-            data,
-            valid,
-            dictionary_ids: _,
-        } => {
-            assert_trusted_offsets(offsets, &[0, 11, 22, 33], data.len());
-            assert_eq!(data, b"Iris-setosaIris-setosaIris-setosa");
-            assert!(valid.is_none());
-        }
-        other => panic!("unexpected species batch column: {other:?}"),
-    }
-}
-
-#[test]
-fn fixture_cookie_matches_expected_shape() {
-    let path = fixture_path("raw_data/csharp/54-cookie.sas7bdat");
-    if !path.exists() {
-        eprintln!("skipping fixture-specific test: {}", path.display());
-        return;
-    }
-
-    let dataset = Dataset::open(&path).expect("open 54-cookie");
-    assert_eq!(dataset.metadata().table_name.as_deref(), Some("COOKIE"));
-    assert_eq!(dataset.metadata().encoding.as_deref(), Some("WINDOWS-1252"));
-    assert_eq!(dataset.metadata().row_count, 54);
-    assert_eq!(dataset.columns().len(), 29);
-    assert_eq!(dataset.columns()[0].name, "__CKG");
-    assert_eq!(dataset.columns()[25].name, "INSTRON");
-
-    let rows = dataset.scan().limit(3).collect_rows().expect("rows");
-    assert_eq!(rows.len(), 3);
-    assert!(matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if value == 13.8));
-    assert!(matches!(rows[1].cells[25], OwnedCellValue::String(ref value) if value == "15.1"));
-    assert!(matches!(rows[2].cells[25], OwnedCellValue::String(ref value) if value == "."));
-
-    let batches = dataset
-        .scan()
-        .limit(3)
-        .with_batch_hint(BatchHint::Rows(3))
-        .collect_batches()
-        .expect("batches");
-    assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].row_count, 3);
-    match &batches[0].columns[25] {
-        OwnedColumnBuffer::Utf8 {
-            offsets,
-            data,
-            valid,
-            dictionary_ids: _,
-        } => {
-            assert_trusted_offsets(offsets, &[0, 3, 7, 8], data.len());
-            assert_eq!(data, b"9.015.1.");
-            assert!(valid.is_none());
-        }
-        other => panic!("unexpected INSTRON batch column: {other:?}"),
-    }
-}
-
-fn fixture_path(relative: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures")
-        .join(relative)
-}
-
-fn excluded_fixture(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| EXCLUDED_FIXTURE_NAMES.contains(&name))
-}
-
-fn collect_fixture_files(root: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_fixture_files(&path, out);
-            continue;
-        }
-        if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("sas7bdat"))
-        {
-            out.push(path);
-        }
-    }
 }

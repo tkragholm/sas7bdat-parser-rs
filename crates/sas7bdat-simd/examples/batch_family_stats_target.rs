@@ -1,8 +1,9 @@
 use sas7bdat_simd::{BatchHint, Dataset};
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
+use std::{env, fs};
+
+#[path = "common/mod.rs"]
+mod common;
+use common::{discover_target_paths, fixture_root};
 
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 
@@ -29,59 +30,6 @@ struct FileSummary {
     raw_bytes_read: u64,
     row_bytes_materialized: u64,
     decode_batches: u64,
-}
-
-fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures")
-}
-
-fn collect_sas7bdat_files(root: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_sas7bdat_files(&path, out);
-            continue;
-        }
-        let is_sas = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("sas7bdat"));
-        if is_sas {
-            out.push(path);
-        }
-    }
-}
-
-fn discover_target_paths(min_size_bytes: u64) -> Vec<PathBuf> {
-    let fixtures_root = fixture_root();
-    let mut roots = Vec::new();
-    if let Ok(entries) = fs::read_dir(&fixtures_root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if name == "raw_data" {
-                continue;
-            }
-            roots.push(path);
-        }
-    }
-    roots.sort();
-
-    let mut files = Vec::new();
-    for root in roots {
-        collect_sas7bdat_files(&root, &mut files);
-    }
-    files.sort();
-    files.retain(|path| fs::metadata(path).is_ok_and(|meta| meta.len() >= min_size_bytes));
-    files
 }
 
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]

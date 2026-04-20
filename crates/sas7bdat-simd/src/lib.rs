@@ -58,9 +58,9 @@ pub use error::{
 };
 pub use fixture_catalog::{
     FixtureCatalog, FixtureEntry, FixtureProfile, FixtureStatus, LogicalTypeCounts, NamedCount,
-    ProjectionPreset, SampleSummary, TemporalFormatSummary, WidthSummary,
-    build_catalog, build_projection, discover_fixture_paths, profile_dataset_with_sample,
-    profile_fixture, summarize_scan_stats,
+    ProjectionPreset, SampleSummary, TemporalFormatSummary, WidthSummary, build_catalog,
+    build_projection, discover_fixture_paths, profile_dataset_with_sample, profile_fixture,
+    summarize_scan_stats,
 };
 pub use metadata::{
     ColumnMeta, CompressionKind, DatasetMetadata, Endianness, LogicalType, SasDate, SasDateTime,

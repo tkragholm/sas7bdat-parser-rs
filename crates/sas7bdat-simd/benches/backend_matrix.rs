@@ -1,28 +1,11 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use sas7bdat_simd::{BatchHint, Dataset, IoBackendPreference, OpenOptions, Projection};
-use std::{hint::black_box, path::PathBuf};
+use sas7bdat_simd::{BatchHint, Dataset, IoBackendPreference, Projection};
+use std::hint::black_box;
 
-fn fixture_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures")
-        .join(relative)
-}
-
-fn open_dataset(relative: &str, io_backend: IoBackendPreference) -> Option<Dataset> {
-    let path = fixture_path(relative);
-    Dataset::open_with(&path, OpenOptions::builder().io_backend(io_backend).build()).ok()
-}
-
-const fn backend_label(io_backend: IoBackendPreference) -> &'static str {
-    match io_backend {
-        IoBackendPreference::Auto => "auto",
-        IoBackendPreference::MmapPreferred => "mmap_preferred",
-        IoBackendPreference::BufferedPreferred => "buffered_preferred",
-        IoBackendPreference::BufferedOnly => "buffered_only",
-    }
-}
+mod common;
+use common::{backend_label, bench_raw_rows, open_dataset};
 
 fn bench_string_batches(
     c: &mut Criterion,
@@ -100,7 +83,7 @@ fn bench_numeric_batches(
     group.finish();
 }
 
-fn bench_raw_rows(
+fn bench_backend_raw_rows(
     c: &mut Criterion,
     name: &str,
     relative: &str,
@@ -119,21 +102,10 @@ fn bench_raw_rows(
         let Some(dataset) = open_dataset(relative, io_backend) else {
             continue;
         };
-        group.bench_function(
+        bench_raw_rows(
+            &mut group,
+            &dataset,
             BenchmarkId::new("raw_rows", backend_label(io_backend)),
-            |b| {
-                b.iter(|| {
-                    let stats = dataset
-                        .scan()
-                        .visit_raw_rows(|row| {
-                            black_box(row.row_index);
-                            black_box(row.bytes.len());
-                            Ok(std::ops::ControlFlow::Continue(()))
-                        })
-                        .expect("backend raw scan");
-                    black_box(stats.rows_emitted);
-                });
-            },
         );
     }
 
@@ -210,7 +182,7 @@ fn backend_matrix(c: &mut Criterion) {
         IoBackendPreference::BufferedOnly,
     ];
 
-    bench_raw_rows(c, "backend_ahs2013n_raw", "ahs2013n.sas7bdat", &io_backends);
+    bench_backend_raw_rows(c, "backend_ahs2013n_raw", "ahs2013n.sas7bdat", &io_backends);
     bench_typed_rows(
         c,
         "backend_ahs2013n_strings_rows",

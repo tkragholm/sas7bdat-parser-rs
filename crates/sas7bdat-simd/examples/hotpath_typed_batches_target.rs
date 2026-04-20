@@ -1,7 +1,5 @@
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
+#[cfg(feature = "hotpath-profile")]
+use std::{env, fs, path::Path};
 
 #[cfg(feature = "hotpath-profile")]
 use std::{hint::black_box, ops::ControlFlow};
@@ -9,68 +7,15 @@ use std::{hint::black_box, ops::ControlFlow};
 #[cfg(feature = "hotpath-profile")]
 use sas7bdat_simd::{BatchHint, Dataset};
 
+#[path = "common/mod.rs"]
+mod common;
+#[cfg(feature = "hotpath-profile")]
+use common::{discover_target_paths, fixture_root};
+
 #[allow(dead_code)]
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 #[allow(dead_code)]
 const DEFAULT_OUTPUT_PATH: &str = "target/criterion/hotpath/typed_batches_target.json";
-
-#[allow(dead_code)]
-fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures")
-}
-
-#[allow(dead_code)]
-fn collect_sas7bdat_files(root: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_sas7bdat_files(&path, out);
-            continue;
-        }
-        let is_sas = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("sas7bdat"));
-        if is_sas {
-            out.push(path);
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn discover_target_paths(min_size_bytes: u64, max_files: usize) -> Vec<PathBuf> {
-    let fixtures_root = fixture_root();
-    let mut roots = Vec::new();
-    if let Ok(entries) = fs::read_dir(&fixtures_root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if name == "raw_data" {
-                continue;
-            }
-            roots.push(path);
-        }
-    }
-    roots.sort();
-
-    let mut files = Vec::new();
-    for root in roots {
-        collect_sas7bdat_files(&root, &mut files);
-    }
-
-    files.sort();
-    files.retain(|path| fs::metadata(path).is_ok_and(|meta| meta.len() >= min_size_bytes));
-    files.truncate(max_files);
-    files
-}
 
 #[cfg(feature = "hotpath-profile")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -100,7 +45,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     let fixtures_root = fixture_root();
-    let targets = discover_target_paths(TARGET_MIN_SIZE_BYTES, max_files);
+    let mut targets = discover_target_paths(TARGET_MIN_SIZE_BYTES);
+    targets.truncate(max_files);
+
     println!("profiling_files={}", targets.len());
     println!("batch_rows={batch_rows}");
     println!("hotpath_output={output_path}");

@@ -16,22 +16,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod common;
+use common::{bench_raw_rows, fixture_path, load_dataset};
+
 const BATCH_ROWS_SMALL: usize = 256;
 const BATCH_ROWS_MEDIUM: usize = 4096;
 const BATCH_ROWS_LARGE: usize = 16384;
 const PARALLEL_THREADS: usize = 4;
-
-fn fixture_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures")
-        .join(relative)
-}
-
-fn load_dataset(relative: &str) -> Option<Dataset> {
-    let path = fixture_path(relative);
-    let bytes = fs::read(path).ok()?;
-    Dataset::from_bytes(bytes).ok()
-}
 
 fn load_dataset_path(path: &Path) -> Option<Dataset> {
     let path = if path.is_absolute() {
@@ -56,19 +47,7 @@ fn bench_dataset_scans(
     group.throughput(Throughput::Elements(dataset.metadata().row_count));
 
     if bench_raw {
-        group.bench_function(BenchmarkId::new("raw_rows", "all"), |b| {
-            b.iter(|| {
-                let stats = dataset
-                    .scan()
-                    .visit_raw_rows(|row| {
-                        black_box(row.row_index);
-                        black_box(row.bytes.len());
-                        Ok(std::ops::ControlFlow::Continue(()))
-                    })
-                    .expect("raw scan");
-                black_box(stats.rows_emitted);
-            });
-        });
+        bench_raw_rows(&mut group, &dataset, BenchmarkId::new("raw_rows", "all"));
     }
 
     if bench_typed {
