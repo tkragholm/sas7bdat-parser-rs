@@ -4,29 +4,29 @@ default:
     @just --list
 
 catalog sample_rows="256" out="fixtures/fixture_catalog.local.json":
-    @cargo run --release -p sas7bdat-profiler --bin fixture_catalog -- fixtures/raw_data fixtures/ahs2013n.sas7bdat --sample-rows {{sample_rows}} --out {{out}}
+    @cargo run --release -p sas7bdat-cli --bin sas7bdat-corpus-catalog -- fixtures/raw_data fixtures/ahs2013n.sas7bdat --sample-rows {{sample_rows}} --out {{out}}
 
 catalog-stdout sample_rows="64":
-    @cargo run --release -p sas7bdat-profiler --bin fixture_catalog -- fixtures/raw_data fixtures/ahs2013n.sas7bdat --sample-rows {{sample_rows}}
+    @cargo run --release -p sas7bdat-cli --bin sas7bdat-corpus-catalog -- fixtures/raw_data fixtures/ahs2013n.sas7bdat --sample-rows {{sample_rows}}
 
 correctness-all:
     @cargo test -q -p sas7bdat-simd --test fixture_smoke
 
 profile fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
-    @cargo run --release -p sas7bdat-profiler --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
+    @cargo run --release -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
 
 string-profile fixture sample_rows="2048" top="12":
-    @cargo run --release -p sas7bdat-profiler --bin fixture_string_profile -- --fixture {{fixture}} --sample-rows {{sample_rows}} --top {{top}}
+    @cargo run --release -p sas7bdat-cli --bin sas7bdat-fixture-string-profile -- --fixture {{fixture}} --sample-rows {{sample_rows}} --top {{top}}
 
 profile-rss fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
-    @/bin/zsh -lc 'set +e; tmp="$(mktemp)"; /usr/bin/time -l cargo run --release -p sas7bdat-profiler --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}} 2>"$tmp"; code=$?; grep -v "^time: sysctl kern.clockrate: Operation not permitted$" "$tmp" >&2 || true; rm -f "$tmp"; if [[ "$code" -eq 1 ]]; then exit 0; fi; exit "$code"'
+    @/bin/zsh -lc 'set +e; tmp="$(mktemp)"; /usr/bin/time -l cargo run --release -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}} 2>"$tmp"; code=$?; grep -v "^time: sysctl kern.clockrate: Operation not permitted$" "$tmp" >&2 || true; rm -f "$tmp"; if [[ "$code" -eq 1 ]]; then exit 0; fi; exit "$code"'
 
 profile-sample fixture mode projection="full" repeat="50" limit="0" batch_rows="256" seconds="5" out="tmp/profile.sample.txt" io_backend="auto":
     @mkdir -p "$(dirname {{out}})"
-    @/bin/zsh -lc 'cargo run --release -p sas7bdat-profiler --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}} >/tmp/sas7bdat-fixture-profile.json & pid=$!; sleep 0.5; /usr/bin/sample "$pid" {{seconds}} -file {{out}} >/dev/null 2>&1 || true; wait "$pid"; cat /tmp/sas7bdat-fixture-profile.json'
+    @/bin/zsh -lc 'cargo run --release -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}} >/tmp/sas7bdat-fixture-profile.json & pid=$!; sleep 0.5; /usr/bin/sample "$pid" {{seconds}} -file {{out}} >/dev/null 2>&1 || true; wait "$pid"; cat /tmp/sas7bdat-fixture-profile.json'
 
 profile-leaks fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
-    @leaks --atExit -- cargo run --release -p sas7bdat-profiler --bin fixture_profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
+    @leaks --atExit -- cargo run --release -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
 
 build-polars-plugin:
     @uvx maturin build --release --manifest-path crates/polars_plugin/Cargo.toml
@@ -42,7 +42,7 @@ test-polars-plugin-rust:
     @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib
 
 test-core:
-    @cargo nextest run --release -p sas7bdat-simd -p sas7bdat-profiler
+    @cargo nextest run --release -p sas7bdat-simd -p sas7bdat-cli
 
 test: test-core test-polars-plugin-rust test-polars-plugin
 
@@ -111,3 +111,6 @@ hotpath-typed-batches-target:
 
 hotpath-typed-batches-top3:
     @/bin/zsh -lc 'out="${HOTPATH_OUTPUT_PATH:-target/criterion/hotpath/typed_batches_top3_target.json}"; mkdir -p "$(dirname "$out")"; BATCH_ROWS="${BATCH_ROWS:-256}" MAX_FILES=3 HOTPATH_OUTPUT_PATH="$out" cargo run --release -p sas7bdat-simd --features hotpath-profile --example hotpath_typed_batches_target'
+
+sas7bdat *args:
+    @cargo run --manifest-path crates/sas7bdat-cli/Cargo.toml --bin sas7bdat -- {{args}}

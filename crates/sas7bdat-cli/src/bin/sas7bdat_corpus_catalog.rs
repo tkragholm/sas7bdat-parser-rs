@@ -1,6 +1,9 @@
-use sas7bdat_profiler::init_profiler_runtime;
+use sas7bdat_cli::init_profiler_runtime;
 use sas7bdat_simd::{build_catalog, discover_fixture_paths};
 use std::{env, fs, path::PathBuf, process::ExitCode};
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> ExitCode {
     init_profiler_runtime();
@@ -67,6 +70,6 @@ fn run() -> std::result::Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "usage: cargo run -p sas7bdat-profiler --bin fixture_catalog -- [paths...] [--sample-rows N] [--out PATH]"
+        "usage: cargo run -p sas7bdat-cli --bin sas7bdat-corpus-catalog -- [paths...] [--sample-rows N] [--out PATH]"
     );
 }

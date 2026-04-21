@@ -1,19 +1,31 @@
 [workspace]
-members = ["crates/sas7bdat-simd", "crates/profiler", "crates/polars_plugin"]
+members = [
+    "crates/sas7bdat-cli",
+    "crates/sas7bdat-simd",
+    "crates/polars_plugin",
+]
 resolver = "2"
 
 [workspace.dependencies]
+anyhow = "1"
 arrow-array = "58.1.0"
 arrow-schema = "58.1.0"
 bytemuck = { version = "1", features = ["derive"] }
 bstr = "1"
 criterion = "0.8.2"
+clap = { version = "4", features = ["derive"] }
 csv = "1"
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 encoding_rs = "0.8"
+glob = "0.3"
+hex = "0.4"
 hotpath = { version = "0.15", features = ["hotpath"] }
+indicatif = "0.18"
 memchr = "2.8"
 memmap2 = "0.9"
 mimalloc = { version = "0.1.49", default-features = false, features = ["secure"] }
+num-traits = "0.2"
+parquet = { version = "58.1.0", features = ["arrow"] }
 polars = "0.53.0"
 polars-arrow = "0.53.0"
 polars-plan = { version = "0.53.0", features = ["serde"] }
@@ -24,6 +36,7 @@ rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 simdutf8 = "0.1"
+walkdir = "2"
 tracing = "0.1.44"
 tracing-indicatif = "0.3.14"
 tracing-subscriber = "0.3.23"

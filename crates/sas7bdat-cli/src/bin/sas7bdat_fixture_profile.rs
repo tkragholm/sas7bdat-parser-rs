@@ -1,12 +1,15 @@
 #![allow(clippy::cast_precision_loss, clippy::too_many_lines)]
 
-use sas7bdat_profiler::init_profiler_runtime;
+use sas7bdat_cli::init_profiler_runtime;
 use sas7bdat_simd::{
     BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions, ProjectionPreset,
     ScanStatsSummary, build_projection, summarize_scan_stats,
 };
 use serde::Serialize;
 use std::{env, path::PathBuf, process::ExitCode, time::Instant};
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProfileMode {
@@ -238,6 +241,6 @@ fn parse_io_backend(value: &str) -> Option<IoBackendPreference> {
 
 fn print_usage() {
     eprintln!(
-        "usage: cargo run -p sas7bdat-profiler --bin fixture_profile -- --fixture PATH --mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches [--projection full|numeric|strings|mixed] [--repeat N] [--limit N] [--batch-rows N] [--io-backend auto|mmap-preferred|buffered-preferred|buffered-only]"
+        "usage: cargo run -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture PATH --mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches [--projection full|numeric|strings|mixed] [--repeat N] [--limit N] [--batch-rows N] [--io-backend auto|mmap-preferred|buffered-preferred|buffered-only]"
     );
 }

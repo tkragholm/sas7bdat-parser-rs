@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "marys-cdef-sas7bdat-profiler-tkragholm"
+name = "sas7bdat-toolkit"
 version = "0.1.0"
 description = "Tools for profiling SAS7BDAT corpora"
 readme = "README.md"
@@ -17,4 +17,4 @@ classifiers = [
 
 [tool.maturin]
 bindings = "bin"
-manifest-path = "crates/profiler/Cargo.toml"
+manifest-path = "crates/sas7bdat-cli/Cargo.toml"

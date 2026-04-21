@@ -1,6 +1,6 @@
 use csv::ReaderBuilder;
 use rayon::prelude::*;
-use sas7bdat_profiler::init_profiler_runtime;
+use sas7bdat_cli::init_profiler_runtime;
 use sas7bdat_simd::{
     BatchHint, Dataset, DecodeMode, Endianness, FixtureCatalog, FixtureEntry, FixtureProfile,
     FixtureStatus, IoBackendPreference, LogicalType, LogicalTypeCounts, NamedCount, OpenOptions,
@@ -23,13 +23,16 @@ use tracing::Span;
 use tracing_indicatif::{IndicatifLayer, span_ext::IndicatifSpanExt, style::ProgressStyle};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[path = "corpus_profile/cli.rs"]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[path = "sas7bdat_corpus_profile/cli.rs"]
 mod corpus_cli;
-#[path = "corpus_profile/csv.rs"]
+#[path = "sas7bdat_corpus_profile/csv.rs"]
 mod corpus_csv;
-#[path = "corpus_profile/render.rs"]
+#[path = "sas7bdat_corpus_profile/render.rs"]
 mod corpus_render;
-#[path = "corpus_profile/scan.rs"]
+#[path = "sas7bdat_corpus_profile/scan.rs"]
 mod corpus_scan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -361,7 +364,7 @@ struct FileProgressReporter {
 impl ProgressReporter {
     fn new(message: &str, total_files: usize, total_bytes: u64) -> Self {
         init_progress_subscriber();
-        let span = tracing::info_span!("corpus_profile");
+        let span = tracing::info_span!("sas7bdat-corpus-profile");
         span.pb_set_style(&progress_style());
         span.pb_set_length(total_bytes.max(1));
         span.pb_set_message(&format_progress_message(
@@ -1092,7 +1095,7 @@ fn summary_txt_path(csv_path: &Path) -> PathBuf {
     let stem = csv_path
         .file_stem()
         .and_then(|value| value.to_str())
-        .unwrap_or("corpus_profile");
+        .unwrap_or("sas7bdat-corpus-profile");
     let summary_name = format!("{stem}_summary.txt");
     csv_path.with_file_name(summary_name)
 }
@@ -1443,6 +1446,6 @@ const fn projection_name(value: ProjectionPreset) -> &'static str {
 
 fn print_usage() {
     eprintln!(
-        "usage: cargo run -p sas7bdat-profiler --bin corpus_profile -- INPUT [INPUT ...] [--failed-from PATH] [--sample-rows N] [--format json|csv] [--summary-only] [--out PATH] [--scan-mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches] [--scan-projection full|numeric|strings|mixed] [--scan-batch-rows N] [--scan-io-backend auto|mmap-preferred|buffered-preferred|buffered-only] [--scan-limit N]"
+        "usage: cargo run -p sas7bdat-cli --bin sas7bdat-corpus-profile -- INPUT [INPUT ...] [--failed-from PATH] [--sample-rows N] [--format json|csv] [--summary-only] [--out PATH] [--scan-mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches] [--scan-projection full|numeric|strings|mixed] [--scan-batch-rows N] [--scan-io-backend auto|mmap-preferred|buffered-preferred|buffered-only] [--scan-limit N]"
     );
 }

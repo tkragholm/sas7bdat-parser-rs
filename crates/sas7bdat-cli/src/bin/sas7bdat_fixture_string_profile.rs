@@ -1,7 +1,10 @@
-use sas7bdat_profiler::init_profiler_runtime;
+use sas7bdat_cli::init_profiler_runtime;
 use sas7bdat_simd::{Dataset, LogicalType, RowIndex, RowSelection};
 use serde::Serialize;
 use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Debug, Serialize)]
 struct StringProfileOutput {
@@ -336,6 +339,6 @@ fn next_value(
 
 fn print_usage() {
     eprintln!(
-        "usage: cargo run -p sas7bdat-profiler --bin fixture_string_profile -- --fixture PATH [--sample-rows N] [--top N]"
+        "usage: cargo run -p sas7bdat-cli --bin sas7bdat-fixture-string-profile -- --fixture PATH [--sample-rows N] [--top N]"
     );
 }

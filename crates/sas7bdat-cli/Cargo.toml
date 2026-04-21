@@ -1,0 +1,60 @@
+[package]
+name = "sas7bdat-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Standalone CLI for converting SAS7BDAT files to parquet, CSV, or TSV"
+license = "MIT"
+
+[lib]
+name = "sas7bdat_cli"
+
+[[bin]]
+name = "sas7bdat"
+path = "src/main.rs"
+
+[[bin]]
+name = "sas7bdat-corpus-catalog"
+path = "src/bin/sas7bdat_corpus_catalog.rs"
+
+[[bin]]
+name = "sas7bdat-corpus-profile"
+path = "src/bin/sas7bdat_corpus_profile.rs"
+
+[[bin]]
+name = "sas7bdat-fixture-profile"
+path = "src/bin/sas7bdat_fixture_profile.rs"
+
+[[bin]]
+name = "sas7bdat-fixture-string-profile"
+path = "src/bin/sas7bdat_fixture_string_profile.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+clap = { workspace = true }
+chrono = { workspace = true }
+csv = { workspace = true }
+encoding_rs = { workspace = true }
+glob = { workspace = true }
+hex = { workspace = true }
+indicatif = { workspace = true }
+mimalloc = { workspace = true }
+num-traits = { workspace = true }
+parquet = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-indicatif = { workspace = true }
+tracing-subscriber = { workspace = true }
+walkdir = { workspace = true }
+sas7bdat-simd = { path = "../sas7bdat-simd", features = ["arrow"] }
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

@@ -1,24 +1,24 @@
-# sas7bdat-profiler
+# sas7bdat-cli
 
-Utilities for profiling SAS7BDAT corpora and scan behavior.
+Utilities for converting and profiling SAS7BDAT data.
 
 The workspace contains:
 
 - the `sas7bdat-simd` library crate
-- the `sas7bdat-profiler` binary package
+- the `sas7bdat-cli` package, which ships the `sas7bdat` converter plus profiling binaries
 - the `sas7bdat-polars` Python extension package
 
-The profiler package ships Windows command-line executables including:
+The package ships command-line executables including:
 
-- `corpus_profile`
-- `fixture_catalog`
-- `fixture_profile`
-- `fixture_string_profile`
+- `sas7bdat-corpus-catalog`
+- `sas7bdat-corpus-profile`
+- `sas7bdat-fixture-profile`
+- `sas7bdat-fixture-string-profile`
 
 Typical usage after installation:
 
 ```text
-corpus_profile <root> --format csv --out corpus_profile.csv
+sas7bdat-corpus-profile <root> --format csv --out corpus_profile.csv
 ```
 
 ## Current progress
@@ -40,13 +40,13 @@ Historical notes and superseded reports are kept in [docs/archive/README.md](/Us
 For full-scan profiling:
 
 ```text
-corpus_profile <root> --mode typed_batches --projection full --out corpus_profile.csv
+sas7bdat-corpus-profile <root> --mode typed_batches --projection full --out corpus_profile.csv
 ```
 
 For local development from the workspace root:
 
 ```text
-cargo run -p sas7bdat-profiler --bin corpus_profile -- <root> --format csv --out corpus_profile.csv
+cargo run -p sas7bdat-cli --bin sas7bdat-corpus-profile -- <root> --format csv --out corpus_profile.csv
 ```
 
 ## Testing
@@ -66,6 +66,23 @@ just test
 - `just test-polars-plugin` builds the extension module and runs the Python
   smoke tests.
 - `just test` runs the full sequence.
+
+## Standalone CLI
+
+The workspace also ships a small `sas7bdat` conversion CLI in the
+`sas7bdat-cli` package.
+
+Examples:
+
+```text
+cargo run -p sas7bdat-cli --bin sas7bdat -- convert fixtures/ahs2013n.sas7bdat --sink parquet --out /tmp/out.parquet
+cargo run -p sas7bdat-cli --bin sas7bdat -- inspect fixtures/ahs2013n.sas7bdat --json
+just sas7bdat convert fixtures/ahs2013n.sas7bdat --sink parquet --out /tmp/out.parquet
+```
+
+It supports directory recursion, column projection, row limits, parquet, CSV,
+or TSV output, and an optional `.sas7bcat` companion via `--catalog` so
+parquet output can carry value-label metadata.
 
 ## Production corpus target profile
 
