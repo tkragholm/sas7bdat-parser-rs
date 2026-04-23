@@ -3,15 +3,19 @@ name = "sas7bdat-cli"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Standalone CLI for converting SAS7BDAT files to parquet, CSV, or TSV"
+description = "Standalone CLI tools for converting, inspecting, and profiling SAS7BDAT files"
 license = "MIT"
 
 [lib]
 name = "sas7bdat_cli"
 
 [[bin]]
-name = "sas7bdat"
-path = "src/main.rs"
+name = "sas7bdat-convert"
+path = "src/bin/sas7bdat_convert.rs"
+
+[[bin]]
+name = "sas7bdat-inspect"
+path = "src/bin/sas7bdat_inspect.rs"
 
 [[bin]]
 name = "sas7bdat-corpus-catalog"

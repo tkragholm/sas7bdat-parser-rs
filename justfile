@@ -112,5 +112,8 @@ hotpath-typed-batches-target:
 hotpath-typed-batches-top3:
     @/bin/zsh -lc 'out="${HOTPATH_OUTPUT_PATH:-target/criterion/hotpath/typed_batches_top3_target.json}"; mkdir -p "$(dirname "$out")"; BATCH_ROWS="${BATCH_ROWS:-256}" MAX_FILES=3 HOTPATH_OUTPUT_PATH="$out" cargo run --release -p sas7bdat-simd --features hotpath-profile --example hotpath_typed_batches_target'
 
-sas7bdat *args:
-    @cargo run --manifest-path crates/sas7bdat-cli/Cargo.toml --bin sas7bdat -- {{args}}
+convert *args:
+    @cargo run --manifest-path crates/sas7bdat-cli/Cargo.toml --bin sas7bdat-convert -- {{args}}
+
+inspect *args:
+    @cargo run --manifest-path crates/sas7bdat-cli/Cargo.toml --bin sas7bdat-inspect -- {{args}}

@@ -5,7 +5,7 @@ Utilities for converting and profiling SAS7BDAT data.
 The workspace contains:
 
 - the `sas7bdat-simd` library crate
-- the `sas7bdat-cli` package, which ships the `sas7bdat` converter plus profiling binaries
+- the `sas7bdat-cli` package, which ships the `sas7bdat-convert`, `sas7bdat-inspect`, and profiling binaries
 - the `sas7bdat-polars` Python extension package
 
 The package ships command-line executables including:
@@ -69,15 +69,16 @@ just test
 
 ## Standalone CLI
 
-The workspace also ships a small `sas7bdat` conversion CLI in the
-`sas7bdat-cli` package.
+The workspace also ships small `sas7bdat-convert` and `sas7bdat-inspect`
+commands in the `sas7bdat-cli` package.
 
 Examples:
 
 ```text
-cargo run -p sas7bdat-cli --bin sas7bdat -- convert fixtures/ahs2013n.sas7bdat --sink parquet --out /tmp/out.parquet
-cargo run -p sas7bdat-cli --bin sas7bdat -- inspect fixtures/ahs2013n.sas7bdat --json
-just sas7bdat convert fixtures/ahs2013n.sas7bdat --sink parquet --out /tmp/out.parquet
+cargo run -p sas7bdat-cli --bin sas7bdat-convert -- fixtures/ahs2013n.sas7bdat --sink parquet --out /tmp/out.parquet
+cargo run -p sas7bdat-cli --bin sas7bdat-inspect -- fixtures/ahs2013n.sas7bdat --json
+just convert fixtures/ahs2013n.sas7bdat --sink parquet --out /tmp/out.parquet
+just inspect fixtures/ahs2013n.sas7bdat --json
 ```
 
 It supports directory recursion, column projection, row limits, parquet, CSV,

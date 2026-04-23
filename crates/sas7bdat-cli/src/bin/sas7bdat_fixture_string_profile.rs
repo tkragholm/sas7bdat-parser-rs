@@ -1,4 +1,4 @@
-use sas7bdat_cli::init_profiler_runtime;
+use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
 use sas7bdat_simd::{Dataset, LogicalType, RowIndex, RowSelection};
 use serde::Serialize;
 use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
@@ -83,14 +83,7 @@ struct PrintableWidthBucket {
 }
 
 fn main() -> ExitCode {
-    init_profiler_runtime();
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(message) => {
-            eprintln!("{message}");
-            ExitCode::FAILURE
-        }
-    }
+    exit_code_with_init(init_profiler_runtime, run)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -104,16 +97,10 @@ fn run() -> std::result::Result<(), String> {
         match arg.to_string_lossy().as_ref() {
             "--fixture" => fixture = Some(PathBuf::from(next_value(&mut args, "--fixture")?)),
             "--sample-rows" => {
-                let value = next_value(&mut args, "--sample-rows")?;
-                sample_rows = value
-                    .parse()
-                    .map_err(|_| format!("invalid --sample-rows value: {value}"))?;
+                sample_rows = next_parsed(&mut args, "--sample-rows")?;
             }
             "--top" => {
-                let value = next_value(&mut args, "--top")?;
-                top = value
-                    .parse()
-                    .map_err(|_| format!("invalid --top value: {value}"))?;
+                top = next_parsed(&mut args, "--top")?;
             }
             "--help" | "-h" => {
                 print_usage();
@@ -325,16 +312,6 @@ fn avg(total: u64, count: u64) -> f64 {
     } else {
         total as f64 / count as f64
     }
-}
-
-fn next_value(
-    args: &mut impl Iterator<Item = std::ffi::OsString>,
-    flag: &str,
-) -> std::result::Result<String, String> {
-    let Some(value) = args.next() else {
-        return Err(format!("missing value after {flag}"));
-    };
-    Ok(value.to_string_lossy().into_owned())
 }
 
 fn print_usage() {

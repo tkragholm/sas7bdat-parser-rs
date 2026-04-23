@@ -1,4 +1,4 @@
-use sas7bdat_cli::init_profiler_runtime;
+use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
 use sas7bdat_simd::{build_catalog, discover_fixture_paths};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
@@ -6,14 +6,7 @@ use std::{env, fs, path::PathBuf, process::ExitCode};
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> ExitCode {
-    init_profiler_runtime();
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(message) => {
-            eprintln!("{message}");
-            ExitCode::FAILURE
-        }
-    }
+    exit_code_with_init(init_profiler_runtime, run)
 }
 
 fn run() -> std::result::Result<(), String> {
@@ -25,19 +18,10 @@ fn run() -> std::result::Result<(), String> {
     while let Some(arg) = args.next() {
         match arg.to_string_lossy().as_ref() {
             "--sample-rows" => {
-                let Some(value) = args.next() else {
-                    return Err("missing value after --sample-rows".to_owned());
-                };
-                sample_rows = value
-                    .to_string_lossy()
-                    .parse()
-                    .map_err(|_| "invalid --sample-rows value".to_owned())?;
+                sample_rows = next_parsed(&mut args, "--sample-rows")?;
             }
             "--out" => {
-                let Some(value) = args.next() else {
-                    return Err("missing value after --out".to_owned());
-                };
-                out = Some(PathBuf::from(value));
+                out = Some(PathBuf::from(next_value(&mut args, "--out")?));
             }
             "--help" | "-h" => {
                 print_usage();

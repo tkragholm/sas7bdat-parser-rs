@@ -1,6 +1,6 @@
 #![allow(clippy::cast_precision_loss, clippy::too_many_lines)]
 
-use sas7bdat_cli::init_profiler_runtime;
+use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
 use sas7bdat_simd::{
     BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions, ProjectionPreset,
     ScanStatsSummary, build_projection, summarize_scan_stats,
@@ -70,14 +70,7 @@ const fn mode_name(mode: ProfileMode) -> &'static str {
 }
 
 fn main() -> ExitCode {
-    init_profiler_runtime();
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(message) => {
-            eprintln!("{message}");
-            ExitCode::FAILURE
-        }
-    }
+    exit_code_with_init(init_profiler_runtime, run)
 }
 
 fn run() -> std::result::Result<(), String> {
@@ -104,23 +97,14 @@ fn run() -> std::result::Result<(), String> {
                     .ok_or_else(|| format!("invalid --projection value: {value}"))?;
             }
             "--repeat" => {
-                let value = next_value(&mut args, "--repeat")?;
-                repeat = value
-                    .parse()
-                    .map_err(|_| format!("invalid --repeat value: {value}"))?;
+                repeat = next_parsed(&mut args, "--repeat")?;
             }
             "--limit" => {
-                let value = next_value(&mut args, "--limit")?;
-                let parsed: u64 = value
-                    .parse()
-                    .map_err(|_| format!("invalid --limit value: {value}"))?;
+                let parsed: u64 = next_parsed(&mut args, "--limit")?;
                 limit = (parsed != 0).then_some(parsed);
             }
             "--batch-rows" => {
-                let value = next_value(&mut args, "--batch-rows")?;
-                batch_rows = value
-                    .parse()
-                    .map_err(|_| format!("invalid --batch-rows value: {value}"))?;
+                batch_rows = next_parsed(&mut args, "--batch-rows")?;
             }
             "--io-backend" => {
                 let value = next_value(&mut args, "--io-backend")?;
@@ -217,16 +201,6 @@ fn run() -> std::result::Result<(), String> {
         serde_json::to_string_pretty(&output).map_err(|err| err.to_string())?
     );
     Ok(())
-}
-
-fn next_value(
-    args: &mut impl Iterator<Item = std::ffi::OsString>,
-    flag: &str,
-) -> std::result::Result<String, String> {
-    let Some(value) = args.next() else {
-        return Err(format!("missing value after {flag}"));
-    };
-    Ok(value.to_string_lossy().into_owned())
 }
 
 fn parse_io_backend(value: &str) -> Option<IoBackendPreference> {

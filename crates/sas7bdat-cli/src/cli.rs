@@ -1,33 +1,12 @@
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
-    name = "sas7bdat",
+    name = "sas7bdat-convert",
     version,
-    about = "Convert SAS7BDAT datasets to parquet, CSV, TSV, or inspect metadata"
+    about = "Convert SAS7BDAT datasets to parquet, CSV, or TSV"
 )]
-pub struct Cli {
-    #[command(subcommand)]
-    pub command: Commands,
-}
-
-#[derive(Subcommand)]
-pub enum Commands {
-    /// Convert one or more SAS7BDAT files to another tabular format.
-    Convert(Box<ConvertArgs>),
-    /// Inspect dataset metadata and print a summary.
-    Inspect(InspectArgs),
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-pub enum SinkKind {
-    Parquet,
-    Csv,
-    Tsv,
-}
-
-#[derive(Parser, Clone)]
 pub struct ConvertArgs {
     /// Input files or directories. Directories are scanned recursively.
     #[arg(required = true, value_name = "PATH")]
@@ -85,6 +64,13 @@ pub struct ConvertArgs {
     /// Optional value-label catalog (.sas7bcat) to attach to parquet metadata.
     #[arg(long, value_name = "FILE", help_heading = "Input")]
     pub catalog: Option<PathBuf>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SinkKind {
+    Parquet,
+    Csv,
+    Tsv,
 }
 
 #[derive(Parser, Clone)]
@@ -205,6 +191,11 @@ pub enum RecursionMode {
 }
 
 #[derive(Parser, Clone)]
+#[command(
+    name = "sas7bdat-inspect",
+    version,
+    about = "Inspect SAS7BDAT dataset metadata and print a summary"
+)]
 pub struct InspectArgs {
     /// Input SAS7BDAT file.
     #[arg(value_name = "FILE")]

@@ -3,6 +3,7 @@ use super::{
     ScanRunOptions, collect_fixture_entries, discover_fixture_paths, display_roots,
     load_failed_paths, parse_io_backend, print_usage, summarize_catalog,
 };
+use sas7bdat_cli::{next_parsed, next_value};
 use std::{env, path::PathBuf};
 
 #[derive(Debug)]
@@ -90,7 +91,7 @@ fn handle_common_flag(
 ) -> std::result::Result<bool, String> {
     match flag {
         "--sample-rows" => {
-            config.sample_rows = next_usize(args, flag)?;
+            config.sample_rows = next_parsed(args, flag)?;
             Ok(true)
         }
         "--out" => {
@@ -133,7 +134,7 @@ fn handle_scan_flag(
             Ok(true)
         }
         "--scan-batch-rows" | "--batch-rows" => {
-            config.scan_batch_rows = next_usize(args, flag)?;
+            config.scan_batch_rows = next_parsed(args, flag)?;
             Ok(true)
         }
         "--scan-io-backend" | "--io-backend" => {
@@ -143,38 +144,12 @@ fn handle_scan_flag(
             Ok(true)
         }
         "--scan-limit" | "--limit" => {
-            let parsed = next_u64(args, flag)?;
+            let parsed = next_parsed(args, flag)?;
             config.scan_limit = (parsed != 0).then_some(parsed);
             Ok(true)
         }
         _ => Ok(false),
     }
-}
-
-fn next_value(
-    args: &mut impl Iterator<Item = std::ffi::OsString>,
-    flag: &str,
-) -> std::result::Result<String, String> {
-    let Some(value) = args.next() else {
-        return Err(format!("missing value after {flag}"));
-    };
-    Ok(value.to_string_lossy().into_owned())
-}
-
-fn next_usize(
-    args: &mut impl Iterator<Item = std::ffi::OsString>,
-    flag: &str,
-) -> std::result::Result<usize, String> {
-    let value = next_value(args, flag)?;
-    value.parse().map_err(|_| format!("invalid {flag} value"))
-}
-
-fn next_u64(
-    args: &mut impl Iterator<Item = std::ffi::OsString>,
-    flag: &str,
-) -> std::result::Result<u64, String> {
-    let value = next_value(args, flag)?;
-    value.parse().map_err(|_| format!("invalid {flag} value"))
 }
 
 fn execute(config: &CliConfig) -> std::result::Result<(), String> {

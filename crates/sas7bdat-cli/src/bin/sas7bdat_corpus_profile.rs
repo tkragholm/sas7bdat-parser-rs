@@ -1,6 +1,6 @@
 use csv::ReaderBuilder;
 use rayon::prelude::*;
-use sas7bdat_cli::init_profiler_runtime;
+use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime};
 use sas7bdat_simd::{
     BatchHint, Dataset, DecodeMode, Endianness, FixtureCatalog, FixtureEntry, FixtureProfile,
     FixtureStatus, IoBackendPreference, LogicalType, LogicalTypeCounts, NamedCount, OpenOptions,
@@ -762,14 +762,7 @@ fn collect_scan_rows(
 }
 
 fn main() -> ExitCode {
-    init_profiler_runtime();
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(message) => {
-            eprintln!("{message}");
-            ExitCode::FAILURE
-        }
-    }
+    exit_code_with_init(init_profiler_runtime, run)
 }
 
 fn run() -> std::result::Result<(), String> {
