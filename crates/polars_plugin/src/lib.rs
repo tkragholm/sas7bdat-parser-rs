@@ -28,6 +28,9 @@ use pyo3_polars::types::PyDataFrame;
 #[cfg(feature = "arrow")]
 use sas7bdat_simd::{BatchHint, Dataset, Error, OwnedColumnarBatch, Projection};
 
+#[cfg(feature = "arrow")]
+const PLUGIN_CONTRACT_VERSION: &str = "sas7bdat_polars.v1";
+
 // ─── message types ────────────────────────────────────────────────────────────
 
 #[cfg(feature = "arrow")]
@@ -651,6 +654,8 @@ fn batch_benchmark_dict(
 #[cfg(feature = "arrow")]
 #[pymodule]
 fn sas7bdat_polars(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add("PLUGIN_CONTRACT_VERSION", PLUGIN_CONTRACT_VERSION)?;
     m.add_class::<SasDataset>()?;
     m.add_class::<SasIoSource>()?;
     m.add_class::<BatchReader>()?;

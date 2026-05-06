@@ -36,7 +36,7 @@ check-polars-plugin:
 
 test-polars-plugin:
     @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml --features arrow,extension-module
-    @.venv/bin/pytest crates/polars_plugin/tests
+    @.venv/bin/python -m pytest crates/polars_plugin/tests
 
 test-polars-plugin-rust:
     @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib

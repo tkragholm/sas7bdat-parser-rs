@@ -6,6 +6,15 @@ import sas7bdat_polars as sp
 FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "ahs2013n.sas7bdat"
 
 
+def test_public_api_contract_is_exposed():
+    assert sp.__version__ == "0.1.0"
+    assert sp.PLUGIN_CONTRACT_VERSION == "sas7bdat_polars.v1"
+    assert callable(sp.scan_sas)
+    assert callable(sp.schema_for_file)
+    assert callable(sp.batch_reader)
+    assert hasattr(sp, "SasDataset")
+
+
 def test_scan_sas_head_collects():
     assert FIXTURE.exists(), f"missing fixture: {FIXTURE}"
 
@@ -48,6 +57,17 @@ def test_scan_sas_projection_collects_requested_columns():
 
     assert df.columns == ["CONTROL", "DEGREE"]
     assert df.height == 3
+
+
+def test_projected_scan_schema_matches_collected_frame():
+    assert FIXTURE.exists(), f"missing fixture: {FIXTURE}"
+
+    lf = sp.scan_sas(str(FIXTURE)).select(["CONTROL", "DEGREE", "LMED"])
+    schema = lf.collect_schema()
+    df = lf.head(3).collect()
+
+    assert schema.names() == ["CONTROL", "DEGREE", "LMED"]
+    assert df.schema == schema
 
 
 def test_scan_sas_filter_collects_matching_rows():
