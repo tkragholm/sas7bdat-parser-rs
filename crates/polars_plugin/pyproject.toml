@@ -15,3 +15,4 @@ test = ["pytest"]
 [tool.maturin]
 bindings = "pyo3"
 manifest-path = "Cargo.toml"
+features = ["extension-module"]

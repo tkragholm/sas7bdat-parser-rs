@@ -651,9 +651,14 @@ fn batch_benchmark_dict(
     Ok(dict.unbind().into_any())
 }
 
-#[cfg(feature = "arrow")]
+#[cfg(all(feature = "arrow", feature = "extension-module"))]
 #[pymodule]
 fn sas7bdat_polars(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    register_module(m)
+}
+
+#[cfg(feature = "arrow")]
+pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add("PLUGIN_CONTRACT_VERSION", PLUGIN_CONTRACT_VERSION)?;
     m.add_class::<SasDataset>()?;
