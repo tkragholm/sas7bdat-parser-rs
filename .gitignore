@@ -23,6 +23,6 @@ fixtures/fixture_catalog.local.json
 INDEX.md
 
 # Personal editor / AI assistant configs (not project-level)
-.claude/settings.local.json
+.claude/
 .codex/
 .mcp.json
