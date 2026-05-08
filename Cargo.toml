@@ -8,27 +8,27 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1"
-arrow-array = "58.1.0"
-arrow-schema = "58.1.0"
+arrow-array = "58"
+arrow-schema = "58"
 bytemuck = { version = "1", features = ["derive"] }
 bstr = "1"
-criterion = "0.8.2"
+criterion = "0.8"
 clap = { version = "4", features = ["derive"] }
 csv = "1"
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 encoding_rs = "0.8"
 glob = "0.3"
 hex = "0.4"
-hotpath = { version = "0.15", features = ["hotpath"] }
+hotpath = { version = "0.16", features = ["hotpath"] }
 indicatif = "0.18"
 memchr = "2.8"
 memmap2 = "0.9"
 mimalloc = { version = "0.1.49", default-features = false, features = ["secure"] }
 num-traits = "0.2"
-parquet = { version = "58.1.0", features = ["arrow"] }
-polars = "0.53.0"
-polars-arrow = "0.53.0"
-polars-plan = { version = "0.53.0", features = ["serde"] }
+parquet = { version = "58", features = ["arrow"] }
+polars = "0.53"
+polars-arrow = "0.53"
+polars-plan = { version = "0.53", features = ["serde"] }
 pyo3 = { version = "0.27" }
 pyo3-polars = "0.26.0"
 rayon = "1"
