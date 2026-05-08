@@ -110,9 +110,7 @@ def gather_rows(
         batch_thrpt_high = elems * 1_000_000_000.0 / batch_low
 
         # Throughput relative change is inverse of time: (1 / (1 + dt)) - 1
-        thrpt_change_low = (1.0 / (1.0 + change_high)) - 1.0
         thrpt_change_mid = (1.0 / (1.0 + change_mid)) - 1.0
-        thrpt_change_high = (1.0 / (1.0 + change_low)) - 1.0
 
         runtime_status = classify_change(change_mid, noise_threshold)
         # For throughput, positive is good, so classify the negated value.

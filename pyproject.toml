@@ -3,9 +3,9 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "sas7bdat-toolkit"
+name = "sas7bdat-dir-mapper"
 version = "0.1.0"
-description = "Tools for profiling SAS7BDAT corpora"
+description = "Tools for mapping out SAS7BDAT files"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
@@ -18,3 +18,4 @@ classifiers = [
 [tool.maturin]
 bindings = "bin"
 manifest-path = "crates/sas7bdat-cli/Cargo.toml"
+cargo-extra-args = "--bin sas7bdat-dir-mapper"
