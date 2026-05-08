@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow, bail};
-use sas7bdat_simd::{ColumnMeta, Dataset, Projection, RowSelection};
+use sas7bdat::{ColumnMeta, Dataset, Projection, RowSelection};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, Default)]

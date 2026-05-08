@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use criterion::{BenchmarkGroup, BenchmarkId, Throughput, measurement::Measurement};
-use sas7bdat_simd::{Dataset, IoBackendPreference, OpenOptions};
+use sas7bdat::{Dataset, IoBackendPreference, OpenOptions};
 use std::{
     fs,
     hint::black_box,

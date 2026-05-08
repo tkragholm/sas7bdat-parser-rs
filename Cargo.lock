@@ -3351,6 +3351,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "sas7bdat"
+version = "0.3.0"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "bstr",
+ "bytemuck",
+ "criterion",
+ "encoding_rs",
+ "hotpath",
+ "memchr",
+ "memmap2",
+ "rayon",
+ "serde",
+ "serde_json",
+ "simdutf8",
+]
+
+[[package]]
 name = "sas7bdat-cli"
 version = "0.1.0"
 dependencies = [
@@ -3368,7 +3387,7 @@ dependencies = [
  "num-traits",
  "parquet",
  "rayon",
- "sas7bdat-simd",
+ "sas7bdat",
  "serde",
  "serde_json",
  "tracing",
@@ -3389,26 +3408,7 @@ dependencies = [
  "pyo3",
  "pyo3-polars",
  "rmp-serde",
- "sas7bdat-simd",
-]
-
-[[package]]
-name = "sas7bdat-simd"
-version = "0.1.0"
-dependencies = [
- "arrow-array",
- "arrow-schema",
- "bstr",
- "bytemuck",
- "criterion",
- "encoding_rs",
- "hotpath",
- "memchr",
- "memmap2",
- "rayon",
- "serde",
- "serde_json",
- "simdutf8",
+ "sas7bdat",
 ]
 
 [[package]]

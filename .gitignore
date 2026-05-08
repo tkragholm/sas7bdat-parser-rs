@@ -1,4 +1,28 @@
+# Rust build artifacts
 /target
+crates/polars_plugin/target
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+crates/polars_plugin/.pytest_cache/
+scripts/__pycache__/
+
+# macOS
+.DS_Store
+
+# Test fixtures (binary data files, tracked via README only)
 fixtures/*
 !fixtures/README.md
+
+# Local dev / tooling caches
+.indxr-cache/
 /.quibble
+fixtures/fixture_catalog.local.json
+INDEX.md
+
+# Personal editor / AI assistant configs (not project-level)
+.claude/settings.local.json
+.codex/
+.mcp.json

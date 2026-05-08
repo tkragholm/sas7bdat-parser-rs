@@ -1,4 +1,4 @@
-use sas7bdat_simd::{BatchHint, Dataset, IoBackendPreference, OpenOptions, Projection};
+use sas7bdat::{BatchHint, Dataset, IoBackendPreference, OpenOptions, Projection};
 use std::{env, ops::ControlFlow, path::Path, time::Instant};
 
 fn parse_backend(value: &str) -> Result<IoBackendPreference, String> {

@@ -5,7 +5,7 @@ use std::{env, fs, path::Path};
 use std::{hint::black_box, ops::ControlFlow};
 
 #[cfg(feature = "hotpath-profile")]
-use sas7bdat_simd::{BatchHint, Dataset};
+use sas7bdat::{BatchHint, Dataset};
 
 #[path = "common/mod.rs"]
 mod common;

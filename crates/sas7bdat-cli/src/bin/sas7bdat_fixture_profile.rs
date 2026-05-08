@@ -1,7 +1,7 @@
 #![allow(clippy::cast_precision_loss, clippy::too_many_lines)]
 
 use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
-use sas7bdat_simd::{
+use sas7bdat::{
     BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions, ProjectionPreset,
     ScanStatsSummary, build_projection, summarize_scan_stats,
 };

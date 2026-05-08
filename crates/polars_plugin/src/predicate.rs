@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 #[cfg(feature = "arrow")]
 use rmp_serde::from_slice;
 #[cfg(feature = "arrow")]
-use sas7bdat_simd::{Error, Result as SasResult};
+use sas7bdat::{Error, Result as SasResult};
 
 #[cfg(feature = "arrow")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

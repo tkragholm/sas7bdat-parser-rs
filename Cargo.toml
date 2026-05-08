@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/sas7bdat-cli",
-    "crates/sas7bdat-simd",
+    "crates/sas7bdat",
     "crates/polars_plugin",
 ]
 resolver = "2"

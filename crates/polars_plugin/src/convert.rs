@@ -15,7 +15,7 @@ use polars_arrow::{
 #[cfg(feature = "arrow")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule};
 #[cfg(feature = "arrow")]
-use sas7bdat_simd::{Error, OwnedColumnBuffer, Result as SasResult, TrustedOffsets};
+use sas7bdat::{Error, OwnedColumnBuffer, Result as SasResult, TrustedOffsets};
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
 
@@ -56,7 +56,7 @@ pub(super) fn arrow_dt_to_polars_arrow(dt: &ArrowSchemaDataType) -> Result<Arrow
 
 #[cfg(feature = "arrow")]
 pub(super) fn owned_batch_to_dataframe(
-    batch: sas7bdat_simd::OwnedColumnarBatch,
+    batch: sas7bdat::OwnedColumnarBatch,
     schema: Arc<ArrowSchema>,
 ) -> SasResult<DataFrame> {
     let row_count = batch.row_count;
@@ -140,7 +140,7 @@ fn trusted_large_offsets_buffer(offsets: TrustedOffsets, data_len: usize) -> Off
 
     // SAFETY:
     // `TrustedOffsets` is only produced by the scanner's variable-width builders in
-    // `sas7bdat-simd`. Those builders:
+    // `sas7bdat`. Those builders:
     // - initialize offsets with a single `0`
     // - append the current data length after each pushed value
     // - repeat the previous offset for nulls

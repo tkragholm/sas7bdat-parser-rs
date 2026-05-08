@@ -4,7 +4,7 @@
     clippy::unreadable_literal
 )]
 
-use sas7bdat_simd::{BatchHint, Dataset, TrustedOffsets, discover_fixture_paths};
+use sas7bdat::{BatchHint, Dataset, TrustedOffsets, discover_fixture_paths};
 use std::{
     env,
     ops::ControlFlow,
@@ -96,7 +96,7 @@ fn local_compressed_fixtures_open_and_scan() {
         let dataset = Dataset::open(&path)
             .unwrap_or_else(|err| panic!("failed to open fixture {}: {err}", path.display()));
 
-        if dataset.metadata().compression == sas7bdat_simd::CompressionKind::None {
+        if dataset.metadata().compression == sas7bdat::CompressionKind::None {
             continue;
         }
 

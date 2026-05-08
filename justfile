@@ -10,7 +10,7 @@ catalog-stdout sample_rows="64":
     @cargo run --release -p sas7bdat-cli --bin sas7bdat-corpus-catalog -- fixtures/raw_data fixtures/ahs2013n.sas7bdat --sample-rows {{sample_rows}}
 
 correctness-all:
-    @cargo test -q -p sas7bdat-simd --test fixture_smoke
+    @cargo test -q -p sas7bdat --test fixture_smoke
 
 profile fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
     @cargo run --release -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
@@ -42,7 +42,7 @@ test-polars-plugin-rust:
     @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib
 
 test-core:
-    @cargo nextest run --release -p sas7bdat-simd -p sas7bdat-cli
+    @cargo nextest run --release -p sas7bdat -p sas7bdat-cli
 
 test: test-core test-polars-plugin-rust test-polars-plugin
 
@@ -76,7 +76,7 @@ bench-compare fixture="fixtures/raw_data/other/cars.sas7bdat" mode="both" repeat
     @python3 scripts/compare_simd_vs_old.py --fixture {{fixture}} --mode {{mode}} --repeat {{repeat}} --batch-rows {{batch_rows}}
 
 bench-tags tags projection="full" max_fixtures="999" catalog="fixtures/fixture_catalog.local.json":
-    @/bin/zsh -lc 'args=(${=CRITERION_ARGS:-}); BENCH_TAGS={{tags}} BENCH_PROJECTION={{projection}} BENCH_CATALOG={{catalog}} BENCH_MAX_FIXTURES={{max_fixtures}} cargo bench -p sas7bdat-simd --bench scan_hotpaths -- "${args[@]}"'
+    @/bin/zsh -lc 'args=(${=CRITERION_ARGS:-}); BENCH_TAGS={{tags}} BENCH_PROJECTION={{projection}} BENCH_CATALOG={{catalog}} BENCH_MAX_FIXTURES={{max_fixtures}} cargo bench -p sas7bdat --bench scan_hotpaths -- "${args[@]}"'
 
 bench-standard projection="full" max_fixtures="999" catalog="fixtures/fixture_catalog.local.json":
     @just bench-tags benchmark-standard {{projection}} {{max_fixtures}} {{catalog}}
@@ -97,20 +97,20 @@ update-top3-bench-readme:
     @python3 scripts/update_top3_bench_table.py
 
 bench-top3-readme:
-    @cargo bench -p sas7bdat-simd --bench compression_matrix -- 'top3_target/'
+    @cargo bench -p sas7bdat --bench compression_matrix -- 'top3_target/'
     @python3 scripts/update_top3_bench_table.py
 
 batch-family-stats fixture batch_rows="256":
-    @BATCH_ROWS={{batch_rows}} cargo run --release -p sas7bdat-simd --example batch_family_stats -- {{fixture}}
+    @BATCH_ROWS={{batch_rows}} cargo run --release -p sas7bdat --example batch_family_stats -- {{fixture}}
 
 batch-family-stats-target batch_rows="256" max_files="999999" top="10":
-    @BATCH_ROWS={{batch_rows}} MAX_FILES={{max_files}} TOP={{top}} cargo run --release -p sas7bdat-simd --example batch_family_stats_target
+    @BATCH_ROWS={{batch_rows}} MAX_FILES={{max_files}} TOP={{top}} cargo run --release -p sas7bdat --example batch_family_stats_target
 
 hotpath-typed-batches-target:
-    @/bin/zsh -lc 'out="${HOTPATH_OUTPUT_PATH:-target/criterion/hotpath/typed_batches_target.json}"; mkdir -p "$(dirname "$out")"; BATCH_ROWS="${BATCH_ROWS:-256}" MAX_FILES="${MAX_FILES:-999999}" HOTPATH_OUTPUT_PATH="$out" cargo run --release -p sas7bdat-simd --features hotpath-profile --example hotpath_typed_batches_target'
+    @/bin/zsh -lc 'out="${HOTPATH_OUTPUT_PATH:-target/criterion/hotpath/typed_batches_target.json}"; mkdir -p "$(dirname "$out")"; BATCH_ROWS="${BATCH_ROWS:-256}" MAX_FILES="${MAX_FILES:-999999}" HOTPATH_OUTPUT_PATH="$out" cargo run --release -p sas7bdat --features hotpath-profile --example hotpath_typed_batches_target'
 
 hotpath-typed-batches-top3:
-    @/bin/zsh -lc 'out="${HOTPATH_OUTPUT_PATH:-target/criterion/hotpath/typed_batches_top3_target.json}"; mkdir -p "$(dirname "$out")"; BATCH_ROWS="${BATCH_ROWS:-256}" MAX_FILES=3 HOTPATH_OUTPUT_PATH="$out" cargo run --release -p sas7bdat-simd --features hotpath-profile --example hotpath_typed_batches_target'
+    @/bin/zsh -lc 'out="${HOTPATH_OUTPUT_PATH:-target/criterion/hotpath/typed_batches_top3_target.json}"; mkdir -p "$(dirname "$out")"; BATCH_ROWS="${BATCH_ROWS:-256}" MAX_FILES=3 HOTPATH_OUTPUT_PATH="$out" cargo run --release -p sas7bdat --features hotpath-profile --example hotpath_typed_batches_target'
 
 convert *args:
     @cargo run --manifest-path crates/sas7bdat-cli/Cargo.toml --bin sas7bdat-convert -- {{args}}

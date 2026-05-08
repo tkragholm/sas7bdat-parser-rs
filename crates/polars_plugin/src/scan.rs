@@ -19,7 +19,7 @@ use pyo3::{
     types::{PyDict, PyModule},
 };
 #[cfg(feature = "arrow")]
-use sas7bdat_simd::{BatchHint, Error, LogicalType, Projection, Result as SasResult};
+use sas7bdat::{BatchHint, Error, LogicalType, Projection, Result as SasResult};
 #[cfg(feature = "arrow")]
 use std::{
     sync::{Arc, mpsc},
@@ -238,7 +238,7 @@ fn run_scan(
 fn resolve_polars_schema(
     full_schema: Option<&Arc<polars_arrow::datatypes::ArrowSchema>>,
     projection_columns: Option<&[String]>,
-    scan: &sas7bdat_simd::ScanBuilder<'_>,
+    scan: &sas7bdat::ScanBuilder<'_>,
 ) -> SasResult<Arc<polars_arrow::datatypes::ArrowSchema>> {
     match (projection_columns, full_schema) {
         (None, Some(full_schema)) => Ok(Arc::clone(full_schema)),

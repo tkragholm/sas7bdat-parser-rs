@@ -26,7 +26,7 @@ use pyo3::{
 #[cfg(feature = "arrow")]
 use pyo3_polars::types::PyDataFrame;
 #[cfg(feature = "arrow")]
-use sas7bdat_simd::{BatchHint, Dataset, Error, OwnedColumnarBatch, Projection};
+use sas7bdat::{BatchHint, Dataset, Error, OwnedColumnarBatch, Projection};
 
 #[cfg(feature = "arrow")]
 const PLUGIN_CONTRACT_VERSION: &str = "sas7bdat_polars.v1";
@@ -578,7 +578,7 @@ fn run_scan_to_dataframes_once(
 fn resolve_polars_schema_from_full(
     full_schema: &Arc<polars_arrow::datatypes::ArrowSchema>,
     projection_columns: Option<&[String]>,
-    scan: &sas7bdat_simd::ScanBuilder<'_>,
+    scan: &sas7bdat::ScanBuilder<'_>,
 ) -> Result<Arc<polars_arrow::datatypes::ArrowSchema>, Error> {
     let cached = match projection_columns {
         None | Some([]) => Some(Arc::clone(full_schema)),

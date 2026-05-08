@@ -16,11 +16,11 @@ validation or benchmarks.
 
 ## How fixtures are used
 
-- Rust integration snapshots under `crates/sas7bdat-simd/tests/` use these fixtures.
-- `crates/sas7bdat-simd/tests/fixture_smoke.rs` auto-discovers local `.sas7bdat` files and runs open/raw/typed/batch smoke coverage, plus stricter assertions for selected representative fixtures when they are present.
+- Rust integration snapshots under `crates/sas7bdat/tests/` use these fixtures.
+- `crates/sas7bdat/tests/fixture_smoke.rs` auto-discovers local `.sas7bdat` files and runs open/raw/typed/batch smoke coverage, plus stricter assertions for selected representative fixtures when they are present.
   Current pinned regressions include both uncompressed and compressed real files such as `charset_utf8.sas7bdat`, `54-cookie.sas7bdat`, `54-class.sas7bdat`, `test2.sas7bdat`, and `max_sas_date.sas7bdat`.
   The fixture suite also has a dedicated compressed-corpus smoke pass so compressed datasets are exercised as a first-class runtime path.
-- `crates/sas7bdat-simd/benches/scan_hotpaths.rs` uses a smaller set of local fixtures for repeatable Criterion runs and now includes both the larger compressed `raw_data/ahs2013/topical.sas7bdat` case and the larger uncompressed `raw_data/ahs2013/homimp.sas7bdat` case so the suite is not biased toward tiny files.
+- `crates/sas7bdat/benches/scan_hotpaths.rs` uses a smaller set of local fixtures for repeatable Criterion runs and now includes both the larger compressed `raw_data/ahs2013/topical.sas7bdat` case and the larger uncompressed `raw_data/ahs2013/homimp.sas7bdat` case so the suite is not biased toward tiny files.
 - `sas7bdat-corpus-catalog` builds a local JSON catalog of the available fixture corpus, including the AHS datasets plus the `csharp`, `other`, `pandas`, `principlesofeco`, and `readstat` subcorpora. The catalog records metadata, sampled content features, and derived tags such as `compressed`, `string-heavy`, `benchmark-standard`, or `benchmark-macro`.
 - `sas7bdat-corpus-profile` is the server-oriented version of the catalog workflow. It walks arbitrary input roots, emits one JSON report for the whole corpus, and adds aggregate summaries such as compression counts, encoding counts, tag counts, and top files by size, rows, columns, and string columns.
 - `sas7bdat-fixture-profile` runs one fixture in a selected scan mode (`raw_rows`, `typed_rows`, `typed_batches`, etc.) and emits structured timing plus parser stats. This is intended to be wrapped by established OS tools for memory and CPU inspection.
@@ -90,7 +90,7 @@ Examples:
 
 ## Wheel Packaging
 
-The repository now includes a minimal [`/Users/tobiaskragholm/dev/sas7bdat-simd/pyproject.toml`](/Users/tobiaskragholm/dev/sas7bdat-simd/pyproject.toml) configured for `maturin` `bin` bindings.
+The repository includes a minimal `pyproject.toml` configured for `maturin` `bin` bindings.
 
 That means a command like:
 

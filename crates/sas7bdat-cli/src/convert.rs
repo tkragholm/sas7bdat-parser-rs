@@ -10,7 +10,7 @@ use crate::selection::{
 use anyhow::{Result, anyhow};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use rayon::prelude::*;
-use sas7bdat_simd::{Dataset, OpenOptions, ValidationMode};
+use sas7bdat::{Dataset, OpenOptions, ValidationMode};
 use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;

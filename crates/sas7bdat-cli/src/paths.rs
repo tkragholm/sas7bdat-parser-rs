@@ -216,7 +216,7 @@ mod tests {
             row_selection_from_window(RowWindow::new(Some(10), Some(5)), 1_000).expect("selection");
         assert!(matches!(
             selection,
-            sas7bdat_simd::RowSelection::Range { start, end }
+            sas7bdat::RowSelection::Range { start, end }
                 if start.0 == 10 && end.0 == 15
         ));
     }

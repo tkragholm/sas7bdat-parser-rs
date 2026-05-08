@@ -1,6 +1,6 @@
 use std::{convert::TryFrom, env, path::PathBuf, process::ExitCode, time::Instant};
 
-use sas7bdat_simd::{BatchHint, Dataset};
+use sas7bdat::{BatchHint, Dataset};
 
 fn main() -> ExitCode {
     match run() {
@@ -170,7 +170,7 @@ fn run() -> Result<(), String> {
 fn build_projection(
     ds: &Dataset,
     columns: &[String],
-) -> Result<Option<sas7bdat_simd::Projection>, String> {
+) -> Result<Option<sas7bdat::Projection>, String> {
     if columns.is_empty() {
         return Ok(None);
     }

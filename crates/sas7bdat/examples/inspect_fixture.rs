@@ -1,4 +1,4 @@
-use sas7bdat_simd::{BatchHint, Dataset};
+use sas7bdat::{BatchHint, Dataset};
 use std::{env, ops::ControlFlow, path::PathBuf};
 
 fn main() {

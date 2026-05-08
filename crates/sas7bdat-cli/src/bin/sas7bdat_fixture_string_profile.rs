@@ -1,5 +1,5 @@
 use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
-use sas7bdat_simd::{Dataset, LogicalType, RowIndex, RowSelection};
+use sas7bdat::{Dataset, LogicalType, RowIndex, RowSelection};
 use serde::Serialize;
 use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
 
@@ -155,7 +155,7 @@ fn run() -> std::result::Result<(), String> {
             })
             .visit_rows(|row| {
                 for (stats, cell) in per_column.iter_mut().zip(row.iter()) {
-                    if let sas7bdat_simd::CellValue::Str(value) = cell {
+                    if let sas7bdat::CellValue::Str(value) = cell {
                         stats.sampled_cells += 1;
                         let trimmed_len = value.len() as u64;
                         stats.total_trimmed_len += trimmed_len;

@@ -3,7 +3,7 @@
 //! # Quick start
 //!
 //! ```no_run
-//! use sas7bdat_simd::{Dataset, Result};
+//! use sas7bdat::{Dataset, Result};
 //! use std::ops::ControlFlow;
 //!
 //! fn main() -> Result<()> {

@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "sas7bdat-polars"
 version = "0.1.0"
-description = "Thin Polars IO plugin for sas7bdat-simd"
+description = "Thin Polars IO plugin for the sas7bdat crate"
 requires-python = ">=3.8"
 dependencies = ["polars"]
 

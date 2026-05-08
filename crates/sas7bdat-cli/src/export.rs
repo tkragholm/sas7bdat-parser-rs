@@ -5,7 +5,7 @@ use chrono::{Duration, NaiveDate, NaiveTime};
 use csv::WriterBuilder;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
-use sas7bdat_simd::{
+use sas7bdat::{
     BatchHint, CellValue, Dataset, Error, Parallelism, Projection, RowSelection, ScanBuilder,
 };
 use std::fs::File;

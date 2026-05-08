@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use sas7bdat_simd::discover_fixture_paths;
+use sas7bdat::discover_fixture_paths;
 use std::{
     fs,
     path::{Path, PathBuf},

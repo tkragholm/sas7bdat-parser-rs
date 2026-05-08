@@ -1,7 +1,7 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use sas7bdat_simd::{BatchHint, Dataset, IoBackendPreference, Projection};
+use sas7bdat::{BatchHint, Dataset, IoBackendPreference, Projection};
 use std::hint::black_box;
 
 mod common;

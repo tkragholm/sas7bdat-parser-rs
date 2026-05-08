@@ -1,4 +1,4 @@
-use sas7bdat_simd::{ColumnMeta, Dataset};
+use sas7bdat::{ColumnMeta, Dataset};
 use std::path::Path;
 
 #[must_use]

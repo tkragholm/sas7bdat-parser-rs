@@ -30,7 +30,7 @@ struct InspectJson {
 ///
 /// Returns an error if opening or rendering the dataset fails.
 pub fn run_inspect(args: &InspectArgs) -> Result<()> {
-    let dataset = sas7bdat_simd::Dataset::open(&args.input)?;
+    let dataset = sas7bdat::Dataset::open(&args.input)?;
     let selected_columns = resolve_column_indices(
         &dataset,
         ColumnSelection {

@@ -9,7 +9,7 @@ This script benchmarks two aligned paths on the same fixtures:
 The goal is to make sure we compare the same semantic work across all three
 checkouts:
 
-* current `sas7bdat-simd`
+* current `sas7bdat`
 * nested GitHub snapshot checkout in this repo
 * newer dev checkout in `../sas7bdat-parser-rs`
 
@@ -117,9 +117,9 @@ def fixture_paths(args: argparse.Namespace) -> list[Path]:
 def build_current_runner(root: Path) -> Path:
     return build_runner(
         label="current",
-        dependency_path=root / "crates" / "sas7bdat-simd",
-        package_name="sas7bdat-simd",
-        crate_name="sas7bdat_simd",
+        dependency_path=root / "crates" / "sas7bdat",
+        package_name="sas7bdat",
+        crate_name="sas7bdat",
         use_current_api=True,
     )
 

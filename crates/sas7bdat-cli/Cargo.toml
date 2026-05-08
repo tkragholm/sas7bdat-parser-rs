@@ -5,6 +5,8 @@ edition = "2024"
 rust-version = "1.85"
 description = "Standalone CLI tools for converting, inspecting, and profiling SAS7BDAT files"
 license = "MIT"
+repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
+publish = false
 
 [lib]
 name = "sas7bdat_cli"
@@ -33,12 +35,16 @@ path = "src/bin/sas7bdat_fixture_profile.rs"
 name = "sas7bdat-fixture-string-profile"
 path = "src/bin/sas7bdat_fixture_string_profile.rs"
 
+[[bin]]
+name = "sas7bdat-dir-mapper"
+path = "src/bin/sas7bdat_dir_mapper.rs"
+
 [dependencies]
 anyhow = { workspace = true }
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
-clap = { workspace = true }
 chrono = { workspace = true }
+clap = { workspace = true }
 csv = { workspace = true }
 encoding_rs = { workspace = true }
 glob = { workspace = true }
@@ -54,7 +60,7 @@ tracing = { workspace = true }
 tracing-indicatif = { workspace = true }
 tracing-subscriber = { workspace = true }
 walkdir = { workspace = true }
-sas7bdat-simd = { path = "../sas7bdat-simd", features = ["arrow"] }
+sas7bdat = { path = "../sas7bdat", features = ["arrow"] }
 
 [lints.rust]
 unsafe_code = "warn"

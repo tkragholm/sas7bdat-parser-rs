@@ -1,7 +1,7 @@
 use csv::ReaderBuilder;
 use rayon::prelude::*;
 use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime};
-use sas7bdat_simd::{
+use sas7bdat::{
     BatchHint, Dataset, DecodeMode, Endianness, FixtureCatalog, FixtureEntry, FixtureProfile,
     FixtureStatus, IoBackendPreference, LogicalType, LogicalTypeCounts, NamedCount, OpenOptions,
     Projection, ProjectionPreset, SampleSummary, ScanProgress, ScanStatsSummary,
@@ -1151,7 +1151,7 @@ fn run_scan(
     limit: Option<u64>,
     file_progress: Option<FileProgressReporter>,
     mut row_tap: RowTap<'_>,
-) -> sas7bdat_simd::Result<sas7bdat_simd::ScanStatsSummary> {
+) -> sas7bdat::Result<sas7bdat::ScanStatsSummary> {
     let mut scan = ds.scan().with_decode_mode(mode.decode_mode());
     if let Some(projection) = projection {
         scan = scan.with_projection(projection);
@@ -1224,13 +1224,13 @@ fn logical_type_counts_for_scan(ds: &Dataset) -> LogicalTypeCounts {
     let mut counts = LogicalTypeCounts::default();
     for column in ds.columns() {
         match column.logical_type {
-            sas7bdat_simd::LogicalType::String => counts.string += 1,
-            sas7bdat_simd::LogicalType::Integer => counts.integer += 1,
-            sas7bdat_simd::LogicalType::Float => counts.float += 1,
-            sas7bdat_simd::LogicalType::Date => counts.date += 1,
-            sas7bdat_simd::LogicalType::DateTime => counts.datetime += 1,
-            sas7bdat_simd::LogicalType::Time => counts.time += 1,
-            sas7bdat_simd::LogicalType::Bytes => counts.bytes += 1,
+            sas7bdat::LogicalType::String => counts.string += 1,
+            sas7bdat::LogicalType::Integer => counts.integer += 1,
+            sas7bdat::LogicalType::Float => counts.float += 1,
+            sas7bdat::LogicalType::Date => counts.date += 1,
+            sas7bdat::LogicalType::DateTime => counts.datetime += 1,
+            sas7bdat::LogicalType::Time => counts.time += 1,
+            sas7bdat::LogicalType::Bytes => counts.bytes += 1,
         }
     }
     counts
@@ -1240,15 +1240,15 @@ fn width_summary_for_scan(ds: &Dataset) -> WidthSummary {
     let mut widths = WidthSummary::default();
     for column in ds.columns() {
         match column.logical_type {
-            sas7bdat_simd::LogicalType::String | sas7bdat_simd::LogicalType::Bytes => {
+            sas7bdat::LogicalType::String | sas7bdat::LogicalType::Bytes => {
                 widths.string_width_sum += u64::from(column.physical_width);
                 widths.string_width_max = widths.string_width_max.max(column.physical_width);
             }
-            sas7bdat_simd::LogicalType::Integer
-            | sas7bdat_simd::LogicalType::Float
-            | sas7bdat_simd::LogicalType::Date
-            | sas7bdat_simd::LogicalType::DateTime
-            | sas7bdat_simd::LogicalType::Time => {
+            sas7bdat::LogicalType::Integer
+            | sas7bdat::LogicalType::Float
+            | sas7bdat::LogicalType::Date
+            | sas7bdat::LogicalType::DateTime
+            | sas7bdat::LogicalType::Time => {
                 widths.numeric_width_sum += u64::from(column.physical_width);
                 widths.numeric_width_max = widths.numeric_width_max.max(column.physical_width);
             }
@@ -1277,21 +1277,21 @@ fn projected_scan_shape(ds: &Dataset, projection: Option<&Projection>) -> Projec
 
 fn accumulate_projected_column(
     shape: &mut ProjectedScanShape,
-    logical_type: sas7bdat_simd::LogicalType,
+    logical_type: sas7bdat::LogicalType,
     physical_width: u32,
 ) {
     shape.projected_columns += 1;
     shape.projected_physical_width_sum += u64::from(physical_width);
     match logical_type {
-        sas7bdat_simd::LogicalType::String | sas7bdat_simd::LogicalType::Bytes => {
+        sas7bdat::LogicalType::String | sas7bdat::LogicalType::Bytes => {
             shape.projected_string_columns += 1;
             shape.projected_string_width_sum += u64::from(physical_width);
         }
-        sas7bdat_simd::LogicalType::Integer
-        | sas7bdat_simd::LogicalType::Float
-        | sas7bdat_simd::LogicalType::Date
-        | sas7bdat_simd::LogicalType::DateTime
-        | sas7bdat_simd::LogicalType::Time => {
+        sas7bdat::LogicalType::Integer
+        | sas7bdat::LogicalType::Float
+        | sas7bdat::LogicalType::Date
+        | sas7bdat::LogicalType::DateTime
+        | sas7bdat::LogicalType::Time => {
             shape.projected_numeric_like_columns += 1;
             shape.projected_numeric_width_sum += u64::from(physical_width);
         }
@@ -1313,15 +1313,15 @@ fn temporal_format_summary_for_scan(ds: &Dataset) -> TemporalFormatSummary {
             continue;
         }
         match column.logical_type {
-            sas7bdat_simd::LogicalType::Date => {
+            sas7bdat::LogicalType::Date => {
                 summary.date_format_columns += 1;
                 *date_formats.entry(cleaned.to_owned()).or_default() += 1;
             }
-            sas7bdat_simd::LogicalType::DateTime => {
+            sas7bdat::LogicalType::DateTime => {
                 summary.datetime_format_columns += 1;
                 *datetime_formats.entry(cleaned.to_owned()).or_default() += 1;
             }
-            sas7bdat_simd::LogicalType::Time => {
+            sas7bdat::LogicalType::Time => {
                 summary.time_format_columns += 1;
                 *time_formats.entry(cleaned.to_owned()).or_default() += 1;
             }
@@ -1349,12 +1349,12 @@ fn named_counts(values: BTreeMap<String, usize>) -> Vec<NamedCount> {
     values
 }
 
-const fn compression_name(value: sas7bdat_simd::CompressionKind) -> &'static str {
+const fn compression_name(value: sas7bdat::CompressionKind) -> &'static str {
     match value {
-        sas7bdat_simd::CompressionKind::None => "uncompressed",
-        sas7bdat_simd::CompressionKind::Row => "compressed",
-        sas7bdat_simd::CompressionKind::Binary => "compressed-binary",
-        sas7bdat_simd::CompressionKind::Unknown => "compressed-unknown",
+        sas7bdat::CompressionKind::None => "uncompressed",
+        sas7bdat::CompressionKind::Row => "compressed",
+        sas7bdat::CompressionKind::Binary => "compressed-binary",
+        sas7bdat::CompressionKind::Unknown => "compressed-unknown",
     }
 }
 

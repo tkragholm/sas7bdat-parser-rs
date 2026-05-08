@@ -1,5 +1,5 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use sas7bdat_simd::{BatchHint, Dataset, discover_fixture_paths};
+use sas7bdat::{BatchHint, Dataset, discover_fixture_paths};
 use std::{fs, hint::black_box, time::Duration};
 
 mod common;

@@ -1,4 +1,4 @@
-use sas7bdat_simd::{Dataset, OpenOptions};
+use sas7bdat::{Dataset, OpenOptions};
 use std::{path::PathBuf, time::Instant};
 
 #[path = "common/mod.rs"]
