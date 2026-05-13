@@ -57,19 +57,17 @@ fn column_format_links_to_label_set() {
 
     let label_sets = &ds.metadata().label_sets;
 
-    let labelled_columns: Vec<_> = ds
+    let has_labelled_columns = ds
         .columns()
         .iter()
-        .filter(|col| {
+        .any(|col| {
             col.format
                 .as_deref()
-                .map(|f| label_sets.contains_key(&normalize_format_name(f)))
-                .unwrap_or(false)
-        })
-        .collect();
+                .is_some_and(|f| label_sets.contains_key(&normalize_format_name(f)))
+        });
 
     assert!(
-        !labelled_columns.is_empty(),
+        has_labelled_columns,
         "expected at least one column with a matching label set; columns: {:?}",
         ds.columns()
             .iter()

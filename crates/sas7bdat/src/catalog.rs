@@ -18,7 +18,7 @@ pub struct CatalogLayout {
     pub label_sets: Vec<LabelSet>,
 }
 
-/// Normalizes a format name for use as a HashMap key.
+/// Normalizes a format name for use as a `HashMap` key.
 ///
 /// Trims whitespace, removes trailing dots, and uppercases. The leading `$` is
 /// preserved because it distinguishes string formats (`$GENDER`) from numeric
@@ -123,7 +123,7 @@ struct IndexLayout {
 }
 
 impl IndexLayout {
-    fn new(header: &HeaderInfo) -> Self {
+    const fn new(header: &HeaderInfo) -> Self {
         let pad = header.pad_alignment as usize;
         let mut entry_stride = 212 + pad;
         let mut index_start_offset = 856 + 2 * pad;
@@ -353,7 +353,7 @@ fn parse_block(
             u64::from(read_u32_slice(header, &buffer[42 + pad..46 + pad]));
     }
 
-    let mut name = decode_text(&buffer[8..16], encoding)?;
+    let mut name = decode_text(&buffer[8..16], encoding);
     if pad != 0 {
         pad += 16;
     }
@@ -369,7 +369,7 @@ fn parse_block(
         if end > buffer.len() {
             return Err(Error::header_corruption("catalog long-name block truncated"));
         }
-        name = decode_text(&buffer[start..end], encoding)?;
+        name = decode_text(&buffer[start..end], encoding);
         pad += 32;
     }
 
@@ -514,7 +514,7 @@ fn parse_value_label_entries(
         let mut label_len = usize::from(read_u16_slice(header, &lbp2[8..10]));
         let available = lbp2.len().saturating_sub(10);
         label_len = min(label_len, available);
-        let label = decode_text(&lbp2[10..10 + label_len], encoding)?;
+        let label = decode_text(&lbp2[10..10 + label_len], encoding);
         labels.push(ValueLabel { key, label });
         let skip = 8 + 2 + label_len + 1;
         label_cursor = label_cursor.saturating_add(skip);
@@ -541,7 +541,7 @@ fn parse_value_label_key(
                 ));
             }
             let value_bytes = &entry[entry_len - 16..entry_len];
-            Ok(ValueKey::String(decode_text(value_bytes, encoding)?))
+            Ok(ValueKey::String(decode_text(value_bytes, encoding)))
         }
         ValueType::Numeric => {
             if entry_len < 30 {
@@ -603,24 +603,23 @@ fn trim_trailing(bytes: &[u8]) -> &[u8] {
     &bytes[..end]
 }
 
-fn decode_text(bytes: &[u8], encoding: &'static Encoding) -> Result<String> {
+fn decode_text(bytes: &[u8], encoding: &'static Encoding) -> String {
     let trimmed = trim_trailing(bytes);
     if trimmed.is_empty() {
-        return Ok(String::new());
+        return String::new();
     }
-    match String::from_utf8(trimmed.to_vec()) {
-        Ok(text) => Ok(text.trim_end_matches('\u{0000}').to_string()),
-        Err(_) => {
+    String::from_utf8(trimmed.to_vec()).map_or_else(
+        |_| {
             let (decoded, _, had_errors) = encoding.decode(trimmed);
             if had_errors {
-                Ok(String::from_utf8_lossy(trimmed).into_owned())
+                String::from_utf8_lossy(trimmed).into_owned()
             } else {
-                Ok(decoded.into_owned())
+                decoded.into_owned()
             }
-        }
-    }
+        },
+        |text| text.trim_end_matches('\u{0000}').to_string(),
+    )
 }
-
 // ─── slice read helpers ───────────────────────────────────────────────────────
 
 use crate::metadata::Endianness;

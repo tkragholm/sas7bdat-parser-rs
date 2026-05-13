@@ -413,7 +413,7 @@ fn collect_paths(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn logical_type_name(lt: sas7bdat::LogicalType) -> &'static str {
+const fn logical_type_name(lt: sas7bdat::LogicalType) -> &'static str {
     use sas7bdat::LogicalType;
     match lt {
         LogicalType::Integer => "integer",
@@ -426,7 +426,7 @@ fn logical_type_name(lt: sas7bdat::LogicalType) -> &'static str {
     }
 }
 
-fn compression_name(c: sas7bdat::CompressionKind) -> &'static str {
+const fn compression_name(c: sas7bdat::CompressionKind) -> &'static str {
     use sas7bdat::CompressionKind;
     match c {
         CompressionKind::None => "none",
@@ -529,6 +529,7 @@ fn group_key(record: &FileRecord, root: &Path, relative: bool) -> String {
 
 // ─── Schema analysis ──────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn analyze_schema(files: &[FileRecord]) -> SchemaAnalysis {
     let valid: Vec<&FileRecord> = files.iter().filter(|f| f.error.is_none()).collect();
     let file_count = valid.len();
@@ -836,6 +837,7 @@ fn ingestion_recommendations(groups: &[RegisterGroup]) -> Vec<IngestionRecommend
 
 // ─── Markdown rendering ───────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn render_markdown(map: &DirectoryMap) -> String {
     let mut out = String::new();
 
@@ -973,11 +975,10 @@ fn render_markdown(map: &DirectoryMap) -> String {
         writeln!(out).unwrap();
         for f in &g.files {
             let yr = f.year.map_or_else(|| "—".to_owned(), |y| y.to_string());
-            let err = if let Some(e) = &f.error {
-                format!(" ⚠ `{e}`")
-            } else {
-                String::new()
-            };
+            let err = f
+                .error
+                .as_ref()
+                .map_or_else(String::new, |e| format!(" ⚠ `{e}`"));
             writeln!(
                 out,
                 "- `{}` — year: {}, rows: {}, cols: {}, size: {}{}",
@@ -1054,6 +1055,7 @@ fn fmt_large(n: u64) -> String {
     result.chars().rev().collect()
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn fmt_bytes(b: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * KB;
@@ -1071,6 +1073,7 @@ fn fmt_bytes(b: u64) -> String {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn run(config: &Config) -> Result<(), String> {
     if let Some(jobs) = config.jobs {
         rayon::ThreadPoolBuilder::new()

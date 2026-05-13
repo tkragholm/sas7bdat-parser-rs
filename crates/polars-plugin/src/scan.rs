@@ -47,16 +47,15 @@ pub fn full_arrow_schema_for_dataset(ds: &Dataset) -> SasResult<Arc<ArrowSchema>
         .iter()
         .map(|column| {
             let raw_dt = arrow_data_type_for_logical_type(column.logical_type);
-            let dt = if !label_sets.is_empty() {
+            let dt = if label_sets.is_empty() {
+                raw_dt
+            } else {
                 column
                     .format
                     .as_deref()
                     .map(normalize_format_name)
                     .filter(|norm| label_sets.contains_key(norm.as_str()))
-                    .map(|_| ArrowSchemaDataType::Utf8)
-                    .unwrap_or(raw_dt)
-            } else {
-                raw_dt
+                    .map_or(raw_dt, |_| ArrowSchemaDataType::Utf8)
             };
             Ok(ArrowSchemaField::new(column.name.clone(), dt, true))
         })
@@ -225,10 +224,10 @@ fn run_scan(
         &scan,
     )?;
 
-    let projected_names: Vec<&str> = match projection_columns.as_deref() {
-        None => ds.columns().iter().map(|c| c.name.as_str()).collect(),
-        Some(names) => names.iter().map(String::as_str).collect(),
-    };
+    let projected_names: Vec<&str> = projection_columns.as_deref().map_or_else(
+        || ds.columns().iter().map(|c| c.name.as_str()).collect(),
+        |names| names.iter().map(String::as_str).collect(),
+    );
     let label_mapping = build_label_mapping_for_columns(ds, &projected_names);
 
     if request.coalesce {

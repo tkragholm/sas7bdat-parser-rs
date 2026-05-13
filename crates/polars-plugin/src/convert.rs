@@ -142,11 +142,11 @@ pub(super) fn owned_batch_to_dataframe(
 }
 
 #[cfg(feature = "arrow")]
-fn is_valid_bit(valid: &Option<Vec<u64>>, i: usize) -> bool {
-    match valid {
-        None => true,
-        Some(bits) => bits.get(i / 64).map_or(false, |w| (w >> (i % 64)) & 1 == 1),
-    }
+fn is_valid_bit(valid: Option<&[u64]>, i: usize) -> bool {
+    valid.is_none_or(|bits| {
+        bits.get(i / 64)
+            .is_some_and(|w| (w >> (i % 64)) & 1 == 1)
+    })
 }
 
 #[cfg(feature = "arrow")]
@@ -164,7 +164,7 @@ fn owned_column_to_labelled_utf8(
         ($label:expr, $is_valid:expr) => {
             if $is_valid {
                 data.extend_from_slice($label.as_bytes());
-                offsets.push(data.len() as i64);
+                offsets.push(i64::try_from(data.len()).expect("string data exceeds i64::MAX"));
                 validity.push(true);
             } else {
                 offsets.push(*offsets.last().unwrap_or(&0));
@@ -179,15 +179,17 @@ fn owned_column_to_labelled_utf8(
                 let label = label_set
                     .lookup_numeric(*v)
                     .map_or_else(|| format!("{v}"), str::to_owned);
-                push_label!(label, is_valid_bit(&valid, i));
+                push_label!(label, is_valid_bit(valid.as_deref(), i));
             }
         }
         OwnedColumnBuffer::I64 { values, valid } => {
             for (i, v) in values.iter().enumerate() {
+                // SAS categorical codes are small integers; i64→f64 is exact for |v| ≤ 2^53.
+                #[allow(clippy::cast_precision_loss)]
                 let label = label_set
                     .lookup_numeric(*v as f64)
                     .map_or_else(|| v.to_string(), str::to_owned);
-                push_label!(label, is_valid_bit(&valid, i));
+                push_label!(label, is_valid_bit(valid.as_deref(), i));
             }
         }
         OwnedColumnBuffer::I32 { values, valid } => {
@@ -195,7 +197,7 @@ fn owned_column_to_labelled_utf8(
                 let label = label_set
                     .lookup_numeric(f64::from(*v))
                     .map_or_else(|| v.to_string(), str::to_owned);
-                push_label!(label, is_valid_bit(&valid, i));
+                push_label!(label, is_valid_bit(valid.as_deref(), i));
             }
         }
         OwnedColumnBuffer::Utf8 {
@@ -206,13 +208,14 @@ fn owned_column_to_labelled_utf8(
         } => {
             let src_offs = src_offsets.into_inner();
             for i in 0..row_count {
-                if is_valid_bit(&valid, i) {
-                    let start = src_offs[i] as usize;
-                    let end = src_offs[i + 1] as usize;
+                if is_valid_bit(valid.as_deref(), i) {
+                    // Arrow Offsets<i64> guarantees non-negative, monotonically-increasing values.
+                    let start = usize::try_from(src_offs[i]).expect("Arrow offset must be non-negative");
+                    let end = usize::try_from(src_offs[i + 1]).expect("Arrow offset must be non-negative");
                     let s = std::str::from_utf8(&src_data[start..end]).unwrap_or("");
                     let label = label_set.lookup_string(s).unwrap_or(s);
                     data.extend_from_slice(label.as_bytes());
-                    offsets.push(data.len() as i64);
+                    offsets.push(i64::try_from(data.len()).expect("string data exceeds i64::MAX"));
                     validity.push(true);
                 } else {
                     offsets.push(*offsets.last().unwrap_or(&0));

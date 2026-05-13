@@ -7,7 +7,7 @@ pub struct LabelSet {
 
 impl LabelSet {
     #[must_use]
-    pub fn new(name: String, value_type: ValueType) -> Self {
+    pub const fn new(name: String, value_type: ValueType) -> Self {
         Self {
             name,
             value_type,
@@ -20,8 +20,8 @@ impl LabelSet {
     pub fn lookup_numeric(&self, value: f64) -> Option<&str> {
         for label in &self.labels {
             match &label.key {
-                ValueKey::Numeric(v) if *v == value => return Some(&label.label),
-                ValueKey::Integer(v) if f64::from(*v) == value => return Some(&label.label),
+                ValueKey::Numeric(v) if (*v - value).abs() < f64::EPSILON => return Some(&label.label),
+                ValueKey::Integer(v) if (f64::from(*v) - value).abs() < f64::EPSILON => return Some(&label.label),
                 _ => {}
             }
         }
@@ -32,11 +32,10 @@ impl LabelSet {
     #[must_use]
     pub fn lookup_string(&self, value: &str) -> Option<&str> {
         for label in &self.labels {
-            if let ValueKey::String(k) = &label.key {
-                if k.trim_end() == value.trim_end() {
+            if let ValueKey::String(k) = &label.key
+                && k.trim_end() == value.trim_end() {
                     return Some(&label.label);
                 }
-            }
         }
         None
     }

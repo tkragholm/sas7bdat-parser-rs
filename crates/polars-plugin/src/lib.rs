@@ -670,6 +670,11 @@ fn sas7bdat_polars(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     register_module(m)
 }
 
+/// Registers the SAS7BDAT Polars plugin module.
+///
+/// # Errors
+///
+/// Returns a Python error if any class or function registration fails.
 #[cfg(feature = "arrow")]
 pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

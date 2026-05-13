@@ -55,13 +55,8 @@ fn canonical_batch(batch: &OwnedColumnarBatch) -> (u64, Vec<u8>) {
                     out.extend_from_slice(bytemuck::cast_slice(v));
                 }
             }
-            OwnedColumnBuffer::Utf8 { data, valid, .. } => {
-                out.extend_from_slice(data);
-                if let Some(v) = valid {
-                    out.extend_from_slice(bytemuck::cast_slice(v));
-                }
-            }
-            OwnedColumnBuffer::RawBytes { data, valid, .. } => {
+            OwnedColumnBuffer::Utf8 { data, valid, .. }
+            | OwnedColumnBuffer::RawBytes { data, valid, .. } => {
                 out.extend_from_slice(data);
                 if let Some(v) = valid {
                     out.extend_from_slice(bytemuck::cast_slice(v));
@@ -72,7 +67,7 @@ fn canonical_batch(batch: &OwnedColumnarBatch) -> (u64, Vec<u8>) {
     (batch.row_base.0, out)
 }
 
-fn sorted_fingerprints(batches: Vec<OwnedColumnarBatch>) -> Vec<(u64, Vec<u8>)> {
+fn sorted_fingerprints(batches: &[OwnedColumnarBatch]) -> Vec<(u64, Vec<u8>)> {
     let mut fps: Vec<_> = batches.iter().map(canonical_batch).collect();
     fps.sort_by_key(|(base, _)| *base);
     fps
@@ -106,8 +101,8 @@ fn check_parallel_matches_serial(path: &Path) {
         path.display()
     );
 
-    let serial_fps = sorted_fingerprints(serial);
-    let parallel_fps = sorted_fingerprints(parallel);
+    let serial_fps = sorted_fingerprints(&serial);
+    let parallel_fps = sorted_fingerprints(&parallel);
 
     for (idx, (sf, pf)) in serial_fps.iter().zip(parallel_fps.iter()).enumerate() {
         assert_eq!(

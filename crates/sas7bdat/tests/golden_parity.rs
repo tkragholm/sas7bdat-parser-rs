@@ -27,10 +27,10 @@ fn csv_golden(name: &str) -> std::path::PathBuf {
 
 // SAS epoch is 1960-01-01 = Julian Day Number 2436935.
 fn sas_date_to_string(days: i32) -> String {
-    let jdn = days as i64 + 2_436_935;
+    let jdn = i64::from(days) + 2_436_935;
     let l = jdn + 68569;
-    let n = 4 * l / 146097;
-    let l = l - (146097 * n + 3) / 4;
+    let n = 4 * l / 146_097;
+    let l = l - (146_097 * n + 3) / 4;
     let i = 4000 * (l + 1) / 1_461_001;
     let l = l - 1461 * i / 4 + 31;
     let j = 80 * l / 2447;
@@ -42,8 +42,8 @@ fn sas_date_to_string(days: i32) -> String {
 }
 
 fn sas_datetime_to_string(seconds: i64) -> String {
-    let day = seconds.div_euclid(86400) as i32;
-    let sec_of_day = seconds.rem_euclid(86400) as u32;
+    let day = i32::try_from(seconds.div_euclid(86400)).unwrap_or(0);
+    let sec_of_day = u32::try_from(seconds.rem_euclid(86400)).unwrap_or(0);
     let h = sec_of_day / 3600;
     let m = (sec_of_day % 3600) / 60;
     let s = sec_of_day % 60;
@@ -91,6 +91,7 @@ fn csv_datetime_prefix(s: &str) -> Option<&str> {
     }
 }
 
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 fn compare_cell(
     actual: &OwnedCellValue,
     expected_csv: &str,
@@ -114,9 +115,10 @@ fn compare_cell(
         );
         return;
     }
-    if actual_is_missing {
-        panic!("{fixture} row {row} col {col}: got null/NaN but CSV has {expected_csv:?}");
-    }
+    assert!(
+        !actual_is_missing,
+        "{fixture} row {row} col {col}: got null/NaN but CSV has {expected_csv:?}"
+    );
 
     match actual {
         OwnedCellValue::Null | OwnedCellValue::Bytes(_) => unreachable!(),
@@ -150,6 +152,7 @@ fn compare_cell(
             if let Some(expected_prefix) = csv_datetime_prefix(expected_csv) {
                 if f.abs() < 500_000.0 {
                     // Date column (days).
+                    #[allow(clippy::cast_possible_truncation)]
                     let actual_date = sas_date_to_string(f.round() as i32);
                     let expected_date = &expected_prefix[..10.min(expected_prefix.len())];
                     assert_eq!(
@@ -160,6 +163,7 @@ fn compare_cell(
                     // Datetime column (seconds, possibly fractional).
                     // Use floor() so negative pre-1960 timestamps round the same
                     // direction as the reference parser (toward negative infinity).
+                    #[allow(clippy::cast_possible_truncation)]
                     let actual_dt = sas_datetime_to_string(f.floor() as i64);
                     assert_eq!(
                         actual_dt, expected_prefix,
@@ -170,6 +174,7 @@ fn compare_cell(
             }
             // Time values in the CSV may be raw seconds (integer string).
             if let Ok(csv_secs) = expected_csv.trim().parse::<i64>() {
+                #[allow(clippy::cast_possible_truncation)]
                 let actual_secs = f.round() as i64;
                 assert_eq!(
                     actual_secs, csv_secs,
@@ -184,9 +189,9 @@ fn compare_cell(
 
         OwnedCellValue::Int32(n) => {
             if let Ok(expected_f) = expected_csv.parse::<f64>() {
-                let tol = 1e-7 * (*n as f64).abs().max(1.0);
+                let tol = 1e-7 * f64::from(*n).abs().max(1.0);
                 assert!(
-                    (*n as f64 - expected_f).abs() <= tol,
+                    (f64::from(*n) - expected_f).abs() <= tol,
                     "{fixture} row {row} col {col}: Int32 mismatch {n} vs {expected_f}"
                 );
             } else {
