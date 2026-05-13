@@ -87,10 +87,14 @@ struct SasDataset {
 #[pymethods]
 impl SasDataset {
     #[new]
-    fn open(py: Python<'_>, path: &str) -> PyResult<Self> {
-        let ds = py
+    #[pyo3(signature = (path, catalog_path=None))]
+    fn open(py: Python<'_>, path: &str, catalog_path: Option<&str>) -> PyResult<Self> {
+        let mut ds = py
             .detach(|| Dataset::open(path))
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        if let Some(cat) = catalog_path {
+            ds.attach_catalog(cat).map_err(convert::py_err)?;
+        }
         let arrow_schema = scan::full_arrow_schema_for_dataset(&ds).map_err(convert::py_err)?;
         let polars_schema = scan::full_polars_schema_for_dataset(&ds).map_err(convert::py_err)?;
         Ok(Self {
@@ -228,6 +232,7 @@ fn schema_for_file(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
 
 #[cfg(feature = "arrow")]
 #[pyfunction]
+#[pyo3(signature = (path, with_columns=None, predicate=None, n_rows=None, batch_size=None, catalog_path=None))]
 fn batch_reader(
     py: Python<'_>,
     path: &str,
@@ -235,10 +240,14 @@ fn batch_reader(
     predicate: Option<Py<PyAny>>,
     n_rows: Option<usize>,
     batch_size: Option<usize>,
+    catalog_path: Option<&str>,
 ) -> PyResult<BatchReader> {
-    let ds = py
+    let mut ds = py
         .detach(|| Dataset::open(path))
         .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    if let Some(cat) = catalog_path {
+        ds.attach_catalog(cat).map_err(convert::py_err)?;
+    }
     let ds = Arc::new(ds);
     Ok(scan::batch_reader_from_dataset(
         py,
@@ -256,10 +265,14 @@ fn batch_reader(
 
 #[cfg(feature = "arrow")]
 #[pyfunction]
-fn scan_sas(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
-    let ds = py
+#[pyo3(signature = (path, catalog_path=None))]
+fn scan_sas(py: Python<'_>, path: &str, catalog_path: Option<&str>) -> PyResult<Py<PyAny>> {
+    let mut ds = py
         .detach(|| Dataset::open(path))
         .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    if let Some(cat) = catalog_path {
+        ds.attach_catalog(cat).map_err(convert::py_err)?;
+    }
     let ds = Arc::new(ds);
     let schema = scan::schema_for_dataset(py, &ds)?;
     scan::register_io_source(py, ds, None, schema)
@@ -286,7 +299,7 @@ fn benchmark_batch_to_dataframe(
         move || -> PyResult<u128> {
             let start = Instant::now();
             for batch in batches {
-                let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema))
+                let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema), &[])
                     .map_err(convert::py_err)?;
                 black_box(df.height());
                 black_box(df.width());
@@ -304,7 +317,7 @@ fn benchmark_batch_to_dataframe(
                 let start = Instant::now();
                 let mut rows = 0usize;
                 for batch in batches.iter().cloned() {
-                    let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema))
+                    let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema), &[])
                         .map_err(convert::py_err)?;
                     rows += df.height();
                     black_box(df.width());
@@ -429,7 +442,7 @@ fn benchmark_dataframe_to_python(
             batches
                 .into_iter()
                 .map(|batch| {
-                    convert::owned_batch_to_dataframe(batch, Arc::clone(&schema))
+                    convert::owned_batch_to_dataframe(batch, Arc::clone(&schema), &[])
                         .map_err(convert::py_err)
                 })
                 .collect()
@@ -558,7 +571,7 @@ fn run_scan_to_dataframes_once(
     let mut rows = 0usize;
     let mut batches = 0usize;
     scan.visit_owned_batches(|batch| {
-        let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema))?;
+        let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema), &[])?;
         rows += df.height();
         batches += 1;
         black_box(df.width());

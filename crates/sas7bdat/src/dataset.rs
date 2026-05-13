@@ -1,4 +1,5 @@
 use crate::{
+    catalog::{normalize_format_name, parse_catalog_file},
     columnar::OwnedColumnarBatch,
     error::{Error, Result},
     internal::{FileInner, FileSource, LayoutPlan, PageDescriptorTable},
@@ -249,6 +250,34 @@ impl Dataset {
     #[must_use]
     pub fn scan(&self) -> ScanBuilder<'_> {
         ScanBuilder::new(self)
+    }
+
+    /// Loads a companion SAS catalog (`.sas7bcat`) and merges its value-label sets
+    /// into this dataset's metadata.
+    ///
+    /// After calling this, [`DatasetMetadata::label_sets`] contains the parsed
+    /// formats, keyed by normalized format name (uppercase, trimmed). Columns whose
+    /// [`ColumnMeta::format`] matches a key in `label_sets` can be hydrated to
+    /// labelled values by the caller.
+    ///
+    /// Calling this multiple times is safe: label sets are inserted, not replaced in
+    /// bulk, so repeated calls with different catalog files accumulate formats.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or its catalog structure cannot
+    /// be decoded.
+    pub fn attach_catalog(&mut self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        use std::sync::Arc;
+        let layout = parse_catalog_file(path.as_ref())?;
+        let metadata = Arc::make_mut(&mut self.metadata);
+        for label_set in layout.label_sets {
+            let key = normalize_format_name(&label_set.name);
+            if !key.is_empty() {
+                metadata.label_sets.insert(key, label_set);
+            }
+        }
+        Ok(())
     }
 
     /// Scans raw rows and returns the collected scan statistics.

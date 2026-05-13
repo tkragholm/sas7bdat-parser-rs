@@ -15,7 +15,7 @@ use polars_arrow::{
 #[cfg(feature = "arrow")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule};
 #[cfg(feature = "arrow")]
-use sas7bdat::{Error, OwnedColumnBuffer, Result as SasResult, TrustedOffsets};
+use sas7bdat::{Error, LabelSet, OwnedColumnBuffer, Result as SasResult, TrustedOffsets};
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
 
@@ -58,11 +58,17 @@ pub(super) fn arrow_dt_to_polars_arrow(dt: &ArrowSchemaDataType) -> Result<Arrow
 pub(super) fn owned_batch_to_dataframe(
     batch: sas7bdat::OwnedColumnarBatch,
     schema: Arc<ArrowSchema>,
+    label_mapping: &[Option<LabelSet>],
 ) -> SasResult<DataFrame> {
     let row_count = batch.row_count;
     let mut arrays: Vec<Box<dyn Array>> = Vec::with_capacity(batch.columns.len());
 
-    for col in batch.columns {
+    for (col_idx, col) in batch.columns.into_iter().enumerate() {
+        let label_set = label_mapping.get(col_idx).and_then(Option::as_ref);
+        if let Some(label_set) = label_set {
+            arrays.push(Box::new(owned_column_to_labelled_utf8(col, label_set, row_count)));
+            continue;
+        }
         let array: Box<dyn Array> = match col {
             OwnedColumnBuffer::I32 { values, valid } => {
                 Box::new(primitive_array_with_optional_validity(
@@ -130,8 +136,104 @@ pub(super) fn owned_batch_to_dataframe(
     }
 
     let rec = PolarsRecordBatch::try_new(row_count, schema, arrays)
+
         .map_err(|err| Error::arrow(err.to_string()))?;
     Ok(DataFrame::from(rec))
+}
+
+#[cfg(feature = "arrow")]
+fn is_valid_bit(valid: &Option<Vec<u64>>, i: usize) -> bool {
+    match valid {
+        None => true,
+        Some(bits) => bits.get(i / 64).map_or(false, |w| (w >> (i % 64)) & 1 == 1),
+    }
+}
+
+#[cfg(feature = "arrow")]
+fn owned_column_to_labelled_utf8(
+    col: OwnedColumnBuffer,
+    label_set: &LabelSet,
+    row_count: usize,
+) -> Utf8Array<i64> {
+    let mut offsets: Vec<i64> = Vec::with_capacity(row_count + 1);
+    let mut data: Vec<u8> = Vec::new();
+    let mut validity = MutableBitmap::with_capacity(row_count);
+    offsets.push(0);
+
+    macro_rules! push_label {
+        ($label:expr, $is_valid:expr) => {
+            if $is_valid {
+                data.extend_from_slice($label.as_bytes());
+                offsets.push(data.len() as i64);
+                validity.push(true);
+            } else {
+                offsets.push(*offsets.last().unwrap_or(&0));
+                validity.push(false);
+            }
+        };
+    }
+
+    match col {
+        OwnedColumnBuffer::F64 { values, valid } => {
+            for (i, v) in values.iter().enumerate() {
+                let label = label_set
+                    .lookup_numeric(*v)
+                    .map_or_else(|| format!("{v}"), str::to_owned);
+                push_label!(label, is_valid_bit(&valid, i));
+            }
+        }
+        OwnedColumnBuffer::I64 { values, valid } => {
+            for (i, v) in values.iter().enumerate() {
+                let label = label_set
+                    .lookup_numeric(*v as f64)
+                    .map_or_else(|| v.to_string(), str::to_owned);
+                push_label!(label, is_valid_bit(&valid, i));
+            }
+        }
+        OwnedColumnBuffer::I32 { values, valid } => {
+            for (i, v) in values.iter().enumerate() {
+                let label = label_set
+                    .lookup_numeric(f64::from(*v))
+                    .map_or_else(|| v.to_string(), str::to_owned);
+                push_label!(label, is_valid_bit(&valid, i));
+            }
+        }
+        OwnedColumnBuffer::Utf8 {
+            offsets: src_offsets,
+            data: src_data,
+            valid,
+            ..
+        } => {
+            let src_offs = src_offsets.into_inner();
+            for i in 0..row_count {
+                if is_valid_bit(&valid, i) {
+                    let start = src_offs[i] as usize;
+                    let end = src_offs[i + 1] as usize;
+                    let s = std::str::from_utf8(&src_data[start..end]).unwrap_or("");
+                    let label = label_set.lookup_string(s).unwrap_or(s);
+                    data.extend_from_slice(label.as_bytes());
+                    offsets.push(data.len() as i64);
+                    validity.push(true);
+                } else {
+                    offsets.push(*offsets.last().unwrap_or(&0));
+                    validity.push(false);
+                }
+            }
+        }
+        _ => {
+            for _ in 0..row_count {
+                offsets.push(*offsets.last().unwrap_or(&0));
+                validity.push(false);
+            }
+        }
+    }
+
+    let bitmap = validity.into();
+    // SAFETY: offsets are built by appending data.len() after each extend (monotonically
+    // non-decreasing) and zero-copying for null rows, so Arrow offset invariants hold.
+    let offs_buf = unsafe { Offsets::new_unchecked(offsets).into() };
+    // SAFETY: all label strings come from &str literals or format!() — valid UTF-8.
+    unsafe { Utf8Array::<i64>::new_unchecked(ArrowDataType::LargeUtf8, offs_buf, data.into(), Some(bitmap)) }
 }
 
 #[cfg(feature = "arrow")]
@@ -286,6 +388,125 @@ mod tests {
             ))
             .expect("timestamp"),
             ArrowDataType::Timestamp(PlTimeUnit::Second, None)
+        );
+    }
+
+    // §2.3 — Catalog + Polars label conversion tests.
+    // These test owned_batch_to_dataframe with a label_mapping at the Rust level,
+    // without requiring a Python interpreter.
+
+    fn make_f64_batch(values: Vec<f64>, valid: Option<Vec<u64>>) -> sas7bdat::OwnedColumnarBatch {
+        let row_count = values.len();
+        sas7bdat::OwnedColumnarBatch {
+            row_base: sas7bdat::RowIndex(0),
+            row_count,
+            columns: vec![sas7bdat::OwnedColumnBuffer::F64 { values, valid }],
+        }
+    }
+
+    fn make_single_col_schema(name: &str, dtype: ArrowDataType) -> Arc<ArrowSchema> {
+        Arc::new(
+            ArrowSchema::from_iter_check_duplicates(vec![Field::new(
+                name.into(),
+                dtype,
+                true,
+            )])
+            .expect("schema"),
+        )
+    }
+
+    fn make_label_set(pairs: &[(f64, &str)]) -> LabelSet {
+        let mut ls = sas7bdat::LabelSet::new(
+            "TEST".to_owned(),
+            sas7bdat::ValueType::Numeric,
+        );
+        for (k, v) in pairs {
+            ls.labels.push(sas7bdat::ValueLabel {
+                key: sas7bdat::ValueKey::Numeric(*k),
+                label: (*v).to_owned(),
+            });
+        }
+        ls
+    }
+
+    #[test]
+    fn labelled_f64_column_becomes_utf8_with_correct_strings() {
+        let label_set = make_label_set(&[(1.0, "Male"), (2.0, "Female")]);
+        let batch = make_f64_batch(vec![1.0, 2.0], None);
+        let schema = make_single_col_schema("gender", ArrowDataType::LargeUtf8);
+
+        let df = owned_batch_to_dataframe(batch, schema, &[Some(label_set)])
+            .expect("batch to dataframe");
+
+        assert_eq!(df.height(), 2);
+        let series = df.column("gender").expect("gender column");
+        assert!(
+            matches!(series.dtype(), polars::prelude::DataType::String),
+            "expected String dtype, got {:?}",
+            series.dtype()
+        );
+        let strs: Vec<Option<&str>> = series.str().expect("str chunked").into_iter().collect();
+        assert_eq!(strs, vec![Some("Male"), Some("Female")]);
+    }
+
+    #[test]
+    fn unlabelled_value_falls_back_to_stringified_number() {
+        let label_set = make_label_set(&[(1.0, "Male")]);
+        let batch = make_f64_batch(vec![1.0, 99.0], None);
+        let schema = make_single_col_schema("code", ArrowDataType::LargeUtf8);
+
+        let df = owned_batch_to_dataframe(batch, schema, &[Some(label_set)])
+            .expect("batch to dataframe");
+
+        let strs: Vec<Option<&str>> = df
+            .column("code")
+            .expect("code")
+            .str()
+            .expect("str")
+            .into_iter()
+            .collect();
+        assert_eq!(strs[0], Some("Male"));
+        assert!(strs[1].is_some(), "unlabelled value should be non-null");
+        assert!(
+            strs[1].unwrap().contains("99"),
+            "unlabelled value should contain the raw number"
+        );
+    }
+
+    #[test]
+    fn null_row_stays_null_after_label_mapping() {
+        let label_set = make_label_set(&[(1.0, "Male"), (2.0, "Female")]);
+        // row 1 (index 1) is null: valid bit 0 for bit-1
+        let valid: Vec<u64> = vec![0b0000_0101]; // bits 0 and 2 set → rows 0 and 2 valid
+        let batch = make_f64_batch(vec![1.0, 0.0, 2.0], Some(valid));
+        let schema = make_single_col_schema("gender", ArrowDataType::LargeUtf8);
+
+        let df = owned_batch_to_dataframe(batch, schema, &[Some(label_set)])
+            .expect("batch to dataframe");
+
+        let strs: Vec<Option<&str>> = df
+            .column("gender")
+            .expect("gender")
+            .str()
+            .expect("str")
+            .into_iter()
+            .collect();
+        assert_eq!(strs[0], Some("Male"));
+        assert_eq!(strs[1], None, "null row should remain null");
+        assert_eq!(strs[2], Some("Female"));
+    }
+
+    #[test]
+    fn empty_label_mapping_passes_numeric_column_through_unchanged() {
+        let batch = make_f64_batch(vec![1.0, 2.0], None);
+        let schema = make_single_col_schema("x", ArrowDataType::Float64);
+
+        let df = owned_batch_to_dataframe(batch, schema, &[])
+            .expect("batch to dataframe");
+
+        assert!(
+            matches!(df.column("x").expect("x").dtype(), polars::prelude::DataType::Float64),
+            "unlabelled F64 column should remain Float64"
         );
     }
 }

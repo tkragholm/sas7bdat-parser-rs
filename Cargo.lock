@@ -3304,6 +3304,7 @@ dependencies = [
  "bstr",
  "bytemuck",
  "criterion",
+ "csv",
  "encoding_rs",
  "hotpath",
  "memchr",

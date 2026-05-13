@@ -25,6 +25,7 @@
 
 #![feature(portable_simd)]
 
+pub mod catalog;
 mod columnar;
 mod compression;
 mod dataset;
@@ -32,6 +33,7 @@ mod encoding;
 mod error;
 mod fixture_catalog;
 mod internal;
+mod labels;
 mod layout;
 mod metadata;
 mod options;
@@ -62,6 +64,7 @@ pub use fixture_catalog::{
     build_projection, discover_fixture_paths, profile_dataset_with_sample, profile_fixture,
     summarize_scan_stats,
 };
+pub use labels::{LabelSet, ValueKey, ValueLabel, ValueType};
 pub use metadata::{
     ColumnMeta, CompressionKind, DatasetMetadata, Endianness, LogicalType, SasDate, SasDateTime,
     SasTime, Timestamp,

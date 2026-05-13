@@ -119,6 +119,7 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
         header_size,
         release,
         is_catalog,
+        pad_alignment,
     };
 
     let metadata = DatasetMetadata {
@@ -133,6 +134,7 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
         compression: CompressionKind::None,
         created_at,
         modified_at,
+        label_sets: std::collections::HashMap::new(),
     };
 
     Ok((info, metadata))

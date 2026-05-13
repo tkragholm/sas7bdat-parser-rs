@@ -1,5 +1,5 @@
-use crate::row::CellValue;
-use std::time::SystemTime;
+use crate::{labels::LabelSet, row::CellValue};
+use std::{collections::HashMap, time::SystemTime};
 
 pub type Timestamp = SystemTime;
 
@@ -61,6 +61,9 @@ pub struct DatasetMetadata {
     pub compression: CompressionKind,
     pub created_at: Option<Timestamp>,
     pub modified_at: Option<Timestamp>,
+    /// Value-label sets loaded from a companion `.sas7bcat` file.
+    /// Keyed by normalized format name (uppercase, trimmed, `$` prefix preserved).
+    pub label_sets: HashMap<String, LabelSet>,
 }
 
 #[derive(Debug, Clone)]

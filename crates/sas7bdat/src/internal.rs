@@ -111,6 +111,7 @@ pub struct HeaderInfo {
     pub header_size: u32,
     pub release: String,
     pub is_catalog: bool,
+    pub pad_alignment: u32,
 }
 
 #[derive(Debug, Clone, Default)]

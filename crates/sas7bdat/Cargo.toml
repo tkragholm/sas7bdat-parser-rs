@@ -26,6 +26,7 @@ simdutf8 = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+csv = { workspace = true }
 
 [[bench]]
 name = "scan_hotpaths"

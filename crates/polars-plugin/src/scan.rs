@@ -19,7 +19,10 @@ use pyo3::{
     types::{PyDict, PyModule},
 };
 #[cfg(feature = "arrow")]
-use sas7bdat::{BatchHint, Error, LogicalType, Projection, Result as SasResult};
+use sas7bdat::{
+    BatchHint, Error, LabelSet, LogicalType, Projection, Result as SasResult,
+    catalog::normalize_format_name,
+};
 #[cfg(feature = "arrow")]
 use std::{
     sync::{Arc, mpsc},
@@ -38,15 +41,24 @@ pub struct BatchReaderRequest {
 
 #[cfg(feature = "arrow")]
 pub fn full_arrow_schema_for_dataset(ds: &Dataset) -> SasResult<Arc<ArrowSchema>> {
+    let label_sets = &ds.metadata().label_sets;
     let fields = ds
         .columns()
         .iter()
         .map(|column| {
-            Ok(ArrowSchemaField::new(
-                column.name.clone(),
-                arrow_data_type_for_logical_type(column.logical_type),
-                true,
-            ))
+            let raw_dt = arrow_data_type_for_logical_type(column.logical_type);
+            let dt = if !label_sets.is_empty() {
+                column
+                    .format
+                    .as_deref()
+                    .map(normalize_format_name)
+                    .filter(|norm| label_sets.contains_key(norm.as_str()))
+                    .map(|_| ArrowSchemaDataType::Utf8)
+                    .unwrap_or(raw_dt)
+            } else {
+                raw_dt
+            };
+            Ok(ArrowSchemaField::new(column.name.clone(), dt, true))
         })
         .collect::<SasResult<Vec<_>>>()?;
     Ok(Arc::new(ArrowSchema::new(fields)))
@@ -80,6 +92,26 @@ struct ScanRequest {
     n_rows: Option<usize>,
     batch_size: Option<usize>,
     coalesce: bool,
+}
+
+#[cfg(feature = "arrow")]
+fn build_label_mapping_for_columns(ds: &Dataset, column_names: &[&str]) -> Vec<Option<LabelSet>> {
+    let label_sets = &ds.metadata().label_sets;
+    if label_sets.is_empty() {
+        return Vec::new();
+    }
+    column_names
+        .iter()
+        .map(|name| {
+            ds.columns()
+                .iter()
+                .find(|col| col.name.as_str() == *name)
+                .and_then(|col| col.format.as_deref())
+                .map(normalize_format_name)
+                .and_then(|norm| label_sets.get(&norm))
+                .cloned()
+        })
+        .collect()
 }
 
 #[cfg(feature = "arrow")]
@@ -193,10 +225,16 @@ fn run_scan(
         &scan,
     )?;
 
+    let projected_names: Vec<&str> = match projection_columns.as_deref() {
+        None => ds.columns().iter().map(|c| c.name.as_str()).collect(),
+        Some(names) => names.iter().map(String::as_str).collect(),
+    };
+    let label_mapping = build_label_mapping_for_columns(ds, &projected_names);
+
     if request.coalesce {
         let mut combined: Option<DataFrame> = None;
         scan.visit_owned_batches(|batch| {
-            let mut df = owned_batch_to_dataframe(batch, Arc::clone(&pl_schema))
+            let mut df = owned_batch_to_dataframe(batch, Arc::clone(&pl_schema), &label_mapping)
                 .map_err(|e| Error::io(e.to_string()))?;
             if let Some(predicate) = predicate {
                 df = filter_dataframe(&df, predicate)?;
@@ -218,7 +256,7 @@ fn run_scan(
         }
     } else {
         scan.visit_owned_batches(|batch| {
-            let mut df = owned_batch_to_dataframe(batch, Arc::clone(&pl_schema))
+            let mut df = owned_batch_to_dataframe(batch, Arc::clone(&pl_schema), &label_mapping)
                 .map_err(|e| Error::io(e.to_string()))?;
             if let Some(predicate) = predicate {
                 df = filter_dataframe(&df, predicate)?;
