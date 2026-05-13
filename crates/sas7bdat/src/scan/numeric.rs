@@ -506,6 +506,17 @@ const I32_MIN_F64: f64 = i32::MIN as f64;
 #[allow(clippy::cast_precision_loss)]
 const I32_MAX_F64: f64 = i32::MAX as f64;
 
+/// Efficiently find the index of the first value that cannot be represented as
+/// an integer within the specified range [min, max].
+///
+/// This is used to decide whether a SAS numeric column (stored as floats) can
+/// be "downgraded" to a more efficient Arrow/Polars integer type without loss
+/// of precision.
+///
+/// Logic:
+/// 1. Finite: Exponent bits are not all ones (ignores Infinity/NaN).
+/// 2. Integral: floor(x) == x.
+/// 3. In Range: min <= x <= max.
 fn first_non_integral_in_range_index_simd(
     raw_bits: &[u64],
     valid: Option<&[u64]>,

@@ -134,15 +134,25 @@ pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
     while end >= 64 {
         let start = end - 64;
         let chunk = U8x64::from_slice(&slice[start..end]);
+
+        // Find bytes that are either ASCII space (0x20) or NUL (0x00).
+        // SAS often pads strings with spaces, but corrupted or partial 
+        // records may contain NULs.
         let trim_mask = chunk.simd_eq(spaces) | chunk.simd_eq(nuls);
         let bitmask = trim_mask.to_bitmask();
+
         if bitmask == u64::MAX {
+            // Entire 64-byte chunk is trim-able; skip it.
             end = start;
             continue;
         }
-        // `bitmask` has bit i set where lane i is a trim char (space/nul).
-        // Use CLZ on the inverted mask to locate the rightmost non-trim byte
-        // in constant time rather than scanning backwards byte-by-byte.
+
+        // `bitmask` has bit i set if lane i is a space/nul. 
+        // We want the index of the rightmost bit that is NOT set (the last content byte).
+        // 1. Invert the mask: !bitmask has bits set for content bytes.
+        // 2. leading_zeros() finds the index of the first '1' from the left.
+        // 3. Since bitmask maps lane 0 to the LSB, the "rightmost" byte in the slice
+        //    is the "most significant" bit in the mask.
         let last_content = 63 - (!bitmask).leading_zeros() as usize;
         return &slice[..=(start + last_content)];
     }
