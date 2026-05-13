@@ -2,7 +2,7 @@
 members = [
     "crates/sas7bdat-cli",
     "crates/sas7bdat",
-    "crates/polars_plugin",
+    "crates/polars-plugin",
 ]
 resolver = "2"
 
