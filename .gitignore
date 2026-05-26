@@ -1,13 +1,11 @@
-# Rust build artifacts
-/target
-crates/polars_plugin/target
+# Rust build artifacts (root and nested workspace members)
+target/
 
 # Python
 .venv/
 __pycache__/
 *.py[cod]
-crates/polars_plugin/.pytest_cache/
-scripts/__pycache__/
+.pytest_cache/
 
 # macOS
 .DS_Store
@@ -26,3 +24,6 @@ INDEX.md
 .claude/
 .codex/
 .mcp.json
+
+# Reference implementation
+old-implementation/

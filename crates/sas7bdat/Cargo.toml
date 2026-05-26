@@ -44,3 +44,8 @@ harness = false
 default = []
 arrow = ["dep:arrow-array", "dep:arrow-schema"]
 hotpath-profile = ["dep:hotpath"]
+
+# Build docs.rs with the `arrow` feature so the Arrow batch API is documented.
+# `hotpath-profile` is omitted: it adds internal profiling instrumentation, not public API.
+[package.metadata.docs.rs]
+features = ["arrow"]
