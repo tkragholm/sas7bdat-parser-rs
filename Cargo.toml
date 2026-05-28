@@ -37,7 +37,8 @@ parquet = { version = "58", features = ["arrow"] }
 polars = "0.53"
 polars-arrow = "0.53"
 polars-plan = { version = "0.53", features = ["serde"] }
-pyo3 = { version = "0.27" }
+# generate-import-lib synthesizes pythonXX.lib so Windows wheels can be cross-compiled without a Windows Python install.
+pyo3 = { version = "0.27", features = ["generate-import-lib"] }
 pyo3-polars = "0.26.0"
 rayon = "1"
 rmp-serde = "1"

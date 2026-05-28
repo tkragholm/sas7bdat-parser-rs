@@ -6,8 +6,13 @@ build-backend = "maturin"
 name = "sas7bdat-polars"
 version = "0.1.0"
 description = "Thin Polars IO plugin for the sas7bdat crate"
-requires-python = ">=3.8"
-dependencies = ["polars"]
+readme = "README.md"
+# Built against the CPython stable ABI (abi3, floor 3.12), so one cp312-abi3 wheel runs on 3.12+.
+requires-python = ">=3.12"
+# polars is pinned, not floating: the extension links polars-rust 0.53 via
+# pyo3-polars 0.26 and calls polars.io.plugins.register_io_source at runtime, so
+# the installed Python polars must match the version it was built against.
+dependencies = ["polars==1.40.*"]
 
 [project.optional-dependencies]
 test = ["pytest"]
@@ -16,3 +21,4 @@ test = ["pytest"]
 bindings = "pyo3"
 manifest-path = "Cargo.toml"
 features = ["extension-module"]
+locked = true

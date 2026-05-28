@@ -1,0 +1,99 @@
+# Builds sas7bdat-polars wheels natively on each platform and uploads them as
+# CI artifacts. Wheels are abi3 (cp312-abi3), so one wheel per platform covers
+# CPython 3.12+. Publishing is intentionally not wired up — download the
+# artifacts and `twine upload` them manually.
+#
+# The plugin lives in crates/polars-plugin/, NOT the repo root (the root
+# pyproject.toml builds a different package), hence the explicit --manifest-path.
+name: wheels
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: linux-${{ matrix.target }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # aarch64 builds run under QEMU emulation and are slow; swap the runner
+        # to a native ARM runner (e.g. ubuntu-22.04-arm) to speed it up.
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: '2_28'
+          # Must match rust-toolchain.toml — the core crate needs nightly for portable SIMD.
+          rust-toolchain: nightly-2026-04-01
+          args: --profile dist --manifest-path crates/polars-plugin/Cargo.toml --out dist -i python3.12
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: dist/*.whl
+
+  windows:
+    name: windows-x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x64
+          rust-toolchain: nightly-2026-04-01
+          args: --profile dist --manifest-path crates/polars-plugin/Cargo.toml --out dist
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: wheels-windows-x64
+          path: dist/*.whl
+
+  macos:
+    name: macos-${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64
+            runner: macos-13   # Intel
+          - target: aarch64
+            runner: macos-14   # Apple Silicon
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          rust-toolchain: nightly-2026-04-01
+          args: --profile dist --manifest-path crates/polars-plugin/Cargo.toml --out dist
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: wheels-macos-${{ matrix.target }}
+          path: dist/*.whl
