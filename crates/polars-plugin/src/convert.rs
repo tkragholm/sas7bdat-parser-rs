@@ -15,7 +15,9 @@ use polars_arrow::{
 #[cfg(feature = "arrow")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule};
 #[cfg(feature = "arrow")]
-use sas7bdat::{Error, LabelSet, OwnedColumnBuffer, Result as SasResult, TrustedOffsets};
+use sas7bdat::{
+    Error, LabelSet, OwnedColumnBuffer, Result as SasResult, SasDate, SasDateTime, TrustedOffsets,
+};
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
 
@@ -95,7 +97,11 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::Date { values, valid } => {
-                let i32s: Vec<i32> = bytemuck::cast_vec(values);
+                // Arrow Date32 counts days from the Unix epoch (1970), not the SAS epoch (1960).
+                let mut i32s: Vec<i32> = bytemuck::cast_vec(values);
+                for v in &mut i32s {
+                    *v -= SasDate::DAYS_SAS_TO_UNIX;
+                }
                 Box::new(primitive_array_with_optional_validity(
                     ArrowDataType::Date32,
                     i32s,
@@ -104,7 +110,11 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::DateTime { values, valid } => {
-                let i64s: Vec<i64> = bytemuck::cast_vec(values);
+                // Arrow timestamps count seconds from the Unix epoch (1970), not the SAS epoch (1960).
+                let mut i64s: Vec<i64> = bytemuck::cast_vec(values);
+                for v in &mut i64s {
+                    *v -= SasDateTime::SECONDS_SAS_TO_UNIX;
+                }
                 let dtype = ArrowDataType::Timestamp(PlTimeUnit::Second, None);
                 Box::new(primitive_array_with_optional_validity(
                     dtype, i64s, valid, row_count,

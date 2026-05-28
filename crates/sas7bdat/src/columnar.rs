@@ -434,15 +434,17 @@ impl ColumnBuffer<'_> {
                 })
             }
             Self::Date(PrimitiveBuffer { values, valid }) => {
+                // Arrow Date32 counts days from the Unix epoch (1970), not the SAS epoch (1960).
                 build_primitive_array::<Date32Type, _, _>(values.iter().copied(), valid, |value| {
-                    Ok(value.days_since_sas_epoch)
+                    Ok(value.unix_days())
                 })
             }
             Self::DateTime(PrimitiveBuffer { values, valid }) => {
+                // Arrow timestamps count seconds from the Unix epoch (1970), not the SAS epoch (1960).
                 build_primitive_array::<TimestampSecondType, _, _>(
                     values.iter().copied(),
                     valid,
-                    |value| Ok(value.seconds_since_sas_epoch),
+                    |value| Ok(value.unix_seconds()),
                 )
             }
             Self::Time(PrimitiveBuffer { values, valid }) => {

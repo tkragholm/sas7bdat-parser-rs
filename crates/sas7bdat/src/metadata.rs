@@ -48,11 +48,33 @@ pub struct SasDate {
     pub days_since_sas_epoch: i32,
 }
 
+impl SasDate {
+    /// Days between the SAS epoch (1960-01-01) and the Unix epoch (1970-01-01).
+    pub const DAYS_SAS_TO_UNIX: i32 = 3653;
+
+    /// Days since the Unix epoch (1970-01-01) — the encoding Arrow `Date32` expects.
+    #[must_use]
+    pub const fn unix_days(self) -> i32 {
+        self.days_since_sas_epoch - Self::DAYS_SAS_TO_UNIX
+    }
+}
+
 /// A wrapper for SAS datetime values (seconds since 1960-01-01).
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SasDateTime {
     pub seconds_since_sas_epoch: i64,
+}
+
+impl SasDateTime {
+    /// Seconds between the SAS epoch (1960-01-01) and the Unix epoch (1970-01-01).
+    pub const SECONDS_SAS_TO_UNIX: i64 = 315_619_200;
+
+    /// Seconds since the Unix epoch (1970-01-01) — the encoding Arrow timestamps expect.
+    #[must_use]
+    pub const fn unix_seconds(self) -> i64 {
+        self.seconds_since_sas_epoch - Self::SECONDS_SAS_TO_UNIX
+    }
 }
 
 /// A wrapper for SAS time values (seconds since midnight).
@@ -133,5 +155,32 @@ impl From<SasDateTime> for CellValue<'_> {
 impl From<SasTime> for CellValue<'_> {
     fn from(value: SasTime) -> Self {
         Self::Time(value)
+    }
+}
+
+#[cfg(test)]
+mod epoch_tests {
+    use super::{SasDate, SasDateTime};
+
+    #[test]
+    fn date_offset_anchors_on_unix_epoch() {
+        // 1970-01-01 is SAS day 3653 and must map to Arrow Date32 value 0.
+        assert_eq!(SasDate { days_since_sas_epoch: 3653 }.unix_days(), 0);
+        // 2000-01-01 is SAS day 14610 and Unix day 10957.
+        assert_eq!(SasDate { days_since_sas_epoch: 14610 }.unix_days(), 10957);
+    }
+
+    #[test]
+    fn datetime_offset_anchors_on_unix_epoch() {
+        // 1970-01-01T00:00:00 is SAS second 315_619_200 and must map to timestamp 0.
+        assert_eq!(
+            SasDateTime { seconds_since_sas_epoch: 315_619_200 }.unix_seconds(),
+            0
+        );
+        // 2000-01-01T00:00:00 UTC is Unix second 946_684_800.
+        assert_eq!(
+            SasDateTime { seconds_since_sas_epoch: 1_262_304_000 }.unix_seconds(),
+            946_684_800
+        );
     }
 }
