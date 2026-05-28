@@ -77,8 +77,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64
-            runner: macos-13   # Intel
           - target: aarch64
             runner: macos-14   # Apple Silicon
     steps:
