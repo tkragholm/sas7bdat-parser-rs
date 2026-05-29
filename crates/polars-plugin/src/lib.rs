@@ -8,7 +8,7 @@ use crate::scan::BatchReaderRequest;
 use std::{
     convert::TryFrom,
     hint::black_box,
-    sync::{Arc, mpsc},
+    sync::{Arc, Mutex, mpsc},
     time::Instant,
 };
 
@@ -178,12 +178,25 @@ impl SasIoSource {
 
 // ─── BatchReader ──────────────────────────────────────────────────────────────
 
+// `mpsc::Receiver<T>` is `Send` but `!Sync`, and `pyo3 >= 0.21` requires
+// `#[pyclass]` types to be `Send + Sync` (it enforces this at runtime since
+// 0.27). Wrapping the receiver in a `Mutex` makes the whole struct `Sync`
+// without forcing the `unsendable` runtime check, which used to abort whenever
+// Polars's lazy executor created the reader on a worker thread and then pulled
+// batches from the main thread (the GIL still serialises access on the Python
+// side, so there is no real concurrent consumer to contend with the mutex).
 #[cfg(feature = "arrow")]
-#[pyclass(unsendable)]
+#[pyclass]
 struct BatchReader {
-    rx: mpsc::Receiver<ReaderMessage>,
+    rx: Mutex<mpsc::Receiver<ReaderMessage>>,
     predicate: Option<Py<PyAny>>,
 }
+
+#[cfg(feature = "arrow")]
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<BatchReader>();
+};
 
 #[cfg(feature = "arrow")]
 #[pymethods]
@@ -194,7 +207,13 @@ impl BatchReader {
 
     fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
         loop {
-            let rx = &mut slf.rx;
+            // `&mut self` gives us unique access, so `get_mut` is infallible-by-construction
+            // and avoids touching the mutex's atomic at all (`MutexGuard` is never produced,
+            // so the mutex can never be poisoned either).
+            let rx = slf
+                .rx
+                .get_mut()
+                .expect("BatchReader mutex is never poisoned: only ever accessed via get_mut");
             let message = py
                 .detach(move || rx.recv())
                 .map_err(|_| PyStopIteration::new_err("end of stream"))?;

@@ -7,7 +7,11 @@ FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "ahs2013n.sas7bdat"
 
 
 def test_public_api_contract_is_exposed():
-    assert sp.__version__ == "0.1.0"
+    # __version__ comes from CARGO_PKG_VERSION at build time; assert the
+    # SemVer shape rather than a literal so the test doesn't rot on every bump.
+    import re
+
+    assert re.fullmatch(r"\d+\.\d+\.\d+", sp.__version__), sp.__version__
     assert sp.PLUGIN_CONTRACT_VERSION == "sas7bdat_polars.v1"
     assert callable(sp.scan_sas)
     assert callable(sp.schema_for_file)

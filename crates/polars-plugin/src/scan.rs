@@ -25,7 +25,7 @@ use sas7bdat::{
 };
 #[cfg(feature = "arrow")]
 use std::{
-    sync::{Arc, mpsc},
+    sync::{Arc, Mutex, mpsc},
     thread,
 };
 
@@ -192,7 +192,7 @@ pub fn batch_reader_from_dataset(
     });
 
     BatchReader {
-        rx,
+        rx: Mutex::new(rx),
         predicate: python_predicate,
     }
 }
