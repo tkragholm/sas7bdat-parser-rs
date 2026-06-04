@@ -232,3 +232,47 @@ def test_sasdataset_repeated_scans_and_batch_readers_reuse_cached_schema():
     assert pl.concat(first_batches).to_dict(as_series=False) == pl.concat(
         second_batches
     ).to_dict(as_series=False)
+
+
+DATETIME_FIXTURE = (
+    Path(__file__).resolve().parents[3]
+    / "fixtures"
+    / "raw_data"
+    / "csharp"
+    / "date_format_datetime.sas7bdat"
+)
+
+
+def test_datetime_columns_are_microsecond_and_stack_across_batches(tmp_path):
+    # Regression: datetime columns were declared Datetime('us') but materialized as
+    # Datetime('ms') (Timestamp(Second) -> ms), so the declared and actual units
+    # disagreed and Polars refused to stack batches with a SchemaError. Sub-second
+    # values were additionally widened to a raw-seconds F64 and decoded as garbage.
+    import datetime as dt
+
+    if not DATETIME_FIXTURE.exists():
+        import pytest
+
+        pytest.skip(f"missing fixture: {DATETIME_FIXTURE}")
+
+    lf = sp.scan_sas(str(DATETIME_FIXTURE))
+    declared = lf.collect_schema()
+    df = lf.collect()
+
+    dt_cols = [n for n, t in df.schema.items() if isinstance(t, pl.Datetime)]
+    assert dt_cols, "fixture should expose datetime columns"
+    for name in dt_cols:
+        # us, and declared schema == materialized schema
+        assert df.schema[name] == pl.Datetime("us"), name
+        assert declared[name] == df.schema[name], name
+
+    # Exact value (cross-checked against pyreadstat / ReadStat), incl. sub-second.
+    assert df["DATETIME"][0] == dt.datetime(2013, 3, 17, 19, 53, 1, 321000)
+
+    # The exact pipeline path that used to raise SchemaError("ms" != "us").
+    out = tmp_path / "concat.parquet"
+    pl.concat(
+        [sp.scan_sas(str(DATETIME_FIXTURE)), sp.scan_sas(str(DATETIME_FIXTURE))],
+        how="diagonal_relaxed",
+    ).sink_parquet(out)
+    assert pl.read_parquet(out).height == 2 * df.height

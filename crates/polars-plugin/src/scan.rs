@@ -78,7 +78,14 @@ const fn arrow_data_type_for_logical_type(logical_type: LogicalType) -> ArrowSch
         LogicalType::Float => ArrowSchemaDataType::Float64,
         LogicalType::String => ArrowSchemaDataType::Utf8,
         LogicalType::Date => ArrowSchemaDataType::Date32,
-        LogicalType::DateTime => ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None),
+        // Microseconds, not Seconds: Polars has no Second time unit, so a
+        // Timestamp(Second) batch is materialized as Datetime('ms') while the
+        // declared schema says Datetime('us') — the two disagree and Polars
+        // refuses to stack the batches (SchemaError: ms != us). Emitting µs
+        // keeps the declared schema and the materialized batches identical.
+        LogicalType::DateTime => {
+            ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Microsecond, None)
+        }
         LogicalType::Time => ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond),
         LogicalType::Bytes => ArrowSchemaDataType::Binary,
     }

@@ -49,8 +49,8 @@ pub(super) fn arrow_dt_to_polars_arrow(dt: &ArrowSchemaDataType) -> Result<Arrow
         | ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond) => {
             ArrowDataType::Time64(PlTimeUnit::Nanosecond)
         }
-        ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None) => {
-            ArrowDataType::Timestamp(PlTimeUnit::Second, None)
+        ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Microsecond, None) => {
+            ArrowDataType::Timestamp(PlTimeUnit::Microsecond, None)
         }
         other => return Err(format!("unsupported Arrow type: {other:?}")),
     })
@@ -64,6 +64,13 @@ pub(super) fn owned_batch_to_dataframe(
 ) -> SasResult<DataFrame> {
     let row_count = batch.row_count;
     let mut arrays: Vec<Box<dyn Array>> = Vec::with_capacity(batch.columns.len());
+    // Target dtype per column, in column order. A temporal column whose values do
+    // not all fit a whole i64 (e.g. sub-second datetimes) is widened to an F64
+    // buffer of RAW SAS-epoch units; we must still emit it as the declared
+    // temporal dtype (below) rather than a bare Float64, or Polars reinterprets
+    // the raw seconds/days as the timestamp's i64 payload and yields garbage.
+    let field_dtypes: Vec<ArrowDataType> =
+        schema.iter_values().map(|field| field.dtype.clone()).collect();
 
     for (col_idx, col) in batch.columns.into_iter().enumerate() {
         let label_set = label_mapping.get(col_idx).and_then(Option::as_ref);
@@ -71,6 +78,7 @@ pub(super) fn owned_batch_to_dataframe(
             arrays.push(Box::new(owned_column_to_labelled_utf8(col, label_set, row_count)));
             continue;
         }
+        let target_dtype = field_dtypes.get(col_idx);
         let array: Box<dyn Array> = match col {
             OwnedColumnBuffer::I32 { values, valid } => {
                 Box::new(primitive_array_with_optional_validity(
@@ -89,12 +97,73 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::F64 { values, valid } => {
-                Box::new(primitive_array_with_optional_validity(
-                    ArrowDataType::Float64,
-                    values,
-                    valid,
-                    row_count,
-                ))
+                // A genuine Float column stays Float64. A temporal column that was
+                // widened to F64 (its values didn't all fit a whole i64) carries RAW
+                // SAS-epoch units as floats and must be converted to its declared
+                // temporal dtype, preserving sub-second precision.
+                match target_dtype {
+                    Some(ArrowDataType::Timestamp(PlTimeUnit::Microsecond, tz)) => {
+                        let tz = tz.clone();
+                        #[allow(
+                            clippy::cast_possible_truncation,
+                            clippy::cast_precision_loss
+                        )]
+                        let micros: Vec<i64> = values
+                            .iter()
+                            .map(|&seconds_since_sas| {
+                                ((seconds_since_sas
+                                    - SasDateTime::SECONDS_SAS_TO_UNIX as f64)
+                                    * 1_000_000.0)
+                                    .round() as i64
+                            })
+                            .collect();
+                        Box::new(primitive_array_with_optional_validity(
+                            ArrowDataType::Timestamp(PlTimeUnit::Microsecond, tz),
+                            micros,
+                            valid,
+                            row_count,
+                        ))
+                    }
+                    Some(ArrowDataType::Date32) => {
+                        #[allow(clippy::cast_possible_truncation)]
+                        let days: Vec<i32> = values
+                            .iter()
+                            .map(|&days_since_sas| {
+                                days_since_sas.round() as i32 - SasDate::DAYS_SAS_TO_UNIX
+                            })
+                            .collect();
+                        Box::new(primitive_array_with_optional_validity(
+                            ArrowDataType::Date32,
+                            days,
+                            valid,
+                            row_count,
+                        ))
+                    }
+                    Some(ArrowDataType::Time64(PlTimeUnit::Nanosecond)) => {
+                        #[allow(
+                            clippy::cast_possible_truncation,
+                            clippy::cast_precision_loss
+                        )]
+                        let nanos: Vec<i64> = values
+                            .iter()
+                            .map(|&seconds_since_midnight| {
+                                (seconds_since_midnight * 1_000_000_000.0).round() as i64
+                            })
+                            .collect();
+                        Box::new(primitive_array_with_optional_validity(
+                            ArrowDataType::Time64(PlTimeUnit::Nanosecond),
+                            nanos,
+                            valid,
+                            row_count,
+                        ))
+                    }
+                    _ => Box::new(primitive_array_with_optional_validity(
+                        ArrowDataType::Float64,
+                        values,
+                        valid,
+                        row_count,
+                    )),
+                }
             }
             OwnedColumnBuffer::Date { values, valid } => {
                 // Arrow Date32 counts days from the Unix epoch (1970), not the SAS epoch (1960).
@@ -110,12 +179,18 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::DateTime { values, valid } => {
-                // Arrow timestamps count seconds from the Unix epoch (1970), not the SAS epoch (1960).
-                let mut i64s: Vec<i64> = bytemuck::cast_vec(values);
-                for v in &mut i64s {
-                    *v -= SasDateTime::SECONDS_SAS_TO_UNIX;
-                }
-                let dtype = ArrowDataType::Timestamp(PlTimeUnit::Second, None);
+                // Arrow timestamps count from the Unix epoch (1970), not the SAS epoch (1960).
+                // Emit MICROSECONDS (not seconds): Polars has no Second time unit, so a
+                // Timestamp(Second) array materializes as Datetime('ms') and clashes with the
+                // declared Datetime('us') schema when batches are stacked. Microseconds keep
+                // the declared schema and the materialized batches identical.
+                let i64s: Vec<i64> = bytemuck::cast_vec::<_, i64>(values)
+                    .into_iter()
+                    .map(|seconds| {
+                        (seconds - SasDateTime::SECONDS_SAS_TO_UNIX) * 1_000_000
+                    })
+                    .collect();
+                let dtype = ArrowDataType::Timestamp(PlTimeUnit::Microsecond, None);
                 Box::new(primitive_array_with_optional_validity(
                     dtype, i64s, valid, row_count,
                 ))
@@ -363,7 +438,7 @@ pub(super) fn polars_dtype(
         | ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond) => {
             polars.getattr("Time")?.unbind()
         }
-        ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Second, None) => {
+        ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Microsecond, None) => {
             polars.getattr("Datetime")?.call1(("us",))?.unbind()
         }
         other => {
@@ -396,11 +471,11 @@ mod tests {
         );
         assert_eq!(
             arrow_dt_to_polars_arrow(&ArrowSchemaDataType::Timestamp(
-                ArrowSchemaTimeUnit::Second,
+                ArrowSchemaTimeUnit::Microsecond,
                 None
             ))
             .expect("timestamp"),
-            ArrowDataType::Timestamp(PlTimeUnit::Second, None)
+            ArrowDataType::Timestamp(PlTimeUnit::Microsecond, None)
         );
     }
 
