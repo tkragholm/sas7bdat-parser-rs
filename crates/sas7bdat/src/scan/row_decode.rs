@@ -5,7 +5,7 @@ use super::{
     UTF_8, Utf8ValidationMode, classify_date_numeric_value, classify_datetime_numeric_value,
     classify_time_numeric_value, classify_typed_numeric_value, compile_column_plan,
     compile_compiled_projection_column_plan, compile_owned_materialization_kind,
-    compile_string_decode_kernel, decode_numeric_cell, is_blank_after_trim_mode,
+    TrimMode, compile_string_decode_kernel, decode_numeric_cell, is_blank_after_trim_mode,
     maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes, numeric_bits,
     resolve_encoding, trim_and_classify_for_mode,
 };
@@ -208,7 +208,12 @@ impl RowDecodePlan {
 
         let trimmed = trim_and_classify_for_mode(slice, self.string_options.trim_mode);
         let slice = trimmed.bytes;
-        if slice.is_empty() || is_blank_after_trim_mode(slice, self.string_options.trim_mode) {
+        // For RTrim/Strip, `is_blank_after_trim_mode` reduces to `is_empty`, already
+        // checked here; only Preserve does extra work (all-spaces scan).
+        if slice.is_empty()
+            || (matches!(self.string_options.trim_mode, TrimMode::Preserve)
+                && is_blank_after_trim_mode(slice, self.string_options.trim_mode))
+        {
             return Ok(PlannedCell::StrBorrowed(""));
         }
 
@@ -229,8 +234,9 @@ impl RowDecodePlan {
         let trimmed = trim_and_classify_for_mode(slice, self.string_options.trim_mode);
         let slice = trimmed.bytes;
         if slice.is_empty()
-            || is_blank_after_trim_mode(slice, self.string_options.trim_mode)
             || trimmed.is_ascii
+            || (matches!(self.string_options.trim_mode, TrimMode::Preserve)
+                && is_blank_after_trim_mode(slice, self.string_options.trim_mode))
         {
             return Ok(slice);
         }

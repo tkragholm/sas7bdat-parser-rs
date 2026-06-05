@@ -608,17 +608,18 @@ fn decode_text(bytes: &[u8], encoding: &'static Encoding) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    String::from_utf8(trimmed.to_vec()).map_or_else(
-        |_| {
+    // Validate UTF-8 in place; only copy/decode when it isn't valid UTF-8.
+    match std::str::from_utf8(trimmed) {
+        Ok(text) => text.trim_end_matches('\u{0000}').to_string(),
+        Err(_) => {
             let (decoded, _, had_errors) = encoding.decode(trimmed);
             if had_errors {
                 String::from_utf8_lossy(trimmed).into_owned()
             } else {
                 decoded.into_owned()
             }
-        },
-        |text| text.trim_end_matches('\u{0000}').to_string(),
-    )
+        }
+    }
 }
 // ─── slice read helpers ───────────────────────────────────────────────────────
 

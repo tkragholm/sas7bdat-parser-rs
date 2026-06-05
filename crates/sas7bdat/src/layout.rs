@@ -83,13 +83,19 @@ impl TextStore {
         let start = usize::from(text_ref.offset);
         let bytes = blob.get(start..end)?;
         let (decoded, had_errors) = self.encoding.decode_without_bom_handling(bytes);
-        let text = if had_errors {
-            String::from_utf8_lossy(bytes).into_owned()
+        let decoded = if had_errors {
+            String::from_utf8_lossy(bytes)
         } else {
-            decoded.into_owned()
+            decoded
         };
-        let text = text.trim().to_owned();
-        if text.is_empty() { None } else { Some(text) }
+        // Trim the borrowed `&str` and allocate once, instead of materializing
+        // the decoded string and then re-allocating the trimmed copy.
+        let trimmed = decoded.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
     }
 
     fn can_resolve(&self, text_ref: TextRef) -> bool {

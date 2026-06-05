@@ -106,12 +106,18 @@ fn build_label_mapping_for_columns(ds: &Dataset, column_names: &[&str]) -> Vec<O
     if label_sets.is_empty() {
         return Vec::new();
     }
+    // Index columns by name once (first occurrence wins, matching the prior
+    // `find`) instead of rescanning every column for each requested name.
+    let mut by_name: std::collections::HashMap<&str, _> =
+        std::collections::HashMap::with_capacity(ds.columns().len());
+    for col in ds.columns() {
+        by_name.entry(col.name.as_str()).or_insert(col);
+    }
     column_names
         .iter()
         .map(|name| {
-            ds.columns()
-                .iter()
-                .find(|col| col.name.as_str() == *name)
+            by_name
+                .get(name)
                 .and_then(|col| col.format.as_deref())
                 .map(normalize_format_name)
                 .and_then(|norm| label_sets.get(&norm))
@@ -211,7 +217,6 @@ fn run_scan(
     predicate: Option<&PredicateExpr>,
     tx: &mpsc::SyncSender<ReaderMessage>,
 ) -> SasResult<()> {
-    let projection_columns = request.with_columns.clone();
     let projection = build_projection(ds, request.with_columns.clone())?;
     let mut scan = ds.scan();
     if let Some(ref projection) = projection {
@@ -227,11 +232,11 @@ fn run_scan(
 
     let pl_schema = resolve_polars_schema(
         request.full_schema.as_ref(),
-        projection_columns.as_deref(),
+        request.with_columns.as_deref(),
         &scan,
     )?;
 
-    let projected_names: Vec<&str> = projection_columns.as_deref().map_or_else(
+    let projected_names: Vec<&str> = request.with_columns.as_deref().map_or_else(
         || ds.columns().iter().map(|c| c.name.as_str()).collect(),
         |names| names.iter().map(String::as_str).collect(),
     );

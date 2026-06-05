@@ -110,15 +110,13 @@ pub(super) fn compile_column_plan(
     let end = start
         .checked_add(width_usize)
         .ok_or_else(|| Error::unsupported("column end overflow"))?;
+    let kernel = compile_decode_kernel(builder, column.logical_type);
     Ok(CompiledColumnPlan {
         start,
         end,
         width,
-        kernel: compile_decode_kernel(builder, column.logical_type),
-        numeric_tile: compile_numeric_tile_mode(
-            compile_decode_kernel(builder, column.logical_type),
-            width,
-        ),
+        kernel,
+        numeric_tile: compile_numeric_tile_mode(kernel, width),
     })
 }
 
@@ -126,15 +124,13 @@ pub(super) fn compile_compiled_projection_column_plan(
     builder: &ScanBuilder<'_>,
     column: &ProjectedColumnPlan,
 ) -> CompiledColumnPlan {
+    let kernel = compile_decode_kernel(builder, column.logical_type);
     CompiledColumnPlan {
         start: usize::from(column.offset),
         end: usize::from(column.end),
         width: column.width,
-        kernel: compile_decode_kernel(builder, column.logical_type),
-        numeric_tile: compile_numeric_tile_mode(
-            compile_decode_kernel(builder, column.logical_type),
-            column.width,
-        ),
+        kernel,
+        numeric_tile: compile_numeric_tile_mode(kernel, column.width),
     }
 }
 
