@@ -1,24 +1,15 @@
 use crate::{
     error::{CompressionError, Error, Result},
-    internal::{SmallCommandBlock, SmallOp},
     metadata::CompressionKind,
 };
 
 const RLE_COMMAND_LENGTHS: [usize; 16] = [1, 1, 0, 0, 2, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0];
-const COMMAND_BLOCK_CAPACITY: usize = 16;
 
 #[derive(Debug, Clone, Copy)]
 struct RleOp {
     copy_len: usize,
     insert_len: usize,
     insert_byte: u8,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct RdcState {
-    prefix: u16,
-    bit_index: u8,
-    has_prefix: bool,
 }
 
 pub fn decompress_row<'a>(
@@ -176,19 +167,61 @@ pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
 
 pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -> Result<()> {
     output.clear();
-    let mut cursor = 0usize;
     if output.capacity() < expected_len {
         output.reserve(expected_len - output.capacity());
     }
-    let mut state = RdcState::default();
-    let mut block = SmallCommandBlock::<COMMAND_BLOCK_CAPACITY>::default();
+    let mut cursor = 0usize;
 
-    while cursor < input.len() || state.has_prefix {
-        decode_rdc_block(input, &mut cursor, &mut state, &mut block)?;
-        if block.len == 0 {
-            break;
+    // Each 16-bit big-endian prefix word describes the next up-to-16 tokens:
+    // a 0 bit is a single literal byte, a 1 bit is a fill/copy marker. Tokens
+    // are applied straight to `output` as they are decoded (no staging buffer).
+    'words: while cursor + 2 <= input.len() {
+        let prefix = u16::from_be_bytes([input[cursor], input[cursor + 1]]);
+        cursor += 2;
+
+        for bit in 0..16u8 {
+            if (prefix & (1 << (15 - bit))) == 0 {
+                // Literal byte. Running out of input here ends the row.
+                if cursor >= input.len() {
+                    break 'words;
+                }
+                output.push(input[cursor]);
+                cursor += 1;
+                continue;
+            }
+
+            if cursor + 2 > input.len() {
+                return Err(compression_error("RDC marker exceeds input"));
+            }
+            let marker = input[cursor];
+            let next = input[cursor + 1];
+            cursor += 2;
+
+            if marker <= 0x0F {
+                let fill_len = 3 + usize::from(marker);
+                output.resize(output.len() + fill_len, next);
+            } else if (marker >> 4) == 1 {
+                if cursor >= input.len() {
+                    return Err(compression_error("RDC insert length exceeds input"));
+                }
+                let fill_len = 19 + usize::from(marker & 0x0F) + usize::from(next) * 16;
+                let fill_byte = input[cursor];
+                cursor += 1;
+                output.resize(output.len() + fill_len, fill_byte);
+            } else if (marker >> 4) == 2 {
+                if cursor >= input.len() {
+                    return Err(compression_error("RDC copy length exceeds input"));
+                }
+                let copy_len = 16 + usize::from(input[cursor]);
+                cursor += 1;
+                let back = 3 + usize::from(marker & 0x0F) + usize::from(next) * 16;
+                copy_backref(output, back, copy_len)?;
+            } else {
+                let copy_len = usize::from(marker >> 4);
+                let back = 3 + usize::from(marker & 0x0F) + usize::from(next) * 16;
+                copy_backref(output, back, copy_len)?;
+            }
         }
-        execute_command_block(&block, input, output)?;
     }
 
     if output.len() != expected_len {
@@ -198,192 +231,16 @@ pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
     Ok(())
 }
 
-fn decode_rdc_block(
-    input: &[u8],
-    cursor: &mut usize,
-    state: &mut RdcState,
-    block: &mut SmallCommandBlock<COMMAND_BLOCK_CAPACITY>,
-) -> Result<()> {
-    clear_block(block);
-
-    while usize::from(block.len) < COMMAND_BLOCK_CAPACITY {
-        if !state.has_prefix {
-            if *cursor + 2 > input.len() {
-                break;
-            }
-            state.prefix = u16::from_be_bytes([input[*cursor], input[*cursor + 1]]);
-            *cursor += 2;
-            state.bit_index = 0;
-            state.has_prefix = true;
-        }
-
-        while state.bit_index < 16 && usize::from(block.len) < COMMAND_BLOCK_CAPACITY {
-            let bit = state.bit_index;
-            state.bit_index += 1;
-
-            if (state.prefix & (1 << (15 - bit))) == 0 {
-                if *cursor >= input.len() {
-                    state.has_prefix = false;
-                    return Ok(());
-                }
-                push_literal_segments(block, *cursor, 1)?;
-                *cursor += 1;
-                continue;
-            }
-
-            if *cursor + 2 > input.len() {
-                return Err(compression_error("RDC marker exceeds input"));
-            }
-
-            let marker = input[*cursor];
-            let next = input[*cursor + 1];
-            *cursor += 2;
-
-            if marker <= 0x0F {
-                push_fill_segments(block, next, 3 + usize::from(marker))?;
-            } else if (marker >> 4) == 1 {
-                if *cursor >= input.len() {
-                    return Err(compression_error("RDC insert length exceeds input"));
-                }
-                let insert_len = 19 + usize::from(marker & 0x0F) + usize::from(next) * 16;
-                let insert_byte = input[*cursor];
-                *cursor += 1;
-                push_fill_segments(block, insert_byte, insert_len)?;
-            } else if (marker >> 4) == 2 {
-                if *cursor >= input.len() {
-                    return Err(compression_error("RDC copy length exceeds input"));
-                }
-                let copy_len = 16 + usize::from(input[*cursor]);
-                *cursor += 1;
-                let back_offset = 3 + usize::from(marker & 0x0F) + usize::from(next) * 16;
-                push_copy_segments(block, back_offset, copy_len)?;
-            } else {
-                let copy_len = usize::from(marker >> 4);
-                let back_offset = 3 + usize::from(marker & 0x0F) + usize::from(next) * 16;
-                push_copy_segments(block, back_offset, copy_len)?;
-            }
-        }
-
-        if state.bit_index >= 16 {
-            state.has_prefix = false;
-        }
-
-        if usize::from(block.len) >= COMMAND_BLOCK_CAPACITY {
-            break;
-        }
+/// Copies `len` bytes from `back` bytes before the current end of `output`.
+/// The encoding never references past the start nor overlaps the cursor, so a
+/// back-reference that does is treated as corrupt input.
+#[inline]
+fn copy_backref(output: &mut Vec<u8>, back: usize, len: usize) -> Result<()> {
+    if back == 0 || output.len() < back || len > back {
+        return Err(compression_error("copy-backref invalid"));
     }
-
-    Ok(())
-}
-
-fn execute_command_block<const N: usize>(
-    block: &SmallCommandBlock<N>,
-    input: &[u8],
-    output: &mut Vec<u8>,
-) -> Result<()> {
-    for index in 0..usize::from(block.len) {
-        match block.ops[index] {
-            SmallOp::Literal { src_off, len } => {
-                let src_off = usize::try_from(src_off)
-                    .map_err(|_| compression_error("literal src offset exceeds usize"))?;
-                let len = usize::from(len);
-                if src_off.saturating_add(len) > input.len() {
-                    return Err(compression_error("literal exceeds input length"));
-                }
-                output.extend_from_slice(&input[src_off..src_off + len]);
-            }
-            SmallOp::Fill { byte, len } => {
-                let len = usize::from(len);
-                output.resize(output.len().saturating_add(len), byte);
-            }
-            SmallOp::CopyBackref { back, len } => {
-                let back = usize::from(back);
-                let len = usize::from(len);
-                if back == 0 || output.len() < back || len > back {
-                    return Err(compression_error("copy-backref invalid"));
-                }
-                let start = output.len() - back;
-                output.extend_from_within(start..start + len);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn clear_block<const N: usize>(block: &mut SmallCommandBlock<N>) {
-    block.len = 0;
-}
-
-fn push_literal_segments<const N: usize>(
-    block: &mut SmallCommandBlock<N>,
-    src_off: usize,
-    len: usize,
-) -> Result<()> {
-    let mut remaining = len;
-    let mut local_src = src_off;
-    while remaining > 0 {
-        if usize::from(block.len) >= N {
-            return Err(compression_error(
-                "command block overflow while decoding literal",
-            ));
-        }
-        let chunk = remaining.min(usize::from(u16::MAX));
-        block.ops[usize::from(block.len)] = SmallOp::Literal {
-            src_off: u32::try_from(local_src)
-                .map_err(|_| compression_error("literal src offset exceeds u32"))?,
-            len: u16::try_from(chunk).unwrap_or(u16::MAX),
-        };
-        block.len = block.len.saturating_add(1);
-        remaining -= chunk;
-        local_src = local_src.saturating_add(chunk);
-    }
-    Ok(())
-}
-
-fn push_fill_segments<const N: usize>(
-    block: &mut SmallCommandBlock<N>,
-    byte: u8,
-    len: usize,
-) -> Result<()> {
-    let mut remaining = len;
-    while remaining > 0 {
-        if usize::from(block.len) >= N {
-            return Err(compression_error(
-                "command block overflow while decoding fill",
-            ));
-        }
-        let chunk = remaining.min(usize::from(u16::MAX));
-        block.ops[usize::from(block.len)] = SmallOp::Fill {
-            byte,
-            len: u16::try_from(chunk).unwrap_or(u16::MAX),
-        };
-        block.len = block.len.saturating_add(1);
-        remaining -= chunk;
-    }
-    Ok(())
-}
-
-fn push_copy_segments<const N: usize>(
-    block: &mut SmallCommandBlock<N>,
-    back: usize,
-    len: usize,
-) -> Result<()> {
-    let back = u16::try_from(back).map_err(|_| compression_error("copy-backref exceeds u16"))?;
-    let mut remaining = len;
-    while remaining > 0 {
-        if usize::from(block.len) >= N {
-            return Err(compression_error(
-                "command block overflow while decoding copy-backref",
-            ));
-        }
-        let chunk = remaining.min(usize::from(u16::MAX));
-        block.ops[usize::from(block.len)] = SmallOp::CopyBackref {
-            back,
-            len: u16::try_from(chunk).unwrap_or(u16::MAX),
-        };
-        block.len = block.len.saturating_add(1);
-        remaining -= chunk;
-    }
+    let start = output.len() - back;
+    output.extend_from_within(start..start + len);
     Ok(())
 }
 

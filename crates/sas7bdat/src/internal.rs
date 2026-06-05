@@ -122,34 +122,6 @@ pub struct KernelSet;
 #[allow(dead_code)]
 pub struct PageSource;
 
-#[derive(Debug, Clone)]
-pub struct SmallCommandBlock<const N: usize = 16> {
-    pub len: u8,
-    pub ops: [SmallOp; N],
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SmallOp {
-    Fill { byte: u8, len: u16 },
-    Literal { src_off: u32, len: u16 },
-    CopyBackref { back: u16, len: u16 },
-}
-
-impl Default for SmallOp {
-    fn default() -> Self {
-        Self::Fill { byte: 0, len: 0 }
-    }
-}
-
-impl<const N: usize> Default for SmallCommandBlock<N> {
-    fn default() -> Self {
-        Self {
-            len: 0,
-            ops: [SmallOp::default(); N],
-        }
-    }
-}
-
 pub const fn read_u16(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
     let mut buf = [0u8; 2];
     buf[0] = bytes[0];
