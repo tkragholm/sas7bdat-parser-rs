@@ -36,6 +36,44 @@ fn resolved_parallel_workers(parallelism: Parallelism, work_items: usize) -> usi
     }
 }
 
+/// Delivers buffered batches to `f` in strict chunk order, starting at
+/// `*next_chunk` and advancing past any chunk that is both finished and
+/// drained. Returns `Break` if `f` requested a stop.
+///
+/// This must run after a new batch is buffered *and* after a chunk finishes:
+/// a `Finished` message can make `*next_chunk` eligible to advance onto a
+/// chunk whose batches already arrived out of order, and those buffered
+/// batches must be flushed here rather than waiting for a later batch to
+/// drive delivery (the last chunk may have no later batch, stranding it).
+fn drain_ordered_batches<F>(
+    buffered: &mut [VecDeque<OwnedColumnarBatch>],
+    finished: &[bool],
+    next_chunk: &mut usize,
+    chunk_count: usize,
+    delivered_batches: &mut u64,
+    delivered_rows: &mut u64,
+    f: &mut F,
+) -> Result<ControlFlow<()>>
+where
+    F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+{
+    while *next_chunk < chunk_count {
+        if let Some(batch) = buffered[*next_chunk].pop_front() {
+            *delivered_batches = delivered_batches.saturating_add(1);
+            *delivered_rows =
+                delivered_rows.saturating_add(u64::try_from(batch.row_count).unwrap_or(u64::MAX));
+            if f(batch)?.is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
+        } else if finished[*next_chunk] {
+            *next_chunk += 1;
+        } else {
+            break;
+        }
+    }
+    Ok(ControlFlow::Continue(()))
+}
+
 pub struct ScanBuilder<'a> {
     pub(crate) ds: &'a Dataset,
     pub(crate) projection: Option<&'a Projection>,
@@ -782,57 +820,44 @@ impl ScanBuilder<'_> {
                             delivered_batches = delivered_batches.saturating_add(1);
                             delivered_rows = delivered_rows
                                 .saturating_add(u64::try_from(batch.row_count).unwrap_or(u64::MAX));
-                            match f(batch)? {
-                                ControlFlow::Continue(()) => {}
-                                ControlFlow::Break(()) => {
-                                    stop.store(true, Ordering::Relaxed);
-                                    break;
-                                }
+                            if f(batch)?.is_break() {
+                                stop.store(true, Ordering::Relaxed);
+                                break;
                             }
                         } else {
                             buffered[chunk_idx].push_back(batch);
-                            while next_chunk < chunk_count {
-                                if let Some(batch) = buffered[next_chunk].pop_front() {
-                                    delivered_batches = delivered_batches.saturating_add(1);
-                                    delivered_rows = delivered_rows.saturating_add(
-                                        u64::try_from(batch.row_count).unwrap_or(u64::MAX),
-                                    );
-                                    match f(batch)? {
-                                        ControlFlow::Continue(()) => {}
-                                        ControlFlow::Break(()) => {
-                                            stop.store(true, Ordering::Relaxed);
-                                            drop(rx);
-                                            let mut total = ScanStats::default();
-                                            for handle in handles {
-                                                let worker_stats = handle.join().map_err(|_| {
-                                                    Error::unsupported(
-                                                        "parallel batch worker panicked",
-                                                    )
-                                                })?;
-                                                merge_scan_stats(&mut total, &worker_stats);
-                                            }
-                                            total.decode_batches = delivered_batches;
-                                            total.rows_emitted = delivered_rows;
-                                            return Ok(total);
-                                        }
-                                    }
-                                } else if finished[next_chunk] {
-                                    next_chunk += 1;
-                                } else {
-                                    break;
-                                }
+                            if drain_ordered_batches(
+                                &mut buffered,
+                                &finished,
+                                &mut next_chunk,
+                                chunk_count,
+                                &mut delivered_batches,
+                                &mut delivered_rows,
+                                f,
+                            )?
+                            .is_break()
+                            {
+                                stop.store(true, Ordering::Relaxed);
+                                break;
                             }
                         }
                     }
                     StreamedBatchMessage::Finished { chunk_idx } => {
                         finished[chunk_idx] = true;
-                        if matches!(self.ordering, OrderingMode::Stable) {
-                            while next_chunk < chunk_count
-                                && finished[next_chunk]
-                                && buffered[next_chunk].is_empty()
-                            {
-                                next_chunk += 1;
-                            }
+                        if matches!(self.ordering, OrderingMode::Stable)
+                            && drain_ordered_batches(
+                                &mut buffered,
+                                &finished,
+                                &mut next_chunk,
+                                chunk_count,
+                                &mut delivered_batches,
+                                &mut delivered_rows,
+                                f,
+                            )?
+                            .is_break()
+                        {
+                            stop.store(true, Ordering::Relaxed);
+                            break;
                         }
                     }
                     StreamedBatchMessage::Error(err) => {
@@ -1062,5 +1087,83 @@ impl ScanBuilder<'_> {
             batches_emitted: decode_batches,
             stats: stats.summary(),
         })
+    }
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use super::drain_ordered_batches;
+    use crate::columnar::OwnedColumnarBatch;
+    use crate::types::RowIndex;
+    use std::collections::VecDeque;
+    use std::ops::ControlFlow;
+
+    fn batch(row_base: u64, row_count: usize) -> OwnedColumnarBatch {
+        OwnedColumnarBatch {
+            row_base: RowIndex(row_base),
+            row_count,
+            columns: Vec::new(),
+        }
+    }
+
+    fn drain(
+        buffered: &mut [VecDeque<OwnedColumnarBatch>],
+        finished: &[bool],
+        next_chunk: &mut usize,
+    ) -> (Vec<u64>, u64, u64) {
+        let chunk_count = buffered.len();
+        let mut delivered_batches = 0u64;
+        let mut delivered_rows = 0u64;
+        let mut seen = Vec::new();
+        let flow = drain_ordered_batches(
+            buffered,
+            finished,
+            next_chunk,
+            chunk_count,
+            &mut delivered_batches,
+            &mut delivered_rows,
+            &mut |b| {
+                seen.push(b.row_base.0);
+                Ok(ControlFlow::Continue(()))
+            },
+        )
+        .expect("drain");
+        assert!(flow.is_continue());
+        (seen, delivered_batches, delivered_rows)
+    }
+
+    // Regression: a batch buffered for a later chunk must be flushed once the
+    // earlier chunks are finished and drained. Previously delivery only ran
+    // when a new batch arrived, so a `Finished` event that advanced past empty
+    // chunks would strand an already-buffered later batch (it had no following
+    // batch to drive delivery), making the parallel stream drop rows.
+    #[test]
+    fn flushes_buffered_later_chunk_when_earlier_chunks_finish() {
+        let mut buffered = vec![VecDeque::new(), VecDeque::new()];
+        buffered[1].push_back(batch(2, 2)); // chunk 1's batch arrived first
+        let mut next_chunk = 0;
+        let (seen, delivered_batches, delivered_rows) =
+            drain(&mut buffered, &[true, true], &mut next_chunk);
+
+        assert_eq!(seen, vec![2]); // the otherwise-stranded batch is delivered
+        assert_eq!(next_chunk, 2);
+        assert_eq!(delivered_batches, 1);
+        assert_eq!(delivered_rows, 2);
+    }
+
+    // Delivers in strict chunk order and blocks at an unfinished gap so a later
+    // chunk that arrived early is not delivered ahead of its predecessor.
+    #[test]
+    fn delivers_in_order_and_blocks_on_unfinished_gap() {
+        let mut buffered = vec![VecDeque::new(), VecDeque::new(), VecDeque::new()];
+        buffered[0].push_back(batch(0, 2));
+        buffered[2].push_back(batch(4, 2));
+        let mut next_chunk = 0;
+        let (seen, delivered_batches, _) =
+            drain(&mut buffered, &[true, false, true], &mut next_chunk);
+
+        assert_eq!(seen, vec![0]); // chunk 1 unfinished blocks chunk 2
+        assert_eq!(next_chunk, 1);
+        assert_eq!(delivered_batches, 1);
     }
 }
