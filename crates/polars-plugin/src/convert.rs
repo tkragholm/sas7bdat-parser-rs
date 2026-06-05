@@ -186,12 +186,12 @@ pub(super) fn owned_batch_to_dataframe(
                 // Timestamp(Second) array materializes as Datetime('ms') and clashes with the
                 // declared Datetime('us') schema when batches are stacked. Microseconds keep
                 // the declared schema and the materialized batches identical.
-                let i64s: Vec<i64> = bytemuck::cast_vec::<_, i64>(values)
-                    .into_iter()
-                    .map(|seconds| {
-                        (seconds - SasDateTime::SECONDS_SAS_TO_UNIX) * 1_000_000
-                    })
-                    .collect();
+                // Reinterpret in place (zero-copy cast) and rebase to Unix µs without
+                // allocating a second Vec, mirroring the Date arm below.
+                let mut i64s: Vec<i64> = bytemuck::cast_vec::<_, i64>(values);
+                for v in &mut i64s {
+                    *v = (*v - SasDateTime::SECONDS_SAS_TO_UNIX) * 1_000_000;
+                }
                 let dtype = ArrowDataType::Timestamp(PlTimeUnit::Microsecond, None);
                 Box::new(primitive_array_with_optional_validity(
                     dtype, i64s, valid, row_count,
