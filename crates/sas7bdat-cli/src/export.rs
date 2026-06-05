@@ -1,14 +1,16 @@
 use crate::catalog::Catalog;
 use anyhow::Result;
 use arrow_schema::{Schema, SchemaRef};
-use chrono::{Duration, NaiveDate, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use csv::WriterBuilder;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use sas7bdat::{
     BatchHint, CellValue, Dataset, Error, Parallelism, Projection, RowSelection, ScanBuilder,
 };
+use std::fmt::Write as _;
 use std::fs::File;
+use std::io::Write;
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
@@ -114,7 +116,12 @@ pub fn write_csv_or_tsv(
         },
     );
 
+    // Precompute the SAS epoch once instead of rebuilding it per date/time cell.
+    let (date_epoch, datetime_epoch) = sas_epochs();
+
     let mut wrote_header = false;
+    // Reused across every cell so formatting numerics/dates allocates no per-cell String.
+    let mut scratch = String::new();
     scan.visit_rows(|row| {
         if options.headers && !wrote_header {
             writer
@@ -122,9 +129,13 @@ pub fn write_csv_or_tsv(
                 .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
             wrote_header = true;
         }
-        let record = row.iter().map(cell_to_string).collect::<Vec<_>>();
+        for cell in row.iter() {
+            write_cell_field(&mut writer, &mut scratch, cell, date_epoch, datetime_epoch)
+                .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
+        }
+        // Terminate the record after the field sequence.
         writer
-            .write_record(record)
+            .write_record(None::<&[u8]>)
             .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
         Ok(ControlFlow::Continue(()))
     })?;
@@ -178,41 +189,72 @@ fn apply_catalog_metadata(
     Ok(Arc::new(schema))
 }
 
-fn cell_to_string(cell: &CellValue<'_>) -> String {
-    match cell {
-        CellValue::Null => String::new(),
-        CellValue::Int32(value) => value.to_string(),
-        CellValue::Int64(value) => value.to_string(),
-        CellValue::Float64(value) => value.to_string(),
-        CellValue::Str(value) => (*value).to_owned(),
-        CellValue::Bytes(value) => format!("0x{}", hex::encode(value)),
-        CellValue::Date(value) => sas_date_to_string(value.days_since_sas_epoch),
-        CellValue::DateTime(value) => sas_datetime_to_string(value.seconds_since_sas_epoch),
-        CellValue::Time(value) => sas_time_to_string(value.seconds_since_midnight),
-    }
-}
-
-fn sas_date_to_string(days_since_sas_epoch: i32) -> String {
-    let epoch = NaiveDate::from_ymd_opt(1960, 1, 1).expect("valid SAS epoch");
-    (epoch + Duration::days(i64::from(days_since_sas_epoch)))
-        .format("%Y-%m-%d")
-        .to_string()
-}
-
-fn sas_datetime_to_string(seconds_since_sas_epoch: i64) -> String {
-    let epoch = NaiveDate::from_ymd_opt(1960, 1, 1)
-        .expect("valid SAS epoch")
+/// The SAS epoch (`1960-01-01`) as a date and as a midnight datetime, computed once per export.
+fn sas_epochs() -> (NaiveDate, NaiveDateTime) {
+    let date_epoch = NaiveDate::from_ymd_opt(1960, 1, 1).expect("valid SAS epoch");
+    let datetime_epoch = date_epoch
         .and_hms_opt(0, 0, 0)
         .expect("valid SAS epoch time");
-    (epoch + Duration::seconds(seconds_since_sas_epoch))
-        .format("%Y-%m-%d %H:%M:%S")
-        .to_string()
+    (date_epoch, datetime_epoch)
 }
 
-fn sas_time_to_string(seconds_since_midnight: i32) -> String {
-    let seconds = u32::try_from(seconds_since_midnight).unwrap_or(0);
-    NaiveTime::from_num_seconds_from_midnight_opt(seconds, 0)
-        .unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).expect("valid midnight"))
-        .format("%H:%M:%S")
-        .to_string()
+/// Formats a single cell into `scratch` (reused across cells) and writes it as one CSV field.
+///
+/// String and null cells are written straight from their borrowed bytes; everything else is
+/// formatted into the shared `scratch` buffer, so no per-cell `String` is allocated. The SAS
+/// epoch is passed in precomputed rather than rebuilt per cell.
+fn write_cell_field<W: Write>(
+    writer: &mut csv::Writer<W>,
+    scratch: &mut String,
+    cell: &CellValue<'_>,
+    date_epoch: NaiveDate,
+    datetime_epoch: NaiveDateTime,
+) -> csv::Result<()> {
+    match cell {
+        CellValue::Null => writer.write_field(""),
+        CellValue::Str(value) => writer.write_field(value.as_bytes()),
+        CellValue::Int32(value) => {
+            scratch.clear();
+            let _ = write!(scratch, "{value}");
+            writer.write_field(scratch.as_bytes())
+        }
+        CellValue::Int64(value) => {
+            scratch.clear();
+            let _ = write!(scratch, "{value}");
+            writer.write_field(scratch.as_bytes())
+        }
+        CellValue::Float64(value) => {
+            scratch.clear();
+            let _ = write!(scratch, "{value}");
+            writer.write_field(scratch.as_bytes())
+        }
+        CellValue::Bytes(value) => {
+            scratch.clear();
+            scratch.push_str("0x");
+            for byte in *value {
+                let _ = write!(scratch, "{byte:02x}");
+            }
+            writer.write_field(scratch.as_bytes())
+        }
+        CellValue::Date(value) => {
+            scratch.clear();
+            let date = date_epoch + Duration::days(i64::from(value.days_since_sas_epoch));
+            let _ = write!(scratch, "{}", date.format("%Y-%m-%d"));
+            writer.write_field(scratch.as_bytes())
+        }
+        CellValue::DateTime(value) => {
+            scratch.clear();
+            let datetime = datetime_epoch + Duration::seconds(value.seconds_since_sas_epoch);
+            let _ = write!(scratch, "{}", datetime.format("%Y-%m-%d %H:%M:%S"));
+            writer.write_field(scratch.as_bytes())
+        }
+        CellValue::Time(value) => {
+            scratch.clear();
+            let seconds = u32::try_from(value.seconds_since_midnight).unwrap_or(0);
+            let time = NaiveTime::from_num_seconds_from_midnight_opt(seconds, 0)
+                .unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).expect("valid midnight"));
+            let _ = write!(scratch, "{}", time.format("%H:%M:%S"));
+            writer.write_field(scratch.as_bytes())
+        }
+    }
 }
