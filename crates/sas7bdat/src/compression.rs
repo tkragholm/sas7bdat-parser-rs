@@ -136,13 +136,14 @@ fn decode_rle_command(control: u8, input: &[u8], cursor: &mut usize) -> Result<R
 }
 
 pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -> Result<()> {
+    // Build the row incrementally: each output byte is written exactly once.
+    // (Pre-`resize`-ing to zeros would memset the whole row and then overwrite
+    // every byte during decode, doubling the writes on this per-row hot path.)
     output.clear();
-    output.resize(expected_len, 0);
-    let buffer = output.as_mut_slice();
+    output.reserve(expected_len);
     let mut cursor = 0usize;
-    let mut out_pos = 0usize;
 
-    while cursor < input.len() && out_pos < expected_len {
+    while cursor < input.len() && output.len() < expected_len {
         let control = input[cursor];
         cursor += 1;
         let op = decode_rle_command(control, input, &mut cursor)?;
@@ -151,25 +152,22 @@ pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
             if cursor.saturating_add(op.copy_len) > input.len() {
                 return Err(compression_error("RLE copy exceeds input length"));
             }
-            if out_pos.saturating_add(op.copy_len) > expected_len {
+            if output.len().saturating_add(op.copy_len) > expected_len {
                 return Err(compression_error("RLE copy exceeds output length"));
             }
-            buffer[out_pos..out_pos + op.copy_len]
-                .copy_from_slice(&input[cursor..cursor + op.copy_len]);
+            output.extend_from_slice(&input[cursor..cursor + op.copy_len]);
             cursor += op.copy_len;
-            out_pos += op.copy_len;
         }
 
         if op.insert_len > 0 {
-            if out_pos.saturating_add(op.insert_len) > expected_len {
+            if output.len().saturating_add(op.insert_len) > expected_len {
                 return Err(compression_error("RLE insert exceeds output length"));
             }
-            buffer[out_pos..out_pos + op.insert_len].fill(op.insert_byte);
-            out_pos += op.insert_len;
+            output.resize(output.len() + op.insert_len, op.insert_byte);
         }
     }
 
-    if out_pos != expected_len {
+    if output.len() != expected_len {
         return Err(compression_error("RLE output length mismatch"));
     }
 
