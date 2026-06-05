@@ -19,6 +19,8 @@ use sas7bdat::{
     Error, LabelSet, OwnedColumnBuffer, Result as SasResult, SasDate, SasDateTime, TrustedOffsets,
 };
 #[cfg(feature = "arrow")]
+use std::io::Write;
+#[cfg(feature = "arrow")]
 use std::sync::Arc;
 
 #[cfg(feature = "arrow")]
@@ -241,48 +243,67 @@ fn owned_column_to_labelled_utf8(
     row_count: usize,
 ) -> Utf8Array<i64> {
     let mut offsets: Vec<i64> = Vec::with_capacity(row_count + 1);
-    let mut data: Vec<u8> = Vec::new();
+    // Labels are short category names; pre-size to avoid repeated reallocation as
+    // `data` grows. A modest per-row estimate covers the common case.
+    let mut data: Vec<u8> = Vec::with_capacity(row_count.saturating_mul(16));
     let mut validity = MutableBitmap::with_capacity(row_count);
     offsets.push(0);
 
-    macro_rules! push_label {
-        ($label:expr, $is_valid:expr) => {
+    // Emits one row. For valid rows `$emit` appends the label bytes to `data`
+    // (a borrowed `&str` for a label hit, or a formatted value for a miss) — no
+    // per-cell `String` is allocated. For null rows the label is not computed at
+    // all and the previous offset is repeated.
+    macro_rules! push_cell {
+        ($is_valid:expr, $emit:block) => {{
             if $is_valid {
-                data.extend_from_slice($label.as_bytes());
+                $emit
                 offsets.push(i64::try_from(data.len()).expect("string data exceeds i64::MAX"));
                 validity.push(true);
             } else {
                 offsets.push(*offsets.last().unwrap_or(&0));
                 validity.push(false);
             }
-        };
+        }};
     }
 
     match col {
         OwnedColumnBuffer::F64 { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                let label = label_set
-                    .lookup_numeric(*v)
-                    .map_or_else(|| format!("{v}"), str::to_owned);
-                push_label!(label, is_valid_bit(valid.as_deref(), i));
+                push_cell!(is_valid_bit(valid.as_deref(), i), {
+                    match label_set.lookup_numeric(*v) {
+                        Some(label) => data.extend_from_slice(label.as_bytes()),
+                        None => {
+                            let _ = write!(data, "{v}");
+                        }
+                    }
+                });
             }
         }
         OwnedColumnBuffer::I64 { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                // SAS categorical codes are small integers; i64→f64 is exact for |v| ≤ 2^53.
-                #[allow(clippy::cast_precision_loss)]
-                let label = label_set
-                    .lookup_numeric(*v as f64)
-                    .map_or_else(|| v.to_string(), str::to_owned);
-                push_label!(label, is_valid_bit(valid.as_deref(), i));
+                push_cell!(is_valid_bit(valid.as_deref(), i), {
+                    // SAS categorical codes are small integers; i64→f64 is exact for |v| ≤ 2^53.
+                    #[allow(clippy::cast_precision_loss)]
+                    let hit = label_set.lookup_numeric(*v as f64);
+                    match hit {
+                        Some(label) => data.extend_from_slice(label.as_bytes()),
+                        None => {
+                            let _ = write!(data, "{v}");
+                        }
+                    }
+                });
             }
         }
         OwnedColumnBuffer::I32 { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                let label = label_set
-                    .lookup_numeric(f64::from(*v))
-                    .map_or_else(|| v.to_string(), str::to_owned);
-                push_label!(label, is_valid_bit(valid.as_deref(), i));
+                push_cell!(is_valid_bit(valid.as_deref(), i), {
+                    match label_set.lookup_numeric(f64::from(*v)) {
+                        Some(label) => data.extend_from_slice(label.as_bytes()),
+                        None => {
+                            let _ = write!(data, "{v}");
+                        }
+                    }
+                });
             }
         }
         OwnedColumnBuffer::Utf8 {
@@ -293,19 +314,14 @@ fn owned_column_to_labelled_utf8(
         } => {
             let src_offs = src_offsets.into_inner();
             for i in 0..row_count {
-                if is_valid_bit(valid.as_deref(), i) {
+                push_cell!(is_valid_bit(valid.as_deref(), i), {
                     // Arrow Offsets<i64> guarantees non-negative, monotonically-increasing values.
                     let start = usize::try_from(src_offs[i]).expect("Arrow offset must be non-negative");
                     let end = usize::try_from(src_offs[i + 1]).expect("Arrow offset must be non-negative");
                     let s = std::str::from_utf8(&src_data[start..end]).unwrap_or("");
                     let label = label_set.lookup_string(s).unwrap_or(s);
                     data.extend_from_slice(label.as_bytes());
-                    offsets.push(i64::try_from(data.len()).expect("string data exceeds i64::MAX"));
-                    validity.push(true);
-                } else {
-                    offsets.push(*offsets.last().unwrap_or(&0));
-                    validity.push(false);
-                }
+                });
             }
         }
         _ => {
