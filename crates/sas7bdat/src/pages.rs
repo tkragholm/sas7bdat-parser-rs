@@ -83,7 +83,7 @@ pub fn compile_page_descriptors<R: Read + Seek>(
     reader: &mut R,
     layout: &LayoutPlan,
 ) -> Result<PageDescriptorTable> {
-    let (table, _) = compile_page_descriptors_profiled(reader, layout)?;
+    let (table, _) = compile_page_descriptors_inner::<R, false>(reader, layout)?;
     Ok(table)
 }
 
@@ -91,7 +91,7 @@ pub fn compile_page_descriptors_in_memory(
     file_bytes: &[u8],
     layout: &LayoutPlan,
 ) -> Result<PageDescriptorTable> {
-    let (table, _) = compile_page_descriptors_profiled_in_memory(file_bytes, layout)?;
+    let (table, _) = compile_page_descriptors_inner_in_memory::<false>(file_bytes, layout)?;
     Ok(table)
 }
 
@@ -99,7 +99,7 @@ pub fn compile_page_descriptors_breakdown<R: Read + Seek>(
     reader: &mut R,
     layout: &LayoutPlan,
 ) -> Result<DescriptorBreakdown> {
-    let (_, breakdown) = compile_page_descriptors_profiled(reader, layout)?;
+    let (_, breakdown) = compile_page_descriptors_inner::<R, true>(reader, layout)?;
     Ok(breakdown)
 }
 
@@ -107,11 +107,26 @@ pub fn compile_page_descriptors_breakdown_in_memory(
     file_bytes: &[u8],
     layout: &LayoutPlan,
 ) -> Result<DescriptorBreakdown> {
-    let (_, breakdown) = compile_page_descriptors_profiled_in_memory(file_bytes, layout)?;
+    let (_, breakdown) = compile_page_descriptors_inner_in_memory::<true>(file_bytes, layout)?;
     Ok(breakdown)
 }
 
-fn compile_page_descriptors_profiled<R: Read + Seek>(
+/// Reads the wall clock only when `PROFILE` is set. On the default open path
+/// (`PROFILE == false`) this is a compile-time `None` and the call is elided,
+/// so descriptor compilation pays no per-page clock cost.
+#[inline(always)]
+fn profile_now<const PROFILE: bool>() -> Option<Instant> {
+    PROFILE.then(Instant::now)
+}
+
+#[inline(always)]
+fn accumulate_ns(acc: &mut u128, start: Option<Instant>) {
+    if let Some(start) = start {
+        *acc += start.elapsed().as_nanos();
+    }
+}
+
+fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
     reader: &mut R,
     layout: &LayoutPlan,
 ) -> Result<(PageDescriptorTable, DescriptorBreakdown)> {
@@ -128,7 +143,7 @@ fn compile_page_descriptors_profiled<R: Read + Seek>(
         ));
     }
 
-    let total_start = Instant::now();
+    let total_start = profile_now::<PROFILE>();
     let mut descriptors = Vec::with_capacity(
         usize::try_from(header.page_count)
             .map_err(|_| page_corruption("page count exceeds usize"))?,
@@ -139,7 +154,7 @@ fn compile_page_descriptors_profiled<R: Read + Seek>(
     let mut page = vec![0u8; usize::from(header.page_size)];
 
     for page_index in 0..header.page_count {
-        let read_start = Instant::now();
+        let read_start = profile_now::<PROFILE>();
         let page_offset = header.data_offset + page_index * u64::from(header.page_size);
         reader
             .seek(SeekFrom::Start(page_offset))
@@ -147,10 +162,10 @@ fn compile_page_descriptors_profiled<R: Read + Seek>(
         reader
             .read_exact(&mut page)
             .map_err(|e| page_io_error(&e))?;
-        breakdown.page_read_ns += read_start.elapsed().as_nanos();
+        accumulate_ns(&mut breakdown.page_read_ns, read_start);
         breakdown.pages_seen += 1;
 
-        let header_start = Instant::now();
+        let header_start = profile_now::<PROFILE>();
         let page_type = read_header_u16(&page, header.page_header_size as usize - 8, layout)?;
         let page_row_count = u64::from(read_header_u16(
             &page,
@@ -162,9 +177,9 @@ fn compile_page_descriptors_profiled<R: Read + Seek>(
             header.page_header_size as usize - 4,
             layout,
         )?);
-        breakdown.header_read_ns += header_start.elapsed().as_nanos();
+        accumulate_ns(&mut breakdown.header_read_ns, header_start);
 
-        let classify_start = Instant::now();
+        let classify_start = profile_now::<PROFILE>();
         let descriptor = classify_descriptor(
             layout,
             &page,
@@ -177,7 +192,7 @@ fn compile_page_descriptors_profiled<R: Read + Seek>(
             },
             &mut row_spans,
         )?;
-        breakdown.classify_ns += classify_start.elapsed().as_nanos();
+        accumulate_ns(&mut breakdown.classify_ns, classify_start);
 
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);
@@ -186,7 +201,7 @@ fn compile_page_descriptors_profiled<R: Read + Seek>(
         }
     }
 
-    breakdown.total_ns = total_start.elapsed().as_nanos();
+    accumulate_ns(&mut breakdown.total_ns, total_start);
     breakdown.descriptors_emitted = descriptors.len();
     breakdown.row_spans_emitted = row_spans.len();
     breakdown.total_candidate_rows = row_base;
@@ -201,7 +216,7 @@ fn compile_page_descriptors_profiled<R: Read + Seek>(
     ))
 }
 
-fn compile_page_descriptors_profiled_in_memory(
+fn compile_page_descriptors_inner_in_memory<const PROFILE: bool>(
     file_bytes: &[u8],
     layout: &LayoutPlan,
 ) -> Result<(PageDescriptorTable, DescriptorBreakdown)> {
@@ -218,7 +233,7 @@ fn compile_page_descriptors_profiled_in_memory(
         ));
     }
 
-    let total_start = Instant::now();
+    let total_start = profile_now::<PROFILE>();
     let mut descriptors = Vec::with_capacity(
         usize::try_from(header.page_count)
             .map_err(|_| page_corruption("page count exceeds usize"))?,
@@ -228,12 +243,12 @@ fn compile_page_descriptors_profiled_in_memory(
     let mut breakdown = DescriptorBreakdown::default();
 
     for page_index in 0..header.page_count {
-        let read_start = Instant::now();
+        let read_start = profile_now::<PROFILE>();
         let page = page_slice(file_bytes, header, page_index)?;
-        breakdown.page_read_ns += read_start.elapsed().as_nanos();
+        accumulate_ns(&mut breakdown.page_read_ns, read_start);
         breakdown.pages_seen += 1;
 
-        let header_start = Instant::now();
+        let header_start = profile_now::<PROFILE>();
         let page_type = read_header_u16(page, header.page_header_size as usize - 8, layout)?;
         let page_row_count = u64::from(read_header_u16(
             page,
@@ -245,9 +260,9 @@ fn compile_page_descriptors_profiled_in_memory(
             header.page_header_size as usize - 4,
             layout,
         )?);
-        breakdown.header_read_ns += header_start.elapsed().as_nanos();
+        accumulate_ns(&mut breakdown.header_read_ns, header_start);
 
-        let classify_start = Instant::now();
+        let classify_start = profile_now::<PROFILE>();
         let descriptor = classify_descriptor(
             layout,
             page,
@@ -260,7 +275,7 @@ fn compile_page_descriptors_profiled_in_memory(
             },
             &mut row_spans,
         )?;
-        breakdown.classify_ns += classify_start.elapsed().as_nanos();
+        accumulate_ns(&mut breakdown.classify_ns, classify_start);
 
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);
@@ -269,7 +284,7 @@ fn compile_page_descriptors_profiled_in_memory(
         }
     }
 
-    breakdown.total_ns = total_start.elapsed().as_nanos();
+    accumulate_ns(&mut breakdown.total_ns, total_start);
     breakdown.descriptors_emitted = descriptors.len();
     breakdown.row_spans_emitted = row_spans.len();
     breakdown.total_candidate_rows = row_base;
