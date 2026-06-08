@@ -20,7 +20,7 @@ use pyo3::{
 };
 #[cfg(feature = "arrow")]
 use sas7bdat::{
-    BatchHint, Error, LabelSet, LogicalType, Projection, Result as SasResult,
+    BatchHint, Error, LabelSet, LogicalType, Parallelism, Projection, Result as SasResult,
     catalog::normalize_format_name,
 };
 #[cfg(feature = "arrow")]
@@ -210,6 +210,82 @@ pub fn batch_reader_from_dataset(
     }
 }
 
+// Parallel "grain size": the minimum work one decode worker should be handed before
+// the fixed cost of spawning it (rayon task + per-chunk accumulator + the ordered
+// page-chunk merge) is worth paying. The grain is in WORK units, not wall-clock, so a
+// single conservative default holds across hardware: spawn/merge overhead is ~tens of
+// microseconds everywhere, and these grains keep each worker busy for well over a
+// millisecond regardless of CPU. This is the standard parallel-cutoff practice — scale
+// the worker COUNT to the file (cf. rayon `with_min_len`, TBB partitioner grain)
+// instead of tuning a per-machine byte threshold. Both can be overridden via env, but
+// the defaults need no tuning.
+//
+// Each worker should decode ≳ this many uncompressed bytes (row_count × row_len). At
+// typical decode throughput that is several ms of work — comfortably amortising setup.
+#[cfg(feature = "arrow")]
+const DEFAULT_MIN_BYTES_PER_WORKER: u64 = 4 * 1024 * 1024;
+// …and span ≳ this many pages, since page chunks are the unit of parallelism (no point
+// making 12 one-page chunks out of a 12-page file).
+#[cfg(feature = "arrow")]
+const DEFAULT_MIN_PAGES_PER_WORKER: u64 = 8;
+
+#[cfg(feature = "arrow")]
+fn env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(default)
+}
+
+/// How many decode threads were requested (env `SAS7BDAT_SCAN_THREADS`, else all
+/// logical cores). The inter-file pool sets this per worker to keep the total core
+/// budget bounded; standalone scans get every core. This is the CAP — the grain-size
+/// rule below may hand out fewer for small files.
+#[cfg(feature = "arrow")]
+fn requested_scan_threads() -> usize {
+    std::env::var("SAS7BDAT_SCAN_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .or_else(|| std::thread::available_parallelism().ok().map(|n| n.get()))
+        .unwrap_or(1)
+}
+
+/// Resolve the parallelism for one file's page decode.
+///
+/// The crate's `Parallelism::Auto` resolves to a SINGLE worker (serial), so the plugin
+/// must opt in explicitly. But blindly fanning every file across all cores wastes
+/// effort on the many small yearly files in a register — the threads just fight over a
+/// near-empty file. Instead of a tuned threshold, we derive the worker COUNT from the
+/// file using a hardware-stable grain size: each worker must get at least one grain of
+/// work in BOTH dimensions (pages and decoded bytes), and the smallest of the three
+/// caps (requested threads, pages/grain, bytes/grain) wins. A small file collapses this
+/// to <2 → serial (one core, no coordination overhead) and the inter-file pool keeps
+/// the cores busy by running several such files at once; a large file scales up to the
+/// requested cap. All inputs are header-only metadata — no body decode.
+#[cfg(feature = "arrow")]
+fn scan_parallelism(ds: &Dataset) -> Parallelism {
+    let requested = requested_scan_threads();
+    if requested <= 1 {
+        return Parallelism::None;
+    }
+    let meta = ds.metadata();
+    let decode_bytes = meta.row_count.saturating_mul(u64::from(meta.row_len));
+    let min_bytes = env_u64("SAS7BDAT_SCAN_MIN_BYTES_PER_WORKER", DEFAULT_MIN_BYTES_PER_WORKER);
+    let min_pages = env_u64("SAS7BDAT_SCAN_MIN_PAGES_PER_WORKER", DEFAULT_MIN_PAGES_PER_WORKER);
+
+    // Hand each worker a full grain; the tightest constraint decides the count.
+    let workers = (requested as u64)
+        .min(meta.page_count / min_pages)
+        .min(decode_bytes / min_bytes);
+    if workers >= 2 {
+        Parallelism::Threads(usize::try_from(workers).unwrap_or(requested))
+    } else {
+        Parallelism::None
+    }
+}
+
 #[cfg(feature = "arrow")]
 fn run_scan(
     ds: &Dataset,
@@ -218,7 +294,12 @@ fn run_scan(
     tx: &mpsc::SyncSender<ReaderMessage>,
 ) -> SasResult<()> {
     let projection = build_projection(ds, request.with_columns.clone())?;
-    let mut scan = ds.scan();
+    // Decode pages across threads. The crate defaults to Parallelism::Auto, which
+    // resolves to a SINGLE worker (serial) — so without this the scan pegged one core
+    // and left large hosts at ~10% CPU. Threads(n) engages the parallel page-streaming
+    // path (ScanBuilder::try_stream_batches_parallel). Defaults to all logical cores;
+    // override with SAS7BDAT_SCAN_THREADS for tuning.
+    let mut scan = ds.scan().with_parallelism(scan_parallelism(ds));
     if let Some(ref projection) = projection {
         scan = scan.with_projection(projection);
     }
