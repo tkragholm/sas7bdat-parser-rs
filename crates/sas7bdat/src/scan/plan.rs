@@ -50,6 +50,9 @@ pub(super) struct CompiledColumnPlan {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ColumnMaterializationKind {
+    // No kernel maps to I32 today (Integer always materializes as I64), but the
+    // builder/widening plumbing for it is kept for future width-aware narrowing.
+    #[allow(dead_code)]
     I32,
     I64,
     F64,

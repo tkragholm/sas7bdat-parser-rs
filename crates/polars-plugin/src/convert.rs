@@ -13,7 +13,11 @@ use polars_arrow::{
     record_batch::RecordBatch as PolarsRecordBatch,
 };
 #[cfg(feature = "arrow")]
-use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule};
+use pyo3::{
+    exceptions::PyValueError,
+    prelude::*,
+    types::{PyDict, PyModule},
+};
 #[cfg(feature = "arrow")]
 use sas7bdat::{
     Error, LabelSet, OwnedColumnBuffer, Result as SasResult, SasDate, SasDateTime, TrustedOffsets,
@@ -71,13 +75,17 @@ pub(super) fn owned_batch_to_dataframe(
     // buffer of RAW SAS-epoch units; we must still emit it as the declared
     // temporal dtype (below) rather than a bare Float64, or Polars reinterprets
     // the raw seconds/days as the timestamp's i64 payload and yields garbage.
-    let field_dtypes: Vec<ArrowDataType> =
-        schema.iter_values().map(|field| field.dtype.clone()).collect();
+    let field_dtypes: Vec<ArrowDataType> = schema
+        .iter_values()
+        .map(|field| field.dtype.clone())
+        .collect();
 
     for (col_idx, col) in batch.columns.into_iter().enumerate() {
         let label_set = label_mapping.get(col_idx).and_then(Option::as_ref);
         if let Some(label_set) = label_set {
-            arrays.push(Box::new(owned_column_to_labelled_utf8(col, label_set, row_count)));
+            arrays.push(Box::new(owned_column_to_labelled_utf8(
+                col, label_set, row_count,
+            )));
             continue;
         }
         let target_dtype = field_dtypes.get(col_idx);
@@ -106,15 +114,11 @@ pub(super) fn owned_batch_to_dataframe(
                 match target_dtype {
                     Some(ArrowDataType::Timestamp(PlTimeUnit::Microsecond, tz)) => {
                         let tz = tz.clone();
-                        #[allow(
-                            clippy::cast_possible_truncation,
-                            clippy::cast_precision_loss
-                        )]
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
                         let micros: Vec<i64> = values
                             .iter()
                             .map(|&seconds_since_sas| {
-                                ((seconds_since_sas
-                                    - SasDateTime::SECONDS_SAS_TO_UNIX as f64)
+                                ((seconds_since_sas - SasDateTime::SECONDS_SAS_TO_UNIX as f64)
                                     * 1_000_000.0)
                                     .round() as i64
                             })
@@ -142,10 +146,7 @@ pub(super) fn owned_batch_to_dataframe(
                         ))
                     }
                     Some(ArrowDataType::Time64(PlTimeUnit::Nanosecond)) => {
-                        #[allow(
-                            clippy::cast_possible_truncation,
-                            clippy::cast_precision_loss
-                        )]
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
                         let nanos: Vec<i64> = values
                             .iter()
                             .map(|&seconds_since_midnight| {
@@ -223,17 +224,13 @@ pub(super) fn owned_batch_to_dataframe(
     }
 
     let rec = PolarsRecordBatch::try_new(row_count, schema, arrays)
-
         .map_err(|err| Error::arrow(err.to_string()))?;
     Ok(DataFrame::from(rec))
 }
 
 #[cfg(feature = "arrow")]
 fn is_valid_bit(valid: Option<&[u64]>, i: usize) -> bool {
-    valid.is_none_or(|bits| {
-        bits.get(i / 64)
-            .is_some_and(|w| (w >> (i % 64)) & 1 == 1)
-    })
+    valid.is_none_or(|bits| bits.get(i / 64).is_some_and(|w| (w >> (i % 64)) & 1 == 1))
 }
 
 #[cfg(feature = "arrow")]
@@ -316,8 +313,10 @@ fn owned_column_to_labelled_utf8(
             for i in 0..row_count {
                 push_cell!(is_valid_bit(valid.as_deref(), i), {
                     // Arrow Offsets<i64> guarantees non-negative, monotonically-increasing values.
-                    let start = usize::try_from(src_offs[i]).expect("Arrow offset must be non-negative");
-                    let end = usize::try_from(src_offs[i + 1]).expect("Arrow offset must be non-negative");
+                    let start =
+                        usize::try_from(src_offs[i]).expect("Arrow offset must be non-negative");
+                    let end = usize::try_from(src_offs[i + 1])
+                        .expect("Arrow offset must be non-negative");
                     let s = std::str::from_utf8(&src_data[start..end]).unwrap_or("");
                     let label = label_set.lookup_string(s).unwrap_or(s);
                     data.extend_from_slice(label.as_bytes());
@@ -337,7 +336,14 @@ fn owned_column_to_labelled_utf8(
     // non-decreasing) and zero-copying for null rows, so Arrow offset invariants hold.
     let offs_buf = unsafe { Offsets::new_unchecked(offsets).into() };
     // SAFETY: all label strings come from &str literals or format!() — valid UTF-8.
-    unsafe { Utf8Array::<i64>::new_unchecked(ArrowDataType::LargeUtf8, offs_buf, data.into(), Some(bitmap)) }
+    unsafe {
+        Utf8Array::<i64>::new_unchecked(
+            ArrowDataType::LargeUtf8,
+            offs_buf,
+            data.into(),
+            Some(bitmap),
+        )
+    }
 }
 
 #[cfg(feature = "arrow")]
@@ -471,6 +477,59 @@ pub(super) fn py_err(err: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(err.to_string())
 }
 
+/// Convert a Python `{column_name: polars_dtype}` mapping into core
+/// `LogicalType` overrides. Returns an empty vec when no dict is given.
+#[cfg(feature = "arrow")]
+pub(super) fn schema_overrides_from_pydict(
+    overrides: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Vec<(String, sas7bdat::LogicalType)>> {
+    let Some(dict) = overrides else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::with_capacity(dict.len());
+    for (key, value) in dict.iter() {
+        let name: String = key.extract().map_err(|_| {
+            PyValueError::new_err("schema_overrides keys must be column-name strings")
+        })?;
+        out.push((name, logical_type_from_polars_dtype(&value)?));
+    }
+    Ok(out)
+}
+
+/// Map a Polars dtype (class like `pl.Int64` or instance like `pl.Datetime("us")`)
+/// to the core `LogicalType` it requests.
+#[cfg(feature = "arrow")]
+fn logical_type_from_polars_dtype(dtype: &Bound<'_, PyAny>) -> PyResult<sas7bdat::LogicalType> {
+    use sas7bdat::LogicalType;
+    // Both DataType instances and DataTypeClass classes expose base_type(),
+    // which strips parameters (Datetime("us") -> Datetime) and normalizes
+    // instance vs class spelling.
+    let base = dtype.call_method0("base_type").map_err(|_| {
+        PyValueError::new_err(format!(
+            "schema_overrides values must be Polars dtypes, got {}",
+            dtype
+                .repr()
+                .map_or_else(|_| "<unprintable>".to_owned(), |repr| repr.to_string())
+        ))
+    })?;
+    let name: String = base.getattr("__name__")?.extract()?;
+    Ok(match name.as_str() {
+        "Int64" => LogicalType::Integer,
+        "Float64" => LogicalType::Float,
+        "Date" => LogicalType::Date,
+        "Datetime" => LogicalType::DateTime,
+        "Time" => LogicalType::Time,
+        "String" | "Utf8" => LogicalType::String,
+        "Binary" => LogicalType::Bytes,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unsupported dtype {other} in schema_overrides; supported: Int64, \
+                 Float64, Date, Datetime, Time, String, Binary"
+            )));
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,20 +569,13 @@ mod tests {
 
     fn make_single_col_schema(name: &str, dtype: ArrowDataType) -> Arc<ArrowSchema> {
         Arc::new(
-            ArrowSchema::from_iter_check_duplicates(vec![Field::new(
-                name.into(),
-                dtype,
-                true,
-            )])
-            .expect("schema"),
+            ArrowSchema::from_iter_check_duplicates(vec![Field::new(name.into(), dtype, true)])
+                .expect("schema"),
         )
     }
 
     fn make_label_set(pairs: &[(f64, &str)]) -> LabelSet {
-        let mut ls = sas7bdat::LabelSet::new(
-            "TEST".to_owned(),
-            sas7bdat::ValueType::Numeric,
-        );
+        let mut ls = sas7bdat::LabelSet::new("TEST".to_owned(), sas7bdat::ValueType::Numeric);
         for (k, v) in pairs {
             ls.labels.push(sas7bdat::ValueLabel {
                 key: sas7bdat::ValueKey::Numeric(*k),
@@ -605,11 +657,13 @@ mod tests {
         let batch = make_f64_batch(vec![1.0, 2.0], None);
         let schema = make_single_col_schema("x", ArrowDataType::Float64);
 
-        let df = owned_batch_to_dataframe(batch, schema, &[])
-            .expect("batch to dataframe");
+        let df = owned_batch_to_dataframe(batch, schema, &[]).expect("batch to dataframe");
 
         assert!(
-            matches!(df.column("x").expect("x").dtype(), polars::prelude::DataType::Float64),
+            matches!(
+                df.column("x").expect("x").dtype(),
+                polars::prelude::DataType::Float64
+            ),
             "unlabelled F64 column should remain Float64"
         );
     }

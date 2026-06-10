@@ -28,8 +28,9 @@ use pyo3_polars::types::PyDataFrame;
 #[cfg(feature = "arrow")]
 use sas7bdat::{BatchHint, Dataset, Error, OwnedColumnarBatch, Projection};
 
+// v2: scan_sas/SasDataset/batch_reader accept schema_overrides={name: polars dtype}.
 #[cfg(feature = "arrow")]
-const PLUGIN_CONTRACT_VERSION: &str = "sas7bdat_polars.v1";
+const PLUGIN_CONTRACT_VERSION: &str = "sas7bdat_polars.v2";
 
 // ─── message types ────────────────────────────────────────────────────────────
 
@@ -87,14 +88,20 @@ struct SasDataset {
 #[pymethods]
 impl SasDataset {
     #[new]
-    #[pyo3(signature = (path, catalog_path=None))]
-    fn open(py: Python<'_>, path: &str, catalog_path: Option<&str>) -> PyResult<Self> {
+    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None))]
+    fn open(
+        py: Python<'_>,
+        path: &str,
+        catalog_path: Option<&str>,
+        schema_overrides: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Self> {
         let mut ds = py
             .detach(|| Dataset::open(path))
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
         if let Some(cat) = catalog_path {
             ds.attach_catalog(cat).map_err(convert::py_err)?;
         }
+        apply_schema_overrides(&mut ds, schema_overrides)?;
         let arrow_schema = scan::full_arrow_schema_for_dataset(&ds).map_err(convert::py_err)?;
         let polars_schema = scan::full_polars_schema_for_dataset(&ds).map_err(convert::py_err)?;
         Ok(Self {
@@ -251,7 +258,8 @@ fn schema_for_file(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
 
 #[cfg(feature = "arrow")]
 #[pyfunction]
-#[pyo3(signature = (path, with_columns=None, predicate=None, n_rows=None, batch_size=None, catalog_path=None))]
+#[pyo3(signature = (path, with_columns=None, predicate=None, n_rows=None, batch_size=None, catalog_path=None, schema_overrides=None))]
+#[allow(clippy::too_many_arguments)]
 fn batch_reader(
     py: Python<'_>,
     path: &str,
@@ -260,6 +268,7 @@ fn batch_reader(
     n_rows: Option<usize>,
     batch_size: Option<usize>,
     catalog_path: Option<&str>,
+    schema_overrides: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<BatchReader> {
     let mut ds = py
         .detach(|| Dataset::open(path))
@@ -267,6 +276,7 @@ fn batch_reader(
     if let Some(cat) = catalog_path {
         ds.attach_catalog(cat).map_err(convert::py_err)?;
     }
+    apply_schema_overrides(&mut ds, schema_overrides)?;
     let ds = Arc::new(ds);
     Ok(scan::batch_reader_from_dataset(
         py,
@@ -284,17 +294,40 @@ fn batch_reader(
 
 #[cfg(feature = "arrow")]
 #[pyfunction]
-#[pyo3(signature = (path, catalog_path=None))]
-fn scan_sas(py: Python<'_>, path: &str, catalog_path: Option<&str>) -> PyResult<Py<PyAny>> {
+#[pyo3(signature = (path, catalog_path=None, schema_overrides=None))]
+fn scan_sas(
+    py: Python<'_>,
+    path: &str,
+    catalog_path: Option<&str>,
+    schema_overrides: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Py<PyAny>> {
     let mut ds = py
         .detach(|| Dataset::open(path))
         .map_err(|err| PyValueError::new_err(err.to_string()))?;
     if let Some(cat) = catalog_path {
         ds.attach_catalog(cat).map_err(convert::py_err)?;
     }
+    apply_schema_overrides(&mut ds, schema_overrides)?;
     let ds = Arc::new(ds);
     let schema = scan::schema_for_dataset(py, &ds)?;
     scan::register_io_source(py, ds, None, schema)
+}
+
+/// Apply user-requested `{column: polars dtype}` overrides to a freshly opened
+/// dataset. Declared at schema time, so the lazy schema and every materialized
+/// batch agree; a file whose values violate an Integer override fails the scan
+/// instead of silently flapping the dtype back to Float64.
+#[cfg(feature = "arrow")]
+fn apply_schema_overrides(
+    ds: &mut Dataset,
+    schema_overrides: Option<&Bound<'_, PyDict>>,
+) -> PyResult<()> {
+    let overrides = convert::schema_overrides_from_pydict(schema_overrides)?;
+    if !overrides.is_empty() {
+        ds.apply_schema_overrides(overrides)
+            .map_err(convert::py_err)?;
+    }
+    Ok(())
 }
 
 #[cfg(feature = "arrow")]

@@ -37,7 +37,25 @@ lf = sp.scan_sas("data.sas7bdat", catalog_path="formats.sas7bcat")
 
 # Inspect the Arrow schema without reading rows.
 schema = sp.schema_for_file("data.sas7bdat")
+
+# SAS stores every numeric column as a float. Declare integer-coded columns
+# (registry/category codes) explicitly to get Int64 out instead of Float64:
+lf = sp.scan_sas(
+    "bef2020.sas7bdat",
+    schema_overrides={"KOEN": pl.Int64, "SOCIO13": pl.Int64, "HFAUDD": pl.Int64},
+)
 ```
+
+`schema_overrides` is applied at schema time, so the lazy schema and the collected
+frame always agree, and the same override map yields the same dtypes for every file
+of a register. Override names that don't exist in a given file are ignored, so a
+register-wide map can be passed wholesale. If a file contains a value that violates
+an Int64 override (non-integral or out of range), the scan **fails with an error
+naming the column, row, and value** — it never silently falls back to Float64.
+Supported override dtypes: `Int64`, `Float64`, `Date`, `Datetime`, `Time`, `String`,
+`Binary` (numeric columns can only be re-typed to numeric/temporal dtypes, character
+columns to `String`/`Binary`). Feature-detect with
+`sp.PLUGIN_CONTRACT_VERSION >= "sas7bdat_polars.v2"`.
 
 ## License
 

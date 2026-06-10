@@ -374,14 +374,14 @@ impl<'a> ScanBuilder<'a> {
         let _stats = scan_row_bytes_with_plan(self, &plan.raw, &mut |row_index, bytes| {
             batch_accumulator.push_row(row_index.into(), bytes)?;
             if batch_accumulator.is_full() {
-                batches.push(batch_accumulator.take_batch());
+                batches.push(batch_accumulator.take_batch()?);
                 batch_accumulator.reset_after_flush();
             }
             Ok(ControlFlow::Continue(()))
         })?;
 
         if !batch_accumulator.is_empty() {
-            batches.push(batch_accumulator.take_batch());
+            batches.push(batch_accumulator.take_batch()?);
         }
 
         Ok(batches)
@@ -504,7 +504,7 @@ fn collect_batches_for_descriptor_chunk(
             &mut |row_index: crate::types::RowIndex, bytes| {
                 batch_accumulator.push_row(row_index.into(), bytes)?;
                 if batch_accumulator.is_full() {
-                    batches.push(batch_accumulator.take_batch());
+                    batches.push(batch_accumulator.take_batch()?);
                     batch_accumulator.reset_after_flush();
                 }
                 Ok(ControlFlow::Continue(()))
@@ -513,7 +513,7 @@ fn collect_batches_for_descriptor_chunk(
     }
 
     if !batch_accumulator.is_empty() {
-        batches.push(batch_accumulator.take_batch());
+        batches.push(batch_accumulator.take_batch()?);
     }
 
     Ok(batches)
@@ -574,7 +574,7 @@ fn stream_batches_for_descriptor_chunk(
             &mut |row_index: crate::types::RowIndex, bytes| {
                 batch_accumulator.push_row(row_index.into(), bytes)?;
                 if batch_accumulator.is_full() {
-                    let batch = batch_accumulator.take_batch();
+                    let batch = batch_accumulator.take_batch()?;
                     decode_batches = decode_batches.saturating_add(1);
                     batch_accumulator.reset_after_flush();
                     if tx
@@ -595,9 +595,16 @@ fn stream_batches_for_descriptor_chunk(
     }
 
     if !stop.load(Ordering::Relaxed) && !batch_accumulator.is_empty() {
-        let batch = batch_accumulator.take_batch();
-        decode_batches = decode_batches.saturating_add(1);
-        let _ = tx.send(StreamedBatchMessage::Batch { chunk_idx, batch });
+        match batch_accumulator.take_batch() {
+            Ok(batch) => {
+                decode_batches = decode_batches.saturating_add(1);
+                let _ = tx.send(StreamedBatchMessage::Batch { chunk_idx, batch });
+            }
+            Err(e) => {
+                let _ = tx.send(StreamedBatchMessage::Error(e));
+                return stats;
+            }
+        }
     }
 
     let counters = batch_accumulator.counters();
@@ -974,7 +981,7 @@ impl ScanBuilder<'_> {
             tap(row_index.into(), bytes);
             batcher.push_row(row_index.into(), bytes)?;
             if batcher.is_full() {
-                let batch = batcher.take_batch();
+                let batch = batcher.take_batch()?;
                 match f(batch)? {
                     ControlFlow::Continue(()) => {
                         decode_batches = decode_batches.saturating_add(1);
@@ -991,7 +998,7 @@ impl ScanBuilder<'_> {
         })?;
 
         if !stop_after_current_batch && !batcher.is_empty() {
-            let batch = batcher.take_batch();
+            let batch = batcher.take_batch()?;
             decode_batches = decode_batches.saturating_add(1);
             let _ = f(batch)?;
         }
@@ -1045,7 +1052,7 @@ impl ScanBuilder<'_> {
             push_row_ns += push_start.elapsed().as_nanos();
             if batcher.is_full() {
                 let take_start = Instant::now();
-                let _batch = batcher.take_batch();
+                let _batch = batcher.take_batch()?;
                 take_batch_ns += take_start.elapsed().as_nanos();
                 decode_batches = decode_batches.saturating_add(1);
 
@@ -1059,7 +1066,7 @@ impl ScanBuilder<'_> {
 
         if !batcher.is_empty() {
             let take_start = Instant::now();
-            let _batch = batcher.take_batch();
+            let _batch = batcher.take_batch()?;
             take_batch_ns += take_start.elapsed().as_nanos();
             decode_batches = decode_batches.saturating_add(1);
         }

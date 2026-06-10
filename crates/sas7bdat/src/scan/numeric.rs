@@ -506,6 +506,15 @@ const I32_MIN_F64: f64 = i32::MIN as f64;
 #[allow(clippy::cast_precision_loss)]
 const I32_MAX_F64: f64 = i32::MAX as f64;
 
+/// Whether a valid f64 cell would be accepted by the i64 materializer.
+///
+/// Mirrors the acceptance criteria of [`first_non_integral_in_range_index_simd`]
+/// with the i64 bounds, so a scalar scan with this predicate locates exactly the
+/// value that forced [`materialize_staged_i64_or_f64_column`] to fall back to F64.
+pub(super) fn f64_is_i64_representable(value: f64) -> bool {
+    value.is_finite() && value.trunc() == value && (I64_MIN_F64..=I64_MAX_F64).contains(&value)
+}
+
 /// Efficiently find the index of the first value that cannot be represented as
 /// an integer within the specified range [min, max].
 ///

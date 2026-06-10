@@ -158,6 +158,13 @@ impl Error {
     }
 
     #[must_use]
+    pub fn decode(message: impl Into<String>) -> Self {
+        Self::Decode(DecodeError {
+            message: message.into(),
+        })
+    }
+
+    #[must_use]
     pub fn page_corruption(message: impl Into<String>) -> Self {
         Self::Corruption(CorruptionError::Other(message.into()))
     }

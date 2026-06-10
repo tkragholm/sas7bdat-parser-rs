@@ -5,8 +5,8 @@ use super::{
     SasDateTime, SasTime, ScanBuilder, StringDecodeKernel, TimeNumericValue, TrimMode,
     TrimmedString, TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
     classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
-    materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
-    staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
+    f64_is_i64_representable, materialize_staged_numeric_column, numeric_bits,
+    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
 use crate::define_owned_column_enum;
 use crate::{
@@ -1024,18 +1024,39 @@ impl BatchAccumulator {
     }
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
-    pub(super) fn take_batch(&mut self) -> OwnedColumnarBatch {
+    pub(super) fn take_batch(&mut self) -> Result<OwnedColumnarBatch> {
         let row_base = self.row_base.unwrap_or(0);
         let row_count = self.row_count;
         let columns =
             finish_columns_ordered(std::mem::take(&mut self.columns), self.materialize_threads);
+        self.check_integer_contract(&columns, row_base)?;
         self.row_base = None;
         self.row_count = 0;
-        OwnedColumnarBatch {
+        Ok(OwnedColumnarBatch {
             row_base: crate::types::RowIndex(row_base),
             row_count,
             columns,
+        })
+    }
+
+    /// Error if a column planned as Integer (only possible via a schema override)
+    /// materialized as F64 because a value was non-integral or out of i64 range.
+    /// `columns` must be indexed like `plan.row_plan.columns` (full batch order).
+    fn check_integer_contract(&self, columns: &[OwnedColumnBuffer], row_base: u64) -> Result<()> {
+        for &idx in &self.plan.families.staged_numeric {
+            if matches!(
+                self.plan.row_plan.columns[idx].numeric_tile,
+                Some(NumericTileMode::IntegerWidth8)
+            ) && matches!(columns[idx], OwnedColumnBuffer::F64 { .. })
+            {
+                return Err(integer_override_violation(
+                    &self.plan.row_plan.names[idx],
+                    row_base,
+                    &columns[idx],
+                ));
+            }
         }
+        Ok(())
     }
 
     pub(super) fn reset_after_flush(&mut self) {
@@ -1151,11 +1172,17 @@ impl BatchAccumulator {
                 has_missing,
             } = &self.columns[idx]
             {
-                staged_scratch.push(materialize_staged_numeric_column(
-                    raw_bits,
-                    *mode,
-                    *has_missing,
-                ));
+                let materialized = materialize_staged_numeric_column(raw_bits, *mode, *has_missing);
+                if matches!(*mode, NumericTileMode::IntegerWidth8)
+                    && matches!(materialized, OwnedColumnBuffer::F64 { .. })
+                {
+                    return Err(integer_override_violation(
+                        &self.plan.row_plan.names[idx],
+                        self.row_base.unwrap_or(0),
+                        &materialized,
+                    ));
+                }
+                staged_scratch.push(materialized);
             }
         }
 
@@ -1193,6 +1220,39 @@ impl BatchAccumulator {
             .get(idx)
             .is_some_and(Option::is_some)
     }
+}
+
+/// Build the error for a column whose schema override declared it Integer but whose
+/// staged values could not all be materialized as i64.
+///
+/// `LogicalType::Integer` is only ever assigned through an explicit schema override
+/// (inference never produces it), so an Integer-planned column that materialized as
+/// F64 means the file violates the caller's declared contract. Erroring here — rather
+/// than silently emitting Float64 — keeps the declared schema and the materialized
+/// batches identical, which downstream consumers (Polars batch stacking, multi-file
+/// concat) rely on.
+fn integer_override_violation(name: &str, row_base: u64, buffer: &OwnedColumnBuffer) -> Error {
+    let detail = if let OwnedColumnBuffer::F64 { values, valid } = buffer {
+        values
+            .iter()
+            .enumerate()
+            .find(|&(i, &value)| {
+                let is_valid = valid.as_deref().is_none_or(|bits| {
+                    bits.get(i / 64)
+                        .is_some_and(|word| (word >> (i % 64)) & 1 == 1)
+                });
+                is_valid && !f64_is_i64_representable(value)
+            })
+            .map(|(i, value)| format!(" (row {}: value {value})", row_base + i as u64))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    Error::decode(format!(
+        "column '{name}' is declared Integer by a schema override, but the file \
+         contains a non-integral or out-of-i64-range value{detail}; remove the \
+         override for this column or fix the source data"
+    ))
 }
 
 fn finish_columns_ordered(
@@ -2358,16 +2418,14 @@ pub(super) fn compile_batch_column_families(
 
 pub(super) const fn column_materialization_kind(
     kernel: CompiledDecodeKernel,
-    width: u32,
+    _width: u32,
 ) -> ColumnMaterializationKind {
     match kernel {
-        CompiledDecodeKernel::Integer => {
-            if width <= 4 {
-                ColumnMaterializationKind::I32
-            } else {
-                ColumnMaterializationKind::I64
-            }
-        }
+        // Always I64, regardless of on-disk width: truncated numerics (3-7 bytes)
+        // still decode to full f64 values, and the staged materializer only ever
+        // produces an i64 buffer. Width-dependent I32 would make the declared
+        // schema disagree with the materialized batch.
+        CompiledDecodeKernel::Integer => ColumnMaterializationKind::I64,
         CompiledDecodeKernel::Float
         | CompiledDecodeKernel::NumericLossless
         | CompiledDecodeKernel::DateAsNumeric

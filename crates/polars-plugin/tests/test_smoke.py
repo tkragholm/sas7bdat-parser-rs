@@ -12,7 +12,7 @@ def test_public_api_contract_is_exposed():
     import re
 
     assert re.fullmatch(r"\d+\.\d+\.\d+", sp.__version__), sp.__version__
-    assert sp.PLUGIN_CONTRACT_VERSION == "sas7bdat_polars.v1"
+    assert sp.PLUGIN_CONTRACT_VERSION == "sas7bdat_polars.v2"
     assert callable(sp.scan_sas)
     assert callable(sp.schema_for_file)
     assert callable(sp.batch_reader)
@@ -276,3 +276,85 @@ def test_datetime_columns_are_microsecond_and_stack_across_batches(tmp_path):
         how="diagonal_relaxed",
     ).sink_parquet(out)
     assert pl.read_parquet(out).height == 2 * df.height
+
+
+# ─── schema_overrides: integer-coded numeric columns ─────────────────────────
+
+
+def _numeric_probe(n=500):
+    """Split the fixture's Float64 columns into all-integral vs fractional,
+    judged over the first n rows (the same slices the tests below scan)."""
+    df = sp.scan_sas(str(FIXTURE)).head(n).collect()
+    integral, fractional = [], []
+    for name, dtype in df.schema.items():
+        if dtype != pl.Float64:
+            continue
+        s = df[name].drop_nulls()
+        if len(s) == 0:
+            continue
+        (integral if (s == s.floor()).all() else fractional).append(name)
+    return integral, fractional
+
+
+def test_schema_overrides_emit_int64_at_schema_and_collect_time():
+    assert FIXTURE.exists(), f"missing fixture: {FIXTURE}"
+
+    integral, _ = _numeric_probe()
+    assert integral, "fixture should expose an integer-coded Float64 column"
+    name = integral[0]
+
+    lf = sp.scan_sas(str(FIXTURE), schema_overrides={name: pl.Int64})
+    # Declared at schema time (no data pass) and identical at collect time.
+    assert lf.collect_schema()[name] == pl.Int64
+
+    df = lf.select(name).head(100).collect()
+    assert df[name].dtype == pl.Int64
+
+    baseline = sp.scan_sas(str(FIXTURE)).select(name).head(100).collect()
+    assert df[name].cast(pl.Float64).equals(baseline[name])
+
+
+def test_schema_overrides_error_on_fractional_values():
+    import pytest
+
+    assert FIXTURE.exists(), f"missing fixture: {FIXTURE}"
+
+    _, fractional = _numeric_probe()
+    if not fractional:
+        pytest.skip("fixture has no fractional numeric column in the probed slice")
+    name = fractional[0]
+
+    lf = sp.scan_sas(str(FIXTURE), schema_overrides={name: pl.Int64})
+    with pytest.raises(Exception, match="declared Integer"):
+        lf.select(name).head(500).collect()
+
+
+def test_schema_overrides_unknown_column_ignored_and_char_column_rejected():
+    import pytest
+
+    assert FIXTURE.exists(), f"missing fixture: {FIXTURE}"
+
+    # Absent columns are skipped so a register-wide catalog can be applied wholesale.
+    lf = sp.scan_sas(str(FIXTURE), schema_overrides={"__NOPE__": pl.Int64})
+    assert isinstance(lf, pl.LazyFrame)
+
+    # Re-typing across the char/numeric boundary fails fast at open time.
+    char_col = next(
+        n for n, t in sp.scan_sas(str(FIXTURE)).collect_schema().items() if t == pl.String
+    )
+    with pytest.raises(Exception, match=char_col):
+        sp.scan_sas(str(FIXTURE), schema_overrides={char_col: pl.Int64})
+
+
+def test_sasdataset_applies_schema_overrides():
+    assert FIXTURE.exists(), f"missing fixture: {FIXTURE}"
+
+    integral, _ = _numeric_probe()
+    assert integral, "fixture should expose an integer-coded Float64 column"
+    name = integral[0]
+
+    ds = sp.SasDataset(str(FIXTURE), schema_overrides={name: pl.Int64})
+    assert ds.schema()[name] == pl.Int64
+
+    df = ds.scan_sas().select(name).head(5).collect()
+    assert df[name].dtype == pl.Int64

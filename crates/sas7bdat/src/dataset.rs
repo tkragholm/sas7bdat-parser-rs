@@ -280,6 +280,66 @@ impl Dataset {
         Ok(())
     }
 
+    /// Overrides the inferred [`LogicalType`](crate::LogicalType) of named columns for
+    /// all subsequent scans on this dataset.
+    ///
+    /// SAS stores every numeric column as an IEEE double, so integer-coded columns
+    /// (registry codes, category numbers, ...) are inferred as
+    /// [`LogicalType::Float`](crate::LogicalType::Float) and emitted as `f64`. Overriding
+    /// such a column to [`LogicalType::Integer`](crate::LogicalType::Integer) makes scans
+    /// emit it as `i64` instead — and fail with a decode error if the file contains a
+    /// non-integral or out-of-range value, rather than silently changing the column type.
+    ///
+    /// Override names that do not match any column in this file are ignored, so a
+    /// register-wide override catalog can be applied wholesale to files whose column
+    /// sets vary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an override would reinterpret a column across the
+    /// numeric/character boundary (e.g. a character column overridden to `Integer`),
+    /// which cannot be expressed by re-typing the stored values.
+    pub fn apply_schema_overrides<I, S>(&mut self, overrides: I) -> Result<()>
+    where
+        I: IntoIterator<Item = (S, crate::LogicalType)>,
+        S: AsRef<str>,
+    {
+        use crate::LogicalType;
+        let layout = Arc::make_mut(&mut self.layout);
+        for (name, requested) in overrides {
+            let name = name.as_ref();
+            let Some(column) = layout.columns.iter_mut().find(|column| column.name == name) else {
+                continue;
+            };
+            let current = column.logical_type;
+            let compatible = match current {
+                LogicalType::Integer
+                | LogicalType::Float
+                | LogicalType::Date
+                | LogicalType::DateTime
+                | LogicalType::Time => matches!(
+                    requested,
+                    LogicalType::Integer
+                        | LogicalType::Float
+                        | LogicalType::Date
+                        | LogicalType::DateTime
+                        | LogicalType::Time
+                ),
+                LogicalType::String => {
+                    matches!(requested, LogicalType::String | LogicalType::Bytes)
+                }
+                LogicalType::Bytes => matches!(requested, LogicalType::Bytes),
+            };
+            if !compatible {
+                return Err(Error::unsupported(format!(
+                    "schema override for column '{name}': a {current:?} column cannot be decoded as {requested:?}"
+                )));
+            }
+            column.logical_type = requested;
+        }
+        Ok(())
+    }
+
     /// Scans raw rows and returns the collected scan statistics.
     ///
     /// # Errors

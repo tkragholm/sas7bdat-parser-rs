@@ -887,27 +887,24 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
 }
 
 #[test]
-fn collect_batches_typed_integer_widens_to_f64_for_fractional_values() {
+fn collect_batches_typed_integer_errors_for_fractional_values() {
     let row = make_numeric_text_row(1.5, *b"INT ");
     let ds = make_integer_test_dataset(&row);
 
+    // Row-level decode stays value-typed: a fractional cell is simply a Float64.
     let rows = ScanBuilder::new(&ds).collect_rows().expect("rows");
     assert!(
         matches!(rows[0].cells[0], OwnedCellValue::Float64(value) if (value - 1.5).abs() < f64::EPSILON)
     );
 
-    let batches = ScanBuilder::new(&ds)
+    // Batch decode enforces the declared column type: an Integer column (only
+    // assignable via a schema override) must error on fractional values rather
+    // than silently widening the batch to F64 and flapping the dtype.
+    let err = ScanBuilder::new(&ds)
         .with_batch_hint(crate::BatchHint::Rows(1))
         .collect_batches()
-        .expect("batches");
-    assert_eq!(batches.len(), 1);
-    match &batches[0].columns[0] {
-        OwnedColumnBuffer::F64 { values, valid } => {
-            assert_eq!(values, &vec![1.5]);
-            assert!(valid.is_none());
-        }
-        other => panic!("unexpected widened integer batch column: {other:?}"),
-    }
+        .expect_err("fractional value violates the declared Integer type");
+    assert!(err.to_string().contains("declared Integer"));
 }
 
 #[test]
@@ -1091,4 +1088,132 @@ fn make_pages() -> Vec<u8> {
     bytes.extend(make_page(0x0100, 2, 0, &[b"ABCD", b"EFGH"], 64));
     bytes.extend(make_page(0x0200, 0, 0, &[b"IJKL"], 64));
     bytes
+}
+
+// ─── schema overrides: integer-coded numeric columns ────────────────────────
+
+/// One 64-byte data page holding up to 5 little-endian f64 rows.
+fn make_f64_page(values: &[f64]) -> Vec<u8> {
+    assert!(values.len() <= 5, "64-byte page fits at most 5 f64 rows");
+    let rows: Vec<[u8; 8]> = values.iter().map(|value| value.to_le_bytes()).collect();
+    let row_refs: Vec<&[u8]> = rows.iter().map(|row| &row[..]).collect();
+    make_page(
+        0x0100,
+        u16::try_from(values.len()).expect("row count"),
+        0,
+        &row_refs,
+        64,
+    )
+}
+
+fn make_f64_dataset(values: &[f64]) -> crate::Dataset {
+    let total_rows = u64::try_from(values.len()).expect("rows");
+    MockDatasetBuilder::new(Arc::<[u8]>::from(make_f64_page(values)))
+        .with_column("CODE", LogicalType::Float, 8, 0)
+        .with_row_len(8)
+        .with_total_rows(total_rows)
+        .with_rows_per_page(total_rows)
+        .build()
+}
+
+#[test]
+fn integer_override_emits_i64_column() {
+    let mut ds = make_f64_dataset(&[1.0, 2.0, 5100.0]);
+    ds.apply_schema_overrides([("CODE", LogicalType::Integer)])
+        .expect("numeric override applies");
+    assert_eq!(ds.columns()[0].logical_type, LogicalType::Integer);
+
+    let batches = ScanBuilder::new(&ds)
+        .collect_batches()
+        .expect("integral values satisfy the Integer override");
+    let all: Vec<i64> = batches
+        .iter()
+        .flat_map(|batch| match &batch.columns[0] {
+            OwnedColumnBuffer::I64 { values, valid } => {
+                assert!(valid.is_none(), "no missing values expected");
+                values.clone()
+            }
+            other => panic!("expected I64 buffer under Integer override, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(all, vec![1, 2, 5100]);
+}
+
+#[cfg(feature = "arrow")]
+#[test]
+fn integer_override_declares_int64_in_arrow_schema() {
+    let mut ds = make_f64_dataset(&[1.0, 2.0]);
+    ds.apply_schema_overrides([("CODE", LogicalType::Integer)])
+        .expect("numeric override applies");
+    let schema = ScanBuilder::new(&ds).arrow_schema().expect("arrow schema");
+    assert_eq!(schema.field(0).data_type(), &DataType::Int64);
+}
+
+#[test]
+fn integer_override_errors_on_fractional_value() {
+    let mut ds = make_f64_dataset(&[1.0, 64.5, 2.0]);
+    ds.apply_schema_overrides([("CODE", LogicalType::Integer)])
+        .expect("numeric override applies");
+
+    let err = ScanBuilder::new(&ds)
+        .collect_batches()
+        .expect_err("fractional value must violate the Integer override");
+    let message = err.to_string();
+    assert!(
+        message.contains("CODE"),
+        "error names the column: {message}"
+    );
+    assert!(message.contains("64.5"), "error shows the value: {message}");
+    assert!(
+        message.contains("row 1"),
+        "error locates the row: {message}"
+    );
+
+    // The borrowed-batch path enforces the same contract.
+    let err = ScanBuilder::new(&ds)
+        .visit_batches(|_| Ok(ControlFlow::Continue(())))
+        .expect_err("borrowed path must also enforce the override");
+    assert!(err.to_string().contains("CODE"));
+}
+
+#[test]
+fn integer_override_keeps_missing_values_null() {
+    let missing = f64::from_bits(SAS_NUMERIC_MISSING_SENTINEL);
+    let mut ds = make_f64_dataset(&[7.0, missing, 9.0]);
+    ds.apply_schema_overrides([("CODE", LogicalType::Integer)])
+        .expect("numeric override applies");
+
+    let batches = ScanBuilder::new(&ds)
+        .collect_batches()
+        .expect("missing values are nulls, not violations");
+    let batch = &batches[0];
+    let OwnedColumnBuffer::I64 { values, valid } = &batch.columns[0] else {
+        panic!("expected I64 buffer, got {:?}", batch.columns[0]);
+    };
+    assert_eq!(values[0], 7);
+    assert_eq!(values[2], 9);
+    let valid = valid
+        .as_ref()
+        .expect("missing row produces a validity mask");
+    assert_eq!(valid[0] & 0b111, 0b101, "row 1 is null, rows 0 and 2 valid");
+}
+
+#[test]
+fn schema_overrides_ignore_unknown_columns_and_reject_char_columns() {
+    let mut ds = make_f64_dataset(&[1.0]);
+    ds.apply_schema_overrides([("NOT_IN_FILE", LogicalType::Integer)])
+        .expect("unknown columns are skipped so catalogs can be applied wholesale");
+    assert_eq!(ds.columns()[0].logical_type, LogicalType::Float);
+
+    let bytes = Arc::<[u8]>::from(make_pages());
+    let mut char_ds = MockDatasetBuilder::new(bytes)
+        .with_column("txt", LogicalType::String, 4, 0)
+        .with_row_len(4)
+        .with_total_rows(3)
+        .with_rows_per_page(1)
+        .build();
+    let err = char_ds
+        .apply_schema_overrides([("txt", LogicalType::Integer)])
+        .expect_err("char column cannot be re-typed as Integer");
+    assert!(err.to_string().contains("txt"));
 }
