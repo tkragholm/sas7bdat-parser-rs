@@ -328,6 +328,22 @@ pub enum BatchHint {
     Bytes(usize),
 }
 
+/// Whether owned-batch scans may use the column-major (transposed) decode path.
+///
+/// The default row-major path decodes one row at a time. When every projected column is a
+/// numeric tile and the source is in-memory, the column-major path instead decodes each
+/// `FusedContiguousUncompressed` page column-by-column in cache-sized tiles, which hoists
+/// per-cell dispatch out of the inner loop and is markedly faster for wide tables. It only
+/// affects [`crate::ScanBuilder::collect_batches`]; it falls back to row-major automatically
+/// whenever its preconditions don't hold, so output is identical either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnMajorDecode {
+    /// Never use the column-major path (default).
+    Off,
+    /// Use the column-major path whenever its preconditions hold; row-major otherwise.
+    On,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowSelection {
     All,

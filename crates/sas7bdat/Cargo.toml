@@ -40,10 +40,17 @@ harness = false
 name = "backend_matrix"
 harness = false
 
+[[bench]]
+name = "wide_table"
+harness = false
+required-features = ["internal-bench"]
+
 [features]
 default = []
 arrow = ["dep:arrow-array", "dep:arrow-schema"]
 hotpath-profile = ["dep:hotpath"]
+# Exposes `test_utils` (synthetic dataset builders) for the `wide_table` benchmark.
+internal-bench = []
 
 # Build docs.rs with the `arrow` feature so the Arrow batch API is documented.
 # `hotpath-profile` is omitted: it adds internal profiling instrumentation, not public API.

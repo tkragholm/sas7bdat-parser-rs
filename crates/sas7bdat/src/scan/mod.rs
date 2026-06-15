@@ -7,8 +7,8 @@ use crate::{
     internal::{FileSource, PageDescriptor, ProjectedColumnPlan, RowSpan, RowSpanKind},
     metadata::{ColumnMeta, Endianness, LogicalType, SasDate, SasDateTime, SasTime},
     options::{
-        BatchHint, DecodeMode, MojibakePolicy, OrderingMode, Parallelism, RowSelection,
-        StringDecodeOptions, TemporalDecodeOptions, TrimMode, Utf8ValidationMode,
+        BatchHint, ColumnMajorDecode, DecodeMode, MojibakePolicy, OrderingMode, Parallelism,
+        RowSelection, StringDecodeOptions, TemporalDecodeOptions, TrimMode, Utf8ValidationMode,
     },
     projection::Projection,
     row::{OwnedRow, RawRow, RowView},
@@ -60,7 +60,8 @@ use numeric::{
     TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
     classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
     f64_is_i64_representable, materialize_staged_numeric_column, numeric_bits,
-    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
+    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, NUMERIC_EXP_MASK,
+    NUMERIC_FRACTION_MASK,
 };
 use plan::{
     ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, NumericTileMode,

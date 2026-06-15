@@ -20,8 +20,8 @@ use pyo3::{
 };
 #[cfg(feature = "arrow")]
 use sas7bdat::{
-    BatchHint, Error, LabelSet, LogicalType, Parallelism, Projection, Result as SasResult,
-    catalog::normalize_format_name,
+    BatchHint, ColumnMajorDecode, Error, LabelSet, LogicalType, Parallelism, Projection,
+    Result as SasResult, catalog::normalize_format_name,
 };
 #[cfg(feature = "arrow")]
 use std::{
@@ -86,6 +86,8 @@ const fn arrow_data_type_for_logical_type(logical_type: LogicalType) -> ArrowSch
         LogicalType::DateTime => {
             ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Microsecond, None)
         }
+        // Time64 (pl.Time) spans only [0, 24h); SAS time values >= 24h or negative surface as
+        // null here by design — see the Time arm in `convert.rs`.
         LogicalType::Time => ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond),
         LogicalType::Bytes => ArrowSchemaDataType::Binary,
     }
@@ -229,6 +231,18 @@ const DEFAULT_MIN_BYTES_PER_WORKER: u64 = 4 * 1024 * 1024;
 #[cfg(feature = "arrow")]
 const DEFAULT_MIN_PAGES_PER_WORKER: u64 = 8;
 
+/// Whether to use the column-major page decode. It is markedly faster for wide all-numeric
+/// tables and falls back to row-major automatically when a scan can't use it (string/temporal
+/// columns, row limits, non-in-memory sources), so it is safe to leave on. On by default; set
+/// `SAS7BDAT_COLUMN_MAJOR=0` (or `off`/`false`) to force the row-major path.
+#[cfg(feature = "arrow")]
+fn column_major_decode() -> ColumnMajorDecode {
+    match std::env::var("SAS7BDAT_COLUMN_MAJOR").ok().as_deref() {
+        Some("0" | "off" | "false" | "OFF" | "FALSE") => ColumnMajorDecode::Off,
+        _ => ColumnMajorDecode::On,
+    }
+}
+
 #[cfg(feature = "arrow")]
 fn env_u64(key: &str, default: u64) -> u64 {
     std::env::var(key)
@@ -299,7 +313,10 @@ fn run_scan(
     // and left large hosts at ~10% CPU. Threads(n) engages the parallel page-streaming
     // path (ScanBuilder::try_stream_batches_parallel). Defaults to all logical cores;
     // override with SAS7BDAT_SCAN_THREADS for tuning.
-    let mut scan = ds.scan().with_parallelism(scan_parallelism(ds));
+    let mut scan = ds
+        .scan()
+        .with_parallelism(scan_parallelism(ds))
+        .with_column_major_decode(column_major_decode());
     if let Some(ref projection) = projection {
         scan = scan.with_projection(projection);
     }

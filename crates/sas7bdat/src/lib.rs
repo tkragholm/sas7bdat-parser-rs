@@ -43,8 +43,10 @@ mod projection;
 mod row;
 mod scan;
 
-#[cfg(test)]
-pub(crate) mod test_utils;
+// Exposed publicly only for in-crate tests and the `internal-bench` benchmarks (which
+// synthesize datasets via `MockDatasetBuilder`). Absent from normal builds.
+#[cfg(any(test, feature = "internal-bench"))]
+pub mod test_utils;
 
 pub use columnar::{
     BytesBuffer, ColumnBuffer, ColumnarBatch, OwnedColumnBuffer, OwnedColumnarBatch,
@@ -70,10 +72,11 @@ pub use metadata::{
     SasTime, Timestamp,
 };
 pub use options::{
-    BatchHint, DecodeMode, DictionaryStaging, IoBackendPreference, MojibakePolicy, OpenOptions,
-    OpenOptionsBuilder, OrderingMode, PageCachePolicy, Parallelism, PrefetchPolicy, RowSelection,
-    StringDecodeOptions, StringDecodeOptionsBuilder, TemporalDecodeOptions,
-    TemporalDecodeOptionsBuilder, TrimMode, Utf8ValidationMode, ValidationMode,
+    BatchHint, ColumnMajorDecode, DecodeMode, DictionaryStaging, IoBackendPreference,
+    MojibakePolicy, OpenOptions, OpenOptionsBuilder, OrderingMode, PageCachePolicy, Parallelism,
+    PrefetchPolicy, RowSelection, StringDecodeOptions, StringDecodeOptionsBuilder,
+    TemporalDecodeOptions, TemporalDecodeOptionsBuilder, TrimMode, Utf8ValidationMode,
+    ValidationMode,
 };
 pub use pages::DescriptorBreakdown;
 pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};

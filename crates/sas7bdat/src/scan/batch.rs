@@ -1,13 +1,16 @@
 use super::{
     ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, DateNumericValue,
-    DateTimeNumericValue, DecodedUtf8BatchValue, Error, NumericTileMode, OwnedColumnBuffer,
+    DateTimeNumericValue, DecodedUtf8BatchValue, Endianness, Error, NumericTileMode,
+    OwnedColumnBuffer,
     OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, SasDate,
     SasDateTime, SasTime, ScanBuilder, StringDecodeKernel, TimeNumericValue, TrimMode,
     TrimmedString, TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
     classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
     f64_is_i64_representable, materialize_staged_numeric_column, numeric_bits,
     numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
+    NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK,
 };
+use std::simd::{Simd, cmp::SimdPartialEq};
 use crate::define_owned_column_enum;
 use crate::{
     DictionaryStaging,
@@ -483,7 +486,6 @@ impl BatchDecodePlan {
         })
     }
 
-    #[cfg(test)]
     pub(super) const fn all_columns_staged_numeric(&self) -> bool {
         self.flags.has(BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC)
     }
@@ -703,6 +705,141 @@ impl BatchAccumulator {
 
     pub(super) const fn is_full(&self) -> bool {
         self.row_count >= self.target_rows
+    }
+
+    pub(super) const fn row_count(&self) -> usize {
+        self.row_count
+    }
+
+    pub(super) const fn target_rows(&self) -> usize {
+        self.target_rows
+    }
+
+    /// Whether every column in the plan is a staged numeric tile — the precondition
+    /// for the column-major contiguous fill path.
+    pub(super) const fn plan_is_all_columns_staged_numeric(&self) -> bool {
+        self.plan
+            .flags
+            .has(BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC)
+    }
+
+    /// Column-major decode of a fixed-stride, contiguous row span into the staged-numeric
+    /// builders. Valid only when the plan is all-staged-numeric (every column is a numeric
+    /// tile). Fills `span_len` rows starting at page row `span_first_row`.
+    ///
+    /// This is the transpose of [`Self::push_staged_numeric_family`]: instead of touching
+    /// every column's `raw_bits` tail once per row (per-cell column lookup + builder enum
+    /// dispatch), it hoists the dispatch out of the inner loop and fills one column at a time
+    /// (one hot write tail, a tight vectorizable gather). The rows are processed in cache-sized
+    /// tiles ([`contiguous_tile_rows`]) so the strided reads of a wide row stay L2-resident
+    /// instead of re-streaming the whole page once per column. The caller guarantees
+    /// `span_len <= target_rows - row_count` so the span fits the current batch.
+    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
+    pub(super) fn push_contiguous_span_all_staged_numeric(
+        &mut self,
+        page_row_base: u64,
+        page: &[u8],
+        span_first_row: usize,
+        span_len: usize,
+        data_start: usize,
+        row_len: usize,
+    ) -> Result<()> {
+        debug_assert!(self.plan_is_all_columns_staged_numeric());
+        if span_len == 0 {
+            return Ok(());
+        }
+
+        // The whole span, and every column field within each row's stride, must lie in `page`.
+        let max_end = self.plan.row_plan.max_end;
+        let span_end_byte = span_first_row
+            .checked_add(span_len)
+            .and_then(|rows| rows.checked_mul(row_len))
+            .and_then(|span_bytes| span_bytes.checked_add(data_start))
+            .ok_or_else(|| Error::unsupported("contiguous span byte range overflow"))?;
+        if row_len < max_end || span_end_byte > page.len() {
+            return Err(Error::unsupported("contiguous span exceeds page bounds"));
+        }
+
+        if self.row_base.is_none() {
+            self.row_base = Some(page_row_base.saturating_add(span_first_row as u64));
+        }
+
+        let endianness = self.plan.row_plan.endianness;
+        let span_base = data_start + span_first_row * row_len;
+
+        // Reserve each column's tail for the whole span up front so the tiled pushes below
+        // never reallocate mid-tile.
+        for op in &self.plan.staged_numeric_ops {
+            let OwnedBatchColumnBuilder::StagedNumeric { raw_bits, .. } = &mut self.columns[op.idx]
+            else {
+                return Err(Error::unsupported(
+                    "column-major staged-numeric plan did not match column builder",
+                ));
+            };
+            raw_bits.reserve(span_len);
+        }
+
+        // Tile the rows so each tile's *read* footprint (`tile_rows * row_len`) stays
+        // cache-resident, then transpose within the tile (column-outer, row-inner). The
+        // non-tiled gather streams the whole span once per column: for wide rows (row_len ≫
+        // cache line) every column re-reads the entire page region from memory, so the win
+        // collapses as width grows. Blocking bounds the re-read to one L2-resident tile —
+        // the page is read from memory ~once while keeping the per-column dispatch hoisted
+        // out of the inner loop and one hot write tail at a time.
+        let tile_rows = contiguous_tile_rows(row_len);
+        let mut tile_start = 0usize;
+        while tile_start < span_len {
+            let tile_len = tile_rows.min(span_len - tile_start);
+            let tile_base = span_base + tile_start * row_len;
+            for op in &self.plan.staged_numeric_ops {
+                let OwnedBatchColumnBuilder::StagedNumeric {
+                    raw_bits,
+                    has_missing,
+                    ..
+                } = &mut self.columns[op.idx]
+                else {
+                    return Err(Error::unsupported(
+                        "column-major staged-numeric plan did not match column builder",
+                    ));
+                };
+                let field_len = op.end - op.start;
+                if field_len == 0 {
+                    raw_bits.extend(std::iter::repeat_n(SAS_NUMERIC_MISSING_SENTINEL, tile_len));
+                    *has_missing = true;
+                    continue;
+                }
+
+                let mut off = tile_base + op.start;
+                let mut missing = false;
+                if field_len == 8 && matches!(endianness, Endianness::Little) {
+                    // Dominant case: full-width 8-byte native-endian numeric. SIMD-assisted
+                    // strided gather (vectorized missing-test + bulk store).
+                    missing |= gather_staged_8byte_le(page, off, row_len, tile_len, raw_bits);
+                } else if field_len == 8 {
+                    for _ in 0..tile_len {
+                        let bytes: [u8; 8] = page[off..off + 8].try_into().expect("8-byte field");
+                        let raw = u64::from_be_bytes(bytes);
+                        missing |= numeric_bits_is_missing(raw);
+                        raw_bits.push(raw);
+                        off += row_len;
+                    }
+                } else {
+                    for _ in 0..tile_len {
+                        let raw = numeric_bits(&page[off..off + field_len], endianness);
+                        missing |= numeric_bits_is_missing(raw);
+                        raw_bits.push(raw);
+                        off += row_len;
+                    }
+                }
+                *has_missing |= missing;
+            }
+            tile_start += tile_len;
+        }
+
+        self.row_count += span_len;
+        self.counters.staged_numeric += (span_len as u64)
+            .saturating_mul(self.plan.staged_numeric_cells_per_row);
+        Ok(())
     }
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
@@ -2541,6 +2678,67 @@ pub(super) fn push_variable_null(
         // bit at pos stays 0 (null)
     }
     offsets.push_repeat_last();
+}
+
+/// Target *read* footprint of one transpose tile, in bytes. The column-outer/row-inner
+/// transpose re-reads the tile's page region once per column, so the region must stay
+/// cache-resident for the wide-row case to win. 512 KiB sits within a typical per-core L2 yet
+/// is large enough to amortise the per-column/per-tile setup over enough rows; a sweep of
+/// 256 KiB–1 MiB across 16–1024 columns put 512 KiB at or near the best for every width.
+/// Narrow rows collapse to a single large tile (the whole batch), matching the untiled path.
+const CONTIGUOUS_TILE_BYTES: usize = 512 * 1024;
+
+/// Strided gather of `len` full-width (8-byte) little-endian numerics into `raw_bits`, with the
+/// missing-value test and the store vectorized: assemble `LANES` strided loads into a vector,
+/// SIMD-test the SAS-missing pattern across all lanes at once, and bulk-append. The strided
+/// loads themselves stay scalar (portable SIMD has no byte-offset gather, and the dominant
+/// targets lack a hardware gather), but this removes the per-cell branch + per-element push.
+/// Returns whether any lane was a SAS missing sentinel.
+#[inline]
+fn gather_staged_8byte_le(
+    page: &[u8],
+    mut base: usize,
+    stride: usize,
+    len: usize,
+    raw_bits: &mut Vec<u64>,
+) -> bool {
+    const LANES: usize = 8;
+    type U64xN = Simd<u64, LANES>;
+    let exp = U64xN::splat(NUMERIC_EXP_MASK);
+    let frac = U64xN::splat(NUMERIC_FRACTION_MASK);
+    let zero = U64xN::splat(0);
+
+    let mut missing = false;
+    let mut i = 0;
+    while i + LANES <= len {
+        let mut lane = [0u64; LANES];
+        for (l, slot) in lane.iter_mut().enumerate() {
+            let off = base + l * stride;
+            *slot = u64::from_le_bytes(page[off..off + 8].try_into().expect("8-byte field"));
+        }
+        let v = U64xN::from_array(lane);
+        let is_missing = (v & exp).simd_eq(exp) & (v & frac).simd_ne(zero);
+        missing |= is_missing.any();
+        raw_bits.extend_from_slice(&lane);
+        base += LANES * stride;
+        i += LANES;
+    }
+    while i < len {
+        let raw = u64::from_le_bytes(page[base..base + 8].try_into().expect("8-byte field"));
+        missing |= numeric_bits_is_missing(raw);
+        raw_bits.push(raw);
+        base += stride;
+        i += 1;
+    }
+    missing
+}
+
+/// Rows per transpose tile for a given fixed row stride, so `tile_rows * row_len ≈
+/// `CONTIGUOUS_TILE_BYTES`. Always at least one row.
+const fn contiguous_tile_rows(row_len: usize) -> usize {
+    let row_len = if row_len == 0 { 1 } else { row_len };
+    let rows = CONTIGUOUS_TILE_BYTES / row_len;
+    if rows == 0 { 1 } else { rows }
 }
 
 pub(super) fn unexpected_batch_cell(expected: &str, actual: PlannedCell<'_>) -> Error {

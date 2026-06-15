@@ -1217,3 +1217,391 @@ fn schema_overrides_ignore_unknown_columns_and_reject_char_columns() {
         .expect_err("char column cannot be re-typed as Integer");
     assert!(err.to_string().contains("txt"));
 }
+
+// ─── column-major (collect_batches_columnar) parity ─────────────────────────
+
+/// One contiguous data page of two-column little-endian f64 rows.
+fn make_2col_f64_page(rows: &[[f64; 2]], page_size: usize) -> Vec<u8> {
+    let row_bytes: Vec<[u8; 16]> = rows
+        .iter()
+        .map(|row| {
+            let mut bytes = [0u8; 16];
+            bytes[..8].copy_from_slice(&row[0].to_le_bytes());
+            bytes[8..].copy_from_slice(&row[1].to_le_bytes());
+            bytes
+        })
+        .collect();
+    let refs: Vec<&[u8]> = row_bytes.iter().map(|row| &row[..]).collect();
+    make_page(
+        0x0100,
+        u16::try_from(rows.len()).expect("row count"),
+        0,
+        &refs,
+        page_size,
+    )
+}
+
+fn make_2col_f64_dataset(pages: &[&[[f64; 2]]]) -> crate::Dataset {
+    const PAGE_SIZE: usize = 128;
+    let mut bytes = Vec::new();
+    let mut total_rows = 0u64;
+    for page in pages {
+        bytes.extend(make_2col_f64_page(page, PAGE_SIZE));
+        total_rows += u64::try_from(page.len()).expect("rows");
+    }
+    let mut builder = MockDatasetBuilder::new(Arc::<[u8]>::from(bytes))
+        .with_column("A", LogicalType::Float, 8, 0)
+        .with_column("B", LogicalType::Float, 8, 8)
+        .with_row_len(16)
+        .with_total_rows(total_rows)
+        .with_rows_per_page(5);
+    builder.page_size = PAGE_SIZE;
+    builder.build()
+}
+
+/// Build a multi-page all-`Float` dataset of `num_cols` columns laid out as fused contiguous
+/// pages of `rows_per_page` rows. Row `r`, column `c` holds `(r*num_cols+c) as f64 * 0.5`,
+/// except every 37th cell which is a SAS missing sentinel.
+fn make_wide_f64_dataset(num_cols: usize, total_rows: usize, rows_per_page: usize) -> crate::Dataset {
+    let missing = SAS_NUMERIC_MISSING_SENTINEL;
+    let row_len = num_cols * 8;
+    let page_size = 24 + row_len * rows_per_page;
+    let mut bytes = Vec::new();
+    let mut row = 0usize;
+    while row < total_rows {
+        let n = rows_per_page.min(total_rows - row);
+        let mut page = vec![0u8; page_size];
+        page[16..18].copy_from_slice(&0x0100u16.to_le_bytes());
+        page[18..20].copy_from_slice(&u16::try_from(n).expect("rows").to_le_bytes());
+        let mut off = 24usize;
+        for r in 0..n {
+            for c in 0..num_cols {
+                let cell = (row + r) * num_cols + c;
+                let bits = if cell.is_multiple_of(37) {
+                    missing
+                } else {
+                    #[allow(clippy::cast_precision_loss)]
+                    let v = cell as f64 * 0.5;
+                    v.to_bits()
+                };
+                page[off..off + 8].copy_from_slice(&bits.to_le_bytes());
+                off += 8;
+            }
+        }
+        bytes.extend_from_slice(&page);
+        row += n;
+    }
+    let mut builder = MockDatasetBuilder::new(Arc::<[u8]>::from(bytes))
+        .with_row_len(row_len)
+        .with_total_rows(total_rows as u64)
+        .with_rows_per_page(rows_per_page as u64);
+    builder.page_size = page_size;
+    for c in 0..num_cols {
+        builder = builder.with_column(
+            &format!("c{c}"),
+            LogicalType::Float,
+            8,
+            u32::try_from(c * 8).expect("offset"),
+        );
+    }
+    builder.build()
+}
+
+#[test]
+fn columnar_matches_row_major_across_tile_boundaries() {
+    // 256 columns → row_len 2048 → ~128 rows per transpose tile, so 320 rows spans >2 tiles
+    // (and 5 pages of 64 rows). Batch sizes are chosen to interleave with both tile and page
+    // boundaries so the tiled fill is exercised against the row-major reference at every split.
+    let ds = make_wide_f64_dataset(256, 320, 64);
+    for batch_rows in [50usize, 64, 100, 128, 320] {
+        let row_major = ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(batch_rows))
+            .with_column_major_decode(crate::ColumnMajorDecode::Off)
+            .collect_batches()
+            .expect("row-major batches");
+        let column_major = ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(batch_rows))
+            .collect_batches_columnar()
+            .expect("column-major batches");
+        assert_collected_batches_eq(&row_major, &column_major);
+    }
+}
+
+/// Flatten an all-`F64` batch set into per-column `(value_bits, is_valid)` rows in global row
+/// order, so two decode paths can be compared regardless of how they split rows into batches
+/// (parallel chunk boundaries differ from the serial uniform-batch boundaries).
+fn flatten_f64_columns(
+    batches: &[crate::OwnedColumnarBatch],
+    num_cols: usize,
+) -> Vec<Vec<(u64, bool)>> {
+    let mut sorted: Vec<&crate::OwnedColumnarBatch> = batches.iter().collect();
+    sorted.sort_by_key(|b| b.row_base);
+    let mut cols: Vec<Vec<(u64, bool)>> = vec![Vec::new(); num_cols];
+    for batch in sorted {
+        for (ci, col) in batch.columns.iter().enumerate() {
+            let OwnedColumnBuffer::F64 { values, valid } = col else {
+                panic!("expected F64 column, got {col:?}");
+            };
+            for (i, v) in values.iter().enumerate() {
+                let is_valid = valid
+                    .as_ref()
+                    .is_none_or(|bits| (bits[i / 64] >> (i % 64)) & 1 == 1);
+                cols[ci].push((v.to_bits(), is_valid));
+            }
+        }
+    }
+    cols
+}
+
+#[test]
+fn columnar_flag_matches_default_serial() {
+    // 10 pages of 64 columns; batch splits interleave with page boundaries.
+    let ds = make_wide_f64_dataset(64, 500, 50);
+    let reference = ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(128))
+        .with_column_major_decode(crate::ColumnMajorDecode::Off)
+        .collect_batches()
+        .expect("row-major default");
+    let flagged = ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(128))
+        .with_column_major_decode(crate::ColumnMajorDecode::On)
+        .collect_batches()
+        .expect("column-major via flag");
+    // Same source, same batch hint, serial → identical batch boundaries and contents.
+    assert_collected_batches_eq(&reference, &flagged);
+}
+
+#[test]
+fn columnar_flag_matches_default_parallel() {
+    let ds = make_wide_f64_dataset(64, 500, 50);
+    let reference = flatten_f64_columns(
+        &ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(128))
+            .with_column_major_decode(crate::ColumnMajorDecode::Off)
+            .collect_batches()
+            .expect("serial row-major"),
+        64,
+    );
+    // Parallel row-major (flag off) and parallel column-major (flag on) must both reproduce
+    // the serial row-major values once flattened to global row order.
+    for column_major in [crate::ColumnMajorDecode::Off, crate::ColumnMajorDecode::On] {
+        let got = flatten_f64_columns(
+            &ScanBuilder::new(&ds)
+                .with_batch_hint(crate::BatchHint::Rows(128))
+                .with_parallelism(crate::Parallelism::Threads(4))
+                .with_column_major_decode(column_major)
+                .collect_batches()
+                .expect("parallel batches"),
+            64,
+        );
+        assert_eq!(got, reference, "mismatch for {column_major:?}");
+    }
+}
+
+#[test]
+fn columnar_flag_falls_back_for_row_limit_and_range() {
+    let ds = make_wide_f64_dataset(32, 400, 50);
+    // A row limit and a row range both disable the column-major fill; the flagged result must
+    // still equal the row-major reference under the same selection.
+    let limited_ref = ScanBuilder::new(&ds)
+        .limit(137)
+        .with_column_major_decode(crate::ColumnMajorDecode::Off)
+        .collect_batches()
+        .expect("row-major limited");
+    let limited_flagged = ScanBuilder::new(&ds)
+        .limit(137)
+        .with_column_major_decode(crate::ColumnMajorDecode::On)
+        .collect_batches()
+        .expect("flagged limited");
+    assert_collected_batches_eq(&limited_ref, &limited_flagged);
+
+    let range = crate::RowSelection::range(40, 260);
+    let range_ref = ScanBuilder::new(&ds)
+        .select(range)
+        .with_column_major_decode(crate::ColumnMajorDecode::Off)
+        .collect_batches()
+        .expect("row-major range");
+    let range_flagged = ScanBuilder::new(&ds)
+        .select(range)
+        .with_column_major_decode(crate::ColumnMajorDecode::On)
+        .collect_batches()
+        .expect("flagged range");
+    assert_collected_batches_eq(&range_ref, &range_flagged);
+}
+
+#[test]
+fn columnar_flag_streaming_owned_matches_default() {
+    // visit_owned_batches is the streaming path the Polars plugin uses. 10 pages so the
+    // parallel streaming workers engage.
+    let ds = make_wide_f64_dataset(64, 500, 50);
+    let mut reference_batches = Vec::new();
+    ScanBuilder::new(&ds)
+        .with_batch_hint(crate::BatchHint::Rows(128))
+        .with_column_major_decode(crate::ColumnMajorDecode::Off)
+        .visit_owned_batches(|b| {
+            reference_batches.push(b);
+            Ok(ControlFlow::Continue(()))
+        })
+        .expect("row-major stream");
+    let reference = flatten_f64_columns(&reference_batches, 64);
+
+    for parallelism in [crate::Parallelism::None, crate::Parallelism::Threads(4)] {
+        let mut got_batches = Vec::new();
+        ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(128))
+            .with_parallelism(parallelism)
+            .with_column_major_decode(crate::ColumnMajorDecode::On)
+            .visit_owned_batches(|b| {
+                got_batches.push(b);
+                Ok(ControlFlow::Continue(()))
+            })
+            .expect("column-major stream");
+        assert_eq!(
+            flatten_f64_columns(&got_batches, 64),
+            reference,
+            "stream mismatch for {parallelism:?}"
+        );
+    }
+}
+
+#[test]
+fn columnar_flag_streaming_owned_early_stop_matches_default() {
+    // Stopping after two batches must deliver the same rows under both decode paths (serial,
+    // where batch boundaries are deterministic).
+    let ds = make_wide_f64_dataset(32, 600, 50);
+    let take_first_two = |column_major: crate::ColumnMajorDecode| {
+        let mut batches = Vec::new();
+        ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(128))
+            .with_parallelism(crate::Parallelism::None)
+            .with_column_major_decode(column_major)
+            .visit_owned_batches(|b| {
+                batches.push(b);
+                if batches.len() == 2 {
+                    Ok(ControlFlow::Break(()))
+                } else {
+                    Ok(ControlFlow::Continue(()))
+                }
+            })
+            .expect("stream");
+        batches
+    };
+    let row_major = take_first_two(crate::ColumnMajorDecode::Off);
+    let column_major = take_first_two(crate::ColumnMajorDecode::On);
+    assert_eq!(row_major.len(), 2);
+    assert_eq!(column_major.len(), 2);
+    assert_collected_batches_eq(&row_major, &column_major);
+}
+
+fn assert_batches_eq(left: &[OwnedColumnBuffer], right: &[OwnedColumnBuffer]) {
+    assert_eq!(left.len(), right.len(), "column count");
+    for (lc, rc) in left.iter().zip(right) {
+        match (lc, rc) {
+            (
+                OwnedColumnBuffer::F64 {
+                    values: lv,
+                    valid: lval,
+                },
+                OwnedColumnBuffer::F64 {
+                    values: rv,
+                    valid: rval,
+                },
+            ) => {
+                let lbits: Vec<u64> = lv.iter().map(|v| v.to_bits()).collect();
+                let rbits: Vec<u64> = rv.iter().map(|v| v.to_bits()).collect();
+                assert_eq!(lbits, rbits, "F64 value bits mismatch");
+                assert_eq!(lval, rval, "F64 validity mismatch");
+            }
+            other => panic!("unexpected column kinds: {other:?}"),
+        }
+    }
+}
+
+fn assert_collected_batches_eq(
+    left: &[crate::OwnedColumnarBatch],
+    right: &[crate::OwnedColumnarBatch],
+) {
+    assert_eq!(left.len(), right.len(), "batch count");
+    for (l, r) in left.iter().zip(right) {
+        assert_eq!(l.row_base, r.row_base, "row_base mismatch");
+        assert_eq!(l.row_count, r.row_count, "row_count mismatch");
+        assert_batches_eq(&l.columns, &r.columns);
+    }
+}
+
+#[test]
+fn columnar_matches_row_major_multi_page_with_nulls() {
+    let missing = f64::from_bits(SAS_NUMERIC_MISSING_SENTINEL);
+    let page0: [[f64; 2]; 5] = [
+        [1.0, 2.0],
+        [3.5, missing],
+        [-4.0, 5.25],
+        [6.0, 7.0],
+        [missing, 8.0],
+    ];
+    let page1: [[f64; 2]; 4] = [[9.0, 10.0], [11.5, 12.0], [13.0, missing], [14.25, 15.0]];
+    let ds = make_2col_f64_dataset(&[&page0, &page1]);
+
+    // Batch sizes that split within a page, across pages, and span the whole file.
+    for batch_rows in [2usize, 3, 5, 64] {
+        let row_major = ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(batch_rows))
+            .with_column_major_decode(crate::ColumnMajorDecode::Off)
+            .collect_batches()
+            .expect("row-major batches");
+        let column_major = ScanBuilder::new(&ds)
+            .with_batch_hint(crate::BatchHint::Rows(batch_rows))
+            .collect_batches_columnar()
+            .expect("column-major batches");
+        assert_collected_batches_eq(&row_major, &column_major);
+    }
+}
+
+#[test]
+fn columnar_falls_back_for_compressed_pages() {
+    // 0xC5,'A' → RLE insert of 8 'A' bytes = one 8-byte f64 row. Compressed pages take the
+    // row-major fallback inside collect_batches_columnar, so the two paths must still agree.
+    let ds = MockDatasetBuilder::new(Arc::<[u8]>::from(make_compressed_page(&[0xC5u8, b'A'], 64, 4)))
+        .with_column("CODE", LogicalType::Float, 8, 0)
+        .with_row_len(8)
+        .with_total_rows(1)
+        .with_rows_per_page(1)
+        .with_compression(CompressionKind::Row)
+        .build();
+
+    let row_major = ScanBuilder::new(&ds)
+        .collect_batches()
+        .expect("row-major batches");
+    let column_major = ScanBuilder::new(&ds)
+        .collect_batches_columnar()
+        .expect("column-major batches");
+    assert_collected_batches_eq(&row_major, &column_major);
+}
+
+#[test]
+fn columnar_falls_back_for_string_columns() {
+    // A non-numeric plan has no column-major fast path; collect_batches_columnar must defer
+    // to the row-major collect_batches and return identical Utf8 output.
+    let bytes = Arc::<[u8]>::from(make_pages());
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("txt", LogicalType::String, 4, 0)
+        .with_row_len(4)
+        .with_total_rows(3)
+        .with_rows_per_page(1)
+        .build();
+
+    let row_major = ScanBuilder::new(&ds)
+        .collect_batches()
+        .expect("row-major batches");
+    let column_major = ScanBuilder::new(&ds)
+        .collect_batches_columnar()
+        .expect("column-major batches");
+    assert_eq!(row_major.len(), column_major.len());
+    for (l, r) in row_major.iter().zip(&column_major) {
+        assert_eq!(l.row_count, r.row_count);
+        assert_eq!(
+            read_utf8_column(&l.columns[0].as_borrowed()),
+            read_utf8_column(&r.columns[0].as_borrowed()),
+        );
+    }
+}

@@ -199,6 +199,15 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::Time { values, valid } => {
+                // SAS time values are seconds and CAN fall outside a clock day — elapsed-time
+                // data may be >= 24h or negative. `pl.Time` (Time64) only represents [0, 24h),
+                // so such values surface as null in the resulting column. This is a deliberate
+                // limitation: we keep the ergonomic `pl.Time` dtype for the common clock-time
+                // case rather than widening every time column to `pl.Duration`. The core
+                // `OwnedColumnBuffer::Time` retains the exact second value (verified against
+                // readstat); callers needing out-of-range times can read the core batches
+                // directly or post-process. (verified vs pyreadstat: only out-of-range cells
+                // differ, by nulling.)
                 let nanos = values
                     .into_iter()
                     .map(|value| i64::from(value.seconds_since_midnight) * 1_000_000_000)
