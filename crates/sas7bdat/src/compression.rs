@@ -232,15 +232,29 @@ pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
 }
 
 /// Copies `len` bytes from `back` bytes before the current end of `output`.
-/// The encoding never references past the start nor overlaps the cursor, so a
-/// back-reference that does is treated as corrupt input.
+///
+/// `len` may exceed `back`: an RDC copy command can encode `copy_len` up to 271 with `back` as
+/// small as 3, which is the standard LZ77 run-length extension — bytes written during the copy
+/// feed the tail of the same copy (e.g. `back = 1` repeats the last byte `len` times). Only an
+/// out-of-range start (`back == 0` or `back > output.len()`) is corrupt.
 #[inline]
 fn copy_backref(output: &mut Vec<u8>, back: usize, len: usize) -> Result<()> {
-    if back == 0 || output.len() < back || len > back {
+    if back == 0 || output.len() < back {
         return Err(compression_error("copy-backref invalid"));
     }
     let start = output.len() - back;
-    output.extend_from_within(start..start + len);
+    if len <= back {
+        // Non-overlapping: the whole source range already exists; bulk-copy it.
+        output.extend_from_within(start..start + len);
+    } else {
+        // Overlapping run: copy byte-by-byte so each freshly written byte can feed later
+        // positions of this same copy.
+        output.reserve(len);
+        for i in 0..len {
+            let byte = output[start + i];
+            output.push(byte);
+        }
+    }
     Ok(())
 }
 
@@ -280,6 +294,34 @@ mod tests {
         let mut output = Vec::new();
         decompress_rdc(&compressed, 6, &mut output).expect("rdc backref");
         assert_eq!(output, b"ABCABC");
+    }
+
+    #[test]
+    fn decompresses_rdc_overlapping_short_copy() {
+        // 3 literals "ABC", then a short copy of length 5 from back = 3 (overlap: len > back).
+        // marker high nibble = copy_len (5); back = 3 + (marker & 0x0F) + next*16 = 3.
+        // The copy re-reads its own freshly written bytes: ABC → ABCABCAB.
+        let mut compressed = Vec::new();
+        compressed.extend_from_slice(&0x1000u16.to_be_bytes()); // literal, literal, literal, marker
+        compressed.extend_from_slice(b"ABC");
+        compressed.extend_from_slice(&[0x50, 0x00]); // copy_len 5, back 3
+        let mut output = Vec::new();
+        decompress_rdc(&compressed, 8, &mut output).expect("rdc overlapping short copy");
+        assert_eq!(output, b"ABCABCAB");
+    }
+
+    #[test]
+    fn decompresses_rdc_overlapping_long_copy() {
+        // 3 literals "ABC", then a long copy (marker high nibble == 2) of length 16 from
+        // back = 3. copy_len = 16 + third_byte; back = 3 + (marker & 0x0F) + next*16 = 3.
+        // The 3-byte pattern tiles across the 16-byte overlapping run.
+        let mut compressed = Vec::new();
+        compressed.extend_from_slice(&0x1000u16.to_be_bytes());
+        compressed.extend_from_slice(b"ABC");
+        compressed.extend_from_slice(&[0x20, 0x00, 0x00]); // long copy, back 3, copy_len 16+0
+        let mut output = Vec::new();
+        decompress_rdc(&compressed, 19, &mut output).expect("rdc overlapping long copy");
+        assert_eq!(output, b"ABCABCABCABCABCABCA");
     }
 
     #[test]
