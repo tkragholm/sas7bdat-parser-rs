@@ -763,16 +763,23 @@ fn contiguous_data_start(
     };
     let mut data_start = base_offset.saturating_add(align_adjust);
 
+    // StatTransfer-written files (release "X.0000M0") place row data immediately after the
+    // subheader-pointer array instead of padding the start up to an 8-byte boundary the way
+    // SAS does. When `align_adjust` padded us forward but the bytes at `base_offset` are real
+    // data (not zero/space padding), undo the pad — otherwise every column is shifted by the
+    // pad width. Observed on a 32-bit StatTransfer file whose data mix page has an odd
+    // subheader count (base_offset % 8 == 4), which `readstat` decodes at `base_offset`.
     if matches!(page_kind, PageKind::Mix)
-        && (data_start % 8) == 4
-        && usize::try_from(data_start.saturating_add(4))
-            .ok()
-            .is_some_and(|end| end <= page.len())
+        && align_adjust != 0
+        && is_stattransfer_release(&header.release)
     {
-        let start = usize::try_from(data_start).unwrap_or(0);
-        let word = u32::from_le_bytes(page[start..start + 4].try_into().unwrap_or([0; 4]));
-        if word == 0 || word == 0x2020_2020 || !is_stattransfer_release(&header.release) {
-            data_start = data_start.saturating_add(4);
+        let base = usize::try_from(base_offset).unwrap_or(0);
+        let looks_padded = page.get(base..base.saturating_add(4)).is_some_and(|bytes| {
+            let word = u32::from_le_bytes(bytes.try_into().unwrap_or([0; 4]));
+            word == 0 || word == 0x2020_2020
+        });
+        if !looks_padded {
+            data_start = base_offset;
         }
     }
 
@@ -912,6 +919,40 @@ mod tests {
         assert_eq!(second.row_count, 1);
         assert_eq!(second.data_start, crate::types::ByteOffset(24));
         assert_eq!(second.row_span_count, 0);
+    }
+
+    #[test]
+    fn stattransfer_mix_data_start_is_not_padded_when_rows_follow_pointers() {
+        // 32-bit, 17 subheaders → base_offset = 24 + 17*12 = 228 (% 8 == 4), which SAS would
+        // pad to 232. A StatTransfer file ("9.0000M0") instead places rows at 228; padding
+        // would shift every column by 4 (regression: NYYTS_2000_2020_PublicUse).
+        let mut layout = simple_layout(512, 1, 16, 1);
+        layout.header.release = "9.0000M0".to_owned();
+
+        // Real (non-padding) data at offset 228.
+        let mut page = vec![0u8; 512];
+        page[228..232].copy_from_slice(&[0x00, 0x40, 0x9f, 0x40]);
+        assert_eq!(
+            contiguous_data_start(&layout, &page, PageKind::Mix, 17).expect("data start"),
+            228,
+            "StatTransfer rows sit at base_offset, not the 8-padded offset"
+        );
+
+        // If those 4 bytes are zero/space padding, the pad is real → keep the aligned 232.
+        let padded = vec![0u8; 512];
+        assert_eq!(
+            contiguous_data_start(&layout, &padded, PageKind::Mix, 17).expect("data start"),
+            232,
+            "zero padding at base_offset means the row data really is 8-aligned"
+        );
+
+        // A non-StatTransfer release always pads to 8, regardless of the bytes.
+        layout.header.release = "9.0401M3".to_owned();
+        assert_eq!(
+            contiguous_data_start(&layout, &page, PageKind::Mix, 17).expect("data start"),
+            232,
+            "non-StatTransfer files keep the 8-byte alignment"
+        );
     }
 
     #[test]
