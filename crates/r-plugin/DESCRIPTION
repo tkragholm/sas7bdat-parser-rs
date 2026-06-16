@@ -1,0 +1,20 @@
+Package: readsas
+Title: Fast SAS7BDAT Reader Backed by Rust
+Version: 0.0.0.9000
+Authors@R:
+    person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre"))
+Description: High-performance reader for SAS7BDAT files. The parsing core is
+    implemented in Rust (the sas7bdat crate) and exposed to R via extendr.
+    Returns a tibble with haven-compatible column types (Date, POSIXct, hms,
+    character, double).
+License: MIT + file LICENSE
+Encoding: UTF-8
+Language: en-US
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+SystemRequirements: Cargo (Rust's package manager), rustc
+Suggests:
+    tibble,
+    hms,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

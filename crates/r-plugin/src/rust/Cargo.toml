@@ -1,0 +1,26 @@
+[package]
+name = "readsas"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+name = "readsas"
+
+[dependencies]
+extendr-api = "0.7"
+# Path dependency on the workspace core. For a distributable package this is
+# vendored or published to crates.io (see docs/r-bindings/design-direct-fill.md);
+# for local dev the relative path resolves against the repo.
+sas7bdat = { path = "../../../sas7bdat" }
+
+# Detach from the parent cargo workspace: an R package's Rust crate builds
+# standalone (and is copied in isolation by R CMD INSTALL).
+[workspace]
+
+[profile.release]
+# R catches Rust panics and converts them to R errors, which requires unwinding.
+# Do NOT set panic = "abort" here.
+opt-level = 3
+lto = "thin"

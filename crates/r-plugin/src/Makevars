@@ -1,0 +1,19 @@
+TARGET_DIR = $(CURDIR)/rust/target
+LIBDIR = $(TARGET_DIR)/release
+STATLIB = $(LIBDIR)/libreadsas.a
+PKG_LIBS = -L$(LIBDIR) -lreadsas
+
+CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
+
+$(SHLIB): $(STATLIB)
+
+$(STATLIB):
+	cargo build $(CARGO_BUILD_ARGS)
+
+C_clean:
+	rm -Rf $(LIBDIR)/build
+
+clean:
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
+
+.PHONY: C_clean clean
