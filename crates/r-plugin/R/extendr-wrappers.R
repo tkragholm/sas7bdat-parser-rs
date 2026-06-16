@@ -5,4 +5,4 @@
 #' @keywords internal
 NULL
 
-read_sas7bdat <- function(path) .Call("wrap__read_sas7bdat", path, PACKAGE = "readsas")
+read_sas7bdat <- function(path, catalog) .Call("wrap__read_sas7bdat", path, catalog, PACKAGE = "readsas")

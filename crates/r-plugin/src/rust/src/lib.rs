@@ -6,10 +6,17 @@
 //! into a REALSXP (R owns its allocations); strings are interned into UTF-8
 //! CHARSXPs. `haven`-parity defaults: all SAS numerics -> double, SAS missings ->
 //! plain `NA`, dates -> `Date`, datetimes -> `POSIXct` (UTC), times -> `hms`.
+//!
+//! Metadata: SAS variable labels become the column `label` attribute, and
+//! value-label formats (from an attached `.sas7bcat` catalog) become
+//! `haven_labelled` columns (a `labels` named vector + the haven/vctrs class).
 
 use extendr_api::prelude::*;
-use sas7bdat::{Dataset, OwnedColumnBuffer};
+use sas7bdat::{
+    catalog::normalize_format_name, Dataset, LabelSet, OwnedColumnBuffer, ValueKey, ValueType,
+};
 use std::ops::ControlFlow;
+use std::path::{Path, PathBuf};
 
 /// Which R class the assembled double column carries. The epoch shift (for Date/
 /// DateTime) is applied to the *values* during accumulation, not here — this only
@@ -38,6 +45,14 @@ impl ColAccum {
             ColAccum::Text { values } => values.len(),
         }
     }
+}
+
+/// Per-column metadata resolved up front (before decoding): the SAS variable
+/// label and the value-label set (if the column's format matches an attached
+/// catalog format).
+struct ColMeta {
+    var_label: Option<String>,
+    value_labels: Option<LabelSet>,
 }
 
 /// `valid` is a SAS/Arrow-style validity bitmap: bit `i` set => row `i` is
@@ -98,7 +113,7 @@ fn append_column(slot: &mut Option<ColAccum>, col: OwnedColumnBuffer) {
         OwnedColumnBuffer::I32 { values, valid } => {
             let acc = slot.get_or_insert_with(|| ColAccum::Real { values: Vec::new(), class: RealClass::Plain });
             if let ColAccum::Real { values: out, .. } = acc {
-                push_reals(out, &values, valid.as_deref(), |v| f64::from(v));
+                push_reals(out, &values, valid.as_deref(), f64::from);
             }
         }
         OwnedColumnBuffer::I64 { values, valid } => {
@@ -153,13 +168,71 @@ fn append_column(slot: &mut Option<ColAccum>, col: OwnedColumnBuffer) {
     }
 }
 
-/// Materialize one accumulated column into its R vector with class/attributes.
-fn accum_to_robj(acc: ColAccum) -> Robj {
-    match acc {
+/// Build a named numeric `labels` vector (names = label text, values = codes)
+/// from a numeric value-label set. `None` if it carries no numeric keys.
+fn numeric_labels_robj(ls: &LabelSet) -> Option<Robj> {
+    let mut codes: Vec<f64> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    for vl in &ls.labels {
+        let code = match vl.key {
+            ValueKey::Numeric(v) => v,
+            ValueKey::Integer(v) => f64::from(v),
+            // Tagged missings would map to haven::tagged_na — deferred (v1).
+            ValueKey::Tagged(_) | ValueKey::String(_) => continue,
+        };
+        codes.push(code);
+        names.push(vl.label.clone());
+    }
+    if codes.is_empty() {
+        return None;
+    }
+    let mut lab: Robj = Doubles::from_values(codes).into();
+    lab.set_names(names.iter().map(String::as_str)).unwrap();
+    Some(lab)
+}
+
+/// Build a named character `labels` vector (names = label text, values = codes)
+/// from a string value-label set. `None` if it carries no string keys.
+fn string_labels_robj(ls: &LabelSet) -> Option<Robj> {
+    let mut codes: Vec<String> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    for vl in &ls.labels {
+        if let ValueKey::String(s) = &vl.key {
+            codes.push(s.clone());
+            names.push(vl.label.clone());
+        }
+    }
+    if codes.is_empty() {
+        return None;
+    }
+    let mut s = Strings::new(codes.len());
+    for (i, code) in codes.into_iter().enumerate() {
+        s.set_elt(i, Rstr::from(code));
+    }
+    let mut lab: Robj = s.into();
+    lab.set_names(names.iter().map(String::as_str)).unwrap();
+    Some(lab)
+}
+
+/// Materialize one accumulated column into its R vector with class/attributes,
+/// including the variable label and (where applicable) `haven_labelled` value
+/// labels.
+fn accum_to_robj(acc: ColAccum, meta: &ColMeta) -> Robj {
+    let mut col = match acc {
         ColAccum::Real { values, class } => {
             let mut col: Robj = Doubles::from_values(values).into();
             match class {
-                RealClass::Plain => {}
+                RealClass::Plain => {
+                    // Value labels apply only to plain numerics (not temporals).
+                    if let Some(ls) = &meta.value_labels {
+                        if ls.value_type == ValueType::Numeric {
+                            if let Some(labels) = numeric_labels_robj(ls) {
+                                col.set_attrib("labels", labels).unwrap();
+                                col.set_class(&["haven_labelled", "vctrs_vctr", "double"]).unwrap();
+                            }
+                        }
+                    }
+                }
                 RealClass::Date => {
                     col.set_class(&["Date"]).unwrap();
                 }
@@ -182,9 +255,24 @@ fn accum_to_robj(acc: ColAccum) -> Robj {
                     None => s.set_elt(i, Rstr::na()),
                 }
             }
-            s.into()
+            let mut col: Robj = s.into();
+            if let Some(ls) = &meta.value_labels {
+                if ls.value_type == ValueType::String {
+                    if let Some(labels) = string_labels_robj(ls) {
+                        col.set_attrib("labels", labels).unwrap();
+                        col.set_class(&["haven_labelled", "vctrs_vctr", "character"]).unwrap();
+                    }
+                }
+            }
+            col
         }
+    };
+
+    // Variable label applies to every column type, alongside any existing class.
+    if let Some(label) = &meta.var_label {
+        col.set_attrib("label", label.as_str()).unwrap();
     }
+    col
 }
 
 /// Assemble a bare `data.frame` from named columns. Class/tibble reclass happens
@@ -208,10 +296,48 @@ fn build_data_frame(names: &[String], cols: Vec<Robj>, nrow: usize) -> Robj {
     df
 }
 
-fn read_impl(path: &str) -> std::result::Result<Robj, String> {
-    let ds = Dataset::open(path).map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
+/// Resolve the catalog path to attach: an explicit argument, else a same-stem
+/// `.sas7bcat` sibling if one exists.
+fn resolve_catalog(path: &str, catalog: Option<&str>) -> Option<PathBuf> {
+    if let Some(c) = catalog {
+        return Some(PathBuf::from(c));
+    }
+    let sibling = Path::new(path).with_extension("sas7bcat");
+    sibling.exists().then_some(sibling)
+}
 
+fn read_impl(path: &str, catalog: Option<&str>) -> std::result::Result<Robj, String> {
+    let mut ds = Dataset::open(path).map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
+
+    if let Some(cat_path) = resolve_catalog(path, catalog) {
+        match ds.attach_catalog(&cat_path) {
+            Ok(()) => {}
+            // An explicitly-requested catalog that fails is an error; an
+            // auto-detected sibling that fails to parse is silently ignored.
+            Err(e) if catalog.is_some() => {
+                return Err(format!("sas7bdat: catalog `{}`: {e}", cat_path.display()));
+            }
+            Err(_) => {}
+        }
+    }
+
+    // Resolve per-column metadata up front. These borrows end before `scan()`.
     let names: Vec<String> = ds.columns().iter().map(|c| c.name.clone()).collect();
+    let metas: Vec<ColMeta> = {
+        let label_sets = &ds.metadata().label_sets;
+        ds.columns()
+            .iter()
+            .map(|c| ColMeta {
+                var_label: c.label.clone(),
+                value_labels: c
+                    .format
+                    .as_deref()
+                    .map(normalize_format_name)
+                    .and_then(|norm| label_sets.get(&norm).cloned()),
+            })
+            .collect()
+    };
+
     let ncols = names.len();
     let mut accums: Vec<Option<ColAccum>> = (0..ncols).map(|_| None).collect();
 
@@ -233,10 +359,17 @@ fn read_impl(path: &str) -> std::result::Result<Robj, String> {
 
     let cols: Vec<Robj> = accums
         .into_iter()
-        .map(|a| match a {
-            Some(acc) => accum_to_robj(acc),
+        .zip(metas.iter())
+        .map(|(a, meta)| match a {
+            Some(acc) => accum_to_robj(acc, meta),
             // A column with no batches (e.g. zero-row file): empty double column.
-            None => Doubles::new(nrow).into(),
+            None => {
+                let mut col: Robj = Doubles::new(nrow).into();
+                if let Some(label) = &meta.var_label {
+                    col.set_attrib("label", label.as_str()).unwrap();
+                }
+                col
+            }
         })
         .collect();
 
@@ -245,11 +378,14 @@ fn read_impl(path: &str) -> std::result::Result<Robj, String> {
 
 /// Read a SAS7BDAT file into a bare R `data.frame`.
 ///
+/// `catalog` is an optional path to a `.sas7bcat` value-label catalog. When
+/// absent, a same-stem `.sas7bcat` sibling is attached if present.
+///
 /// Errors are converted to R conditions via `throw_r_error` (longjmp), which
 /// extendr handles correctly.
 #[extendr]
-fn read_sas7bdat(path: &str) -> Robj {
-    match read_impl(path) {
+fn read_sas7bdat(path: &str, catalog: Option<String>) -> Robj {
+    match read_impl(path, catalog.as_deref()) {
         Ok(df) => df,
         Err(e) => throw_r_error(e),
     }
