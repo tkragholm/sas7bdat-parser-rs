@@ -61,13 +61,14 @@ raw `F64` buffer when a column carries fractional seconds (its integer-only
 `POSIXct`/`hms` (which represent fractional seconds), matching `haven` — so a
 `DATETIME` column with sub-second values is `POSIXct`, not `double`.
 
+(The Polars plugin already does the equivalent: it coerces an F64 fallback
+buffer to the declared temporal dtype from its schema. This binding now matches
+that behavior.)
+
 ### Known limitations / follow-ups
 
 - **Tagged missings in value labels** (`ValueKey::Tagged`) are skipped from the
   `labels` vector; a `haven::tagged_na` mapping is a follow-up.
-- **Polars has the analogous latent issue.** The Polars plugin maps the buffer
-  variant directly, so a fractional-seconds `DATETIME` column surfaces as
-  `Float64` there. The same logical-type-driven mapping would fix it.
 - **Int64 columns** (from explicit schema overrides) are coerced to `double`
   for haven-parity. A `bit64::integer64` opt-in is a follow-up.
 - **Distribution.** The relative path dependency on `sas7bdat` works for in-repo
