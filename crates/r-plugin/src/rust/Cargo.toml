@@ -10,6 +10,10 @@ name = "readsas"
 
 [dependencies]
 extendr-api = "0.7"
+# Same version extendr-api 0.7 depends on, so `SEXP` is the identical type.
+# Used for the hot string path (raw SET_STRING_ELT / Rf_mkCharLenCE), bypassing
+# extendr's per-call thread-guard + bounds-check overhead.
+libR-sys = "0.7.1"
 # Path dependency on the workspace core. For a distributable package this is
 # vendored or published to crates.io (see docs/r-bindings/design-direct-fill.md);
 # for local dev the relative path resolves against the repo.

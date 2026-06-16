@@ -49,15 +49,21 @@ The Rust crate (`src/rust`) depends on the workspace `sas7bdat` crate by relativ
 path. The Makevars invokes `cargo build` to produce `libreadsas.a`, which is
 linked into `readsas.so`.
 
-## Status: v1
+## Performance
 
-This is the first working binding. It consumes the core's existing
-`OwnedColumnBuffer` columns and marshals them into R vectors on the main thread:
-one memcpy per numeric/temporal column, UTF-8 interning for strings. Variable
-labels and value-label catalogs are wired through (see above). See
-`../../docs/r-bindings/design-direct-fill.md` for the design and the deferred
-optimizations (numeric direct-fill, dictionary-driven string interning,
-tagged-NA haven-parity).
+The core decodes batches across all cores; `read_sas` pre-allocates each R
+vector at the known row count and fills it in place on the main thread:
+
+- **Numeric / temporal:** one copy from the decoded batch into the REALSXP
+  (column-major, so each vector is written sequentially), with the SAS→R epoch
+  shift and tagged-NA folded into the write — no intermediate `Rfloat` buffer.
+- **Character:** a per-column dictionary interns each distinct value once and
+  fills cells with raw `SET_STRING_ELT` (UTF-8), avoiding per-cell `mkChar` and
+  extendr `set_elt` overhead — important for wide files with millions of string
+  cells.
+
+See `benchmarks/` for numbers (≈15–24× faster than `haven`) and
+`../../docs/r-bindings/design-direct-fill.md` for the design.
 
 Column R types are driven by the SAS **logical type**, not the core's
 `OwnedColumnBuffer` variant. This matters for temporal columns: the core emits a

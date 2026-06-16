@@ -190,6 +190,7 @@ name = "readsas"
 version = "0.0.1"
 dependencies = [
  "extendr-api",
+ "libR-sys",
  "sas7bdat",
 ]
 

@@ -22,10 +22,9 @@ and **pandas** (`pd.read_sas`, an independent implementation).
   | `NYYTS_2000_2020_PublicUse` | 193 MB | 121,730 × 514 | NY Youth Tobacco Survey |
   | `ahs2013n` | 2.15 GB | 70,044 × 4,041 | American Housing Survey (very wide) |
 
-- **Threads:** the Rust core and the Polars plugin decode across all 12 cores.
-  readstat / haven / pyreadstat / pandas are single-threaded (ReadStat is a
-  single-threaded C library). `readsas` currently does **not** enable the core's
-  parallelism (single-threaded decode + R marshalling) — see Findings.
+- **Threads:** the Rust core, the Polars plugin, and `readsas` decode across all
+  12 cores. readstat / haven / pyreadstat / pandas are single-threaded (ReadStat
+  is a single-threaded C library).
 
 All readers agreed on row counts on every file (correctness cross-check).
 
@@ -35,8 +34,8 @@ All readers agreed on row counts on every file (correctness cross-check).
 |---|---:|---:|---:|---:|
 | **rust-core** (ours) | 12 | **3436** | **3555** | **3232** |
 | **sas7bdat-polars** (ours) | 12 | 2308 | 2377 | 1816 |
+| **readsas** (ours, R) | 12 | 739 | 1443 | 482 |
 | rust-core, serial | 1 | 572 | 1047 | 1201 |
-| **readsas** (ours, R) | 1 | 230 | 597 | 133 |
 | pandas | 1 | 258 | 216 | 429 |
 | pyreadstat | 1 | 90 | 128 | 103 |
 | haven (R) | 1 | 47 | 60 | 32 |
@@ -47,8 +46,8 @@ Same data as wall-clock **min time (s)**, lower is better:
 |---|---:|---:|---:|
 | rust-core (12t) | 0.029 | 0.054 | 0.67 |
 | sas7bdat-polars (12t) | 0.043 | 0.081 | 1.19 |
+| readsas (12t) | 0.134 | 0.134 | 4.47 |
 | rust-core serial (1t) | 0.173 | 0.185 | 1.79 |
-| readsas (1t) | 0.430 | 0.324 | 16.15 |
 | pandas (1t) | 0.384 | 0.895 | 5.02 |
 | pyreadstat (1t) | 1.098 | 1.516 | 20.95 |
 | haven (1t) | 2.101 | 3.202 | 66.83 |
@@ -74,14 +73,14 @@ higher, so it does more total work, not just less parallel work.
 - **The Polars plugin** trails the raw core slightly (Arrow construction +
   Python boundary) but is still ~2.3 GB/s and **the fastest path that lands a
   usable DataFrame** in a host language.
-- **`readsas` beats `haven`** — its direct R competitor — by **~5–9×** on the
-  moderate files, despite being single-threaded, because the decode core is so
-  much faster than ReadStat.
-- **`readsas` regresses on the very wide table** (AHS, 4,041 cols → 16 s). The
-  bottleneck is the R marshalling: every cell goes through an `Rfloat` box and a
-  `Vec<Rfloat>` → REALSXP copy, ~283 M times. This is exactly what the deferred
-  *direct-fill* optimization (write the REALSXP in place, skip the box) targets,
-  plus enabling the core's parallelism for the decode. Two clear wins available.
+- **`readsas` beats `haven`** — its direct R competitor — by **15–24×**, and
+  beats `pandas` on every file. It pre-allocates each R vector at the known row
+  count and fills it in place (numeric: parallel decode + one copy into the
+  REALSXP; character: per-column dictionary interning via raw `SET_STRING_ELT`).
+  Earlier revisions were ~3× slower on wide tables; the wins were enabling the
+  core's parallelism, direct-fill (skip an `Rfloat` box + a second copy),
+  column-major fill order, and avoiding per-cell `mkChar`/extendr `set_elt`
+  overhead on the 180 M string cells of the AHS file.
 - **CLI:** `sas7bdat-convert` is 3.8–5.0× faster than the `readstat` CLI at the
   same read-and-write-CSV job.
 
