@@ -13,7 +13,8 @@
 
 use extendr_api::prelude::*;
 use sas7bdat::{
-    catalog::normalize_format_name, Dataset, LabelSet, OwnedColumnBuffer, ValueKey, ValueType,
+    catalog::normalize_format_name, Dataset, LabelSet, LogicalType, OwnedColumnBuffer, ValueKey,
+    ValueType,
 };
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -27,6 +28,41 @@ enum RealClass {
     Date,
     DateTime,
     Time,
+}
+
+impl RealClass {
+    /// SAS-epoch -> R-epoch shift applied to the raw SAS value (days for `Date`,
+    /// seconds for `DateTime`). `Time` is seconds-since-midnight (no shift);
+    /// `Plain` is verbatim.
+    const fn epoch_shift(self) -> f64 {
+        match self {
+            RealClass::Date => 3653.0,                 // days 1960-01-01 -> 1970-01-01
+            RealClass::DateTime => 315_619_200.0,      // seconds 1960 -> 1970
+            RealClass::Time | RealClass::Plain => 0.0,
+        }
+    }
+}
+
+/// The R column shape, derived from the SAS *logical type* — the semantic truth.
+/// We deliberately key off `logical_type`, not the `OwnedColumnBuffer` variant:
+/// the core emits a typed temporal buffer for whole-unit values but falls back
+/// to `F64` when a temporal column carries fractional seconds (its `SasDateTime`
+/// is integer-only). Driving the R type from `logical_type` keeps such columns
+/// as `POSIXct`/`hms` (which hold fractional seconds), matching `haven`.
+#[derive(Clone, Copy)]
+enum ColClass {
+    Real(RealClass),
+    Text,
+}
+
+const fn col_class(logical: LogicalType) -> ColClass {
+    match logical {
+        LogicalType::Date => ColClass::Real(RealClass::Date),
+        LogicalType::DateTime => ColClass::Real(RealClass::DateTime),
+        LogicalType::Time => ColClass::Real(RealClass::Time),
+        LogicalType::Integer | LogicalType::Float => ColClass::Real(RealClass::Plain),
+        LogicalType::String | LogicalType::Bytes => ColClass::Text,
+    }
 }
 
 /// One column accumulated across all batches into a single contiguous buffer,
@@ -51,6 +87,7 @@ impl ColAccum {
 /// label and the value-label set (if the column's format matches an attached
 /// catalog format).
 struct ColMeta {
+    class: ColClass,
     var_label: Option<String>,
     value_labels: Option<LabelSet>,
 }
@@ -106,65 +143,57 @@ fn push_strings(
     }
 }
 
-/// Fold one batch's column into its accumulator, initializing the accumulator's
-/// kind from the first batch's buffer variant.
-fn append_column(slot: &mut Option<ColAccum>, col: OwnedColumnBuffer) {
-    match col {
-        OwnedColumnBuffer::I32 { values, valid } => {
-            let acc = slot.get_or_insert_with(|| ColAccum::Real { values: Vec::new(), class: RealClass::Plain });
-            if let ColAccum::Real { values: out, .. } = acc {
-                push_reals(out, &values, valid.as_deref(), f64::from);
+/// Fold one batch's column into its (pre-typed) accumulator. The accumulator's
+/// class was fixed from the column's `logical_type`; here we only extract the
+/// raw SAS value out of whichever buffer variant the core produced (typed
+/// temporal or `F64` fallback) and apply the class's epoch shift.
+fn append_column(acc: &mut ColAccum, buffer: OwnedColumnBuffer) {
+    match acc {
+        ColAccum::Real { values: out, class } => {
+            let shift = class.epoch_shift();
+            match buffer {
+                OwnedColumnBuffer::F64 { values, valid } => {
+                    // Raw SAS value: days (Date), seconds (DateTime/Time), or plain.
+                    push_reals(out, &values, valid.as_deref(), |v| v - shift);
+                }
+                OwnedColumnBuffer::I64 { values, valid } => {
+                    #[allow(clippy::cast_precision_loss)]
+                    push_reals(out, &values, valid.as_deref(), |v| v as f64 - shift);
+                }
+                OwnedColumnBuffer::I32 { values, valid } => {
+                    push_reals(out, &values, valid.as_deref(), |v| f64::from(v) - shift);
+                }
+                OwnedColumnBuffer::Date { values, valid } => {
+                    push_reals(out, &values, valid.as_deref(), |d| {
+                        f64::from(d.days_since_sas_epoch) - shift
+                    });
+                }
+                OwnedColumnBuffer::DateTime { values, valid } => {
+                    #[allow(clippy::cast_precision_loss)]
+                    push_reals(out, &values, valid.as_deref(), |dt| {
+                        dt.seconds_since_sas_epoch as f64 - shift
+                    });
+                }
+                OwnedColumnBuffer::Time { values, valid } => {
+                    push_reals(out, &values, valid.as_deref(), |t| {
+                        f64::from(t.seconds_since_midnight) - shift
+                    });
+                }
+                // A numeric/temporal logical type never yields a string buffer.
+                OwnedColumnBuffer::Utf8 { .. } | OwnedColumnBuffer::RawBytes { .. } => {}
             }
         }
-        OwnedColumnBuffer::I64 { values, valid } => {
-            let acc = slot.get_or_insert_with(|| ColAccum::Real { values: Vec::new(), class: RealClass::Plain });
-            if let ColAccum::Real { values: out, .. } = acc {
-                // haven-parity: SAS numerics are doubles in R. Exact for |v| <= 2^53.
-                #[allow(clippy::cast_precision_loss)]
-                push_reals(out, &values, valid.as_deref(), |v| v as f64);
-            }
-        }
-        OwnedColumnBuffer::F64 { values, valid } => {
-            let acc = slot.get_or_insert_with(|| ColAccum::Real { values: Vec::new(), class: RealClass::Plain });
-            if let ColAccum::Real { values: out, .. } = acc {
-                push_reals(out, &values, valid.as_deref(), |v| v);
-            }
-        }
-        OwnedColumnBuffer::Date { values, valid } => {
-            let acc = slot.get_or_insert_with(|| ColAccum::Real { values: Vec::new(), class: RealClass::Date });
-            if let ColAccum::Real { values: out, .. } = acc {
-                // R `Date` counts days from 1970; core counts from 1960.
-                push_reals(out, &values, valid.as_deref(), |d| f64::from(d.unix_days()));
-            }
-        }
-        OwnedColumnBuffer::DateTime { values, valid } => {
-            let acc = slot.get_or_insert_with(|| ColAccum::Real { values: Vec::new(), class: RealClass::DateTime });
-            if let ColAccum::Real { values: out, .. } = acc {
-                // R `POSIXct` counts seconds from 1970; core counts from 1960.
-                #[allow(clippy::cast_precision_loss)]
-                push_reals(out, &values, valid.as_deref(), |dt| dt.unix_seconds() as f64);
-            }
-        }
-        OwnedColumnBuffer::Time { values, valid } => {
-            let acc = slot.get_or_insert_with(|| ColAccum::Real { values: Vec::new(), class: RealClass::Time });
-            if let ColAccum::Real { values: out, .. } = acc {
-                // `hms`: seconds since midnight, no epoch shift.
-                push_reals(out, &values, valid.as_deref(), |t| f64::from(t.seconds_since_midnight));
-            }
-        }
-        OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => {
-            let acc = slot.get_or_insert_with(|| ColAccum::Text { values: Vec::new() });
-            if let ColAccum::Text { values: out } = acc {
+        ColAccum::Text { values: out } => match buffer {
+            OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => {
                 push_strings(out, offsets.as_slice(), &data, valid.as_deref());
             }
-        }
-        OwnedColumnBuffer::RawBytes { offsets, data, valid } => {
-            // Uninterpreted binary -> lossy UTF-8 character column (rare in practice).
-            let acc = slot.get_or_insert_with(|| ColAccum::Text { values: Vec::new() });
-            if let ColAccum::Text { values: out } = acc {
+            OwnedColumnBuffer::RawBytes { offsets, data, valid } => {
+                // Uninterpreted binary -> lossy UTF-8 character column (rare).
                 push_strings(out, offsets.as_slice(), &data, valid.as_deref());
             }
-        }
+            // A string logical type never yields a numeric buffer.
+            _ => {}
+        },
     }
 }
 
@@ -328,6 +357,7 @@ fn read_impl(path: &str, catalog: Option<&str>) -> std::result::Result<Robj, Str
         ds.columns()
             .iter()
             .map(|c| ColMeta {
+                class: col_class(c.logical_type),
                 var_label: c.label.clone(),
                 value_labels: c
                     .format
@@ -338,8 +368,14 @@ fn read_impl(path: &str, catalog: Option<&str>) -> std::result::Result<Robj, Str
             .collect()
     };
 
-    let ncols = names.len();
-    let mut accums: Vec<Option<ColAccum>> = (0..ncols).map(|_| None).collect();
+    // Accumulators are typed up front from each column's logical type.
+    let mut accums: Vec<ColAccum> = metas
+        .iter()
+        .map(|m| match m.class {
+            ColClass::Real(class) => ColAccum::Real { values: Vec::new(), class },
+            ColClass::Text => ColAccum::Text { values: Vec::new() },
+        })
+        .collect();
 
     ds.scan()
         .visit_owned_batches(|batch| {
@@ -352,25 +388,12 @@ fn read_impl(path: &str, catalog: Option<&str>) -> std::result::Result<Robj, Str
         })
         .map_err(|e| format!("sas7bdat: scan `{path}`: {e}"))?;
 
-    let nrow = accums
-        .iter()
-        .find_map(|a| a.as_ref().map(ColAccum::len))
-        .unwrap_or(0);
+    let nrow = accums.first().map_or(0, ColAccum::len);
 
     let cols: Vec<Robj> = accums
         .into_iter()
         .zip(metas.iter())
-        .map(|(a, meta)| match a {
-            Some(acc) => accum_to_robj(acc, meta),
-            // A column with no batches (e.g. zero-row file): empty double column.
-            None => {
-                let mut col: Robj = Doubles::new(nrow).into();
-                if let Some(label) = &meta.var_label {
-                    col.set_attrib("label", label.as_str()).unwrap();
-                }
-                col
-            }
-        })
+        .map(|(acc, meta)| accum_to_robj(acc, meta))
         .collect();
 
     Ok(build_data_frame(&names, cols, nrow))

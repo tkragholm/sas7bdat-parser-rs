@@ -53,14 +53,21 @@ labels and value-label catalogs are wired through (see above). See
 optimizations (numeric direct-fill, dictionary-driven string interning,
 tagged-NA haven-parity).
 
+Column R types are driven by the SAS **logical type**, not the core's
+`OwnedColumnBuffer` variant. This matters for temporal columns: the core emits a
+typed `Date`/`DateTime`/`Time` buffer for whole-unit values but falls back to a
+raw `F64` buffer when a column carries fractional seconds (its integer-only
+`SasDateTime` can't hold them). The binding still types such columns as
+`POSIXct`/`hms` (which represent fractional seconds), matching `haven` — so a
+`DATETIME` column with sub-second values is `POSIXct`, not `double`.
+
 ### Known limitations / follow-ups
 
-- **Format classification is the core's.** Columns the core classifies as
-  `Float` (e.g. some datetime/time SAS formats like `DTDATE`, `HHMM`) arrive as
-  `double`, not `POSIXct`/`hms`. This is shared with the Polars plugin and is a
-  core `LogicalType` matter, not a binding bug.
 - **Tagged missings in value labels** (`ValueKey::Tagged`) are skipped from the
   `labels` vector; a `haven::tagged_na` mapping is a follow-up.
+- **Polars has the analogous latent issue.** The Polars plugin maps the buffer
+  variant directly, so a fractional-seconds `DATETIME` column surfaces as
+  `Float64` there. The same logical-type-driven mapping would fix it.
 - **Int64 columns** (from explicit schema overrides) are coerced to `double`
   for haven-parity. A `bit64::integer64` opt-in is a follow-up.
 - **Distribution.** The relative path dependency on `sas7bdat` works for in-repo
