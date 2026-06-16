@@ -163,44 +163,12 @@ pub(super) fn materialize_staged_f64_column(
     raw_bits: &[u64],
     valid: Option<Vec<u64>>,
 ) -> OwnedColumnBuffer {
-    type U64x8 = Simd<u64, 8>;
-
-    let mut values = Vec::with_capacity(raw_bits.len());
-    if valid.is_none() {
-        values.extend(raw_bits.iter().map(|b| f64::from_bits(*b)));
-        return OwnedColumnBuffer::F64 { values, valid };
-    }
-
-    let validity = valid.as_deref().expect("checked is_some above");
-    let zeros_u64 = U64x8::splat(0);
-    let ones_u64 = U64x8::splat(1);
-    let shifts = U64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
-
-    let mut raw_chunks = raw_bits.chunks_exact(8);
-    for (chunk_idx, raw_chunk) in raw_chunks.by_ref().enumerate() {
-        // Extract 8 validity bits for this SIMD chunk from the packed word.
-        // chunk_idx * 8 is the row index of the first row in this chunk.
-        let bit_base = chunk_idx * 8;
-        #[allow(clippy::cast_possible_truncation)]
-        let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
-        let lanes = U64x8::from_slice(raw_chunk);
-        // Expand 8 bits to a per-lane null mask: null_mask[i] true where bit i == 0.
-        let spread = U64x8::splat(u64::from(valid_byte)) >> shifts;
-        let null_mask = (spread & ones_u64).simd_eq(zeros_u64);
-        let masked = null_mask.select(zeros_u64, lanes);
-        values.extend(masked.to_array().into_iter().map(f64::from_bits));
-    }
-
-    let processed = raw_bits.len() - raw_chunks.remainder().len();
-    for (offset, &bits) in raw_chunks.remainder().iter().enumerate() {
-        let idx = processed + offset;
-        values.push(if valid_bit(validity, idx) {
-            f64::from_bits(bits)
-        } else {
-            0.0
-        });
-    }
-
+    // Preserve the raw bits for every cell, including missing ones. The validity
+    // bitmap (when present) marks missings; downstream consumers gate on it. SAS
+    // special missing values (`.A`-`.Z`, `._`) encode a tag in the NaN payload —
+    // keeping the raw bits lets bindings recover that tag (e.g. haven tagged_na)
+    // rather than collapsing every missing to a single sentinel.
+    let values = raw_bits.iter().map(|b| f64::from_bits(*b)).collect();
     OwnedColumnBuffer::F64 { values, valid }
 }
 
