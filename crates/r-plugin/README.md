@@ -71,11 +71,12 @@ raw `F64` buffer when a column carries fractional seconds (its integer-only
 buffer to the declared temporal dtype from its schema. This binding now matches
 that behavior.)
 
+Value labels keyed on a special missing (e.g. a format that labels `.A` as
+`"Refused"`) are carried through as a `tagged_na`-valued entry in the column's
+`labels` vector, matching `haven`.
+
 ### Known limitations / follow-ups
 
-- **Tagged missings as value-label keys** (`ValueKey::Tagged`) are skipped from a
-  column's `labels` vector. (Tagged missings in the *data* are fully supported —
-  this is only about a tag appearing as a key in a value-label set.)
 - **Int64 columns** (from explicit schema overrides) are coerced to `double`
   for haven-parity. A `bit64::integer64` opt-in is a follow-up.
 - **Distribution.** The relative path dependency on `sas7bdat` works for in-repo

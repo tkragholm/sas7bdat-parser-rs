@@ -23,3 +23,24 @@ test_that("SAS special missings become haven tagged_na", {
     expect_identical(haven::na_tag(df[[nm]]), haven::na_tag(ref[[nm]]))
   }
 })
+
+test_that("value labels keyed on special missings map to tagged_na", {
+  skip_if_not_installed("haven")
+  data <- system.file("extdata", "missing_test.sas7bdat", package = "readsas")
+  cat <- system.file("extdata", "missing_formats.sas7bcat", package = "readsas")
+  skip_if(data == "" || cat == "", "bundled fixtures not installed")
+
+  df <- read_sas(data, catalog = cat)
+  ref <- haven::read_sas(data, catalog_file = cat)
+
+  # var1 holds .A and its format labels .A as "missing".
+  labs <- attr(df$var1, "labels")
+  expect_false(is.null(labs))
+  expect_equal(names(labs), "missing")
+  expect_equal(haven::na_tag(labs), "a")
+
+  # Bit-exact labels vs haven, every column.
+  for (nm in names(df)) {
+    expect_identical(attr(df[[nm]], "labels"), attr(ref[[nm]], "labels"))
+  }
+})

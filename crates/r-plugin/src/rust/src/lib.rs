@@ -129,6 +129,19 @@ fn sas_special_missing_tag(bits: u64) -> Option<u8> {
     }
 }
 
+/// Map a catalog value-label tag key to its R numeric code: a haven `tagged_na`
+/// for `.A`-`.Z`/`._`, plain `NA` for `.`. The core decodes catalog tags as
+/// uppercase letters (`A`-`Z`), `_`, or `.`; haven tags are lowercase.
+fn tagged_key_to_na(tag: char) -> Option<f64> {
+    match tag {
+        'A'..='Z' => Some(haven_tagged_na(tag.to_ascii_lowercase() as u8)),
+        'a'..='z' => Some(haven_tagged_na(tag as u8)),
+        '_' => Some(haven_tagged_na(b'_')),
+        '.' => Some(f64::from_bits(R_NA_REAL_BITS)),
+        _ => None,
+    }
+}
+
 /// Append a plain numeric column, emitting haven `tagged_na` for SAS special
 /// missings (recovered from the preserved raw bits) and plain `NA` otherwise.
 fn push_reals_with_tags(out: &mut Vec<Rfloat>, values: &[f64], valid: Option<&[u64]>) {
@@ -253,8 +266,13 @@ fn numeric_labels_robj(ls: &LabelSet) -> Option<Robj> {
         let code = match vl.key {
             ValueKey::Numeric(v) => v,
             ValueKey::Integer(v) => f64::from(v),
-            // Tagged missings would map to haven::tagged_na — deferred (v1).
-            ValueKey::Tagged(_) | ValueKey::String(_) => continue,
+            // A value label keyed on a special missing (`.A = "Refused"`) maps to a
+            // haven tagged_na entry, matching haven_labelled semantics.
+            ValueKey::Tagged(tag) => match tagged_key_to_na(tag) {
+                Some(code) => code,
+                None => continue,
+            },
+            ValueKey::String(_) => continue,
         };
         codes.push(code);
         names.push(vl.label.clone());
