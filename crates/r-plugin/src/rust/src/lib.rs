@@ -102,6 +102,48 @@ fn is_valid(valid: Option<&[u64]>, i: usize) -> bool {
     }
 }
 
+/// R's `NA_real_` bit pattern. haven's `tagged_na(c)` is this value with the tag
+/// character placed in byte 4 (bits 32-39).
+const R_NA_REAL_BITS: u64 = 0x7FF0_0000_0000_07A2;
+
+/// Build haven's `tagged_na(tag)` value (bit-exact with `haven::tagged_na`).
+fn haven_tagged_na(tag: u8) -> f64 {
+    f64::from_bits(R_NA_REAL_BITS | (u64::from(tag) << 32))
+}
+
+/// Recover a SAS special-missing tag from a preserved missing cell's raw bits.
+///
+/// SAS encodes special missings (`.A`-`.Z`, `._`) as a NaN of the form
+/// `0xFFFF_TT_00_00_00_00_00`, where the top two bytes are `0xFF` and byte 5
+/// (bits 40-47) is the indicator: `0xFF` -> `_`, `0xFD..=0xE4` -> `a..z`. Plain
+/// `.` missings and ordinary NaNs carry no tag. Verified byte-exact against
+/// `haven::na_tag` across the fixture corpus.
+fn sas_special_missing_tag(bits: u64) -> Option<u8> {
+    if (bits >> 48) != 0xFFFF {
+        return None;
+    }
+    match ((bits >> 40) & 0xFF) as u8 {
+        0xFF => Some(b'_'),
+        b @ 0xE4..=0xFD => Some(b'a' + (0xFD - b)),
+        _ => None,
+    }
+}
+
+/// Append a plain numeric column, emitting haven `tagged_na` for SAS special
+/// missings (recovered from the preserved raw bits) and plain `NA` otherwise.
+fn push_reals_with_tags(out: &mut Vec<Rfloat>, values: &[f64], valid: Option<&[u64]>) {
+    out.reserve(values.len());
+    for (i, &v) in values.iter().enumerate() {
+        if is_valid(valid, i) {
+            out.push(Rfloat::from(v));
+        } else if let Some(tag) = sas_special_missing_tag(v.to_bits()) {
+            out.push(Rfloat::from(haven_tagged_na(tag)));
+        } else {
+            out.push(Rfloat::na());
+        }
+    }
+}
+
 /// Append a typed numeric/temporal column slice, mapping each present cell to an
 /// `f64` (epoch shift folded into `map`) and each missing cell to R's `NA`.
 fn push_reals<T: Copy>(
@@ -153,8 +195,13 @@ fn append_column(acc: &mut ColAccum, buffer: OwnedColumnBuffer) {
             let shift = class.epoch_shift();
             match buffer {
                 OwnedColumnBuffer::F64 { values, valid } => {
-                    // Raw SAS value: days (Date), seconds (DateTime/Time), or plain.
-                    push_reals(out, &values, valid.as_deref(), |v| v - shift);
+                    if *class == RealClass::Plain {
+                        // Plain numerics carry SAS special-missing tags -> haven tagged_na.
+                        push_reals_with_tags(out, &values, valid.as_deref());
+                    } else {
+                        // Temporal F64 fallback: raw SAS days/seconds; missings -> plain NA.
+                        push_reals(out, &values, valid.as_deref(), |v| v - shift);
+                    }
                 }
                 OwnedColumnBuffer::I64 { values, valid } => {
                     #[allow(clippy::cast_precision_loss)]

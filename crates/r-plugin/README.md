@@ -18,8 +18,14 @@ Returns a tibble with `haven`-compatible column types:
 | datetime format       | `POSIXct` (UTC)               |
 | time format           | `hms`                          |
 
-SAS missing values become `NA`. The SAS epoch (1960-01-01) is rebased to the R
-epoch (1970-01-01) during decode.
+SAS missing values become `NA`. SAS **special missings** (`.A`–`.Z`, `._`) on
+numeric columns become `haven::tagged_na()` values, bit-exact with `haven`. The
+SAS epoch (1960-01-01) is rebased to the R epoch (1970-01-01) during decode.
+
+```r
+df <- read_sas("survey.sas7bdat")
+haven::na_tag(df$income)   # e.g. "b" where SAS stored .B ("refused")
+```
 
 SAS variable labels are attached as each column's `label` attribute. Value-label
 formats are supported via a `.sas7bcat` catalog: pass `catalog = "..."` (or drop
@@ -67,8 +73,9 @@ that behavior.)
 
 ### Known limitations / follow-ups
 
-- **Tagged missings in value labels** (`ValueKey::Tagged`) are skipped from the
-  `labels` vector; a `haven::tagged_na` mapping is a follow-up.
+- **Tagged missings as value-label keys** (`ValueKey::Tagged`) are skipped from a
+  column's `labels` vector. (Tagged missings in the *data* are fully supported —
+  this is only about a tag appearing as a key in a value-label set.)
 - **Int64 columns** (from explicit schema overrides) are coerced to `double`
   for haven-parity. A `bit64::integer64` opt-in is a follow-up.
 - **Distribution.** The relative path dependency on `sas7bdat` works for in-repo
