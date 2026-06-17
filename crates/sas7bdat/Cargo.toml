@@ -23,10 +23,18 @@ rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 simdutf8 = { workspace = true }
+# Optional string-column dictionary encoding (feature = "dictionary").
+ahash = { version = "0.8", optional = true }
+lasso2 = { version = "0.8", optional = true }
+cardinality-estimator = { version = "1", optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
 csv = { workspace = true }
+
+[[example]]
+name = "bench_dict"
+required-features = ["dictionary"]
 
 [[bench]]
 name = "scan_hotpaths"
@@ -51,6 +59,8 @@ arrow = ["dep:arrow-array", "dep:arrow-schema"]
 hotpath-profile = ["dep:hotpath"]
 # Exposes `test_utils` (synthetic dataset builders) for the `wide_table` benchmark.
 internal-bench = []
+# String-column dictionary encoding: HLL cardinality gate + lasso2 interner.
+dictionary = ["dep:ahash", "dep:lasso2", "dep:cardinality-estimator"]
 
 # Build docs.rs with the `arrow` feature so the Arrow batch API is documented.
 # `hotpath-profile` is omitted: it adds internal profiling instrumentation, not public API.

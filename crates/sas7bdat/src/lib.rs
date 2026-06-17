@@ -26,6 +26,8 @@
 #![feature(portable_simd)]
 
 pub mod catalog;
+#[cfg(feature = "dictionary")]
+pub mod dictionary;
 mod columnar;
 mod compression;
 mod dataset;
