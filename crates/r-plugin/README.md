@@ -32,6 +32,20 @@ formats are supported via a `.sas7bcat` catalog: pass `catalog = "..."` (or drop
 a same-stem `.sas7bcat` next to the data file) and labelled columns are returned
 as `haven_labelled` vectors.
 
+### Categorical columns (`categorical = TRUE`)
+
+SAS character columns are usually low-cardinality category codes. Pass
+`categorical = TRUE` to return plain (non-value-labelled) character columns as
+`factor` instead of `character`. On a string-heavy file (the 2.15 GB AHS file:
+2,574 character columns) this is **~3× faster to read, ~32% less memory, and
+~11× faster** for downstream `table()`/grouping/joins — because the factor's
+integer codes replace per-cell CHARSXP interning. It uses an HLL cardinality
+gate, so genuinely high-cardinality columns stay `character`.
+
+```r
+df <- read_sas("survey.sas7bdat", categorical = TRUE)
+```
+
 ```r
 df <- read_sas("data.sas7bdat", catalog = "formats.sas7bcat")
 attr(df$SEX, "labels")   # c(Male = 1, Female = 2)

@@ -13,6 +13,10 @@
 #' @param catalog Optional path to a `.sas7bcat` value-label catalog. If `NULL`
 #'   (the default), a same-stem `.sas7bcat` sibling next to `path` is used when
 #'   present.
+#' @param categorical If `TRUE`, plain (non-value-labelled) character columns are
+#'   returned as `factor` instead of `character`. This is faster to build and
+#'   uses less memory on low-cardinality columns, and speeds up downstream
+#'   grouping/joining. Default `FALSE` (haven-style `character`).
 #' @return A tibble (or a base `data.frame` if the `tibble` package is not
 #'   installed).
 #' @export
@@ -20,13 +24,14 @@
 #' \dontrun{
 #' df <- read_sas("path/to/file.sas7bdat")
 #' df <- read_sas("data.sas7bdat", catalog = "formats.sas7bcat")
+#' df <- read_sas("survey.sas7bdat", categorical = TRUE)
 #' }
-read_sas <- function(path, catalog = NULL) {
+read_sas <- function(path, catalog = NULL, categorical = FALSE) {
   path <- path.expand(path)
   if (!is.null(catalog)) {
     catalog <- path.expand(catalog)
   }
-  df <- read_sas7bdat(path, catalog)
+  df <- read_sas7bdat(path, catalog, isTRUE(categorical))
   if (requireNamespace("tibble", quietly = TRUE)) {
     tibble::new_tibble(df, nrow = nrow(df))
   } else {

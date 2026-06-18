@@ -17,7 +17,7 @@ libR-sys = "0.7.1"
 # Path dependency on the workspace core. For a distributable package this is
 # vendored or published to crates.io (see docs/r-bindings/design-direct-fill.md);
 # for local dev the relative path resolves against the repo.
-sas7bdat = { path = "../../../sas7bdat" }
+sas7bdat = { path = "../../../sas7bdat", features = ["dictionary"] }
 
 # Detach from the parent cargo workspace: an R package's Rust crate builds
 # standalone (and is copied in isolation by R CMD INSTALL).

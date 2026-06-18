@@ -77,24 +77,35 @@ fn buffer_rows(buffer: &OwnedColumnBuffer) -> usize {
     }
 }
 
-/// Visit each cell of a `Utf8`/`RawBytes` buffer as `Option<&str>` (lossy for
-/// non-UTF-8 raw bytes, which the core's Utf8 path never produces).
-fn for_each_cell(buffer: &OwnedColumnBuffer, mut f: impl FnMut(Option<&str>)) {
+/// Return the cell at local row `i` of a `Utf8`/`RawBytes` buffer (`None` = null,
+/// outer `None` = out of range / not a string buffer).
+fn cell_in_buffer(buffer: &OwnedColumnBuffer, i: usize) -> Option<&str> {
     let (offsets, data, valid) = match buffer {
         OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => (offsets, data, valid),
         OwnedColumnBuffer::RawBytes { offsets, data, valid } => (offsets, data, valid),
-        _ => return,
+        _ => return None,
     };
-    let offs = offsets.as_slice();
-    let valid = valid.as_deref();
-    for i in 0..offs.len().saturating_sub(1) {
-        if is_valid(valid, i) {
-            let bytes = &data[offs[i] as usize..offs[i + 1] as usize];
-            f(std::str::from_utf8(bytes).ok());
-        } else {
-            f(None);
-        }
+    if !is_valid(valid.as_deref(), i) {
+        return None;
     }
+    let offs = offsets.as_slice();
+    std::str::from_utf8(&data[offs[i] as usize..offs[i + 1] as usize]).ok()
+}
+
+/// Seek the cell at global row `gidx` across a column's batch buffers.
+fn cell_at<'a>(
+    buffers: &[&'a OwnedColumnBuffer],
+    buf_rows: &[usize],
+    gidx: usize,
+) -> Option<Option<&'a str>> {
+    let mut acc = 0usize;
+    for (buffer, &rows) in buffers.iter().zip(buf_rows) {
+        if gidx < acc + rows {
+            return Some(cell_in_buffer(buffer, gidx - acc));
+        }
+        acc += rows;
+    }
+    None
 }
 
 /// Decide and dictionary-encode a string column spanning one or more batch
@@ -111,34 +122,23 @@ pub fn dictionary_encode(
     }
 
     // ── Pass 1: probe cardinality on a stride sample ────────────────────────
+    // Seek directly to the sampled rows (O(sample_rows)) instead of walking every
+    // cell — important for wide files where a full extra pass is costly.
     let stride = if policy.stride > 0 {
         policy.stride
     } else {
         (rows / policy.sample_rows.max(1)).max(1)
     };
+    let buf_rows: Vec<usize> = buffers.iter().copied().map(buffer_rows).collect();
     let mut est = CardinalityEstimator::<str>::new();
     let mut sampled = 0usize;
-    let mut idx = 0usize;
-    'probe: for buffer in buffers {
-        let mut stop = false;
-        for_each_cell(buffer, |cell| {
-            if !stop {
-                if sampled >= policy.sample_rows {
-                    stop = true;
-                } else {
-                    if idx.is_multiple_of(stride) {
-                        if let Some(s) = cell {
-                            est.insert(s);
-                        }
-                        sampled += 1;
-                    }
-                    idx += 1;
-                }
-            }
-        });
-        if sampled >= policy.sample_rows {
-            break 'probe;
+    let mut gidx = 0usize;
+    while sampled < policy.sample_rows && gidx < rows {
+        if let Some(Some(s)) = cell_at(buffers, &buf_rows, gidx) {
+            est.insert(s);
         }
+        sampled += 1;
+        gidx += stride;
     }
     if sampled > 0 {
         let estimate = est.estimate();

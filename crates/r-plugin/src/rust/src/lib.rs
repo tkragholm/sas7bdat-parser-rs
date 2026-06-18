@@ -14,6 +14,7 @@
 //! value-label catalogs -> `haven_labelled`.
 
 use extendr_api::prelude::*;
+use sas7bdat::dictionary::{dictionary_encode, DictionaryColumn, DictionaryPolicy};
 use sas7bdat::{
     catalog::normalize_format_name, Dataset, LabelSet, LogicalType, OwnedColumnBuffer, Parallelism,
     ValueKey, ValueType,
@@ -215,6 +216,40 @@ unsafe fn fill_text_sexp(
     }
 }
 
+/// Build an R `factor` from a dictionary-encoded column: integer codes (1-based,
+/// NA = `NA_integer_`) plus a `levels` character vector — avoiding the per-cell
+/// CHARSXP interning of the `character` path entirely.
+fn factor_from_dict(dict: DictionaryColumn, nrow: usize) -> Robj {
+    // Codes: INTSXP, 1-based level index; null -> NA_integer_ (i32::MIN).
+    let mut col: Robj = Integers::new(nrow).into();
+    {
+        let slice = col.as_integer_slice_mut().expect("INTSXP slice");
+        for (dst, code) in slice.iter_mut().zip(dict.codes.iter()) {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+            {
+                *dst = code.map_or(i32::MIN, |c| (c + 1) as i32);
+            }
+        }
+    }
+
+    // Levels: UTF-8 character vector of the distinct values (cardinality-sized).
+    let levels: Robj = Strings::new(dict.dictionary.len()).into();
+    let lsexp = unsafe { levels.get() };
+    for (i, s) in dict.dictionary.iter().enumerate() {
+        unsafe {
+            let cs = libR_sys::Rf_mkCharLenCE(
+                s.as_ptr().cast::<std::os::raw::c_char>(),
+                s.len() as std::os::raw::c_int,
+                libR_sys::cetype_t::CE_UTF8,
+            );
+            libR_sys::SET_STRING_ELT(lsexp, i as isize, cs);
+        }
+    }
+    col.set_attrib("levels", levels).unwrap();
+    col.set_class(&["factor"]).unwrap();
+    col
+}
+
 // ── value-label vectors ───────────────────────────────────────────────────────
 
 /// Named numeric `labels` vector (names = label text, values = codes). Includes
@@ -335,7 +370,11 @@ fn resolve_catalog(path: &str, catalog: Option<&str>) -> Option<PathBuf> {
     sibling.exists().then_some(sibling)
 }
 
-fn read_impl(path: &str, catalog: Option<&str>) -> std::result::Result<Robj, String> {
+fn read_impl(
+    path: &str,
+    catalog: Option<&str>,
+    categorical: bool,
+) -> std::result::Result<Robj, String> {
     let mut ds = Dataset::open(path).map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
 
     if let Some(cat_path) = resolve_catalog(path, catalog) {
@@ -381,20 +420,36 @@ fn read_impl(path: &str, catalog: Option<&str>) -> std::result::Result<Robj, Str
     // strings before allocating the (potentially thousands of) numeric vectors
     // keeps those GCs cheap. Numeric fill allocates nothing, so it triggers no GC.
     for (ci, meta) in metas.iter().enumerate() {
-        if matches!(meta.class, ColClass::Text) {
-            let robj: Robj = Strings::new(nrow).into();
-            // SAFETY: `robj` owns the STRSXP and keeps it alive; all writes are on
-            // this (main) thread; every index written is < nrow.
-            let sexp = unsafe { robj.get() };
-            let mut dict: HashMap<Box<[u8]>, libR_sys::SEXP> = HashMap::new();
-            for batch in &batches {
-                if let Some(buffer) = batch.columns.get(ci) {
-                    let base = usize::try_from(batch.row_base.0).unwrap_or(0);
-                    unsafe { fill_text_sexp(sexp, base, buffer, &mut dict) };
-                }
-            }
-            cols[ci] = Some(finalize_column(robj, meta));
+        if !matches!(meta.class, ColClass::Text) {
+            continue;
         }
+        // `categorical` -> R factor, but only for plain (non-value-labelled)
+        // string columns. The HLL gate vetoes high-cardinality columns, which
+        // fall through to the `character` path below.
+        if categorical && meta.value_labels.is_none() {
+            let bufs: Vec<&OwnedColumnBuffer> =
+                batches.iter().filter_map(|b| b.columns.get(ci)).collect();
+            if let Some(dict) = dictionary_encode(&bufs, &DictionaryPolicy::default()) {
+                let mut col = factor_from_dict(dict, nrow);
+                if let Some(label) = &meta.var_label {
+                    col.set_attrib("label", label.as_str()).unwrap();
+                }
+                cols[ci] = Some(col);
+                continue;
+            }
+        }
+        let robj: Robj = Strings::new(nrow).into();
+        // SAFETY: `robj` owns the STRSXP and keeps it alive; all writes are on
+        // this (main) thread; every index written is < nrow.
+        let sexp = unsafe { robj.get() };
+        let mut dict: HashMap<Box<[u8]>, libR_sys::SEXP> = HashMap::new();
+        for batch in &batches {
+            if let Some(buffer) = batch.columns.get(ci) {
+                let base = usize::try_from(batch.row_base.0).unwrap_or(0);
+                unsafe { fill_text_sexp(sexp, base, buffer, &mut dict) };
+            }
+        }
+        cols[ci] = Some(finalize_column(robj, meta));
     }
 
     // Numeric / temporal columns: allocate the REALSXP and fill it column-major
@@ -428,8 +483,8 @@ fn read_impl(path: &str, catalog: Option<&str>) -> std::result::Result<Robj, Str
 /// `catalog` is an optional path to a `.sas7bcat` value-label catalog; when
 /// absent a same-stem `.sas7bcat` sibling is attached if present.
 #[extendr]
-fn read_sas7bdat(path: &str, catalog: Option<String>) -> Robj {
-    match read_impl(path, catalog.as_deref()) {
+fn read_sas7bdat(path: &str, catalog: Option<String>, categorical: bool) -> Robj {
+    match read_impl(path, catalog.as_deref(), categorical) {
         Ok(df) => df,
         Err(e) => throw_r_error(e),
     }
