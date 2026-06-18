@@ -958,7 +958,8 @@ fn collect_batches_staged_f64_preserves_missing_validity() {
     match &batches[0].columns[0] {
         OwnedColumnBuffer::F64 { values, valid } => {
             assert_eq!(values.len(), 2);
-            assert_eq!(values[0], 1.25);
+            // Exact bit-pattern check (1.25 is exactly representable); avoids a float_cmp lint.
+            assert_eq!(values[0].to_bits(), 1.25_f64.to_bits());
             // Missing cells now preserve their raw SAS bits (validity marks them),
             // so bindings can recover special-missing tags rather than seeing 0.0.
             assert_eq!(values[1].to_bits(), SAS_NUMERIC_MISSING_SENTINEL);

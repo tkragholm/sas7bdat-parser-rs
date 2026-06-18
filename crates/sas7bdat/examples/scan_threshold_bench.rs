@@ -11,18 +11,23 @@
 //! to justify spawning threads") from cold-disk I/O variance.
 //!
 //! Usage:
-//!   cargo run --release --example scan_threshold_bench -- <dir-or-file> [reps] [threads_csv]
+//! ```text
+//! cargo run --release --example scan_threshold_bench -- <dir-or-file> [reps] [threads_csv]
 //!
 //!   <dir-or-file>  directory searched recursively for *.sas7bdat, or a single file
 //!   reps           timed repetitions per config, median reported (default 5)
 //!   threads_csv    parallelism levels to try, e.g. "2,4,8,16" (default: 2,4,8 capped
 //!                  to logical cores)
+//! ```
 //!
 //! Output: one line per file (size, rows, pages, serial vs best-parallel, speedup,
 //! best thread count) sorted by decode size, then the host's observed crossover and
 //! a verdict on whether the plugin's generic grain-size default is safe here — i.e.
 //! whether it already stays serial below the point where threads start to pay off.
 //! This validates the default; it is not required to operate the plugin.
+
+// Timing/size/speedup math casts integer counters to f64 for display; precision loss is fine here.
+#![allow(clippy::cast_precision_loss)]
 
 use sas7bdat::{Dataset, Parallelism};
 use std::{
@@ -180,10 +185,10 @@ fn recommend_threshold(results: &[FileResult]) -> u64 {
     }
     results
         .last()
-        .map(|r| r.decode_bytes.saturating_add(1))
-        .unwrap_or(u64::MAX)
+        .map_or(u64::MAX, |r| r.decode_bytes.saturating_add(1))
 }
 
+#[allow(clippy::too_many_lines)] // bench driver: argument parsing + sweep + reporting in one place
 fn main() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let target = args
@@ -194,18 +199,16 @@ fn main() -> Result<(), String> {
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(5);
 
-    let cores = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(8);
-    let thread_levels: Vec<usize> = args
-        .next()
-        .map(|csv| {
+    let cores = std::thread::available_parallelism().map_or(8, std::num::NonZeroUsize::get);
+    let thread_levels: Vec<usize> = args.next().map_or_else(
+        || [2usize, 4, 8].iter().copied().filter(|n| *n <= cores).collect(),
+        |csv| {
             csv.split(',')
                 .filter_map(|s| s.trim().parse::<usize>().ok())
                 .filter(|n| *n > 1)
                 .collect()
-        })
-        .unwrap_or_else(|| [2usize, 4, 8].iter().copied().filter(|n| *n <= cores).collect());
+        },
+    );
     let thread_levels = if thread_levels.is_empty() {
         vec![2]
     } else {

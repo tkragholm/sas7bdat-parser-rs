@@ -12,7 +12,7 @@
 //! columnar speedup should grow with width.
 //!
 //! Run with:
-//!   cargo bench -p sas7bdat --features internal-bench --bench wide_table
+//!   `cargo bench -p sas7bdat --features internal-bench --bench wide_table`
 
 #![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 

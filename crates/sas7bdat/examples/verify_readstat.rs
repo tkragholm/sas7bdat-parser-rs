@@ -6,7 +6,7 @@
 //! Confirms the decoder (now column-major by default) reads real SAS files correctly against an
 //! independent reference implementation.
 //!
-//! Requires `readstat` on PATH. Run: cargo run -p sas7bdat --release --example verify_readstat
+//! Requires `readstat` on PATH. Run: `cargo run -p sas7bdat --release --example verify_readstat`
 
 use sas7bdat::{Dataset, MojibakePolicy, OwnedColumnBuffer, StringDecodeOptions};
 use std::path::{Path, PathBuf};
@@ -42,10 +42,8 @@ enum Cell {
     Skip, // RawBytes / unsupported — not compared
 }
 
-fn is_valid(valid: &Option<Vec<u64>>, i: usize) -> bool {
-    valid
-        .as_ref()
-        .is_none_or(|bits| bits.get(i / 64).is_some_and(|w| (w >> (i % 64)) & 1 == 1))
+fn is_valid(valid: Option<&Vec<u64>>, i: usize) -> bool {
+    valid.is_none_or(|bits| bits.get(i / 64).is_some_and(|w| (w >> (i % 64)) & 1 == 1))
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -55,7 +53,7 @@ fn column_cells(col: &OwnedColumnBuffer) -> Vec<Cell> {
             $values
                 .iter()
                 .enumerate()
-                .map(|(i, v)| if is_valid($valid, i) { Cell::Num($map(v)) } else { Cell::Null })
+                .map(|(i, v)| if is_valid($valid.as_ref(), i) { Cell::Num($map(v)) } else { Cell::Null })
                 .collect()
         };
     }
@@ -81,7 +79,7 @@ fn column_cells(col: &OwnedColumnBuffer) -> Vec<Cell> {
             let offs = offsets.as_slice();
             (0..offs.len().saturating_sub(1))
                 .map(|i| {
-                    if !is_valid(valid, i) {
+                    if !is_valid(valid.as_ref(), i) {
                         return Cell::Null;
                     }
                     let s = usize::try_from(offs[i]).unwrap_or(0);
@@ -157,7 +155,7 @@ fn cell_matches(ours: &Cell, theirs: &str) -> bool {
                 return false;
             };
             let scale = o.abs().max(1.0);
-            (o - t).abs() <= 5e-7 * scale + 1e-6
+            (o - t).abs() <= scale.mul_add(5e-7, 1e-6)
         }
         Cell::Text(s) => s.trim_end_matches(' ') == theirs,
     }

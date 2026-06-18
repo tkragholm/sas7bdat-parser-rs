@@ -1,5 +1,7 @@
 //! Time a full file read into owned columnar batches.
-//! Usage: bench_read <path> <iters> <parallel|serial>
+//! Usage: `bench_read <path> <iters> <parallel|serial>`
+// Throughput math casts byte/row counts to f64 for MB/s display; precision loss is fine here.
+#![allow(clippy::cast_precision_loss)]
 use sas7bdat::{Dataset, Parallelism};
 use std::time::Instant;
 
@@ -9,9 +11,7 @@ fn read_once(path: &str, serial: bool) -> usize {
     let parallelism = if serial {
         Parallelism::None
     } else {
-        let n = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1);
+        let n = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
         Parallelism::Threads(n)
     };
     let ds = Dataset::open(path).expect("open");
@@ -27,7 +27,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let path = &args[1];
     let iters: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(5);
-    let serial = args.get(3).map(|s| s == "serial").unwrap_or(false);
+    let serial = args.get(3).is_some_and(|s| s == "serial");
     let label = if serial { "rust-core-serial" } else { "rust-core" };
 
     let rows = read_once(path, serial); // warmup
@@ -41,7 +41,7 @@ fn main() {
     times.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let min = times[0];
     let med = times[times.len() / 2];
-    let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) as f64;
+    let bytes = std::fs::metadata(path).map_or(0, |m| m.len()) as f64;
     let base = std::path::Path::new(path)
         .file_name()
         .and_then(|s| s.to_str())

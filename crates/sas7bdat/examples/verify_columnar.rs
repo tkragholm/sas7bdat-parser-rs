@@ -3,7 +3,7 @@
 //! two produce byte-identical batches — serial and parallel. Proves flipping the default is a
 //! behavioral no-op on real SAS files.
 //!
-//! Run with: cargo run -p sas7bdat --release --example verify_columnar
+//! Run with: `cargo run -p sas7bdat --release --example verify_columnar`
 
 use sas7bdat::{
     BatchHint, ColumnMajorDecode, Dataset, OwnedColumnBuffer, OwnedColumnarBatch, Parallelism,
@@ -50,42 +50,40 @@ fn flatten(batches: &[OwnedColumnarBatch]) -> Option<Vec<Vec<(u64, bool)>>> {
     Some(cols)
 }
 
-fn valid_bit(valid: &Option<Vec<u64>>, i: usize) -> bool {
-    valid
-        .as_ref()
-        .is_none_or(|bits| bits.get(i / 64).is_some_and(|w| (w >> (i % 64)) & 1 == 1))
+fn valid_bit(valid: Option<&Vec<u64>>, i: usize) -> bool {
+    valid.is_none_or(|bits| bits.get(i / 64).is_some_and(|w| (w >> (i % 64)) & 1 == 1))
 }
 
 fn push_column_cells(col: &OwnedColumnBuffer, out: &mut Vec<(u64, bool)>) {
     match col {
         OwnedColumnBuffer::I32 { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((u64::from(v.cast_unsigned()), valid_bit(valid, i)));
+                out.push((u64::from(v.cast_unsigned()), valid_bit(valid.as_ref(), i)));
             }
         }
         OwnedColumnBuffer::I64 { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((v.cast_unsigned(), valid_bit(valid, i)));
+                out.push((v.cast_unsigned(), valid_bit(valid.as_ref(), i)));
             }
         }
         OwnedColumnBuffer::F64 { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((v.to_bits(), valid_bit(valid, i)));
+                out.push((v.to_bits(), valid_bit(valid.as_ref(), i)));
             }
         }
         OwnedColumnBuffer::Date { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((u64::from(v.days_since_sas_epoch.cast_unsigned()), valid_bit(valid, i)));
+                out.push((u64::from(v.days_since_sas_epoch.cast_unsigned()), valid_bit(valid.as_ref(), i)));
             }
         }
         OwnedColumnBuffer::DateTime { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((v.seconds_since_sas_epoch.cast_unsigned(), valid_bit(valid, i)));
+                out.push((v.seconds_since_sas_epoch.cast_unsigned(), valid_bit(valid.as_ref(), i)));
             }
         }
         OwnedColumnBuffer::Time { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((u64::from(v.seconds_since_midnight.cast_unsigned()), valid_bit(valid, i)));
+                out.push((u64::from(v.seconds_since_midnight.cast_unsigned()), valid_bit(valid.as_ref(), i)));
             }
         }
         OwnedColumnBuffer::Utf8 {
@@ -109,7 +107,7 @@ fn push_column_cells(col: &OwnedColumnBuffer, out: &mut Vec<(u64, bool)>) {
                 for &b in &data[start..end] {
                     h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
                 }
-                out.push((h, valid_bit(valid, i)));
+                out.push((h, valid_bit(valid.as_ref(), i)));
             }
         }
     }
@@ -141,13 +139,11 @@ fn main() {
     let mut mismatches: Vec<String> = Vec::new();
 
     for path in &fixtures {
-        let Ok(ds) = Dataset::from_bytes(match std::fs::read(path) {
-            Ok(b) => b,
-            Err(_) => {
-                open_failed += 1;
-                continue;
-            }
-        }) else {
+        let Ok(bytes) = std::fs::read(path) else {
+            open_failed += 1;
+            continue;
+        };
+        let Ok(ds) = Dataset::from_bytes(bytes) else {
             open_failed += 1;
             continue;
         };
@@ -160,12 +156,11 @@ fn main() {
                 .with_column_major_decode(ColumnMajorDecode::On),
         );
 
-        let (row_major, col_serial, col_parallel) = match (row_major, col_serial, col_parallel) {
-            (Ok(a), Ok(b), Ok(c)) => (a, b, c),
-            _ => {
-                decode_failed += 1;
-                continue;
-            }
+        let (Ok(row_major), Ok(col_serial), Ok(col_parallel)) =
+            (row_major, col_serial, col_parallel)
+        else {
+            decode_failed += 1;
+            continue;
         };
         checked += 1;
 
