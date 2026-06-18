@@ -1,3 +1,16 @@
+//! Synthetic dataset/page builders for in-crate tests and `internal-bench` benchmarks.
+//!
+//! This is throwaway scaffolding: builder methods are chained at the call site, and the
+//! helpers panic deliberately on malformed input (that *is* the assertion).
+//! The pedantic/nursery lints below would only add `#[must_use]`/`# Panics`/`const`
+//! ceremony to test code, so they are allowed module-wide rather than annotated per item.
+#![allow(
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use,
+    clippy::missing_const_for_fn,
+    clippy::missing_panics_doc
+)]
+
 use crate::{
     dataset::Dataset,
     internal::{FileInner, FileSource, HeaderInfo, LayoutPlan},
