@@ -38,6 +38,9 @@ lf = sp.scan_sas("data.sas7bdat", catalog_path="formats.sas7bcat")
 # Inspect the Arrow schema without reading rows.
 schema = sp.schema_for_file("data.sas7bdat")
 
+# Return character columns as Categorical (low-cardinality category codes).
+lf = sp.scan_sas("survey.sas7bdat", categorical=True)
+
 # SAS stores every numeric column as a float. Declare integer-coded columns
 # (registry/category codes) explicitly to get Int64 out instead of Float64:
 lf = sp.scan_sas(
@@ -45,6 +48,16 @@ lf = sp.scan_sas(
     schema_overrides={"KOEN": pl.Int64, "SOCIO13": pl.Int64, "HFAUDD": pl.Int64},
 )
 ```
+
+`categorical=True` casts every character column to `Categorical` in the lazy plan
+(via Polars' own cast — equivalent to
+`sp.scan_sas(path).with_columns(pl.col(pl.String).cast(pl.Categorical))`). The
+benefit is **downstream**: group-by / join / sort on these columns run on `u32`
+codes and are ~10–15× faster. It is *not* a read or memory win — Polars' `String`
+is already compact, so casting adds a little to the read (~0.6s on a 2.5k-string-
+column file) and uses more memory; only enable it when you'll group/join on the
+string columns. (Contrast with the R binding's `categorical=TRUE`, where `factor`
+*is* a read-speed and memory win.)
 
 `schema_overrides` is applied at schema time, so the lazy schema and the collected
 frame always agree, and the same override map yields the same dtypes for every file

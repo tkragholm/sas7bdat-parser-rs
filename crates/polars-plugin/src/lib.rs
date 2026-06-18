@@ -294,12 +294,13 @@ fn batch_reader(
 
 #[cfg(feature = "arrow")]
 #[pyfunction]
-#[pyo3(signature = (path, catalog_path=None, schema_overrides=None))]
+#[pyo3(signature = (path, catalog_path=None, schema_overrides=None, categorical=false))]
 fn scan_sas(
     py: Python<'_>,
     path: &str,
     catalog_path: Option<&str>,
     schema_overrides: Option<&Bound<'_, PyDict>>,
+    categorical: bool,
 ) -> PyResult<Py<PyAny>> {
     let mut ds = py
         .detach(|| Dataset::open(path))
@@ -310,7 +311,28 @@ fn scan_sas(
     apply_schema_overrides(&mut ds, schema_overrides)?;
     let ds = Arc::new(ds);
     let schema = scan::schema_for_dataset(py, &ds)?;
-    scan::register_io_source(py, ds, None, schema)
+    let lf = scan::register_io_source(py, ds, None, schema)?;
+    if categorical {
+        return cast_strings_to_categorical(py, lf);
+    }
+    Ok(lf)
+}
+
+/// Append `with_columns(pl.col(pl.String).cast(pl.Categorical))` to the lazy plan
+/// so string columns materialize as `Categorical`. We use Polars' own cast (fast
+/// and version-stable) rather than emitting a dictionary array ourselves: for
+/// Polars the win is downstream (group-by/join), not the read, and its `String`
+/// type is already compact, so a direct dictionary build wouldn't beat the cast.
+fn cast_strings_to_categorical(py: Python<'_>, lf: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let polars = PyModule::import(py, "polars")?;
+    let string_ty = polars.getattr("String")?;
+    let categorical_ty = polars.getattr("Categorical")?;
+    let expr = polars
+        .getattr("col")?
+        .call1((string_ty,))?
+        .call_method1("cast", (categorical_ty,))?;
+    let out = lf.bind(py).call_method1("with_columns", (expr,))?;
+    Ok(out.unbind())
 }
 
 /// Apply user-requested `{column: polars dtype}` overrides to a freshly opened
