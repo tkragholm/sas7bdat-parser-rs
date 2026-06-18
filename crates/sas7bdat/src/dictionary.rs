@@ -149,34 +149,31 @@ pub fn dictionary_encode(
         }
     }
 
-    // ── Pass 2: build the dense dictionary with lasso2 ──────────────────────
-    let mut rodeo: Rodeo<lasso2::Spur, ahash::RandomState> =
-        Rodeo::with_hasher(ahash::RandomState::new());
-    let mut dictionary: Vec<String> = Vec::new();
-    let mut codes: Vec<Option<u32>> = Vec::with_capacity(rows);
+    // ── Pass 2: build the dense dictionary ──────────────────────────────────
+    let mut builder = DictBuilder::with_capacity(rows);
     for buffer in buffers {
-        for_each_cell(buffer, |cell| match cell {
-            Some(s) => {
-                let key = rodeo.get_or_intern(s);
-                let id = key.into_usize();
-                // lasso2 assigns keys densely from 0: the first time we see a
-                // value its key == current dict length, so append once.
-                if id == dictionary.len() {
-                    dictionary.push(s.to_owned());
-                }
-                #[allow(clippy::cast_possible_truncation)]
-                codes.push(Some(id as u32));
-            }
-            None => codes.push(None),
-        });
+        builder.push_buffer(buffer);
     }
-    Some(DictionaryColumn { dictionary, codes })
+    Some(builder.finish())
 }
 
-/// Incremental dictionary builder: intern one batch's string cells at a time, so
-/// the dictionary is produced *as the scan decodes* (cells are cache-hot) rather
-/// than in a separate post-decode pass.
+/// Index in the byte table reserved for the empty string (len 0).
+const EMPTY_KEY: usize = 256;
+
+/// Incremental dictionary builder. Interns one batch's cells at a time, so the
+/// dictionary is produced *as the scan decodes* (cells cache-hot).
+///
+/// SAS character columns are often 1 byte wide (single-char codes). Hashing a
+/// single byte is wasteful, so the builder starts in a **byte-direct** mode that
+/// maps each distinct ≤1-byte value to an id through a 257-entry table with no
+/// hashing at all. The first time a value longer than one byte appears it
+/// promotes to a `lasso2` hash interner (migrating the existing ids so codes stay
+/// stable). For the common all-single-byte column it never hashes.
 pub struct DictBuilder {
+    /// Byte-direct mode: id per byte value (0..256) + the empty string (256).
+    /// `-1` == unseen. Active until a multi-byte value forces promotion.
+    byte_ids: Box<[i32; 257]>,
+    byte_mode: bool,
     rodeo: Rodeo<lasso2::Spur, ahash::RandomState>,
     dictionary: Vec<String>,
     codes: Vec<Option<u32>>,
@@ -191,27 +188,88 @@ impl Default for DictBuilder {
 impl DictBuilder {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_capacity(0)
+    }
+
+    #[must_use]
+    pub fn with_capacity(rows: usize) -> Self {
         Self {
+            byte_ids: Box::new([-1; 257]),
+            byte_mode: true,
             rodeo: Rodeo::with_hasher(ahash::RandomState::new()),
             dictionary: Vec::new(),
-            codes: Vec::new(),
+            codes: Vec::with_capacity(rows),
+        }
+    }
+
+    /// Leave byte-direct mode: re-intern the existing dictionary into the hash
+    /// interner in id order so codes stay stable, then hash from here on.
+    #[cold]
+    fn promote(&mut self) {
+        for s in &self.dictionary {
+            self.rodeo.get_or_intern(s);
+        }
+        self.byte_mode = false;
+    }
+
+    #[inline]
+    fn intern(&mut self, s: &str) -> u32 {
+        if self.byte_mode {
+            let key = match s.as_bytes() {
+                [] => EMPTY_KEY,
+                [b] => *b as usize,
+                _ => {
+                    self.promote();
+                    return self.intern_hashed(s);
+                }
+            };
+            let mut id = self.byte_ids[key];
+            if id < 0 {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                let new_id = self.dictionary.len() as i32;
+                self.byte_ids[key] = new_id;
+                self.dictionary.push(s.to_owned());
+                id = new_id;
+            }
+            #[allow(clippy::cast_sign_loss)]
+            return id as u32;
+        }
+        self.intern_hashed(s)
+    }
+
+    #[inline]
+    fn intern_hashed(&mut self, s: &str) -> u32 {
+        let id = self.rodeo.get_or_intern(s).into_usize();
+        if id == self.dictionary.len() {
+            self.dictionary.push(s.to_owned());
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            id as u32
         }
     }
 
     /// Intern every cell of one batch buffer for this column.
     pub fn push_buffer(&mut self, buffer: &OwnedColumnBuffer) {
-        let Self { rodeo, dictionary, codes } = self;
-        for_each_cell(buffer, |cell| match cell {
-            Some(s) => {
-                let id = rodeo.get_or_intern(s).into_usize();
-                if id == dictionary.len() {
-                    dictionary.push(s.to_owned());
-                }
-                #[allow(clippy::cast_possible_truncation)]
-                codes.push(Some(id as u32));
+        let (offsets, data, valid) = match buffer {
+            OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => (offsets, data, valid),
+            OwnedColumnBuffer::RawBytes { offsets, data, valid } => (offsets, data, valid),
+            _ => return,
+        };
+        let offs = offsets.as_slice();
+        let valid = valid.as_deref();
+        for i in 0..offs.len().saturating_sub(1) {
+            if is_valid(valid, i) {
+                let bytes = &data[offs[i] as usize..offs[i + 1] as usize];
+                let code = match std::str::from_utf8(bytes) {
+                    Ok(s) => self.intern(s),
+                    Err(_) => self.intern(String::from_utf8_lossy(bytes).as_ref()),
+                };
+                self.codes.push(Some(code));
+            } else {
+                self.codes.push(None);
             }
-            None => codes.push(None),
-        });
+        }
     }
 
     /// Distinct values interned so far.
@@ -286,6 +344,21 @@ mod tests {
         assert_eq!(
             rebuilt,
             vec![Some("M"), Some("K"), None, Some("M"), Some("M"), Some("K")]
+        );
+    }
+
+    /// A multi-byte value after single-byte values must promote the byte-direct
+    /// builder to the hash interner while keeping codes stable.
+    #[test]
+    fn byte_mode_promotes_on_multibyte() {
+        let buf = utf8(&[Some("A"), Some("B"), Some("A"), Some("long"), Some("B"), Some("long")]);
+        let mut b = DictBuilder::new();
+        b.push_buffer(&buf);
+        let dict = b.finish();
+        assert_eq!(dict.dictionary, vec!["A".to_string(), "B".to_string(), "long".to_string()]);
+        assert_eq!(
+            dict.codes,
+            vec![Some(0), Some(1), Some(0), Some(2), Some(1), Some(2)]
         );
     }
 
