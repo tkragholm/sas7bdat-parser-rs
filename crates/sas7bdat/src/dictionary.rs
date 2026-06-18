@@ -12,7 +12,7 @@
 //! to interning ([`dictionary_encode`] returns `None` → caller keeps plain Utf8).
 //!
 //! Inputs are the core's already-decoded `Utf8` buffers — strings are UTF-8 and
-//! right-trimmed (TrimMode::RTrim), so no re-normalization happens here.
+//! right-trimmed (`TrimMode::RTrim`), so no re-normalization happens here.
 
 use crate::columnar::OwnedColumnBuffer;
 use cardinality_estimator::CardinalityEstimator;
@@ -77,40 +77,49 @@ fn buffer_rows(buffer: &OwnedColumnBuffer) -> usize {
     }
 }
 
-/// Return the cell at local row `i` of a `Utf8`/`RawBytes` buffer (`None` = null,
-/// outer `None` = out of range / not a string buffer).
+/// Trusted-offset (non-negative) to `usize`.
+#[inline]
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+const fn usz(offset: i64) -> usize {
+    offset as usize
+}
+
+/// Return the cell at local row `i` of a `Utf8`/`RawBytes` buffer (`None` = null
+/// or non-string / out-of-range buffer).
 fn cell_in_buffer(buffer: &OwnedColumnBuffer, i: usize) -> Option<&str> {
-    let (offsets, data, valid) = match buffer {
-        OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => (offsets, data, valid),
-        OwnedColumnBuffer::RawBytes { offsets, data, valid } => (offsets, data, valid),
-        _ => return None,
+    let (OwnedColumnBuffer::Utf8 { offsets, data, valid, .. }
+    | OwnedColumnBuffer::RawBytes { offsets, data, valid }) = buffer
+    else {
+        return None;
     };
     if !is_valid(valid.as_deref(), i) {
         return None;
     }
     let offs = offsets.as_slice();
-    std::str::from_utf8(&data[offs[i] as usize..offs[i + 1] as usize]).ok()
+    std::str::from_utf8(&data[usz(offs[i])..usz(offs[i + 1])]).ok()
 }
 
-/// Seek the cell at global row `gidx` across a column's batch buffers.
+/// Seek the cell at global row `gidx` across a column's batch buffers (`None` =
+/// null or out of range; callers only seek in-range rows).
 fn cell_at<'a>(
     buffers: &[&'a OwnedColumnBuffer],
     buf_rows: &[usize],
     gidx: usize,
-) -> Option<Option<&'a str>> {
+) -> Option<&'a str> {
     let mut acc = 0usize;
     for (buffer, &rows) in buffers.iter().zip(buf_rows) {
         if gidx < acc + rows {
-            return Some(cell_in_buffer(buffer, gidx - acc));
+            return cell_in_buffer(buffer, gidx - acc);
         }
         acc += rows;
     }
     None
 }
 
-/// Decide and dictionary-encode a string column spanning one or more batch
-/// buffers. Returns `Some` if the column is low-cardinality enough to dictionary
-/// encode, `None` if the caller should keep the plain `Utf8` representation.
+/// Decide and dictionary-encode a string column spanning one or more batch buffers.
+///
+/// Returns `Some` if the column is low-cardinality enough to dictionary encode,
+/// `None` if the caller should keep the plain `Utf8` representation.
 #[must_use]
 pub fn dictionary_encode(
     buffers: &[&OwnedColumnBuffer],
@@ -134,7 +143,7 @@ pub fn dictionary_encode(
     let mut sampled = 0usize;
     let mut gidx = 0usize;
     while sampled < policy.sample_rows && gidx < rows {
-        if let Some(Some(s)) = cell_at(buffers, &buf_rows, gidx) {
+        if let Some(s) = cell_at(buffers, &buf_rows, gidx) {
             est.insert(s);
         }
         sampled += 1;
@@ -251,16 +260,16 @@ impl DictBuilder {
 
     /// Intern every cell of one batch buffer for this column.
     pub fn push_buffer(&mut self, buffer: &OwnedColumnBuffer) {
-        let (offsets, data, valid) = match buffer {
-            OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => (offsets, data, valid),
-            OwnedColumnBuffer::RawBytes { offsets, data, valid } => (offsets, data, valid),
-            _ => return,
+        let (OwnedColumnBuffer::Utf8 { offsets, data, valid, .. }
+        | OwnedColumnBuffer::RawBytes { offsets, data, valid }) = buffer
+        else {
+            return;
         };
         let offs = offsets.as_slice();
         let valid = valid.as_deref();
         for i in 0..offs.len().saturating_sub(1) {
             if is_valid(valid, i) {
-                let bytes = &data[offs[i] as usize..offs[i + 1] as usize];
+                let bytes = &data[usz(offs[i])..usz(offs[i + 1])];
                 let code = match std::str::from_utf8(bytes) {
                     Ok(s) => self.intern(s),
                     Err(_) => self.intern(String::from_utf8_lossy(bytes).as_ref()),
@@ -274,7 +283,7 @@ impl DictBuilder {
 
     /// Distinct values interned so far.
     #[must_use]
-    pub fn cardinality(&self) -> usize {
+    pub const fn cardinality(&self) -> usize {
         self.dictionary.len()
     }
 
@@ -284,9 +293,10 @@ impl DictBuilder {
     }
 }
 
-/// Drive a scan and build a per-column dictionary for every string column *while
-/// the file decodes* (interning each batch as it arrives, cache-hot). Returns
-/// one entry per column: `Some` for string columns, `None` otherwise.
+/// Drive a scan and build a per-column dictionary for every string column.
+///
+/// Interns each batch *while the file decodes* (cache-hot). Returns one entry per
+/// column: `Some` for string columns, `None` otherwise.
 ///
 /// This measures the true added cost of dictionary-encoding during decode. It
 /// interns every string column (no cardinality veto) so the cost is the upper

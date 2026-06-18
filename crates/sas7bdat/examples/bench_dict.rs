@@ -2,7 +2,7 @@
 //! the decode stream, vs a decode-only baseline. Also reports the post-decode
 //! (cold, separate pass) cost for comparison, and the cardinality classification.
 //!
-//! Run: cargo run --release -p sas7bdat --features dictionary --example bench_dict -- <file...>
+//! Run: `cargo run --release -p sas7bdat --features dictionary --example bench_dict -- <file...>`
 use sas7bdat::dictionary::{dictionary_encode, read_dictionary_columns, DictionaryPolicy};
 use sas7bdat::{Dataset, OwnedColumnBuffer};
 use std::ops::ControlFlow;
