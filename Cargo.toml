@@ -16,8 +16,8 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1"
-arrow-array = "58"
-arrow-schema = "58"
+arrow-array = "59"
+arrow-schema = "59"
 bytemuck = { version = "1", features = ["derive"] }
 bstr = "1"
 criterion = "0.8"
@@ -33,7 +33,7 @@ memchr = "2.8"
 memmap2 = "0.9"
 mimalloc = { version = "0.1.49", default-features = false, features = ["secure"] }
 num-traits = "0.2"
-parquet = { version = "58", features = ["arrow"] }
+parquet = { version = "59", features = ["arrow"] }
 polars = "0.53"
 polars-arrow = "0.53"
 polars-plan = { version = "0.53", features = ["serde"] }
