@@ -167,6 +167,7 @@ mod tests {
                 overwrite: false,
                 parquet_row_group_size: None,
                 parquet_target_bytes: None,
+                parquet_metadata: false,
             },
             execution: ExecutionOptions {
                 jobs: None,

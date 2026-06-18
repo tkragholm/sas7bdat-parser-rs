@@ -135,6 +135,11 @@ pub struct OutputOptions {
     /// Parquet target row group size in bytes.
     #[arg(long, value_name = "BYTES", help_heading = "Parquet")]
     pub parquet_target_bytes: Option<usize>,
+
+    /// Embed SAS dataset/column metadata (name, label, kind, format, width) into the Parquet
+    /// file's key-value metadata under the `sas7bdat.metadata` key.
+    #[arg(long, help_heading = "Parquet")]
+    pub parquet_metadata: bool,
 }
 
 #[derive(Parser, Clone)]

@@ -130,6 +130,7 @@ fn convert_one(
                     batch_rows: row_group_rows,
                     scan,
                     catalog,
+                    embed_metadata: args.output.parquet_metadata,
                 },
             )
         }

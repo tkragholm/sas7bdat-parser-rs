@@ -1,12 +1,15 @@
 use crate::catalog::Catalog;
+use crate::sas_metadata::{DatasetMetaJson, PARQUET_METADATA_KEY};
 use anyhow::Result;
 use arrow_schema::{Schema, SchemaRef};
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use csv::WriterBuilder;
 use parquet::arrow::ArrowWriter;
+use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
 use sas7bdat::{
-    BatchHint, CellValue, Dataset, Error, Parallelism, Projection, RowSelection, ScanBuilder,
+    BatchHint, CellValue, ColumnMeta, Dataset, Error, Parallelism, Projection, RowSelection,
+    ScanBuilder,
 };
 use std::fmt::Write as _;
 use std::fs::File;
@@ -28,6 +31,8 @@ pub struct WriteOptions<'a> {
     pub batch_rows: Option<usize>,
     pub scan: ScanOptions<'a>,
     pub catalog: Option<&'a Catalog>,
+    /// Embed SAS dataset/column metadata into the Parquet file's key-value metadata.
+    pub embed_metadata: bool,
 }
 
 impl WriteOptions<'_> {
@@ -42,6 +47,7 @@ impl WriteOptions<'_> {
                 parse_threads: None,
             },
             catalog: None,
+            embed_metadata: false,
         }
     }
 }
@@ -73,6 +79,12 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         .set_max_row_group_row_count(Some(options.row_group_rows.unwrap_or(65_536).max(1)))
         .build();
     let mut writer = ArrowWriter::try_new(file, schema, Some(props))?;
+    if options.embed_metadata {
+        // Write as a Parquet file-level key-value pair (not Arrow schema metadata), so it is
+        // visible to plain Parquet readers — e.g. DuckDB's `parquet_kv_metadata()`.
+        let json = sas_metadata_json(dataset, options.scan.projection)?;
+        writer.append_key_value_metadata(KeyValue::new(PARQUET_METADATA_KEY.to_string(), json));
+    }
     scan.visit_arrow_batches(|batch| {
         writer
             .write(&batch)
@@ -187,6 +199,32 @@ fn apply_catalog_metadata(
     let metadata = schema.metadata().clone();
     schema = schema.with_metadata(metadata);
     Ok(Arc::new(schema))
+}
+
+/// Serialize SAS dataset/column metadata (name, label, kind, format, width) for the columns
+/// actually written, in output order — so the payload stays correct under projection.
+fn sas_metadata_json(dataset: &Dataset, projection: Option<&Projection>) -> Result<String> {
+    let columns = written_columns(dataset, projection);
+    let payload = DatasetMetaJson::new(dataset, &columns);
+    Ok(serde_json::to_string(&payload)?)
+}
+
+/// The columns actually written, in output order: the projected columns when a projection is
+/// set (resolved back to their full `ColumnMeta` via the source index), otherwise every column.
+fn written_columns<'a>(
+    dataset: &'a Dataset,
+    projection: Option<&Projection>,
+) -> Vec<&'a ColumnMeta> {
+    projection.map_or_else(
+        || dataset.columns().iter().collect(),
+        |projection| {
+            projection
+                .columns()
+                .iter()
+                .filter_map(|column| dataset.columns().get(column.index))
+                .collect()
+        },
+    )
 }
 
 /// The SAS epoch (`1960-01-01`) as a date and as a midnight datetime, computed once per export.

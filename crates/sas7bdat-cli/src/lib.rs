@@ -7,6 +7,7 @@ pub mod inspect;
 pub mod inspect_report;
 pub mod paths;
 pub mod runtime;
+pub mod sas_metadata;
 pub mod selection;
 
 pub use bin_support::{exit_code, exit_code_with_init, next_parsed, next_value};
