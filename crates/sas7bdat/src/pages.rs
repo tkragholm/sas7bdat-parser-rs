@@ -114,11 +114,15 @@ pub fn compile_page_descriptors_breakdown_in_memory(
 /// Reads the wall clock only when `PROFILE` is set. On the default open path
 /// (`PROFILE == false`) this is a compile-time `None` and the call is elided,
 /// so descriptor compilation pays no per-page clock cost.
+// `inline(always)` is deliberate: it guarantees the `PROFILE == false` branch
+// folds away so the non-profiling path has zero overhead.
+#[allow(clippy::inline_always)]
 #[inline(always)]
 fn profile_now<const PROFILE: bool>() -> Option<Instant> {
     PROFILE.then(Instant::now)
 }
 
+#[allow(clippy::inline_always)]
 #[inline(always)]
 fn accumulate_ns(acc: &mut u128, start: Option<Instant>) {
     if let Some(start) = start {

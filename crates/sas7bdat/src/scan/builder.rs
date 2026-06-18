@@ -693,7 +693,7 @@ fn decode_descriptors_into_batches(
 }
 
 /// Copy the accumulator's per-family cell counters into `stats`.
-fn store_batch_counters(stats: &mut ScanStats, counters: super::batch::BatchFamilyCounters) {
+const fn store_batch_counters(stats: &mut ScanStats, counters: super::batch::BatchFamilyCounters) {
     stats.batch_staged_numeric_cells = counters.staged_numeric;
     stats.batch_direct_numeric_cells = counters.direct_numeric;
     stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;

@@ -190,7 +190,7 @@ fn apply_catalog_metadata(
 }
 
 /// The SAS epoch (`1960-01-01`) as a date and as a midnight datetime, computed once per export.
-fn sas_epochs() -> (NaiveDate, NaiveDateTime) {
+const fn sas_epochs() -> (NaiveDate, NaiveDateTime) {
     let date_epoch = NaiveDate::from_ymd_opt(1960, 1, 1).expect("valid SAS epoch");
     let datetime_epoch = date_epoch
         .and_hms_opt(0, 0, 0)

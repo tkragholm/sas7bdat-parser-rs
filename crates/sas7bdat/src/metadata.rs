@@ -91,9 +91,9 @@ pub struct DatasetMetadata {
     pub table_name: Option<String>,
     /// An optional descriptive label for the dataset.
     pub file_label: Option<String>,
-    /// The character encoding (e.g., "UTF-8", "WINDOWS-1252").
+    /// The character encoding (e.g., `UTF-8`, `WINDOWS-1252`).
     pub encoding: Option<String>,
-    /// The byte order of the file (LittleEndian for Windows/Linux, BigEndian for Unix).
+    /// The byte order of the file (`LittleEndian` for Windows/Linux, `BigEndian` for Unix).
     pub endianness: Endianness,
     /// Size of a single data page in bytes.
     pub page_size: u32,

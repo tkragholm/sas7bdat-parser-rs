@@ -480,7 +480,12 @@ const I32_MAX_F64: f64 = i32::MAX as f64;
 /// with the i64 bounds, so a scalar scan with this predicate locates exactly the
 /// value that forced [`materialize_staged_i64_or_f64_column`] to fall back to F64.
 pub(super) fn f64_is_i64_representable(value: f64) -> bool {
-    value.is_finite() && value.trunc() == value && (I64_MIN_F64..=I64_MAX_F64).contains(&value)
+    // `trunc() == value` is a deliberate exact integer-ness test, not an
+    // approximate comparison — an epsilon margin would be wrong here.
+    #[allow(clippy::float_cmp)]
+    {
+        value.is_finite() && value.trunc() == value && (I64_MIN_F64..=I64_MAX_F64).contains(&value)
+    }
 }
 
 /// Efficiently find the index of the first value that cannot be represented as

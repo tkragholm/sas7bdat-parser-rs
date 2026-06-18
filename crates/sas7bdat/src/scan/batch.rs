@@ -2733,8 +2733,8 @@ fn gather_staged_8byte_le(
     missing
 }
 
-/// Rows per transpose tile for a given fixed row stride, so `tile_rows * row_len ≈
-/// `CONTIGUOUS_TILE_BYTES`. Always at least one row.
+/// Rows per transpose tile for a given fixed row stride, so
+/// `tile_rows * row_len ≈ CONTIGUOUS_TILE_BYTES`. Always at least one row.
 const fn contiguous_tile_rows(row_len: usize) -> usize {
     let row_len = if row_len == 0 { 1 } else { row_len };
     let rows = CONTIGUOUS_TILE_BYTES / row_len;
