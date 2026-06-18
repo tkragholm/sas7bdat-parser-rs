@@ -293,6 +293,17 @@ fn batch_reader(
 }
 
 #[cfg(feature = "arrow")]
+/// Lazily scan a SAS7BDAT file into a Polars `LazyFrame`.
+///
+/// Args:
+///     path: Path to the `.sas7bdat` file.
+///     catalog_path: Optional `.sas7bcat` value-label catalog to hydrate.
+///     schema_overrides: Optional ``{column: polars dtype}`` map applied at
+///         schema time (e.g. integer-coded columns to ``pl.Int64``).
+///     categorical: If ``True``, cast every character column to ``Categorical``.
+///         This speeds up downstream group-by/join/sort (~10-15x) but is not a
+///         read or memory win — Polars' ``String`` is already compact — so enable
+///         it only when grouping/joining on the string columns.
 #[pyfunction]
 #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, categorical=false))]
 fn scan_sas(

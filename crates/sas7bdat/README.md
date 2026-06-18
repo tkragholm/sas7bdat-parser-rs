@@ -24,6 +24,9 @@ binaries and Python wheels instead of a C build toolchain.
 - Parallel page scanning with `rayon`
 - RLE and CHAR compression support
 - Optional Arrow batch output (feature-gated)
+- Optional string-column dictionary encoding (`dictionary` feature): an HLL
+  cardinality gate + byte-direct/`lasso2` interner that powers `Categorical`
+  (Polars) and `factor` (R) output — see [`benchmarks/categorical-encoding.md`](../../benchmarks/categorical-encoding.md)
 - Column projection to skip unwanted columns
 - Row range selection
 - `WINDOWS-1252` and UTF-8 encoding support

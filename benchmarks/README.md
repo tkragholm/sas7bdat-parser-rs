@@ -64,6 +64,20 @@ higher, so it does more total work, not just less parallel work.
 | AP_VOTECAST (99 MB) | 3.05 s | **0.61 s** | **5.0×** |
 | NYYTS (193 MB) | 3.91 s | **1.03 s** | **3.8×** |
 
+## Table C — categorical / factor encoding of string columns (opt-in)
+
+For low-cardinality character columns, the bindings can dictionary-encode
+(`read_sas(categorical=TRUE)` → `factor`; `scan_sas(categorical=True)` →
+`Categorical`). Measured on the 2.15 GB AHS file (2,574 character columns):
+
+| | read | memory | group-by (4 cols) |
+|---|---|---|---|
+| **R `factor`** vs `character` | **2.6× faster** | **~32% smaller** | ~11× faster |
+| **Polars `Categorical`** vs `Utf8` | +0.57 s slower | larger | ~11× faster |
+
+R wins on all three axes; Polars only downstream (its native `String` is already
+compact). Design + decisions: [`categorical-encoding.md`](./categorical-encoding.md).
+
 ## Findings
 
 - **The Rust core is the fastest reader** — ~3.2–3.6 GB/s, and even
