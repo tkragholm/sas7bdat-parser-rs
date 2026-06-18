@@ -1,7 +1,7 @@
-use crate::catalog::Catalog;
+use crate::catalog::{Catalog, LabelSet};
 use crate::sas_metadata::{DatasetMetaJson, PARQUET_METADATA_KEY};
 use anyhow::Result;
-use arrow_schema::{Schema, SchemaRef};
+use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use csv::WriterBuilder;
 use parquet::arrow::ArrowWriter;
@@ -74,7 +74,12 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
     if let Some(rows) = options.batch_rows {
         scan = scan.with_batch_hint(BatchHint::Rows(rows.max(1)));
     }
-    let schema = apply_catalog_metadata(scan.arrow_schema()?, dataset, options.catalog)?;
+    let schema = apply_catalog_metadata(
+        scan.arrow_schema()?,
+        dataset,
+        options.catalog,
+        options.scan.projection,
+    )?;
     let props = WriterProperties::builder()
         .set_max_row_group_row_count(Some(options.row_group_rows.unwrap_or(65_536).max(1)))
         .build();
@@ -173,17 +178,40 @@ fn apply_catalog_metadata(
     schema: SchemaRef,
     dataset: &Dataset,
     catalog: Option<&Catalog>,
+    projection: Option<&Projection>,
 ) -> Result<SchemaRef> {
     let Some(catalog) = catalog else {
         return Ok(schema);
     };
 
-    let mut fields = Vec::with_capacity(schema.fields().len());
-    for (idx, field) in schema.fields().iter().enumerate() {
+    // Pair each output field with its source column. Under projection the schema is a
+    // subset/reorder of the dataset, so the field's position is NOT the source column index —
+    // `written_columns` resolves that mapping (and is identity without projection).
+    let columns = written_columns(dataset, projection);
+    let fields = attach_value_labels(schema.fields(), &columns, |format_name| {
+        catalog.label_set_for_format(format_name)
+    })?;
+
+    let metadata = schema.metadata().clone();
+    Ok(Arc::new(Schema::new(fields).with_metadata(metadata)))
+}
+
+/// Attach `sas.value_labels` metadata to each output field whose source column has a format
+/// that `lookup` resolves to a value-label set.
+///
+/// `fields` and `columns` are paired **positionally**, so `columns` MUST already be in output
+/// order (use [`written_columns`]) — not raw dataset order. Pairing by field position against
+/// raw dataset columns is exactly the projection bug this indirection prevents.
+fn attach_value_labels<'a>(
+    fields: &Fields,
+    columns: &[&ColumnMeta],
+    lookup: impl Fn(&str) -> Option<&'a LabelSet>,
+) -> Result<Vec<Arc<Field>>> {
+    let mut out = Vec::with_capacity(fields.len());
+    for (field, column) in fields.iter().zip(columns) {
         let mut field = field.as_ref().clone();
-        if let Some(column) = dataset.columns().get(idx)
-            && let Some(format_name) = column.format.as_deref()
-            && let Some(label_set) = catalog.label_set_for_format(format_name)
+        if let Some(format_name) = column.format.as_deref()
+            && let Some(label_set) = lookup(format_name)
         {
             let mut metadata = field.metadata().clone();
             metadata.insert(
@@ -192,13 +220,9 @@ fn apply_catalog_metadata(
             );
             field = field.with_metadata(metadata);
         }
-        fields.push(Arc::new(field));
+        out.push(Arc::new(field));
     }
-
-    let mut schema = Schema::new(fields);
-    let metadata = schema.metadata().clone();
-    schema = schema.with_metadata(metadata);
-    Ok(Arc::new(schema))
+    Ok(out)
 }
 
 /// Serialize SAS dataset/column metadata (name, label, kind, format, width) for the columns
@@ -294,5 +318,83 @@ fn write_cell_field<W: Write>(
             let _ = write!(scratch, "{}", time.format("%H:%M:%S"));
             writer.write_field(scratch.as_bytes())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::attach_value_labels;
+    use crate::catalog::{LabelSet, ValueKey, ValueLabel, ValueType};
+    use arrow_schema::{DataType, Field, Fields};
+    use sas7bdat::{ColumnMeta, LogicalType};
+
+    fn column(index: usize, name: &str, format: &str) -> ColumnMeta {
+        ColumnMeta {
+            index,
+            name: name.to_owned(),
+            logical_type: LogicalType::String,
+            physical_width: 1,
+            offset: 0,
+            label: None,
+            format: Some(format.to_owned()),
+        }
+    }
+
+    fn label_set(name: &str, label: &str) -> LabelSet {
+        LabelSet {
+            name: name.to_owned(),
+            value_type: ValueType::String,
+            labels: vec![ValueLabel {
+                key: ValueKey::String("1".to_owned()),
+                label: label.to_owned(),
+            }],
+        }
+    }
+
+    // Regression: under a reordered column projection the output field at position i does NOT
+    // correspond to dataset column i. Labels must follow the (output-ordered) source columns,
+    // not the field position. Mirrors `convert --catalog --columns SEXB,SEXA` on a file laid
+    // out as [ID(0), SEXA(1, fmt $A), SEXB(2, fmt $B)].
+    #[test]
+    fn value_labels_follow_source_columns_not_field_position() {
+        let fields = Fields::from(vec![
+            Field::new("SEXB", DataType::Utf8, true),
+            Field::new("SEXA", DataType::Utf8, true),
+        ]);
+        // Output order, as `written_columns` would resolve it: SEXB first (source index 2).
+        let first_col = column(2, "SEXB", "$B");
+        let second_col = column(1, "SEXA", "$A");
+        let columns = [&first_col, &second_col];
+
+        let labels_b = label_set("$B", "B-Male");
+        let labels_a = label_set("$A", "A-Male");
+        let lookup = |format: &str| match format {
+            "$B" => Some(&labels_b),
+            "$A" => Some(&labels_a),
+            _ => None,
+        };
+
+        let out = attach_value_labels(&fields, &columns, lookup).expect("attach");
+        let labels_of = |name: &str| -> String {
+            out.iter()
+                .find(|f| f.name() == name)
+                .and_then(|f| f.metadata().get("sas.value_labels").cloned())
+                .unwrap_or_default()
+        };
+
+        assert!(labels_of("SEXB").contains("B-Male"), "SEXB must get $B labels");
+        assert!(labels_of("SEXA").contains("A-Male"), "SEXA must get $A labels");
+        // And not cross-contaminated.
+        assert!(!labels_of("SEXB").contains("A-Male"));
+        assert!(!labels_of("SEXA").contains("B-Male"));
+    }
+
+    // A column with a format unknown to the catalog (or no format) gets no metadata.
+    #[test]
+    fn unmatched_format_attaches_no_metadata() {
+        let fields = Fields::from(vec![Field::new("X", DataType::Utf8, true)]);
+        let col = column(0, "X", "$NOPE");
+        let out = attach_value_labels(&fields, &[&col], |_| None).expect("attach");
+        assert!(out[0].metadata().get("sas.value_labels").is_none());
     }
 }
