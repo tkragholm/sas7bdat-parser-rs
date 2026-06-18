@@ -34,12 +34,12 @@ memmap2 = "0.9"
 mimalloc = { version = "0.1.49", default-features = false, features = ["secure"] }
 num-traits = "0.2"
 parquet = { version = "59", features = ["arrow"] }
-polars = "0.53"
-polars-arrow = "0.53"
-polars-plan = { version = "0.53", features = ["serde"] }
+polars = "0.54"
+polars-arrow = "0.54"
+polars-plan = { version = "0.54", features = ["serde"] }
 # generate-import-lib synthesizes pythonXX.lib so Windows wheels can be cross-compiled without a Windows Python install.
-pyo3 = { version = "0.27", features = ["generate-import-lib"] }
-pyo3-polars = "0.26.0"
+pyo3 = { version = "0.28", features = ["generate-import-lib"] }
+pyo3-polars = "0.27.0"
 rayon = "1"
 rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }

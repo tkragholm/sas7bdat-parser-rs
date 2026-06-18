@@ -15,7 +15,7 @@ pip install sas7bdat-polars
 
 This wheel is tightly coupled to its build environment:
 
-- **Polars is pinned to `1.40.*`.** The extension shares the Polars Rust ABI (via
+- **Polars is pinned to `1.41.*`.** The extension shares the Polars Rust ABI (via
   `polars-ffi`) with the in-process `polars` package, so the installed `polars` must match
   the version the wheel was built against. A mismatch is undefined behavior, not a graceful
   error.
