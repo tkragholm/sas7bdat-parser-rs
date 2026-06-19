@@ -1,7 +1,10 @@
 # Builds sas7bdat-polars wheels natively on each platform and uploads them as
 # CI artifacts. Wheels are abi3 (cp312-abi3), so one wheel per platform covers
-# CPython 3.12+. Publishing is intentionally not wired up — download the
-# artifacts and `twine upload` them manually.
+# CPython 3.12+.
+#
+# On a `v*` tag, the `release` job below also publishes the built wheels to PyPI
+# automatically via Trusted Publishing (OIDC, no stored token) — see that job.
+# On branch/PR pushes the wheels are only uploaded as CI artifacts (no publish).
 #
 # The plugin lives in crates/polars-plugin/, NOT the repo root (the root
 # pyproject.toml builds a different package), hence the explicit --manifest-path.
