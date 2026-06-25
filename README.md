@@ -102,22 +102,36 @@ This repository is a Cargo workspace:
 | Crate | Description |
 |---|---|
 | `sas7bdat` (`crates/sas7bdat/`) | Core parser library (published to crates.io) |
-| `sas7bdat-cli` (`crates/sas7bdat-cli/`) | CLI tools: `sas7bdat-convert`, `sas7bdat-inspect`, and profiling binaries |
+| `sas7bdat-cli` (`crates/sas7bdat-cli/`) | The `sas7bdat` CLI (`convert`/`info`/`head`/`completions`), plus compatibility and profiling binaries |
 | `sas7bdat-polars` (`crates/polars-plugin/`) | Polars IO plugin (Python wheel via maturin) |
 
 ## CLI tools
 
-The `sas7bdat-cli` workspace member provides several binaries for working with SAS files:
+The `sas7bdat-cli` member provides one user-facing tool, `sas7bdat`, with subcommands:
 
 ```sh
-# Convert to Parquet
-cargo run -p sas7bdat-cli --bin sas7bdat-convert -- data.sas7bdat --sink parquet --out out.parquet
+# Show metadata, columns, and a small sample
+cargo run -p sas7bdat-cli --bin sas7bdat -- info data.sas7bdat
 
-# Inspect metadata
-cargo run -p sas7bdat-cli --bin sas7bdat-inspect -- data.sas7bdat --json
+# Preview the first rows as a table
+cargo run -p sas7bdat-cli --bin sas7bdat -- head data.sas7bdat -n 20
 
-# Profile a directory of SAS files
-cargo run -p sas7bdat-cli --bin sas7bdat-corpus-profile -- /path/to/sas/files --format csv --out profile.csv
+# Convert (output name + format inferred — this writes data.parquet)
+cargo run -p sas7bdat-cli --bin sas7bdat -- convert data.sas7bdat
+
+# Convert to CSV (format inferred from the .csv extension)
+cargo run -p sas7bdat-cli --bin sas7bdat -- convert data.sas7bdat --out out.csv
+
+# Generate a shell completion script
+cargo run -p sas7bdat-cli --bin sas7bdat -- completions zsh
+```
+
+The standalone `sas7bdat-convert` and `sas7bdat-inspect` binaries remain as backward-compatible
+aliases. Developer/profiling tools (`sas7bdat-corpus-profile`, `sas7bdat-dir-mapper`, ...) build
+only with `--features dev-tools`:
+
+```sh
+cargo run -p sas7bdat-cli --features dev-tools --bin sas7bdat-corpus-profile -- /path/to/sas/files --format csv --out profile.csv
 ```
 
 ## Polars plugin
