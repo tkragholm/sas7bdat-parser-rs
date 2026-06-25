@@ -2746,3 +2746,72 @@ pub(super) fn unexpected_batch_cell(expected: &str, actual: PlannedCell<'_>) -> 
         message: format!("columnar decode expected {expected} cell but saw {actual:?}"),
     })
 }
+
+#[cfg(test)]
+mod windows_1252_tests {
+    use super::{encode_windows_1252_single_byte_utf8, WINDOWS_1252_REPLACEMENT_UTF8};
+
+    /// Encode a single windows-1252 byte and return the produced UTF-8 bytes.
+    fn enc(byte: u8, strict: bool) -> Vec<u8> {
+        let mut out = [0_u8; 3];
+        let len = encode_windows_1252_single_byte_utf8(byte, strict, &mut out)
+            .expect("lenient encode should not fail");
+        out[..len].to_vec()
+    }
+
+    #[test]
+    fn special_cases_match_their_unicode_codepoints() {
+        // Cross-check the lookup table against Rust string literals (an independent
+        // oracle): the 0x80-0x9F window holds the windows-1252 "smart punctuation".
+        assert_eq!(enc(0x80, false), "€".as_bytes()); // 3-byte
+        assert_eq!(enc(0x82, false), "‚".as_bytes());
+        assert_eq!(enc(0x83, false), "ƒ".as_bytes()); // 2-byte
+        assert_eq!(enc(0x8A, false), "Š".as_bytes());
+        assert_eq!(enc(0x8C, false), "Œ".as_bytes());
+        assert_eq!(enc(0x95, false), "•".as_bytes());
+        assert_eq!(enc(0x99, false), "™".as_bytes());
+        assert_eq!(enc(0x9F, false), "Ÿ".as_bytes());
+    }
+
+    #[test]
+    fn high_ranges_map_to_latin1() {
+        // 0xA0..=0xBF take the [0xC2, byte, 0] branch; 0xC0..=0xFF take [0xC3, byte-64, 0].
+        assert_eq!(enc(0xA0, false), "\u{00A0}".as_bytes()); // non-breaking space
+        assert_eq!(enc(0xBF, false), "¿".as_bytes());
+        assert_eq!(enc(0xC0, false), "À".as_bytes());
+        assert_eq!(enc(0xE9, false), "é".as_bytes());
+        assert_eq!(enc(0xFF, false), "ÿ".as_bytes());
+    }
+
+    #[test]
+    fn undefined_bytes_replace_when_lenient_and_error_when_strict() {
+        for byte in [0x81_u8, 0x8D, 0x8F, 0x90, 0x9D] {
+            assert_eq!(
+                enc(byte, false),
+                WINDOWS_1252_REPLACEMENT_UTF8,
+                "byte {byte:#x} should become U+FFFD when lenient",
+            );
+            let mut out = [0_u8; 3];
+            assert!(
+                encode_windows_1252_single_byte_utf8(byte, true, &mut out).is_err(),
+                "byte {byte:#x} should error under strict validation",
+            );
+        }
+    }
+
+    #[test]
+    fn every_high_byte_yields_exactly_one_char() {
+        // Exercises every arm of the special-case match plus both range branches:
+        // each high byte must decode to a single, valid UTF-8 scalar.
+        for byte in 0x80_u8..=0xFF {
+            let out = enc(byte, false);
+            let text = std::str::from_utf8(&out)
+                .unwrap_or_else(|_| panic!("byte {byte:#x} produced invalid UTF-8"));
+            assert_eq!(
+                text.chars().count(),
+                1,
+                "byte {byte:#x} should map to exactly one char",
+            );
+        }
+    }
+}

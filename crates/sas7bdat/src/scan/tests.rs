@@ -1642,8 +1642,8 @@ mod fallback_append {
 
     /// True iff row `idx` is marked valid (non-null) in a bit-packed validity vector.
     /// A `None` vector means "no nulls seen" — every row is valid.
-    fn valid_at(valid: &Option<Vec<u64>>, idx: usize) -> bool {
-        valid.as_ref().is_none_or(|bits| {
+    fn valid_at(valid: Option<&[u64]>, idx: usize) -> bool {
+        valid.is_none_or(|bits| {
             bits.get(idx / 64).is_some_and(|word| (word >> (idx % 64)) & 1 == 1)
         })
     }
@@ -1664,8 +1664,8 @@ mod fallback_append {
             panic!("expected i32 buffer, builder widened unexpectedly");
         };
         assert_eq!(values, vec![0, 7, 9, 5]);
-        assert!(!valid_at(&valid, 0), "row 0 was a null");
-        assert!(valid_at(&valid, 1) && valid_at(&valid, 2) && valid_at(&valid, 3));
+        assert!(!valid_at(valid.as_deref(), 0), "row 0 was a null");
+        assert!(valid_at(valid.as_deref(), 1) && valid_at(valid.as_deref(), 2) && valid_at(valid.as_deref(), 3));
     }
 
     #[test]
@@ -1711,7 +1711,7 @@ mod fallback_append {
             panic!("expected i64 buffer");
         };
         assert_eq!(values, vec![0, 3, 1_000_000_000_000, 2]);
-        assert!(!valid_at(&valid, 0));
+        assert!(!valid_at(valid.as_deref(), 0));
 
         let fractional = run(
             ColumnMaterializationKind::I64,
@@ -1738,7 +1738,7 @@ mod fallback_append {
             panic!("expected f64 buffer");
         };
         assert_eq!(values, vec![0.0, 4.0, 6.0, 1.5]);
-        assert!(!valid_at(&valid, 0));
+        assert!(!valid_at(valid.as_deref(), 0));
     }
 
     #[test]
@@ -1755,7 +1755,7 @@ mod fallback_append {
             panic!("expected date buffer");
         };
         assert_eq!(values, vec![SasDate { days_since_sas_epoch: 0 }, SasDate { days_since_sas_epoch: 42 }]);
-        assert!(!valid_at(&valid, 0));
+        assert!(!valid_at(valid.as_deref(), 0));
 
         let datetime = run(
             ColumnMaterializationKind::DateTime,
@@ -1805,7 +1805,7 @@ mod fallback_append {
         // Offsets delimit "", "inline", "from-pool" across the shared data buffer.
         assert_eq!(offsets.as_slice(), &[0, 0, 6, 15]);
         assert_eq!(&data, b"inlinefrom-pool");
-        assert!(!valid_at(&valid, 0));
+        assert!(!valid_at(valid.as_deref(), 0));
     }
 
     #[test]
@@ -1828,7 +1828,7 @@ mod fallback_append {
         };
         assert_eq!(offsets.as_slice(), &[0, 0, 3]);
         assert_eq!(&data, &[1, 2, 3]);
-        assert!(!valid_at(&valid, 0));
+        assert!(!valid_at(valid.as_deref(), 0));
     }
 
     #[test]
