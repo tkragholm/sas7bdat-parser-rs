@@ -747,4 +747,39 @@ mod tests {
         let missing = Path::new(env!("CARGO_MANIFEST_DIR")).join("does-not-exist.sas7bdat");
         assert!(Dataset::open_breakdown(&missing, OpenOptions::default()).is_err());
     }
+
+    /// End-to-end coverage for the columnar decoder's non-ASCII transcode branch (the
+    /// direct UTF-8 owned path). The fixture is `people.sas7bdat` (WINDOWS-1252) with row
+    /// 0's GENDER cell byte-patched from `M` (0x4D) to 0xE9, i.e. `é` — so the batch
+    /// decoder must transcode a high byte to UTF-8 instead of taking the ASCII fast path.
+    /// See tests/fixtures/README.md.
+    #[test]
+    fn batch_decode_transcodes_non_ascii_windows_1252_string() {
+        use crate::columnar::OwnedColumnBuffer;
+
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/people_nonascii.sas7bdat");
+        let ds = Dataset::open(&path).expect("open patched non-ASCII fixture");
+
+        // GENDER is the 4th column (index 3); collect it across all batches.
+        let mut genders = Vec::new();
+        for batch in ds.scan().collect_batches().expect("columnar batches") {
+            let OwnedColumnBuffer::Utf8 { offsets, data, .. } = &batch.columns[3] else {
+                panic!("GENDER should decode to a utf8 column");
+            };
+            let bounds = offsets.as_slice();
+            for row in 0..batch.row_count {
+                let start = usize::try_from(bounds[row]).expect("offset fits usize");
+                let end = usize::try_from(bounds[row + 1]).expect("offset fits usize");
+                genders.push(
+                    std::str::from_utf8(&data[start..end])
+                        .expect("decoded cell is valid utf-8")
+                        .to_owned(),
+                );
+            }
+        }
+
+        // Row 0 transcodes 0xE9 -> "é" (UTF-8 0xC3 0xA9); the rest stay ASCII.
+        assert_eq!(genders, ["é", "F", "M", "F", "F"]);
+    }
 }
