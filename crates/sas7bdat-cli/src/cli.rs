@@ -104,6 +104,21 @@ pub enum SinkKind {
     Tsv,
 }
 
+/// Parquet compression codec. Defaults to Zstd, which gives a strong size win over
+/// uncompressed while staying fast to decode and broadly readable.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default, ValueEnum)]
+pub enum CompressionCodec {
+    /// Zstandard, level 3 — best size/speed balance (default).
+    #[default]
+    Zstd,
+    /// LZ4 (`lz4_raw`) — fastest decode, larger than Zstd.
+    Lz4,
+    /// Snappy — widely compatible, weaker ratio.
+    Snappy,
+    /// No compression.
+    None,
+}
+
 #[derive(Args, Clone)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct OutputOptions {
@@ -128,6 +143,10 @@ pub struct OutputOptions {
     /// Output format. Default: inferred from --out's extension, otherwise parquet.
     #[arg(long, value_enum, help_heading = "Output")]
     pub sink: Option<SinkKind>,
+
+    /// Parquet compression codec.
+    #[arg(long, value_enum, default_value_t = CompressionCodec::Zstd, help_heading = "Output")]
+    pub compression: CompressionCodec,
 
     /// CSV/TSV delimiter. Defaults to ',' for CSV and a tab for TSV.
     #[arg(long, help_heading = "Output")]
@@ -356,7 +375,7 @@ pub struct InspectCli {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, ConvertCli, InspectCli, OutputOptions, SinkKind};
+    use super::{Cli, CompressionCodec, ConvertCli, InspectCli, OutputOptions, SinkKind};
     use clap::CommandFactory;
     use std::path::PathBuf;
 
@@ -373,6 +392,7 @@ mod tests {
             out_dir: None,
             out: out.map(PathBuf::from),
             sink,
+            compression: CompressionCodec::Zstd,
             delimiter: None,
             no_header: false,
             flatten: false,

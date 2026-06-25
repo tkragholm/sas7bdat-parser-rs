@@ -116,8 +116,11 @@ cargo run -p sas7bdat-cli --bin sas7bdat -- info data.sas7bdat
 # Preview the first rows as a table
 cargo run -p sas7bdat-cli --bin sas7bdat -- head data.sas7bdat -n 20
 
-# Convert (output name + format inferred — this writes data.parquet)
+# Convert (output name + format inferred — this writes data.parquet, Zstd-compressed)
 cargo run -p sas7bdat-cli --bin sas7bdat -- convert data.sas7bdat
+
+# Pick a different Parquet codec (zstd | lz4 | snappy | none)
+cargo run -p sas7bdat-cli --bin sas7bdat -- convert data.sas7bdat --compression lz4
 
 # Convert to CSV (format inferred from the .csv extension)
 cargo run -p sas7bdat-cli --bin sas7bdat -- convert data.sas7bdat --out out.csv

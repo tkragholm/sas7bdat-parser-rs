@@ -213,6 +213,7 @@ fn convert_one(
                     scan,
                     catalog,
                     embed_metadata: args.output.parquet_metadata,
+                    compression: crate::export::resolve_compression(args.output.compression),
                 },
             )
         }

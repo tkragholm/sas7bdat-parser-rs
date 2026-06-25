@@ -168,6 +168,7 @@ mod tests {
                 out_dir: out_dir.map(PathBuf::from),
                 out: None,
                 sink: Some(sink),
+                compression: crate::cli::CompressionCodec::Zstd,
                 delimiter: None,
                 no_header: false,
                 flatten,

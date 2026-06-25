@@ -1,12 +1,60 @@
 use crate::catalog::{Catalog, LabelSet};
+use crate::cli::CompressionCodec;
 use crate::sas_metadata::{DatasetMetaJson, PARQUET_METADATA_KEY};
 use anyhow::Result;
-use arrow_schema::{Field, Fields, Schema, SchemaRef};
+use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use csv::WriterBuilder;
 use parquet::arrow::ArrowWriter;
+use parquet::basic::{Compression, Encoding, ZstdLevel};
 use parquet::file::metadata::KeyValue;
-use parquet::file::properties::WriterProperties;
+use parquet::file::properties::{WriterProperties, WriterPropertiesBuilder};
+use parquet::schema::types::ColumnPath;
+
+/// Column-statistics min/max longer than this (bytes) are truncated, keeping footers
+/// small. Matches the parquet-linter `string_statistics` recommendation and parquet-rs's
+/// own page-index default.
+const STATISTICS_TRUNCATE_LENGTH: usize = 64;
+
+/// Map the user-facing codec choice to a parquet compression setting.
+// Zstd level 3 is a compile-time constant and always valid, so this never panics.
+#[must_use]
+#[allow(clippy::missing_panics_doc)]
+pub fn resolve_compression(codec: CompressionCodec) -> Compression {
+    match codec {
+        CompressionCodec::Zstd => {
+            Compression::ZSTD(ZstdLevel::try_new(3).expect("zstd level 3 is valid"))
+        }
+        CompressionCodec::Lz4 => Compression::LZ4_RAW,
+        CompressionCodec::Snappy => Compression::SNAPPY,
+        CompressionCodec::None => Compression::UNCOMPRESSED,
+    }
+}
+
+/// Set the per-column *fallback* encoding for the types where it pays off, matching the
+/// parquet-linter `float_encoding` and `timestamp_encoding` rules. Dictionary encoding
+/// stays enabled, so low-cardinality columns still use the dictionary and only high-
+/// cardinality columns (which would otherwise spill to PLAIN) pick up the better encoding.
+fn apply_column_encodings(mut builder: WriterPropertiesBuilder, schema: &Schema) -> WriterPropertiesBuilder {
+    for field in schema.fields() {
+        let encoding = match field.data_type() {
+            // BYTE_STREAM_SPLIT typically compresses continuous floats 2-4x better.
+            DataType::Float32 | DataType::Float64 => Some(Encoding::BYTE_STREAM_SPLIT),
+            // DELTA_BINARY_PACKED suits monotonic-ish temporal integers.
+            DataType::Date32
+            | DataType::Date64
+            | DataType::Timestamp(_, _)
+            | DataType::Time32(_)
+            | DataType::Time64(_) => Some(Encoding::DELTA_BINARY_PACKED),
+            _ => None,
+        };
+        if let Some(encoding) = encoding {
+            let path = ColumnPath::from(field.name().as_str());
+            builder = builder.set_column_encoding(path, encoding);
+        }
+    }
+    builder
+}
 use sas7bdat::{
     BatchHint, CellValue, ColumnMeta, Dataset, Error, Parallelism, Projection, RowSelection,
     ScanBuilder,
@@ -33,6 +81,8 @@ pub struct WriteOptions<'a> {
     pub catalog: Option<&'a Catalog>,
     /// Embed SAS dataset/column metadata into the Parquet file's key-value metadata.
     pub embed_metadata: bool,
+    /// Compression codec for the written Parquet data.
+    pub compression: Compression,
 }
 
 impl WriteOptions<'_> {
@@ -48,6 +98,7 @@ impl WriteOptions<'_> {
             },
             catalog: None,
             embed_metadata: false,
+            compression: Compression::UNCOMPRESSED,
         }
     }
 }
@@ -82,9 +133,14 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         options.catalog,
         options.scan.projection,
     )?;
-    let props = WriterProperties::builder()
+    let mut builder = WriterProperties::builder()
         .set_max_row_group_row_count(Some(options.row_group_rows.unwrap_or(65_536).max(1)))
-        .build();
+        .set_compression(options.compression)
+        // Keep column-chunk statistics small for long strings (parquet-linter
+        // `string_statistics`); page-index stats are already truncated by parquet-rs.
+        .set_statistics_truncate_length(Some(STATISTICS_TRUNCATE_LENGTH));
+    builder = apply_column_encodings(builder, &schema);
+    let props = builder.build();
     let mut writer = ArrowWriter::try_new(file, schema, Some(props))?;
     if options.embed_metadata {
         // Write as a Parquet file-level key-value pair (not Arrow schema metadata), so it is
@@ -327,10 +383,58 @@ fn write_cell_field<W: Write>(
 
 #[cfg(test)]
 mod tests {
-    use super::attach_value_labels;
+    use super::{apply_column_encodings, attach_value_labels, resolve_compression};
     use crate::catalog::{LabelSet, ValueKey, ValueLabel, ValueType};
-    use arrow_schema::{DataType, Field, Fields};
+    use crate::cli::CompressionCodec;
+    use arrow_schema::{DataType, Field, Fields, Schema, TimeUnit};
+    use parquet::basic::{Compression, Encoding};
+    use parquet::file::properties::WriterProperties;
+    use parquet::schema::types::ColumnPath;
     use sas7bdat::{ColumnMeta, LogicalType};
+
+    #[test]
+    fn resolve_compression_maps_each_codec() {
+        assert!(matches!(
+            resolve_compression(CompressionCodec::Zstd),
+            Compression::ZSTD(_)
+        ));
+        assert_eq!(resolve_compression(CompressionCodec::Lz4), Compression::LZ4_RAW);
+        assert_eq!(resolve_compression(CompressionCodec::Snappy), Compression::SNAPPY);
+        assert_eq!(
+            resolve_compression(CompressionCodec::None),
+            Compression::UNCOMPRESSED
+        );
+    }
+
+    #[test]
+    fn column_encodings_target_floats_and_temporals_only() {
+        let schema = Schema::new(vec![
+            Field::new("flt", DataType::Float64, false),
+            Field::new("dt", DataType::Date32, false),
+            Field::new("ts", DataType::Timestamp(TimeUnit::Second, None), false),
+            Field::new("txt", DataType::Utf8, false),
+            Field::new("int", DataType::Int64, false),
+        ]);
+        let props = apply_column_encodings(WriterProperties::builder(), &schema).build();
+        // Set as the per-column fallback encoding; dictionary stays enabled globally.
+        assert_eq!(
+            props.encoding(&ColumnPath::from("flt")),
+            Some(Encoding::BYTE_STREAM_SPLIT)
+        );
+        assert_eq!(
+            props.encoding(&ColumnPath::from("dt")),
+            Some(Encoding::DELTA_BINARY_PACKED)
+        );
+        assert_eq!(
+            props.encoding(&ColumnPath::from("ts")),
+            Some(Encoding::DELTA_BINARY_PACKED)
+        );
+        // Strings and integers keep parquet-rs defaults.
+        assert_eq!(props.encoding(&ColumnPath::from("txt")), None);
+        assert_eq!(props.encoding(&ColumnPath::from("int")), None);
+        // Dictionary is still on, so low-cardinality columns use it rather than the fallback.
+        assert!(props.dictionary_enabled(&ColumnPath::from("flt")));
+    }
 
     fn column(index: usize, name: &str, format: &str) -> ColumnMeta {
         ColumnMeta {
