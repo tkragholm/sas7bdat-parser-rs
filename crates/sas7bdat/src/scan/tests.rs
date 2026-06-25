@@ -1610,3 +1610,262 @@ fn columnar_falls_back_for_string_columns() {
         );
     }
 }
+
+/// Direct coverage for [`OwnedBatchColumnBuilder::append`] — the generic fallback
+/// path (`push_fallback_family`). Every shipped fixture qualifies for one of the fast
+/// paths (direct-fill / staged-numeric / direct-utf8), so the fallback's type-widening
+/// and `PlannedCell` promotion branches are otherwise never exercised by the scan tests.
+mod fallback_append {
+    use super::super::batch::OwnedBatchColumnBuilder;
+    use super::super::plan::{ColumnMaterializationKind, NumericTileMode};
+    use super::super::row_decode::PlannedCell;
+    use crate::columnar::OwnedColumnBuffer;
+    use crate::{SasDate, SasDateTime, SasTime};
+
+    /// Build a non-staged builder of `kind`, append `cells`, and finish to a buffer.
+    fn run(kind: ColumnMaterializationKind, cells: &[PlannedCell<'_>]) -> OwnedColumnBuffer {
+        run_with_owned(kind, None, cells, &[])
+    }
+
+    fn run_with_owned(
+        kind: ColumnMaterializationKind,
+        numeric_tile: Option<NumericTileMode>,
+        cells: &[PlannedCell<'_>],
+        owned_strings: &[String],
+    ) -> OwnedColumnBuffer {
+        let mut builder = OwnedBatchColumnBuilder::with_capacity_hint(kind, 8, 8, numeric_tile, 1);
+        for &cell in cells {
+            builder.append(cell, owned_strings).expect("append should succeed");
+        }
+        builder.finish()
+    }
+
+    /// True iff row `idx` is marked valid (non-null) in a bit-packed validity vector.
+    /// A `None` vector means "no nulls seen" — every row is valid.
+    fn valid_at(valid: &Option<Vec<u64>>, idx: usize) -> bool {
+        valid.as_ref().is_none_or(|bits| {
+            bits.get(idx / 64).is_some_and(|word| (word >> (idx % 64)) & 1 == 1)
+        })
+    }
+
+    #[test]
+    fn i32_accepts_and_narrows_without_widening() {
+        // Null, native i32, an i64 that fits, and a float that classifies back to i32.
+        let buffer = run(
+            ColumnMaterializationKind::I32,
+            &[
+                PlannedCell::Null,
+                PlannedCell::Int32(7),
+                PlannedCell::Int64(9),
+                PlannedCell::Float64(5.0),
+            ],
+        );
+        let OwnedColumnBuffer::I32 { values, valid } = buffer else {
+            panic!("expected i32 buffer, builder widened unexpectedly");
+        };
+        assert_eq!(values, vec![0, 7, 9, 5]);
+        assert!(!valid_at(&valid, 0), "row 0 was a null");
+        assert!(valid_at(&valid, 1) && valid_at(&valid, 2) && valid_at(&valid, 3));
+    }
+
+    #[test]
+    fn i32_widens_to_f64_on_int64_overflow() {
+        let overflow = i64::from(i32::MAX) + 1;
+        let buffer = run(
+            ColumnMaterializationKind::I32,
+            &[PlannedCell::Int32(1), PlannedCell::Int64(overflow)],
+        );
+        let OwnedColumnBuffer::F64 { values, .. } = buffer else {
+            panic!("i32 builder should widen to f64 on overflow");
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let expected = overflow as f64;
+        assert_eq!(values, vec![1.0, expected]);
+    }
+
+    #[test]
+    fn i32_widens_to_f64_on_non_integral_float() {
+        let buffer = run(
+            ColumnMaterializationKind::I32,
+            &[PlannedCell::Int32(2), PlannedCell::Float64(3.5)],
+        );
+        let OwnedColumnBuffer::F64 { values, .. } = buffer else {
+            panic!("i32 builder should widen to f64 for a fractional value");
+        };
+        assert_eq!(values, vec![2.0, 3.5]);
+    }
+
+    #[test]
+    fn i64_accepts_promotions_and_widens_on_fraction() {
+        // Integral float promotes to i64; fractional float forces a widen to f64.
+        let integral = run(
+            ColumnMaterializationKind::I64,
+            &[
+                PlannedCell::Null,
+                PlannedCell::Int32(3),
+                PlannedCell::Int64(1_000_000_000_000),
+                PlannedCell::Float64(2.0),
+            ],
+        );
+        let OwnedColumnBuffer::I64 { values, valid } = integral else {
+            panic!("expected i64 buffer");
+        };
+        assert_eq!(values, vec![0, 3, 1_000_000_000_000, 2]);
+        assert!(!valid_at(&valid, 0));
+
+        let fractional = run(
+            ColumnMaterializationKind::I64,
+            &[PlannedCell::Int64(5), PlannedCell::Float64(2.5)],
+        );
+        let OwnedColumnBuffer::F64 { values, .. } = fractional else {
+            panic!("i64 builder should widen to f64 for a fractional value");
+        };
+        assert_eq!(values, vec![5.0, 2.5]);
+    }
+
+    #[test]
+    fn f64_accepts_every_numeric_cell() {
+        let buffer = run(
+            ColumnMaterializationKind::F64,
+            &[
+                PlannedCell::Null,
+                PlannedCell::Int32(4),
+                PlannedCell::Int64(6),
+                PlannedCell::Float64(1.5),
+            ],
+        );
+        let OwnedColumnBuffer::F64 { values, valid } = buffer else {
+            panic!("expected f64 buffer");
+        };
+        assert_eq!(values, vec![0.0, 4.0, 6.0, 1.5]);
+        assert!(!valid_at(&valid, 0));
+    }
+
+    #[test]
+    fn temporal_builders_take_native_and_widen_on_numeric() {
+        // Native temporal cells land in their typed buffer...
+        let date = run(
+            ColumnMaterializationKind::Date,
+            &[
+                PlannedCell::Null,
+                PlannedCell::Date(SasDate { days_since_sas_epoch: 42 }),
+            ],
+        );
+        let OwnedColumnBuffer::Date { values, valid } = date else {
+            panic!("expected date buffer");
+        };
+        assert_eq!(values, vec![SasDate { days_since_sas_epoch: 0 }, SasDate { days_since_sas_epoch: 42 }]);
+        assert!(!valid_at(&valid, 0));
+
+        let datetime = run(
+            ColumnMaterializationKind::DateTime,
+            &[PlannedCell::DateTime(SasDateTime { seconds_since_sas_epoch: 99 })],
+        );
+        let OwnedColumnBuffer::DateTime { values, .. } = datetime else {
+            panic!("expected datetime buffer");
+        };
+        assert_eq!(values, vec![SasDateTime { seconds_since_sas_epoch: 99 }]);
+
+        let time = run(
+            ColumnMaterializationKind::Time,
+            &[PlannedCell::Time(SasTime { seconds_since_midnight: 3600 })],
+        );
+        let OwnedColumnBuffer::Time { values, .. } = time else {
+            panic!("expected time buffer");
+        };
+        assert_eq!(values, vec![SasTime { seconds_since_midnight: 3600 }]);
+
+        // ...but a raw numeric cell forces the temporal column to widen to f64.
+        let widened = run(
+            ColumnMaterializationKind::Date,
+            &[PlannedCell::Date(SasDate { days_since_sas_epoch: 1 }), PlannedCell::Int32(7)],
+        );
+        let OwnedColumnBuffer::F64 { values, .. } = widened else {
+            panic!("date builder should widen to f64 on a numeric cell");
+        };
+        assert_eq!(values, vec![1.0, 7.0]);
+    }
+
+    #[test]
+    fn utf8_handles_null_borrowed_and_owned() {
+        let owned = vec!["from-pool".to_owned()];
+        let buffer = run_with_owned(
+            ColumnMaterializationKind::Utf8,
+            None,
+            &[
+                PlannedCell::Null,
+                PlannedCell::StrBorrowed("inline"),
+                PlannedCell::StrOwned(0),
+            ],
+            &owned,
+        );
+        let OwnedColumnBuffer::Utf8 { data, offsets, valid, .. } = buffer else {
+            panic!("expected utf8 buffer");
+        };
+        // Offsets delimit "", "inline", "from-pool" across the shared data buffer.
+        assert_eq!(offsets.as_slice(), &[0, 0, 6, 15]);
+        assert_eq!(&data, b"inlinefrom-pool");
+        assert!(!valid_at(&valid, 0));
+    }
+
+    #[test]
+    fn utf8_owned_index_out_of_range_errors() {
+        let mut builder =
+            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::Utf8, 8, 8, None, 1);
+        // owned_strings is empty, so index 0 is out of range.
+        let err = builder.append(PlannedCell::StrOwned(0), &[]).expect_err("should reject");
+        assert!(err.to_string().contains("owned string index out of range"));
+    }
+
+    #[test]
+    fn raw_bytes_handles_null_and_payload() {
+        let buffer = run(
+            ColumnMaterializationKind::RawBytes,
+            &[PlannedCell::Null, PlannedCell::Bytes(&[1, 2, 3])],
+        );
+        let OwnedColumnBuffer::RawBytes { data, offsets, valid } = buffer else {
+            panic!("expected raw-bytes buffer");
+        };
+        assert_eq!(offsets.as_slice(), &[0, 0, 3]);
+        assert_eq!(&data, &[1, 2, 3]);
+        assert!(!valid_at(&valid, 0));
+    }
+
+    #[test]
+    fn staged_numeric_arm_encodes_raw_bits() {
+        // The fallback `append` routes cells through the StagedNumeric arm
+        // (`staged_numeric_raw_bits_from_planned_cell`) when the builder is tiled.
+        // It pushes raw bits without flagging `has_missing`, so we assert only on the
+        // round-tripped real values, not on null materialization.
+        let buffer = run_with_owned(
+            ColumnMaterializationKind::F64,
+            Some(NumericTileMode::F64RawBits),
+            &[PlannedCell::Float64(2.0), PlannedCell::Int32(3)],
+            &[],
+        );
+        let OwnedColumnBuffer::F64 { values, .. } = buffer else {
+            panic!("expected staged numeric to materialize as f64");
+        };
+        assert_eq!(values, vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn type_mismatched_cells_are_rejected() {
+        // Each builder rejects a cell kind it cannot represent, rather than silently coercing.
+        let mut f64_builder =
+            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::F64, 8, 8, None, 1);
+        assert!(f64_builder.append(PlannedCell::Bytes(&[0]), &[]).is_err());
+
+        let mut utf8_builder =
+            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::Utf8, 8, 8, None, 1);
+        assert!(utf8_builder.append(PlannedCell::Int32(1), &[]).is_err());
+
+        let mut bytes_builder =
+            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::RawBytes, 8, 8, None, 1);
+        assert!(bytes_builder.append(PlannedCell::StrBorrowed("x"), &[]).is_err());
+
+        let mut date_builder =
+            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::Date, 8, 8, None, 1);
+        assert!(date_builder.append(PlannedCell::StrBorrowed("x"), &[]).is_err());
+    }
+}
