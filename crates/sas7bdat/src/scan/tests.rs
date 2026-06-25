@@ -1849,6 +1849,72 @@ mod fallback_append {
         assert_eq!(values, vec![2.0, 3.0]);
     }
 
+    fn builder(kind: ColumnMaterializationKind) -> OwnedBatchColumnBuilder {
+        OwnedBatchColumnBuilder::with_capacity_hint(kind, 8, 8, None, 1)
+    }
+
+    #[test]
+    fn append_integer_fast_pushes_or_widens_for_i32() {
+        // None -> null, integral-in-range -> i32, no widening.
+        let mut b = builder(ColumnMaterializationKind::I32);
+        assert!(b.append_integer_fast(None));
+        assert!(b.append_integer_fast(Some(5.0)));
+        let OwnedColumnBuffer::I32 { values, valid } = b.finish() else {
+            panic!("expected i32 buffer");
+        };
+        assert_eq!(values, vec![0, 5]);
+        assert!(!valid_at(valid.as_deref(), 0) && valid_at(valid.as_deref(), 1));
+
+        // Integral but out of i32 range -> widen to f64.
+        let mut b = builder(ColumnMaterializationKind::I32);
+        assert!(b.append_integer_fast(Some(5_000_000_000.0)));
+        let OwnedColumnBuffer::F64 { values, .. } = b.finish() else {
+            panic!("i32 should widen to f64 for an out-of-range integer");
+        };
+        assert_eq!(values, vec![5_000_000_000.0]);
+
+        // Fractional -> widen to f64.
+        let mut b = builder(ColumnMaterializationKind::I32);
+        assert!(b.append_integer_fast(Some(2.5)));
+        let OwnedColumnBuffer::F64 { values, .. } = b.finish() else {
+            panic!("i32 should widen to f64 for a fractional value");
+        };
+        assert_eq!(values, vec![2.5]);
+    }
+
+    #[test]
+    fn append_integer_fast_handles_i64_and_f64_and_rejects_others() {
+        // i64 takes nulls and integral values; a fractional value widens to f64.
+        let mut b = builder(ColumnMaterializationKind::I64);
+        assert!(b.append_integer_fast(None));
+        assert!(b.append_integer_fast(Some(9.0)));
+        let OwnedColumnBuffer::I64 { values, .. } = b.finish() else {
+            panic!("expected i64 buffer");
+        };
+        assert_eq!(values, vec![0, 9]);
+
+        let mut b = builder(ColumnMaterializationKind::I64);
+        assert!(b.append_integer_fast(Some(1.5)));
+        let OwnedColumnBuffer::F64 { values, .. } = b.finish() else {
+            panic!("i64 should widen to f64 for a fractional value");
+        };
+        assert_eq!(values, vec![1.5]);
+
+        // f64 takes everything directly.
+        let mut b = builder(ColumnMaterializationKind::F64);
+        assert!(b.append_integer_fast(Some(3.0)));
+        assert!(b.append_integer_fast(None));
+        let OwnedColumnBuffer::F64 { values, valid } = b.finish() else {
+            panic!("expected f64 buffer");
+        };
+        assert_eq!(values, vec![3.0, 0.0]);
+        assert!(!valid_at(valid.as_deref(), 1));
+
+        // Non-numeric builders report "not handled" (false) without mutating.
+        assert!(!builder(ColumnMaterializationKind::Utf8).append_integer_fast(Some(1.0)));
+        assert!(!builder(ColumnMaterializationKind::Date).append_integer_fast(Some(1.0)));
+    }
+
     #[test]
     fn type_mismatched_cells_are_rejected() {
         // Each builder rejects a cell kind it cannot represent, rather than silently coercing.

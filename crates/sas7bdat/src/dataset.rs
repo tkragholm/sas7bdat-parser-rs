@@ -687,4 +687,64 @@ mod tests {
         assert_eq!(visited, collected.len());
         assert_eq!(stats.rows_emitted, collected.len() as u64);
     }
+
+    /// A small, git-tracked fixture (shipped with the R plugin) so the timing-breakdown
+    /// tests actually run in CI rather than skipping like the untracked-corpus tests above.
+    fn tracked_fixture() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../r-plugin/inst/extdata/people.sas7bdat")
+    }
+
+    #[test]
+    fn open_breakdown_via_mmap_records_mapped_timings() {
+        let breakdown = Dataset::open_breakdown(
+            tracked_fixture(),
+            OpenOptions {
+                io_backend: IoBackendPreference::MmapPreferred,
+                ..OpenOptions::default()
+            },
+        )
+        .expect("mmap-preferred breakdown");
+
+        assert!(breakdown.used_mmap);
+        assert!(breakdown.mmap_ns.is_some());
+        // total_ns is the sum of every recorded phase, including the mmap phase.
+        assert_eq!(
+            breakdown.total_ns,
+            breakdown.metadata_ns
+                + breakdown.file_open_ns
+                + breakdown.mmap_ns.expect("mmap phase recorded")
+                + breakdown.probe_header_ns
+                + breakdown.rewind_ns
+                + breakdown.parse_layout_ns,
+        );
+    }
+
+    #[test]
+    fn open_breakdown_buffered_skips_the_mmap_phase() {
+        let breakdown = Dataset::open_breakdown(
+            tracked_fixture(),
+            OpenOptions {
+                io_backend: IoBackendPreference::BufferedOnly,
+                ..OpenOptions::default()
+            },
+        )
+        .expect("buffered-only breakdown");
+
+        assert!(!breakdown.used_mmap);
+        assert!(breakdown.mmap_ns.is_none());
+        assert_eq!(
+            breakdown.total_ns,
+            breakdown.metadata_ns
+                + breakdown.file_open_ns
+                + breakdown.probe_header_ns
+                + breakdown.rewind_ns
+                + breakdown.parse_layout_ns,
+        );
+    }
+
+    #[test]
+    fn open_breakdown_reports_io_error_for_missing_file() {
+        let missing = Path::new(env!("CARGO_MANIFEST_DIR")).join("does-not-exist.sas7bdat");
+        assert!(Dataset::open_breakdown(&missing, OpenOptions::default()).is_err());
+    }
 }

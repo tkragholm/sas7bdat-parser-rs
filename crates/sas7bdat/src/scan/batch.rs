@@ -2748,6 +2748,80 @@ pub(super) fn unexpected_batch_cell(expected: &str, actual: PlannedCell<'_>) -> 
 }
 
 #[cfg(test)]
+mod staged_string_lookup_tests {
+    use super::{MAX_STAGED_STRING_WIDTH, StageLookupHit, StagedStringLookup};
+
+    #[test]
+    fn empty_table_misses() {
+        let mut dict = StagedStringLookup::new();
+        assert!(dict.lookup(b"alpha").is_none());
+    }
+
+    #[test]
+    fn stage_then_promote_resolves_through_recent_and_slot_scan() {
+        let mut dict = StagedStringLookup::new();
+
+        // First sighting stages the key and primes the recent cache.
+        let alpha = dict.insert_seen_once(b"alpha").expect("alpha staged");
+        assert!(matches!(
+            dict.lookup(b"alpha"),
+            Some(StageLookupHit::SeenOnce(idx)) if idx == alpha
+        ));
+
+        // A key longer than the inline window (16 bytes), still within the staged-width
+        // cap (20), forces the raw-bytes key comparison path.
+        let long_key = b"0123456789abcdefghij"; // 20 bytes
+        let long = dict.insert_seen_once(long_key).expect("long key staged");
+        assert!(matches!(
+            dict.lookup(long_key),
+            Some(StageLookupHit::SeenOnce(idx)) if idx == long
+        ));
+
+        // Promote to interned; the stored UTF-8 should come back from interned_utf8.
+        dict.promote_interned(alpha, b"ALPHA", false);
+        assert!(matches!(
+            dict.lookup(b"alpha"),
+            Some(StageLookupHit::Interned(idx)) if idx == alpha
+        ));
+        assert_eq!(dict.interned_utf8(alpha), b"ALPHA");
+
+        // Invalidate the recent cache to force the open-addressed slot scan, which must
+        // still find the (now interned) entry.
+        dict.recent_valid = [0; 4];
+        assert!(matches!(
+            dict.lookup(b"alpha"),
+            Some(StageLookupHit::Interned(idx)) if idx == alpha
+        ));
+
+        // A key that was never staged misses.
+        assert!(dict.lookup(b"never-staged").is_none());
+    }
+
+    #[test]
+    fn keys_wider_than_the_cap_are_not_staged() {
+        let mut dict = StagedStringLookup::new();
+        let too_wide = vec![b'x'; MAX_STAGED_STRING_WIDTH as usize + 1];
+        assert!(dict.insert_seen_once(&too_wide).is_none());
+    }
+
+    #[test]
+    fn lookup_short_circuits_once_disabled() {
+        let mut dict = StagedStringLookup::new();
+        let alpha = dict.insert_seen_once(b"alpha").expect("staged");
+        dict.promote_interned(alpha, b"alpha", true);
+
+        // Drive lookups until the adaptive heuristic disables the table.
+        while dict.should_use() {
+            dict.observe_lookup();
+        }
+        assert!(
+            dict.lookup(b"alpha").is_none(),
+            "a disabled dictionary reports no hits regardless of contents",
+        );
+    }
+}
+
+#[cfg(test)]
 mod windows_1252_tests {
     use super::{encode_windows_1252_single_byte_utf8, WINDOWS_1252_REPLACEMENT_UTF8};
 
