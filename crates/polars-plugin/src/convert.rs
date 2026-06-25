@@ -610,7 +610,7 @@ mod tests {
             "expected String dtype, got {:?}",
             series.dtype()
         );
-        let strs: Vec<Option<&str>> = series.str().expect("str chunked").into_iter().collect();
+        let strs: Vec<Option<&str>> = series.str().expect("str chunked").iter().collect();
         assert_eq!(strs, vec![Some("Male"), Some("Female")]);
     }
 
@@ -628,7 +628,7 @@ mod tests {
             .expect("code")
             .str()
             .expect("str")
-            .into_iter()
+            .iter()
             .collect();
         assert_eq!(strs[0], Some("Male"));
         assert!(strs[1].is_some(), "unlabelled value should be non-null");
@@ -654,7 +654,7 @@ mod tests {
             .expect("gender")
             .str()
             .expect("str")
-            .into_iter()
+            .iter()
             .collect();
         assert_eq!(strs[0], Some("Male"));
         assert_eq!(strs[1], None, "null row should remain null");
