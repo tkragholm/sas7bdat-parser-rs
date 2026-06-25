@@ -4,8 +4,8 @@
 use crate::cli::HeadArgs;
 use crate::friendly;
 use crate::selection::{ColumnSelection, projection_from_selection, resolve_column_indices};
-use crate::style::Style;
-use crate::values::format_cell;
+use crate::style::{Style, terminal_width};
+use crate::values::{format_cell, thousands};
 use anyhow::Result;
 use sas7bdat::{Dataset, Projection, RowSelection};
 use std::fmt::Write as _;
@@ -34,7 +34,10 @@ pub fn run_head(args: &HeadArgs) -> Result<()> {
     let projection = projection_from_selection(&dataset, selection)?;
     let headers = header_names(&dataset, indices.as_deref());
     let table = collect_preview(&dataset, projection.as_ref(), headers, args.rows)?;
-    print!("{}", render_table(&table, Style::for_stdout()));
+    print!(
+        "{}",
+        render_table(&table, Style::for_stdout(), terminal_width())
+    );
     Ok(())
 }
 
@@ -96,16 +99,23 @@ pub fn collect_preview(
 }
 
 /// Render a [`PreviewTable`] as an aligned, optionally-colored text block.
+///
+/// When `max_width` is `Some`, trailing columns that would overflow the terminal are
+/// dropped and noted in the footer, so wide datasets stay readable.
 #[must_use]
-pub fn render_table(table: &PreviewTable, style: Style) -> String {
+pub fn render_table(table: &PreviewTable, style: Style, max_width: Option<usize>) -> String {
     let widths = column_widths(table);
+    let shown = columns_that_fit(&widths, max_width);
+    let dropped = widths.len() - shown;
+    let widths = &widths[..shown];
     let mut out = String::new();
 
     // Header row (bold) and an underline.
     let header_cells: Vec<String> = table
         .headers
         .iter()
-        .zip(&widths)
+        .take(shown)
+        .zip(widths)
         .map(|(name, width)| pad(&truncate(name), *width))
         .collect();
     let _ = writeln!(out, "{}", style.bold(&header_cells.join("  ")));
@@ -125,13 +135,39 @@ pub fn render_table(table: &PreviewTable, style: Style) -> String {
         let _ = writeln!(out, "{}", cells.join("  "));
     }
 
-    let footer = if table.rows.len() as u64 == table.total_rows {
-        format!("({} rows)", table.total_rows)
+    let mut footer = if table.rows.len() as u64 == table.total_rows {
+        format!("({} rows)", thousands(table.total_rows))
     } else {
-        format!("(showing {} of {} rows)", table.rows.len(), table.total_rows)
+        format!(
+            "(showing {} of {} rows)",
+            table.rows.len(),
+            thousands(table.total_rows)
+        )
     };
+    if dropped > 0 {
+        let _ = write!(footer, " · +{dropped} more cols (use --columns to pick)");
+    }
     let _ = writeln!(out, "{}", style.dim(&footer));
     out
+}
+
+/// How many leading columns fit within `max_width` (counting 2-space separators).
+/// Always keeps at least one column; `None` keeps them all.
+fn columns_that_fit(widths: &[usize], max_width: Option<usize>) -> usize {
+    let Some(max) = max_width else {
+        return widths.len();
+    };
+    let mut used = 0;
+    let mut count = 0;
+    for (idx, width) in widths.iter().enumerate() {
+        let needed = if idx == 0 { *width } else { 2 + *width };
+        if used + needed > max && count > 0 {
+            break;
+        }
+        used += needed;
+        count += 1;
+    }
+    count.max(1)
 }
 
 fn column_widths(table: &PreviewTable) -> Vec<usize> {
@@ -167,5 +203,47 @@ fn pad(value: &str, width: usize) -> String {
         value.to_owned()
     } else {
         format!("{value}{}", " ".repeat(width - len))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PreviewTable, columns_that_fit, render_table};
+    use crate::style::Style;
+
+    #[test]
+    fn columns_that_fit_respects_the_width_budget() {
+        // Widths [3, 5, 5] render as 3 + (2+5) + (2+5) = 17 chars with separators.
+        let widths = [3, 5, 5];
+        assert_eq!(columns_that_fit(&widths, None), 3); // no cap -> all
+        assert_eq!(columns_that_fit(&widths, Some(20)), 3); // 17 <= 20
+        assert_eq!(columns_that_fit(&widths, Some(12)), 2); // 17 > 12, 10 <= 12
+        assert_eq!(columns_that_fit(&widths, Some(1)), 1); // always at least one
+    }
+
+    fn table() -> PreviewTable {
+        PreviewTable {
+            headers: vec!["a".into(), "bb".into(), "ccc".into()],
+            rows: vec![vec!["1".into(), "2".into(), "3".into()]],
+            total_rows: 1,
+        }
+    }
+
+    #[test]
+    fn render_drops_overflowing_columns_and_notes_them() {
+        let plain = Style::for_stderr(); // not a tty in tests -> styling off
+        // Narrow budget: only the first column fits; the footer flags the rest.
+        let out = render_table(&table(), plain, Some(3));
+        assert!(out.contains("+2 more cols"), "footer should note dropped columns:\n{out}");
+        // Header should not include the dropped third column name.
+        assert!(!out.contains("ccc"));
+    }
+
+    #[test]
+    fn render_shows_all_columns_without_a_budget() {
+        let out = render_table(&table(), Style::for_stderr(), None);
+        assert!(out.contains("ccc"));
+        assert!(!out.contains("more cols"));
+        assert!(out.contains("(1 rows)"));
     }
 }

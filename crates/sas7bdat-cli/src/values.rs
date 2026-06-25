@@ -5,6 +5,21 @@ use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use sas7bdat::CellValue;
 use std::fmt::Write as _;
 
+/// Group a number with thousands separators (e.g. `70044` -> `70,044`).
+#[must_use]
+pub fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let len = digits.len();
+    let mut out = String::with_capacity(len + len / 3);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// Format a byte count as a compact human-readable size (e.g. `1.2 KB`).
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
@@ -76,6 +91,16 @@ pub fn format_cell(cell: &CellValue<'_>, null_repr: &str) -> String {
 mod tests {
     use super::{format_cell, human_bytes};
     use sas7bdat::{CellValue, SasDate, SasDateTime};
+
+    #[test]
+    fn thousands_groups_digits() {
+        use super::thousands;
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(42), "42");
+        assert_eq!(thousands(4041), "4,041");
+        assert_eq!(thousands(70044), "70,044");
+        assert_eq!(thousands(1_234_567), "1,234,567");
+    }
 
     #[test]
     fn human_bytes_scales_units() {

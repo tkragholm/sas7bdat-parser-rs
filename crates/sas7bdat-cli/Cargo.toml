@@ -62,6 +62,7 @@ chrono = { workspace = true }
 clap = { workspace = true }
 clap_complete = "4"
 csv = { workspace = true }
+terminal_size = "0.4"
 encoding_rs = { workspace = true }
 glob = { workspace = true }
 hex = { workspace = true }

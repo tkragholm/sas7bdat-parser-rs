@@ -6,7 +6,7 @@ use crate::sas_metadata::DatasetMetaJson;
 use crate::selection::{
     ColumnSelection, projection_from_selection, resolve_column_indices, selected_columns_refs,
 };
-use crate::style::Style;
+use crate::style::{Style, terminal_width};
 use anyhow::Result;
 use std::io::{self, Write};
 use std::path::Path;
@@ -65,8 +65,8 @@ pub fn run_inspect(args: &InspectArgs) -> Result<()> {
         )?;
         let headers = header_names(&dataset, Some(&indices));
         let table = collect_preview(&dataset, projection.as_ref(), headers, SAMPLE_ROWS)?;
-        println!("{}", style.bold("Sample:"));
-        print!("{}", render_table(&table, style));
+        println!("\n{}", style.bold("Sample:"));
+        print!("{}", render_table(&table, style, terminal_width()));
     }
     Ok(())
 }

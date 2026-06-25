@@ -3,6 +3,16 @@
 
 use std::io::IsTerminal;
 
+/// Width of the stdout terminal, or `None` when stdout isn't a terminal (piped/redirected),
+/// in which case callers should not truncate to fit.
+#[must_use]
+pub fn terminal_width() -> Option<usize> {
+    if !std::io::stdout().is_terminal() {
+        return None;
+    }
+    terminal_size::terminal_size().map(|(width, _)| width.0 as usize)
+}
+
 #[derive(Clone, Copy)]
 pub struct Style {
     enabled: bool,

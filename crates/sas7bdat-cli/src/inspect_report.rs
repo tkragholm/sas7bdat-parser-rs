@@ -1,4 +1,4 @@
-use crate::values::human_bytes;
+use crate::values::{human_bytes, thousands};
 use sas7bdat::{ColumnMeta, CompressionKind, Dataset};
 use std::path::Path;
 
@@ -20,7 +20,7 @@ pub fn format_inspect_report(
 ) -> String {
     let mut out = String::new();
     append_inspect_summary(&mut out, dataset, source, columns.len(), selected_count);
-    append_inspect_table(&mut out, columns, selected_count);
+    append_inspect_table(&mut out, columns);
     out
 }
 
@@ -34,31 +34,48 @@ fn append_inspect_summary(
     use std::fmt::Write as _;
 
     let meta = dataset.metadata();
-    let _ = writeln!(out, "File: {}", source.display());
-    if let Ok(size) = std::fs::metadata(source) {
-        let _ = writeln!(out, "Size: {}", human_bytes(size.len()));
-    }
-    let _ = writeln!(out, "Rows: {}", meta.row_count);
     let total_count = dataset.columns().len();
-    let _ = writeln!(out, "Columns: {total_count}");
-    let _ = writeln!(out, "Compression: {}", compression_label(meta.compression));
-    if selected_count != total_count {
-        let _ = writeln!(out, "Selected columns: {selected_count}");
+
+    // Path, then a single compact stats line, then optional table/label.
+    let _ = writeln!(out, "{}", source.display());
+    let mut stats = String::new();
+    if let Ok(size) = std::fs::metadata(source) {
+        let _ = write!(stats, "{} · ", human_bytes(size.len()));
     }
-    if visible_count != selected_count {
-        if selected_count == total_count {
-            let _ = writeln!(out, "Showing: {visible_count} of {selected_count} columns");
-        } else {
-            let _ = writeln!(
-                out,
-                "Showing: {visible_count} of {selected_count} selected columns"
-            );
-        }
+    let _ = write!(
+        stats,
+        "{} rows · {} cols · {} · {}",
+        thousands(meta.row_count),
+        thousands(total_count as u64),
+        compression_label(meta.compression),
+        meta.encoding.as_deref().unwrap_or("unknown encoding"),
+    );
+    let _ = writeln!(out, "  {stats}");
+    if let Some(table) = meta.table_name.as_deref() {
+        let _ = writeln!(out, "  table: {table}");
     }
-    let _ = writeln!(out, "Table: {}", meta.table_name.as_deref().unwrap_or("-"));
-    let _ = writeln!(out, "Label: {}", meta.file_label.as_deref().unwrap_or("-"));
-    let _ = writeln!(out, "Encoding: {}", meta.encoding.as_deref().unwrap_or("-"));
+    if let Some(label) = meta.file_label.as_deref() {
+        let _ = writeln!(out, "  label: {label}");
+    }
+
+    // Heading for the column listing, carrying the showing/selected counts.
     let _ = writeln!(out);
+    if selected_count == total_count {
+        let _ = writeln!(
+            out,
+            "Columns (showing {} of {}):",
+            thousands(visible_count as u64),
+            thousands(total_count as u64)
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "Columns (showing {} of {} selected, {} total):",
+            thousands(visible_count as u64),
+            thousands(selected_count as u64),
+            thousands(total_count as u64)
+        );
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,7 +88,7 @@ struct InspectColumn {
     format_name: String,
 }
 
-fn append_inspect_table(out: &mut String, columns: &[&ColumnMeta], selected_count: usize) {
+fn append_inspect_table(out: &mut String, columns: &[&ColumnMeta]) {
     use std::fmt::Write as _;
 
     let display_columns: Vec<_> = columns
@@ -137,13 +154,6 @@ fn append_inspect_table(out: &mut String, columns: &[&ColumnMeta], selected_coun
             width_width = width_width,
             label_width = label_width,
             format_width = format_width,
-        );
-    }
-    if selected_count > display_columns.len() {
-        let _ = writeln!(
-            out,
-            "... {} more columns not shown",
-            selected_count - display_columns.len()
         );
     }
 }
