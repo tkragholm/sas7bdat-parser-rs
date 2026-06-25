@@ -63,6 +63,9 @@ pub(super) fn arrow_dt_to_polars_arrow(dt: &ArrowSchemaDataType) -> Result<Arrow
 }
 
 #[cfg(feature = "arrow")]
+// One straight-line arm per column buffer kind; splitting it would just scatter the
+// uniform per-type conversion across helpers without reducing real complexity.
+#[allow(clippy::too_many_lines)]
 pub(super) fn owned_batch_to_dataframe(
     batch: sas7bdat::OwnedColumnarBatch,
     schema: Arc<ArrowSchema>,

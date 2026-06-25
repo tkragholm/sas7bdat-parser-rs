@@ -201,7 +201,7 @@ struct BatchReader {
 
 #[cfg(feature = "arrow")]
 const _: fn() = || {
-    fn assert_send_sync<T: Send + Sync>() {}
+    const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<BatchReader>();
 };
 
@@ -297,8 +297,8 @@ fn batch_reader(
 ///
 /// Args:
 ///     path: Path to the `.sas7bdat` file.
-///     catalog_path: Optional `.sas7bcat` value-label catalog to hydrate.
-///     schema_overrides: Optional ``{column: polars dtype}`` map applied at
+///     `catalog_path`: Optional `.sas7bcat` value-label catalog to hydrate.
+///     `schema_overrides`: Optional ``{column: polars dtype}`` map applied at
 ///         schema time (e.g. integer-coded columns to ``pl.Int64``).
 ///     categorical: If ``True``, cast every character column to ``Categorical``.
 ///         This speeds up downstream group-by/join/sort (~10-15x) but is not a
@@ -324,7 +324,7 @@ fn scan_sas(
     let schema = scan::schema_for_dataset(py, &ds)?;
     let lf = scan::register_io_source(py, ds, None, schema)?;
     if categorical {
-        return cast_strings_to_categorical(py, lf);
+        return cast_strings_to_categorical(py, &lf);
     }
     Ok(lf)
 }
@@ -334,7 +334,7 @@ fn scan_sas(
 /// and version-stable) rather than emitting a dictionary array ourselves: for
 /// Polars the win is downstream (group-by/join), not the read, and its `String`
 /// type is already compact, so a direct dictionary build wouldn't beat the cast.
-fn cast_strings_to_categorical(py: Python<'_>, lf: Py<PyAny>) -> PyResult<Py<PyAny>> {
+fn cast_strings_to_categorical(py: Python<'_>, lf: &Py<PyAny>) -> PyResult<Py<PyAny>> {
     let polars = PyModule::import(py, "polars")?;
     let string_ty = polars.getattr("String")?;
     let categorical_ty = polars.getattr("Categorical")?;

@@ -262,7 +262,11 @@ fn requested_scan_threads() -> usize {
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|n| *n > 0)
-        .or_else(|| std::thread::available_parallelism().ok().map(|n| n.get()))
+        .or_else(|| {
+            std::thread::available_parallelism()
+                .ok()
+                .map(std::num::NonZero::get)
+        })
         .unwrap_or(1)
 }
 
