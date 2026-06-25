@@ -1,0 +1,171 @@
+//! `sas7bdat head` — preview the first rows of a dataset as an aligned table.
+//! The renderer is shared with the `info` command's data sample.
+
+use crate::cli::HeadArgs;
+use crate::friendly;
+use crate::selection::{ColumnSelection, projection_from_selection, resolve_column_indices};
+use crate::style::Style;
+use crate::values::format_cell;
+use anyhow::Result;
+use sas7bdat::{Dataset, Projection, RowSelection};
+use std::fmt::Write as _;
+use std::ops::ControlFlow;
+
+/// Widest a single column is allowed to get before its cells are truncated with an ellipsis.
+const MAX_COL_WIDTH: usize = 40;
+
+pub struct PreviewTable {
+    pub headers: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub total_rows: u64,
+}
+
+/// # Errors
+///
+/// Returns an error if the file can't be opened or a requested column doesn't exist.
+pub fn run_head(args: &HeadArgs) -> Result<()> {
+    let dataset = friendly::open(&args.input)?;
+    let selection = ColumnSelection {
+        names: args.columns.as_deref(),
+        indices: args.column_indices.as_deref(),
+    };
+    // Validate column selection up front so the user gets a did-you-mean error.
+    let indices = resolve_column_indices(&dataset, selection)?;
+    let projection = projection_from_selection(&dataset, selection)?;
+    let headers = header_names(&dataset, indices.as_deref());
+    let table = collect_preview(&dataset, projection.as_ref(), headers, args.rows)?;
+    print!("{}", render_table(&table, Style::for_stdout()));
+    Ok(())
+}
+
+/// Column names in output (selection) order; all columns when `indices` is `None`.
+#[must_use]
+pub fn header_names(dataset: &Dataset, indices: Option<&[usize]>) -> Vec<String> {
+    indices.map_or_else(
+        || {
+            dataset
+                .columns()
+                .iter()
+                .map(|column| column.name.clone())
+                .collect()
+        },
+        |indices| {
+            indices
+                .iter()
+                .filter_map(|&idx| dataset.columns().get(idx))
+                .map(|column| column.name.clone())
+                .collect()
+        },
+    )
+}
+
+/// Scan up to `limit` rows and format every cell to a display string.
+///
+/// # Errors
+///
+/// Returns an error if the scan fails.
+pub fn collect_preview(
+    dataset: &Dataset,
+    projection: Option<&Projection>,
+    headers: Vec<String>,
+    limit: u64,
+) -> Result<PreviewTable> {
+    let total_rows = dataset.metadata().row_count;
+    let mut rows: Vec<Vec<String>> = Vec::new();
+
+    if limit > 0 {
+        let mut scan = dataset.scan().select(RowSelection::First(limit));
+        if let Some(projection) = projection {
+            scan = scan.with_projection(projection);
+        }
+        scan.visit_rows(|row| {
+            rows.push(row.iter().map(|cell| format_cell(cell, "")).collect());
+            if rows.len() as u64 >= limit {
+                Ok(ControlFlow::Break(()))
+            } else {
+                Ok(ControlFlow::Continue(()))
+            }
+        })?;
+    }
+
+    Ok(PreviewTable {
+        headers,
+        rows,
+        total_rows,
+    })
+}
+
+/// Render a [`PreviewTable`] as an aligned, optionally-colored text block.
+#[must_use]
+pub fn render_table(table: &PreviewTable, style: Style) -> String {
+    let widths = column_widths(table);
+    let mut out = String::new();
+
+    // Header row (bold) and an underline.
+    let header_cells: Vec<String> = table
+        .headers
+        .iter()
+        .zip(&widths)
+        .map(|(name, width)| pad(&truncate(name), *width))
+        .collect();
+    let _ = writeln!(out, "{}", style.bold(&header_cells.join("  ")));
+    let rule: Vec<String> = widths.iter().map(|width| "-".repeat(*width)).collect();
+    let _ = writeln!(out, "{}", style.dim(&rule.join("  ")));
+
+    // Data rows.
+    for row in &table.rows {
+        let cells: Vec<String> = widths
+            .iter()
+            .enumerate()
+            .map(|(idx, width)| {
+                let value = row.get(idx).map_or("", String::as_str);
+                pad(&truncate(value), *width)
+            })
+            .collect();
+        let _ = writeln!(out, "{}", cells.join("  "));
+    }
+
+    let footer = if table.rows.len() as u64 == table.total_rows {
+        format!("({} rows)", table.total_rows)
+    } else {
+        format!("(showing {} of {} rows)", table.rows.len(), table.total_rows)
+    };
+    let _ = writeln!(out, "{}", style.dim(&footer));
+    out
+}
+
+fn column_widths(table: &PreviewTable) -> Vec<usize> {
+    let mut widths: Vec<usize> = table
+        .headers
+        .iter()
+        .map(|name| truncate(name).chars().count())
+        .collect();
+    for row in &table.rows {
+        for (idx, value) in row.iter().enumerate() {
+            if let Some(width) = widths.get_mut(idx) {
+                *width = (*width).max(truncate(value).chars().count());
+            }
+        }
+    }
+    widths
+}
+
+/// Cap a cell at [`MAX_COL_WIDTH`] characters, appending an ellipsis when truncated.
+fn truncate(value: &str) -> String {
+    if value.chars().count() <= MAX_COL_WIDTH {
+        return value.to_owned();
+    }
+    let mut out: String = value.chars().take(MAX_COL_WIDTH - 1).collect();
+    out.push('\u{2026}');
+    out
+}
+
+/// Left-pad `value` with spaces to `width` display characters.
+fn pad(value: &str, width: usize) -> String {
+    let len = value.chars().count();
+    if len >= width {
+        value.to_owned()
+    } else {
+        format!("{value}{}", " ".repeat(width - len))
+    }
+}

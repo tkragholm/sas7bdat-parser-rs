@@ -78,7 +78,7 @@ pub fn resolve_column_indices(
         let mut resolved = Vec::with_capacity(names.len());
         for name in names {
             let Some(&idx) = lookup.get(name).or_else(|| lookup.get(name.trim_end())) else {
-                return Err(anyhow!("column '{name}' not found"));
+                return Err(unknown_column_error(name, dataset));
             };
             if !seen.insert(idx) {
                 return Err(anyhow!("duplicate column '{name}' (index {idx})"));
@@ -103,6 +103,54 @@ pub const fn row_selection_from_window(window: RowWindow, row_count: u64) -> Opt
     }
 }
 
+/// Build a helpful "unknown column" error, suggesting the closest existing name.
+fn unknown_column_error(name: &str, dataset: &Dataset) -> anyhow::Error {
+    closest_column(name, dataset).map_or_else(
+        || anyhow!("No column named '{name}'. Run 'sas7bdat info <file>' to list columns."),
+        |suggestion| {
+            anyhow!(
+                "No column named '{name}'. Did you mean '{suggestion}'? \
+                 Run 'sas7bdat info <file>' to list columns."
+            )
+        },
+    )
+}
+
+/// Closest column name by case-insensitive edit distance, if one is reasonably near.
+fn closest_column(name: &str, dataset: &Dataset) -> Option<String> {
+    let target = name.trim_end().to_ascii_lowercase();
+    dataset
+        .columns()
+        .iter()
+        .map(|column| column.name.trim_end().to_owned())
+        .filter_map(|column| {
+            let distance = levenshtein(&target, &column.to_ascii_lowercase());
+            // Only suggest when the names are genuinely close.
+            let threshold = (column.chars().count() / 2).max(2);
+            (distance <= threshold).then_some((distance, column))
+        })
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, column)| column)
+}
+
+/// Classic two-row Levenshtein edit distance over Unicode scalars.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let b_chars: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b_chars.len()).collect();
+    let mut curr = vec![0usize; b_chars.len() + 1];
+    for (i, ca) in a.chars().enumerate() {
+        curr[0] = i + 1;
+        for (j, &cb) in b_chars.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j] + cost)
+                .min(prev[j + 1] + 1)
+                .min(curr[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b_chars.len()]
+}
+
 #[must_use]
 pub fn selected_columns_refs<'a>(
     dataset: &'a Dataset,
@@ -117,4 +165,19 @@ pub fn selected_columns_refs<'a>(
                 .collect()
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::levenshtein;
+
+    #[test]
+    fn levenshtein_measures_edit_distance() {
+        assert_eq!(levenshtein("", ""), 0);
+        assert_eq!(levenshtein("gender", "gender"), 0);
+        assert_eq!(levenshtein("gendr", "gender"), 1); // one insertion
+        assert_eq!(levenshtein("sexa", "sexb"), 1); // one substitution
+        assert_eq!(levenshtein("abc", ""), 3);
+        assert_eq!(levenshtein("kitten", "sitting"), 3); // classic example
+    }
 }

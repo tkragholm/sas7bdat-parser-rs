@@ -1,5 +1,15 @@
-use sas7bdat::{ColumnMeta, Dataset};
+use crate::values::human_bytes;
+use sas7bdat::{ColumnMeta, CompressionKind, Dataset};
 use std::path::Path;
+
+const fn compression_label(kind: CompressionKind) -> &'static str {
+    match kind {
+        CompressionKind::None => "none",
+        CompressionKind::Row => "row (RLE)",
+        CompressionKind::Binary => "binary (RDC)",
+        CompressionKind::Unknown => "unknown",
+    }
+}
 
 #[must_use]
 pub fn format_inspect_report(
@@ -25,9 +35,13 @@ fn append_inspect_summary(
 
     let meta = dataset.metadata();
     let _ = writeln!(out, "File: {}", source.display());
+    if let Ok(size) = std::fs::metadata(source) {
+        let _ = writeln!(out, "Size: {}", human_bytes(size.len()));
+    }
     let _ = writeln!(out, "Rows: {}", meta.row_count);
     let total_count = dataset.columns().len();
     let _ = writeln!(out, "Columns: {total_count}");
+    let _ = writeln!(out, "Compression: {}", compression_label(meta.compression));
     if selected_count != total_count {
         let _ = writeln!(out, "Selected columns: {selected_count}");
     }

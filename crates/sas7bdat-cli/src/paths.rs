@@ -40,11 +40,18 @@ pub fn discover_inputs(
                     }
                 }
             }
-        } else if input.is_file() && is_sas7bdat(input) {
+        } else if input.is_file() {
+            // An explicitly-named file: report a clear error rather than silently skipping,
+            // so a typo or wrong extension doesn't surface as "no inputs were found".
+            if !is_sas7bdat(input) {
+                bail!("Not a .sas7bdat file: {}", input.display());
+            }
             let root = input
                 .parent()
                 .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
             files.push((root, input.clone()));
+        } else {
+            bail!("File not found: {}", input.display());
         }
     }
     files.sort();
@@ -54,7 +61,7 @@ pub fn discover_inputs(
 
 #[must_use]
 pub fn compute_output_path(root: &Path, input: &Path, args: &ConvertArgs) -> PathBuf {
-    let extension = sink_extension(args.output.sink);
+    let extension = sink_extension(args.output.effective_sink());
     args.output.out_dir.as_ref().map_or_else(
         || input.with_extension(extension),
         |dir| {
@@ -138,7 +145,8 @@ pub fn validate_convert_args(args: &ConvertArgs, discovered_inputs: usize) -> Re
     if args.output.out.is_some() && discovered_inputs != 1 {
         bail!("--out can only be used with a single input");
     }
-    if matches!(args.output.sink, SinkKind::Parquet) && args.output.delimiter.is_some() {
+    if matches!(args.output.effective_sink(), SinkKind::Parquet) && args.output.delimiter.is_some()
+    {
         bail!("--delimiter only applies to CSV/TSV output");
     }
     Ok(())
@@ -159,10 +167,9 @@ mod tests {
             output: OutputOptions {
                 out_dir: out_dir.map(PathBuf::from),
                 out: None,
-                sink,
+                sink: Some(sink),
                 delimiter: None,
-                headers: true,
-                no_headers: false,
+                no_header: false,
                 flatten,
                 overwrite: false,
                 parquet_row_group_size: None,

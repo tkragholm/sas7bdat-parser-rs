@@ -11,6 +11,12 @@ publish = false
 [lib]
 name = "sas7bdat_cli"
 
+# The one unified, user-facing tool: `sas7bdat <convert|info|head|completions>`.
+[[bin]]
+name = "sas7bdat"
+path = "src/bin/sas7bdat.rs"
+
+# Thin backward-compatible aliases for the unified subcommands.
 [[bin]]
 name = "sas7bdat-convert"
 path = "src/bin/sas7bdat_convert.rs"
@@ -19,25 +25,34 @@ path = "src/bin/sas7bdat_convert.rs"
 name = "sas7bdat-inspect"
 path = "src/bin/sas7bdat_inspect.rs"
 
+# Developer/profiling tools — built only with `--features dev-tools` so a default
+# build/install ships just the user-facing binaries above.
 [[bin]]
 name = "sas7bdat-corpus-catalog"
 path = "src/bin/sas7bdat_corpus_catalog.rs"
+required-features = ["dev-tools"]
 
 [[bin]]
 name = "sas7bdat-corpus-profile"
 path = "src/bin/sas7bdat_corpus_profile.rs"
+required-features = ["dev-tools"]
 
 [[bin]]
 name = "sas7bdat-fixture-profile"
 path = "src/bin/sas7bdat_fixture_profile.rs"
+required-features = ["dev-tools"]
 
 [[bin]]
 name = "sas7bdat-fixture-string-profile"
 path = "src/bin/sas7bdat_fixture_string_profile.rs"
+required-features = ["dev-tools"]
 
 [[bin]]
 name = "sas7bdat-dir-mapper"
 path = "src/bin/sas7bdat_dir_mapper.rs"
+
+[features]
+dev-tools = []
 
 [dependencies]
 anyhow = { workspace = true }
@@ -45,6 +60,7 @@ arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
+clap_complete = "4"
 csv = { workspace = true }
 encoding_rs = { workspace = true }
 glob = { workspace = true }

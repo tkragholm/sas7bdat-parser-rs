@@ -68,7 +68,9 @@ pub struct DelimitedWriteOptions<'a> {
 /// # Errors
 ///
 /// Returns an error if parquet writing or Arrow conversion fails.
-pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>) -> Result<()> {
+///
+/// Returns the number of rows written.
+pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>) -> Result<u64> {
     let file = File::create(output)?;
     let mut scan = apply_scan_options(dataset, options.scan);
     if let Some(rows) = options.batch_rows {
@@ -90,24 +92,26 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         let json = sas_metadata_json(dataset, options.scan.projection)?;
         writer.append_key_value_metadata(KeyValue::new(PARQUET_METADATA_KEY.to_string(), json));
     }
-    scan.visit_arrow_batches(|batch| {
+    let stats = scan.visit_arrow_batches(|batch| {
         writer
             .write(&batch)
             .map_err(|err| Error::arrow(err.to_string()))?;
         Ok(ControlFlow::Continue(()))
     })?;
     writer.close()?;
-    Ok(())
+    Ok(stats.rows_emitted)
 }
 
 /// # Errors
 ///
 /// Returns an error if CSV or TSV writing fails.
+///
+/// Returns the number of rows written (excluding the header).
 pub fn write_csv_or_tsv(
     dataset: &Dataset,
     output: &Path,
     options: DelimitedWriteOptions<'_>,
-) -> Result<()> {
+) -> Result<u64> {
     let scan = apply_scan_options(dataset, options.scan);
 
     let file = File::create(output)?;
@@ -139,7 +143,7 @@ pub fn write_csv_or_tsv(
     let mut wrote_header = false;
     // Reused across every cell so formatting numerics/dates allocates no per-cell String.
     let mut scratch = String::new();
-    scan.visit_rows(|row| {
+    let stats = scan.visit_rows(|row| {
         if options.headers && !wrote_header {
             writer
                 .write_record(header_names.iter())
@@ -157,7 +161,7 @@ pub fn write_csv_or_tsv(
         Ok(ControlFlow::Continue(()))
     })?;
     writer.flush()?;
-    Ok(())
+    Ok(stats.rows_emitted)
 }
 
 fn apply_scan_options<'a>(dataset: &'a Dataset, options: ScanOptions<'a>) -> ScanBuilder<'a> {

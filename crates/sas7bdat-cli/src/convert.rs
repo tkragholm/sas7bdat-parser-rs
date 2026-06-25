@@ -3,10 +3,13 @@ use crate::cli::{ConvertArgs, ProgressMode, SinkKind};
 use crate::export::{
     DelimitedWriteOptions, ScanOptions, WriteOptions, write_csv_or_tsv, write_parquet,
 };
+use crate::friendly;
 use crate::paths::{compute_output_path, discover_inputs, validate_convert_args};
 use crate::selection::{
-    ColumnSelection, RowWindow, projection_from_selection, row_selection_from_window,
+    ColumnSelection, RowWindow, projection_from_selection, resolve_column_indices,
+    row_selection_from_window,
 };
+use crate::style::Style;
 use anyhow::{Result, anyhow};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use rayon::prelude::*;
@@ -14,6 +17,7 @@ use sas7bdat::{Dataset, OpenOptions, ValidationMode};
 use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
+use std::time::Instant;
 
 /// # Errors
 ///
@@ -51,16 +55,17 @@ pub fn run_convert(args: &ConvertArgs) -> Result<()> {
         finish_progress(progress.as_ref());
         result
     } else {
+        let style = Style::for_stderr();
         let mut failures = 0usize;
         for (root, input) in &files {
             if let Err(err) = convert_one(root, input, args, catalog.as_ref(), progress.as_ref()) {
                 failures = failures.saturating_add(1);
-                eprintln!("{}: {err}", input.display());
+                eprintln!("{} {}: {err}", style.cross(), input.display());
             }
         }
         finish_progress(progress.as_ref());
         if failures > 0 {
-            Err(anyhow!("completed with {failures} failures"))
+            Err(anyhow!("{}", failures_message(failures)))
         } else {
             Ok(())
         }
@@ -96,7 +101,12 @@ fn convert_one(
         names: args.columns.as_deref(),
         indices: args.column_indices.as_deref(),
     };
+    // Validate the column selection up front for a clear did-you-mean error.
+    resolve_column_indices(&dataset, columns)?;
     let projection = projection_from_selection(&dataset, columns)?;
+    let written_cols = projection
+        .as_ref()
+        .map_or_else(|| dataset.columns().len(), |proj| proj.columns().len());
     let selection = row_selection_from_window(
         RowWindow::new(args.skip, args.max_rows),
         dataset.metadata().row_count,
@@ -107,7 +117,8 @@ fn convert_one(
         parse_threads: args.execution.parse_threads,
     };
 
-    match args.output.sink {
+    let started = Instant::now();
+    let rows = match args.output.effective_sink() {
         SinkKind::Parquet => {
             let row_group_rows = match (
                 args.output.parquet_row_group_size,
@@ -141,7 +152,7 @@ fn convert_one(
                 &output,
                 DelimitedWriteOptions {
                     delimiter,
-                    headers: args.output.headers && !args.output.no_headers,
+                    headers: !args.output.no_header,
                     scan,
                 },
             )
@@ -153,20 +164,55 @@ fn convert_one(
                 &output,
                 DelimitedWriteOptions {
                     delimiter,
-                    headers: args.output.headers && !args.output.no_headers,
+                    headers: !args.output.no_header,
                     scan,
                 },
             )
         }
     }?;
+    let elapsed = started.elapsed();
 
     if let Some(progress) = progress {
         progress.tick_done();
     }
     if !args.ui.quiet && !should_show_progress(args) {
-        println!("{} -> {}", input.display(), output.display());
+        print_success(input, &output, rows, written_cols, elapsed);
     }
     Ok(())
+}
+
+/// Print the styled, one-line success summary for a converted file.
+fn print_success(input: &Path, output: &Path, rows: u64, cols: usize, elapsed: std::time::Duration) {
+    let style = Style::for_stdout();
+    let size = fs::metadata(output).map_or(0, |meta| meta.len());
+    let detail = format!(
+        "{rows} rows · {cols} cols · {} · {}",
+        crate::values::human_bytes(size),
+        human_duration(elapsed)
+    );
+    println!(
+        "{} {} {} {}   {}",
+        style.check(),
+        input.display(),
+        style.dim("\u{2192}"),
+        style.cyan(&output.display().to_string()),
+        style.dim(&detail),
+    );
+}
+
+fn human_duration(elapsed: std::time::Duration) -> String {
+    let secs = elapsed.as_secs_f64();
+    if secs < 1.0 {
+        format!("{} ms", elapsed.as_millis())
+    } else {
+        format!("{secs:.1} s")
+    }
+}
+
+/// Grammatically-correct "N file(s) failed to convert".
+fn failures_message(failures: usize) -> String {
+    let plural = if failures == 1 { "" } else { "s" };
+    format!("{failures} file{plural} failed to convert")
 }
 
 fn open_dataset(input: &Path, args: &ConvertArgs) -> Result<Dataset> {
@@ -177,13 +223,13 @@ fn open_dataset(input: &Path, args: &ConvertArgs) -> Result<Dataset> {
             ValidationMode::Permissive
         })
         .build();
-    Dataset::open_with(input, open).map_err(Into::into)
+    friendly::open_with(input, open)
 }
 
 fn report_failures(results: &[Result<()>]) -> Result<()> {
     let failures = results.iter().filter(|result| result.is_err()).count();
     if failures > 0 {
-        Err(anyhow!("completed with {failures} failures"))
+        Err(anyhow!("{}", failures_message(failures)))
     } else {
         Ok(())
     }
