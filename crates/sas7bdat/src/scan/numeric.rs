@@ -155,7 +155,7 @@ pub(super) fn materialize_staged_numeric_column(
 
 /// Returns whether bit `index` in a bit-packed validity word slice is set (1 = valid, 0 = null).
 #[inline]
-fn valid_bit(validity: &[u64], index: usize) -> bool {
+const fn valid_bit(validity: &[u64], index: usize) -> bool {
     (validity[index / 64] >> (index % 64)) & 1 == 1
 }
 
