@@ -7,7 +7,7 @@ use crate::selection::{ColumnSelection, projection_from_selection, resolve_colum
 use crate::style::{Style, terminal_width};
 use crate::values::{format_cell, thousands};
 use anyhow::Result;
-use sas7bdat::{Dataset, Projection, RowSelection};
+use sas7bdat::{Dataset, LogicalType, Projection, RowSelection};
 use std::fmt::Write as _;
 use std::ops::ControlFlow;
 
@@ -74,6 +74,18 @@ pub fn collect_preview(
     limit: u64,
 ) -> Result<PreviewTable> {
     let total_rows = dataset.metadata().row_count;
+    // Logical type per output column, in scan order — lets the formatter render a temporal
+    // cell that widened to f64 as a timestamp instead of a raw number.
+    let kinds: Vec<LogicalType> = projection.map_or_else(
+        || dataset.columns().iter().map(|c| c.logical_type).collect(),
+        |proj| {
+            proj.columns()
+                .iter()
+                .filter_map(|c| dataset.columns().get(c.index))
+                .map(|c| c.logical_type)
+                .collect()
+        },
+    );
     let mut rows: Vec<Vec<String>> = Vec::new();
 
     if limit > 0 {
@@ -82,7 +94,12 @@ pub fn collect_preview(
             scan = scan.with_projection(projection);
         }
         scan.visit_rows(|row| {
-            rows.push(row.iter().map(|cell| format_cell(cell, "")).collect());
+            rows.push(
+                row.iter()
+                    .zip(&kinds)
+                    .map(|(cell, kind)| format_cell(cell, *kind, ""))
+                    .collect(),
+            );
             if rows.len() as u64 >= limit {
                 Ok(ControlFlow::Break(()))
             } else {
