@@ -3461,6 +3461,7 @@ dependencies = [
  "polars-arrow",
  "polars-plan",
  "pyo3",
+ "pyo3-build-config",
  "pyo3-polars",
  "rmp-serde",
  "sas7bdat",

@@ -19,6 +19,9 @@ pyo3-polars = { workspace = true }
 rmp-serde = { workspace = true }
 sas7bdat = { path = "../sas7bdat", features = ["arrow"] }
 
+[build-dependencies]
+pyo3-build-config = { workspace = true }
+
 [features]
 default = ["arrow"]
 arrow = ["dep:arrow-schema", "sas7bdat/arrow"]
