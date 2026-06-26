@@ -7,12 +7,12 @@ use arrow_array::{
     ArrayRef, RecordBatch,
     builder::{BinaryBuilder, PrimitiveBuilder, StringBuilder},
     types::{
-        ArrowPrimitiveType, Date32Type, Float64Type, Int32Type, Int64Type, Time32SecondType,
-        TimestampSecondType,
+        ArrowPrimitiveType, Date32Type, Float64Type, Int32Type, Int64Type, Time64NanosecondType,
+        TimestampMicrosecondType,
     },
 };
 #[cfg(feature = "arrow")]
-use arrow_schema::SchemaRef;
+use arrow_schema::{DataType, SchemaRef, TimeUnit};
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
 pub const BLANK_ID: u32 = 0;
@@ -440,18 +440,20 @@ impl ColumnBuffer<'_> {
                 })
             }
             Self::DateTime(PrimitiveBuffer { values, valid }) => {
-                // Arrow timestamps count seconds from the Unix epoch (1970), not the SAS epoch (1960).
-                build_primitive_array::<TimestampSecondType, _, _>(
+                // Arrow timestamps count from the Unix epoch (1970), not the SAS epoch (1960).
+                // A DateTime buffer holds whole seconds (sub-second values widen to F64 and are
+                // handled in `column_buffer_to_arrow`); scale to microseconds.
+                build_primitive_array::<TimestampMicrosecondType, _, _>(
                     values.iter().copied(),
                     valid,
-                    |value| Ok(value.unix_seconds()),
+                    |value| Ok(value.unix_seconds().saturating_mul(1_000_000)),
                 )
             }
             Self::Time(PrimitiveBuffer { values, valid }) => {
-                build_primitive_array::<Time32SecondType, _, _>(
+                build_primitive_array::<Time64NanosecondType, _, _>(
                     values.iter().copied(),
                     valid,
-                    |value| Ok(value.seconds_since_midnight),
+                    |value| Ok(i64::from(value.seconds_since_midnight).saturating_mul(1_000_000_000)),
                 )
             }
             Self::Utf8(Utf8Buffer {
@@ -503,10 +505,53 @@ impl OwnedColumnarBatch {
     pub fn into_arrow_record_batch(self, schema: SchemaRef) -> Result<RecordBatch> {
         let arrays = self
             .columns
-            .into_iter()
-            .map(OwnedColumnBuffer::into_arrow_array)
+            .iter()
+            .zip(schema.fields())
+            .map(|(column, field)| column_buffer_to_arrow(column.as_borrowed(), field.data_type()))
             .collect::<Result<Vec<_>>>()?;
         RecordBatch::try_new(schema, arrays).map_err(|err| Error::arrow(err.to_string()))
+    }
+}
+
+/// Convert a column buffer to an Arrow array of the schema's declared type.
+///
+/// Temporal columns whose values didn't all fit a whole integer are widened to an `F64`
+/// buffer holding RAW SAS-epoch units; this reinterprets such a buffer as the declared
+/// temporal type (preserving sub-second precision) instead of a bare `Float64`. Every
+/// other buffer goes through its plain [`ColumnBuffer::into_arrow_array`] conversion.
+#[cfg(feature = "arrow")]
+fn column_buffer_to_arrow(buffer: ColumnBuffer<'_>, field_type: &DataType) -> Result<ArrayRef> {
+    match (field_type, &buffer) {
+        (DataType::Timestamp(TimeUnit::Microsecond, _), ColumnBuffer::F64(buf)) => {
+            let PrimitiveBuffer { values, valid } = buf;
+            build_primitive_array::<TimestampMicrosecondType, _, _>(
+                values.iter().copied(),
+                *valid,
+                |raw| {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+                    Ok(((raw - SasDateTime::SECONDS_SAS_TO_UNIX as f64) * 1_000_000.0).round() as i64)
+                },
+            )
+        }
+        (DataType::Time64(TimeUnit::Nanosecond), ColumnBuffer::F64(buf)) => {
+            let PrimitiveBuffer { values, valid } = buf;
+            build_primitive_array::<Time64NanosecondType, _, _>(
+                values.iter().copied(),
+                *valid,
+                |raw| {
+                    #[allow(clippy::cast_possible_truncation)]
+                    Ok((raw * 1_000_000_000.0).round() as i64)
+                },
+            )
+        }
+        (DataType::Date32, ColumnBuffer::F64(buf)) => {
+            let PrimitiveBuffer { values, valid } = buf;
+            build_primitive_array::<Date32Type, _, _>(values.iter().copied(), *valid, |raw| {
+                #[allow(clippy::cast_possible_truncation)]
+                Ok(raw.round() as i32 - SasDate::DAYS_SAS_TO_UNIX)
+            })
+        }
+        _ => buffer.into_arrow_array(),
     }
 }
 
@@ -523,7 +568,8 @@ impl ColumnarBatch<'_> {
             .columns
             .iter()
             .copied()
-            .map(ColumnBuffer::into_arrow_array)
+            .zip(schema.fields())
+            .map(|(column, field)| column_buffer_to_arrow(column, field.data_type()))
             .collect::<Result<Vec<_>>>()?;
         RecordBatch::try_new(schema, arrays).map_err(|err| Error::arrow(err.to_string()))
     }

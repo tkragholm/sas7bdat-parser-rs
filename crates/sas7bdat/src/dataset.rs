@@ -782,4 +782,30 @@ mod tests {
         // Row 0 transcodes 0xE9 -> "é" (UTF-8 0xC3 0xA9); the rest stay ASCII.
         assert_eq!(genders, ["é", "F", "M", "F", "F"]);
     }
+
+    /// Regression: a datetime column with fractional (sub-second) SAS values widens to an
+    /// f64 buffer internally. The Arrow path used to declare `Timestamp(Second)` but build
+    /// an `f64` array, crashing `RecordBatch::try_new`. It now emits `Timestamp(Microsecond)`
+    /// (so Parquet stores a real timestamp) and preserves sub-second precision.
+    #[cfg(feature = "arrow")]
+    #[test]
+    fn fractional_datetime_columns_export_as_microsecond_timestamps() {
+        use arrow_schema::{DataType, TimeUnit};
+
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../r-plugin/inst/extdata/dtdate.sas7bdat");
+        let ds = Dataset::open(&path).expect("open dtdate");
+        let batches = ds
+            .scan()
+            .collect_arrow_batches()
+            .expect("arrow conversion must not crash on widened datetime columns");
+        let batch = batches.first().expect("at least one batch");
+
+        // Every column in this fixture is a (sub-second) datetime -> microsecond timestamp.
+        assert_eq!(
+            batch.schema().field(0).data_type(),
+            &DataType::Timestamp(TimeUnit::Microsecond, None)
+        );
+        assert!(batch.num_rows() > 0);
+    }
 }

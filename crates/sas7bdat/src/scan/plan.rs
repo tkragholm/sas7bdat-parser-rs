@@ -286,8 +286,11 @@ const fn arrow_data_type(kind: ColumnMaterializationKind) -> DataType {
         ColumnMaterializationKind::I64 => DataType::Int64,
         ColumnMaterializationKind::F64 => DataType::Float64,
         ColumnMaterializationKind::Date => DataType::Date32,
-        ColumnMaterializationKind::DateTime => DataType::Timestamp(TimeUnit::Second, None),
-        ColumnMaterializationKind::Time => DataType::Time32(TimeUnit::Second),
+        // Microseconds/nanoseconds, not Seconds: Parquet and Polars have no second-precision
+        // temporal type, and sub-second SAS datetimes/times must survive (see the
+        // schema-aware conversion in `columnar.rs`).
+        ColumnMaterializationKind::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
+        ColumnMaterializationKind::Time => DataType::Time64(TimeUnit::Nanosecond),
         ColumnMaterializationKind::Utf8 => DataType::Utf8,
         ColumnMaterializationKind::RawBytes => DataType::Binary,
     }
