@@ -52,18 +52,20 @@ pub fn run_inspect(args: &InspectArgs) -> Result<()> {
         )
     );
 
-    // A small data sample over the visible columns, unless suppressed or empty.
+    // A small data sample. Cover the full (or user-selected) column set — not just the
+    // columns shown in the table above — so the renderer's width-capping and its
+    // "+N more cols" note reflect the real column count, not the table's --max-columns cap.
     if !args.no_sample && dataset.metadata().row_count > 0 {
         let style = Style::for_stdout();
-        let indices: Vec<usize> = visible_columns.iter().map(|column| column.index).collect();
+        let sample_cols = selected_columns.as_deref();
         let projection = projection_from_selection(
             &dataset,
             ColumnSelection {
                 names: None,
-                indices: Some(&indices),
+                indices: sample_cols,
             },
         )?;
-        let headers = header_names(&dataset, Some(&indices));
+        let headers = header_names(&dataset, sample_cols);
         let table = collect_preview(&dataset, projection.as_ref(), headers, SAMPLE_ROWS)?;
         println!("\n{}", style.bold("Sample:"));
         print!("{}", render_table(&table, style, terminal_width()));

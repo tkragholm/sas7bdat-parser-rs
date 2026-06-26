@@ -145,7 +145,11 @@ pub fn render_table(table: &PreviewTable, style: Style, max_width: Option<usize>
         )
     };
     if dropped > 0 {
-        let _ = write!(footer, " · +{dropped} more cols (use --columns to pick)");
+        let _ = write!(
+            footer,
+            " · +{} more cols (use --columns to pick)",
+            thousands(dropped as u64)
+        );
     }
     let _ = writeln!(out, "{}", style.dim(&footer));
     out
@@ -248,5 +252,21 @@ mod tests {
         assert!(out.contains("ccc"));
         assert!(!out.contains("more cols"));
         assert!(out.contains("(1 rows)"));
+    }
+
+    #[test]
+    fn dropped_column_count_is_thousands_separated() {
+        // A wide table squeezed to one column: the footer must report the real number of
+        // hidden columns, grouped (e.g. 4,028) — the bug `info` had when it counted only
+        // the columns dropped from an already-capped subset.
+        let headers: Vec<String> = (0..1001).map(|i| format!("c{i}")).collect();
+        let row: Vec<String> = (0..1001).map(|i| i.to_string()).collect();
+        let table = PreviewTable {
+            headers,
+            rows: vec![row],
+            total_rows: 1,
+        };
+        let out = render_table(&table, Style::for_stderr(), Some(1));
+        assert!(out.contains("+1,000 more cols"), "footer:\n{}", out.lines().last().unwrap_or(""));
     }
 }
