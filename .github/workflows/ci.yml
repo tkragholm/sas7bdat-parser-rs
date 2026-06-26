@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-lint:
+    name: test + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # PyO3 needs a Python to link the polars plugin's test binary (abi3-py312).
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The pinned nightly (rust-toolchain.toml) auto-installs on the first cargo
+      # invocation, together with its rustfmt/clippy components.
+      - name: Show toolchain
+        run: rustup show && cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      # Fails on vulnerabilities; "unmaintained" advisories stay non-fatal warnings.
+      # RUSTSEC-2026-0176/0177 (pyo3 < 0.29) are ignored: the fix requires pyo3 0.29,
+      # which is blocked upstream by pyo3-polars 0.27 (no 0.29-compatible release yet),
+      # and we don't call the affected `PyCFunction::new_closure` API. Remove these
+      # ignores once pyo3-polars supports pyo3 0.29.
+      - name: Audit
+        run: cargo audit --ignore RUSTSEC-2026-0176 --ignore RUSTSEC-2026-0177
