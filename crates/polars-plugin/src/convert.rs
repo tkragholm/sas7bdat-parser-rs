@@ -1,4 +1,8 @@
 #![allow(clippy::redundant_pub_crate)]
+// This module is the zero-copy bridge to polars-arrow: it builds Arrow arrays from
+// scanner-produced buffers via `*_unchecked` constructors. Each `unsafe` site carries a
+// SAFETY justification of the offset/UTF-8 invariants the scanner guarantees.
+#![allow(unsafe_code)]
 
 #[cfg(feature = "arrow")]
 use arrow_schema::{DataType as ArrowSchemaDataType, TimeUnit as ArrowSchemaTimeUnit};

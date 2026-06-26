@@ -26,3 +26,6 @@ pyo3-build-config = { workspace = true }
 default = ["arrow"]
 arrow = ["dep:arrow-schema", "sas7bdat/arrow"]
 extension-module = ["pyo3/extension-module"]
+
+[lints]
+workspace = true

@@ -79,9 +79,5 @@ tracing-subscriber = { workspace = true }
 walkdir = { workspace = true }
 sas7bdat = { path = "../sas7bdat", features = ["arrow"] }
 
-[lints.rust]
-unsafe_code = "warn"
-
-[lints.clippy]
-all = "warn"
-pedantic = "warn"
+[lints]
+workspace = true

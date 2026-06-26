@@ -66,3 +66,6 @@ dictionary = ["dep:ahash", "dep:lasso2", "dep:cardinality-estimator"]
 # `hotpath-profile` is omitted: it adds internal profiling instrumentation, not public API.
 [package.metadata.docs.rs]
 features = ["arrow"]
+
+[lints]
+workspace = true
