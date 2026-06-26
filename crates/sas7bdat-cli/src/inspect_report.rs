@@ -1,5 +1,5 @@
 use crate::values::{human_bytes, thousands};
-use sas7bdat::{ColumnMeta, CompressionKind, Dataset};
+use sas7bdat::{ColumnMeta, CompressionKind, Dataset, LogicalType};
 use std::path::Path;
 
 const fn compression_label(kind: CompressionKind) -> &'static str {
@@ -9,6 +9,45 @@ const fn compression_label(kind: CompressionKind) -> &'static str {
         CompressionKind::Binary => "binary (RDC)",
         CompressionKind::Unknown => "unknown",
     }
+}
+
+/// Turn a raw SAS format into a meaningful hint for the `info` table.
+///
+/// SAS's content-free general formats (`BEST`, `F`, `$`, ...) and temporal formats (whose
+/// meaning is already carried by the `Kind` column) become `-`. Common numeric families
+/// map to a plain word; anything user-defined keeps its raw name (it signals a custom
+/// format — frequently value labels, which `convert --catalog` can hydrate).
+fn humanize_format(format: Option<&str>, kind: LogicalType) -> String {
+    // The Kind column already says date/datetime/time; the date format adds nothing.
+    if matches!(
+        kind,
+        LogicalType::Date | LogicalType::DateTime | LogicalType::Time
+    ) {
+        return "-".to_owned();
+    }
+    let Some(raw) = format.map(str::trim).filter(|f| !f.is_empty()) else {
+        return "-".to_owned();
+    };
+    match format_base_name(raw).as_str() {
+        // SAS's "just a number / just a string" defaults — no real meaning.
+        "BEST" | "F" | "D" | "Z" | "$" | "$CHAR" | "$F" | "BESTD" => "-".to_owned(),
+        "DOLLAR" | "EURO" | "YEN" | "NLMNY" | "NLMNYI" => "currency".to_owned(),
+        "PERCENT" | "PCT" => "percent".to_owned(),
+        "COMMA" | "COMMAX" => "grouped".to_owned(),
+        "E" => "scientific".to_owned(),
+        "HEX" => "hex".to_owned(),
+        // User-defined / unrecognized: keep the raw name as a hint.
+        _ => raw.to_owned(),
+    }
+}
+
+/// The leading format name without its `width.decimals` suffix, upper-cased
+/// (e.g. `DOLLAR12.2` -> `DOLLAR`, `$SEX.` -> `$SEX`).
+fn format_base_name(raw: &str) -> String {
+    raw.chars()
+        .take_while(|&ch| ch == '$' || ch.is_ascii_alphabetic())
+        .map(|ch| ch.to_ascii_uppercase())
+        .collect()
 }
 
 #[must_use]
@@ -100,7 +139,7 @@ fn append_inspect_table(out: &mut String, columns: &[&ColumnMeta]) {
             kind: format!("{:?}", column.logical_type).to_lowercase(),
             width: column.physical_width.to_string(),
             label: column.label.as_deref().unwrap_or("-").to_string(),
-            format_name: column.format.as_deref().unwrap_or("-").trim().to_string(),
+            format_name: humanize_format(column.format.as_deref(), column.logical_type),
         })
         .collect();
 
@@ -203,4 +242,35 @@ fn inspect_column_widths(columns: &[InspectColumn]) -> (usize, usize, usize, usi
         label_width,
         format_width,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::humanize_format;
+    use sas7bdat::LogicalType;
+
+    #[test]
+    fn humanize_format_hides_noise_and_translates_families() {
+        let f = LogicalType::Float;
+        // SAS's content-free defaults become "-".
+        assert_eq!(humanize_format(Some("BEST"), f), "-");
+        assert_eq!(humanize_format(Some("BEST12."), f), "-");
+        assert_eq!(humanize_format(Some("$"), LogicalType::String), "-");
+        assert_eq!(humanize_format(None, f), "-");
+        assert_eq!(humanize_format(Some("   "), f), "-");
+
+        // Known numeric families map to a plain hint (width/decimals stripped).
+        assert_eq!(humanize_format(Some("DOLLAR12.2"), f), "currency");
+        assert_eq!(humanize_format(Some("PERCENT8.1"), f), "percent");
+        assert_eq!(humanize_format(Some("COMMA10."), f), "grouped");
+        assert_eq!(humanize_format(Some("E"), f), "scientific");
+
+        // Temporal columns: the Kind column already conveys it, so blank.
+        assert_eq!(humanize_format(Some("DATETIME"), LogicalType::DateTime), "-");
+        assert_eq!(humanize_format(Some("DATE9."), LogicalType::Date), "-");
+
+        // User-defined / unrecognized formats keep their raw name as a hint.
+        assert_eq!(humanize_format(Some("$A"), LogicalType::String), "$A");
+        assert_eq!(humanize_format(Some("SEXF."), f), "SEXF.");
+    }
 }
