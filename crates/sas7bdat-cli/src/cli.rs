@@ -215,7 +215,12 @@ impl OutputOptions {
 #[derive(Args, Clone)]
 pub struct ExecutionOptions {
     /// Worker threads for converting multiple files at once.
-    #[arg(long, value_name = "N", help_heading = "Tuning", hide_short_help = true)]
+    #[arg(
+        long,
+        value_name = "N",
+        help_heading = "Tuning",
+        hide_short_help = true
+    )]
     pub jobs: Option<usize>,
 
     /// Parser threads per file.
@@ -414,8 +419,14 @@ mod tests {
 
     #[test]
     fn effective_sink_infers_from_out_extension() {
-        assert_eq!(output(None, Some("data.csv")).effective_sink(), SinkKind::Csv);
-        assert_eq!(output(None, Some("data.TSV")).effective_sink(), SinkKind::Tsv);
+        assert_eq!(
+            output(None, Some("data.csv")).effective_sink(),
+            SinkKind::Csv
+        );
+        assert_eq!(
+            output(None, Some("data.TSV")).effective_sink(),
+            SinkKind::Tsv
+        );
         assert_eq!(
             output(None, Some("data.parquet")).effective_sink(),
             SinkKind::Parquet
@@ -426,6 +437,9 @@ mod tests {
     fn effective_sink_defaults_to_parquet() {
         assert_eq!(output(None, None).effective_sink(), SinkKind::Parquet);
         // Unknown extension falls back to parquet too.
-        assert_eq!(output(None, Some("data.dat")).effective_sink(), SinkKind::Parquet);
+        assert_eq!(
+            output(None, Some("data.dat")).effective_sink(),
+            SinkKind::Parquet
+        );
     }
 }

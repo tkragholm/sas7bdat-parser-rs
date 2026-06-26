@@ -20,8 +20,12 @@ impl LabelSet {
     pub fn lookup_numeric(&self, value: f64) -> Option<&str> {
         for label in &self.labels {
             match &label.key {
-                ValueKey::Numeric(v) if (*v - value).abs() < f64::EPSILON => return Some(&label.label),
-                ValueKey::Integer(v) if (f64::from(*v) - value).abs() < f64::EPSILON => return Some(&label.label),
+                ValueKey::Numeric(v) if (*v - value).abs() < f64::EPSILON => {
+                    return Some(&label.label);
+                }
+                ValueKey::Integer(v) if (f64::from(*v) - value).abs() < f64::EPSILON => {
+                    return Some(&label.label);
+                }
                 _ => {}
             }
         }
@@ -33,9 +37,10 @@ impl LabelSet {
     pub fn lookup_string(&self, value: &str) -> Option<&str> {
         for label in &self.labels {
             if let ValueKey::String(k) = &label.key
-                && k.trim_end() == value.trim_end() {
-                    return Some(&label.label);
-                }
+                && k.trim_end() == value.trim_end()
+            {
+                return Some(&label.label);
+            }
         }
         None
     }

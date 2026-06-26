@@ -88,7 +88,12 @@ mod tests {
     use super::ColumnMetaJson;
     use sas7bdat::{ColumnMeta, LogicalType};
 
-    fn column(name: &str, ty: LogicalType, label: Option<&str>, format: Option<&str>) -> ColumnMeta {
+    fn column(
+        name: &str,
+        ty: LogicalType,
+        label: Option<&str>,
+        format: Option<&str>,
+    ) -> ColumnMeta {
         ColumnMeta {
             index: 7,
             name: name.to_owned(),
@@ -102,7 +107,12 @@ mod tests {
 
     #[test]
     fn maps_fields_and_lowercases_kind() {
-        let col = column("GENDER", LogicalType::String, Some("Patient Gender"), Some("$SEX."));
+        let col = column(
+            "GENDER",
+            LogicalType::String,
+            Some("Patient Gender"),
+            Some("$SEX."),
+        );
         let json = ColumnMetaJson::from_column(&col);
         assert_eq!(json.index, 7);
         assert_eq!(json.name, "GENDER");

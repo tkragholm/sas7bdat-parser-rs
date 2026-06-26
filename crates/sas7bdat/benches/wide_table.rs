@@ -18,8 +18,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use sas7bdat::{
-    BatchHint, ColumnMajorDecode, Dataset, LogicalType, Parallelism,
-    test_utils::MockDatasetBuilder,
+    BatchHint, ColumnMajorDecode, Dataset, LogicalType, Parallelism, test_utils::MockDatasetBuilder,
 };
 use std::{hint::black_box, ops::ControlFlow, sync::Arc};
 

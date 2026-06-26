@@ -136,7 +136,7 @@ pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
         let chunk = U8x64::from_slice(&slice[start..end]);
 
         // Find bytes that are either ASCII space (0x20) or NUL (0x00).
-        // SAS often pads strings with spaces, but corrupted or partial 
+        // SAS often pads strings with spaces, but corrupted or partial
         // records may contain NULs.
         let trim_mask = chunk.simd_eq(spaces) | chunk.simd_eq(nuls);
         let bitmask = trim_mask.to_bitmask();
@@ -147,7 +147,7 @@ pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
             continue;
         }
 
-        // `bitmask` has bit i set if lane i is a space/nul. 
+        // `bitmask` has bit i set if lane i is a space/nul.
         // We want the index of the rightmost bit that is NOT set (the last content byte).
         // 1. Invert the mask: !bitmask has bits set for content bytes.
         // 2. leading_zeros() finds the index of the first '1' from the left.

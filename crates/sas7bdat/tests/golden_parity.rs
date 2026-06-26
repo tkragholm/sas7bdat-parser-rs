@@ -92,13 +92,7 @@ fn csv_datetime_prefix(s: &str) -> Option<&str> {
 }
 
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
-fn compare_cell(
-    actual: &OwnedCellValue,
-    expected_csv: &str,
-    col: &str,
-    row: usize,
-    fixture: &str,
-) {
+fn compare_cell(actual: &OwnedCellValue, expected_csv: &str, col: &str, row: usize, fixture: &str) {
     // Raw-byte columns have no portable text representation; skip entirely.
     if matches!(actual, OwnedCellValue::Bytes(_)) {
         return;
@@ -233,8 +227,7 @@ fn compare_cell(
         OwnedCellValue::DateTime(dt) => {
             let actual_str = sas_datetime_to_string(dt.seconds_since_sas_epoch);
             // Compare to-second precision; CSV may have trailing microseconds.
-            let expected_prefix = csv_datetime_prefix(expected_csv)
-                .unwrap_or(expected_csv);
+            let expected_prefix = csv_datetime_prefix(expected_csv).unwrap_or(expected_csv);
             assert_eq!(
                 actual_str, expected_prefix,
                 "{fixture} row {row} col {col}: datetime mismatch"
@@ -273,14 +266,15 @@ fn check_parity(sas_name: &str, csv_name: &str) {
         return;
     }
 
-    let ds = Dataset::open(&sas_path)
-        .unwrap_or_else(|e| panic!("open {sas_name}: {e}"));
+    let ds = Dataset::open(&sas_path).unwrap_or_else(|e| panic!("open {sas_name}: {e}"));
     let golden = load_csv(&csv_path);
     let columns = ds.columns();
 
     // Column name parity (trim trailing spaces from SAS names).
-    let actual_names: Vec<String> =
-        columns.iter().map(|c| c.name.trim_end().to_owned()).collect();
+    let actual_names: Vec<String> = columns
+        .iter()
+        .map(|c| c.name.trim_end().to_owned())
+        .collect();
     assert_eq!(
         actual_names, golden.columns,
         "{sas_name}: column name mismatch"

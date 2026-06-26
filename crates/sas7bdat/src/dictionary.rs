@@ -87,8 +87,17 @@ const fn usz(offset: i64) -> usize {
 /// Return the cell at local row `i` of a `Utf8`/`RawBytes` buffer (`None` = null
 /// or non-string / out-of-range buffer).
 fn cell_in_buffer(buffer: &OwnedColumnBuffer, i: usize) -> Option<&str> {
-    let (OwnedColumnBuffer::Utf8 { offsets, data, valid, .. }
-    | OwnedColumnBuffer::RawBytes { offsets, data, valid }) = buffer
+    let (OwnedColumnBuffer::Utf8 {
+        offsets,
+        data,
+        valid,
+        ..
+    }
+    | OwnedColumnBuffer::RawBytes {
+        offsets,
+        data,
+        valid,
+    }) = buffer
     else {
         return None;
     };
@@ -127,7 +136,10 @@ pub fn dictionary_encode(
 ) -> Option<DictionaryColumn> {
     let rows: usize = buffers.iter().copied().map(buffer_rows).sum();
     if rows == 0 {
-        return Some(DictionaryColumn { dictionary: Vec::new(), codes: Vec::new() });
+        return Some(DictionaryColumn {
+            dictionary: Vec::new(),
+            codes: Vec::new(),
+        });
     }
 
     // ── Pass 1: probe cardinality on a stride sample ────────────────────────
@@ -260,8 +272,17 @@ impl DictBuilder {
 
     /// Intern every cell of one batch buffer for this column.
     pub fn push_buffer(&mut self, buffer: &OwnedColumnBuffer) {
-        let (OwnedColumnBuffer::Utf8 { offsets, data, valid, .. }
-        | OwnedColumnBuffer::RawBytes { offsets, data, valid }) = buffer
+        let (OwnedColumnBuffer::Utf8 {
+            offsets,
+            data,
+            valid,
+            ..
+        }
+        | OwnedColumnBuffer::RawBytes {
+            offsets,
+            data,
+            valid,
+        }) = buffer
         else {
             return;
         };
@@ -289,7 +310,10 @@ impl DictBuilder {
 
     #[must_use]
     pub fn finish(self) -> DictionaryColumn {
-        DictionaryColumn { dictionary: self.dictionary, codes: self.codes }
+        DictionaryColumn {
+            dictionary: self.dictionary,
+            codes: self.codes,
+        }
     }
 }
 
@@ -313,12 +337,17 @@ pub fn read_dictionary_columns(
     ds.scan().visit_owned_batches(|batch| {
         for (ci, buffer) in batch.columns.iter().enumerate() {
             if matches!(buffer, OwnedColumnBuffer::Utf8 { .. }) {
-                builders[ci].get_or_insert_with(DictBuilder::new).push_buffer(buffer);
+                builders[ci]
+                    .get_or_insert_with(DictBuilder::new)
+                    .push_buffer(buffer);
             }
         }
         Ok(std::ops::ControlFlow::Continue(()))
     })?;
-    Ok(builders.into_iter().map(|b| b.map(DictBuilder::finish)).collect())
+    Ok(builders
+        .into_iter()
+        .map(|b| b.map(DictBuilder::finish))
+        .collect())
 }
 
 #[cfg(test)]
@@ -337,7 +366,12 @@ mod tests {
             }
             offsets.push_current_data_len(data.len()).unwrap();
         }
-        OwnedColumnBuffer::Utf8 { offsets, data, valid: Some(valid), dictionary_ids: None }
+        OwnedColumnBuffer::Utf8 {
+            offsets,
+            data,
+            valid: Some(valid),
+            dictionary_ids: None,
+        }
     }
 
     /// Dictionary codes must reconstruct exactly the input strings (incl. nulls).
@@ -361,11 +395,21 @@ mod tests {
     /// builder to the hash interner while keeping codes stable.
     #[test]
     fn byte_mode_promotes_on_multibyte() {
-        let buf = utf8(&[Some("A"), Some("B"), Some("A"), Some("long"), Some("B"), Some("long")]);
+        let buf = utf8(&[
+            Some("A"),
+            Some("B"),
+            Some("A"),
+            Some("long"),
+            Some("B"),
+            Some("long"),
+        ]);
         let mut b = DictBuilder::new();
         b.push_buffer(&buf);
         let dict = b.finish();
-        assert_eq!(dict.dictionary, vec!["A".to_string(), "B".to_string(), "long".to_string()]);
+        assert_eq!(
+            dict.dictionary,
+            vec!["A".to_string(), "B".to_string(), "long".to_string()]
+        );
         assert_eq!(
             dict.codes,
             vec![Some(0), Some(1), Some(0), Some(2), Some(1), Some(2)]
@@ -377,7 +421,10 @@ mod tests {
         let owned: Vec<String> = (0..2000).map(|i| format!("id{i}")).collect();
         let cells: Vec<Option<&str>> = owned.iter().map(|s| Some(s.as_str())).collect();
         let buf = utf8(&cells);
-        let policy = DictionaryPolicy { sample_rows: 2000, ..Default::default() };
+        let policy = DictionaryPolicy {
+            sample_rows: 2000,
+            ..Default::default()
+        };
         assert!(dictionary_encode(&[&buf], &policy).is_none());
     }
 }

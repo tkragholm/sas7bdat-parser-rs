@@ -19,8 +19,7 @@ fn check_skip_limit(path: &Path, skip: u64, limit: u64) {
     if !path.exists() {
         return;
     }
-    let ds = Dataset::open(path)
-        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    let ds = Dataset::open(path).unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
 
     let total_rows = ds.metadata().row_count;
 
@@ -88,11 +87,7 @@ fn airline_limit_without_skip() {
         return;
     }
     let ds = Dataset::open(&path).expect("open");
-    let limited = ds
-        .scan()
-        .limit(3)
-        .collect_rows()
-        .expect("limit 3");
+    let limited = ds.scan().limit(3).collect_rows().expect("limit 3");
     assert_eq!(limited.len(), 3, "limit(3) should return exactly 3 rows");
 }
 
@@ -132,7 +127,11 @@ fn duplicate_column_name_is_silently_deduplicated() {
         projection.columns().len(),
         1,
         "expected deduplication to 1 column, got {:?}",
-        projection.columns().iter().map(|c| &c.name).collect::<Vec<_>>()
+        projection
+            .columns()
+            .iter()
+            .map(|c| &c.name)
+            .collect::<Vec<_>>()
     );
 
     let rows = ds
@@ -157,8 +156,7 @@ fn check_batch_sizes_invariant(path: &Path) {
     if !path.exists() {
         return;
     }
-    let ds = Dataset::open(path)
-        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    let ds = Dataset::open(path).unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
 
     let total_rows = ds.metadata().row_count;
 

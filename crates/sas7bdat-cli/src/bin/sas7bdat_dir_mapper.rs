@@ -64,9 +64,7 @@ fn parse_args() -> Result<Config, String> {
                 std::process::exit(0);
             }
             "--out" => {
-                out = Some(PathBuf::from(
-                    args.next().ok_or("--out requires a value")?,
-                ));
+                out = Some(PathBuf::from(args.next().ok_or("--out requires a value")?));
             }
             "--format" => {
                 let v = args
@@ -359,13 +357,21 @@ fn strip_year(stem: &str) -> String {
         && bytes.get(year_end + 2).is_none_or(|b| !b.is_ascii_digit())
     {
         let mm = (bytes[year_end] - b'0') * 10 + (bytes[year_end + 1] - b'0');
-        if (1..=12).contains(&mm) { year_end + 2 } else { year_end }
+        if (1..=12).contains(&mm) {
+            year_end + 2
+        } else {
+            year_end
+        }
     } else if year_end < bytes.len()
         && bytes[year_end].is_ascii_digit()
         && bytes.get(year_end + 1).is_none_or(|b| !b.is_ascii_digit())
     {
         let q = bytes[year_end] - b'0';
-        if (1..=4).contains(&q) { year_end + 1 } else { year_end }
+        if (1..=4).contains(&q) {
+            year_end + 1
+        } else {
+            year_end
+        }
     } else {
         year_end
     };
@@ -388,7 +394,11 @@ fn strip_year(stem: &str) -> String {
     let mut s = stem.to_owned();
     s.drain(remove_start..remove_end);
     let trimmed = s.trim_matches(|c: char| !c.is_alphanumeric()).to_owned();
-    if trimmed.is_empty() { stem.to_owned() } else { trimmed }
+    if trimmed.is_empty() {
+        stem.to_owned()
+    } else {
+        trimmed
+    }
 }
 
 // ─── File scanning ────────────────────────────────────────────────────────────
@@ -662,11 +672,7 @@ fn analyze_schema(files: &[FileRecord]) -> SchemaAnalysis {
         .collect();
 
     // Sort: core columns first, then alphabetical within each group
-    columns.sort_by(|a, b| {
-        b.is_core
-            .cmp(&a.is_core)
-            .then_with(|| a.name.cmp(&b.name))
-    });
+    columns.sort_by(|a, b| b.is_core.cmp(&a.is_core).then_with(|| a.name.cmp(&b.name)));
 
     let core_column_count = columns.iter().filter(|c| c.is_core).count();
     let optional_column_count = columns.len() - core_column_count;
@@ -768,7 +774,7 @@ fn ingestion_recommendations(groups: &[RegisterGroup]) -> Vec<IngestionRecommend
         .iter()
         .map(|g| {
             let schema = &g.schema;
-            
+
             let mut notes: Vec<String> = Vec::new();
 
             if g.error_count > 0 {
@@ -851,22 +857,17 @@ fn render_markdown(map: &DirectoryMap) -> String {
         map.total_files, map.total_errors
     )
     .unwrap();
-    writeln!(
-        out,
-        "**Total rows:** {}  ",
-        fmt_large(map.total_rows)
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "**Total size:** {}",
-        fmt_bytes(map.total_bytes)
-    )
-    .unwrap();
+    writeln!(out, "**Total rows:** {}  ", fmt_large(map.total_rows)).unwrap();
+    writeln!(out, "**Total size:** {}", fmt_bytes(map.total_bytes)).unwrap();
     writeln!(out).unwrap();
 
     // Summary table
-    writeln!(out, "## Register Groups ({} groups)", map.register_groups.len()).unwrap();
+    writeln!(
+        out,
+        "## Register Groups ({} groups)",
+        map.register_groups.len()
+    )
+    .unwrap();
     writeln!(out).unwrap();
     writeln!(
         out,
@@ -880,7 +881,8 @@ fn render_markdown(map: &DirectoryMap) -> String {
     .unwrap();
     for g in &map.register_groups {
         let yr = g
-            .year_range.map_or_else(|| "—".to_owned(), |[a, b]| format!("{a}–{b}"));
+            .year_range
+            .map_or_else(|| "—".to_owned(), |[a, b]| format!("{a}–{b}"));
         let cols = format!(
             "{}/{}",
             g.schema.core_column_count, g.schema.total_unique_columns
@@ -915,7 +917,16 @@ fn render_markdown(map: &DirectoryMap) -> String {
         writeln!(out, "**Directory:** `{}`  ", g.directory).unwrap();
         writeln!(out, "**Files:** {}  ", g.file_count).unwrap();
         if let Some([y_min, y_max]) = g.year_range {
-            writeln!(out, "**Years:** {y_min}–{y_max} ({})  ", g.years.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(", ")).unwrap();
+            writeln!(
+                out,
+                "**Years:** {y_min}–{y_max} ({})  ",
+                g.years
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .unwrap();
         }
         writeln!(out, "**Rows:** {}  ", fmt_large(g.total_rows)).unwrap();
         writeln!(out, "**Size:** {}  ", fmt_bytes(g.total_bytes)).unwrap();
@@ -937,7 +948,11 @@ fn render_markdown(map: &DirectoryMap) -> String {
                         out,
                         "  - `{}` in: {}",
                         v.logical_type,
-                        v.files.iter().map(|f| format!("`{f}`")).collect::<Vec<_>>().join(", ")
+                        v.files
+                            .iter()
+                            .map(|f| format!("`{f}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     )
                     .unwrap();
                 }
@@ -1111,7 +1126,11 @@ fn run(config: &Config) -> Result<(), String> {
     let mut singleton_files: Vec<FileRecord> = Vec::new();
 
     for (key, mut files) in groups {
-        files.sort_by(|a, b| a.year.cmp(&b.year).then_with(|| a.file_name.cmp(&b.file_name)));
+        files.sort_by(|a, b| {
+            a.year
+                .cmp(&b.year)
+                .then_with(|| a.file_name.cmp(&b.file_name))
+        });
 
         let dir = {
             let p = PathBuf::from(&files[0].path);
@@ -1162,19 +1181,13 @@ fn run(config: &Config) -> Result<(), String> {
     register_groups.sort_by(|a, b| a.group_key.cmp(&b.group_key));
     singleton_files.sort_by(|a, b| a.path.cmp(&b.path));
 
-    let total_errors: usize = register_groups
-        .iter()
-        .map(|g| g.error_count)
-        .sum::<usize>()
+    let total_errors: usize = register_groups.iter().map(|g| g.error_count).sum::<usize>()
         + singleton_files.iter().filter(|f| f.error.is_some()).count();
 
     let total_rows: u64 = register_groups.iter().map(|g| g.total_rows).sum::<u64>()
         + singleton_files.iter().map(|f| f.row_count).sum::<u64>();
 
-    let total_bytes: u64 = register_groups
-        .iter()
-        .map(|g| g.total_bytes)
-        .sum::<u64>()
+    let total_bytes: u64 = register_groups.iter().map(|g| g.total_bytes).sum::<u64>()
         + singleton_files.iter().map(|f| f.size_bytes).sum::<u64>();
 
     let ingestion_recommendations = ingestion_recommendations(&register_groups);
@@ -1200,7 +1213,10 @@ fn run(config: &Config) -> Result<(), String> {
         map.total_errors
     );
 
-    let base_out = config.out.clone().unwrap_or_else(|| PathBuf::from("dir_map"));
+    let base_out = config
+        .out
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("dir_map"));
 
     match config.format {
         OutputFormat::Json => {

@@ -157,7 +157,12 @@ fn read_page<R: Read + Seek>(
     Ok(())
 }
 
-fn augment_index(buffer: &[u8], header: &HeaderInfo, layout: &IndexLayout, pointers: &mut Vec<u64>) {
+fn augment_index(
+    buffer: &[u8],
+    header: &HeaderInfo,
+    layout: &IndexLayout,
+    pointers: &mut Vec<u64>,
+) {
     let mut cursor = 0usize;
     while cursor + layout.entry_stride <= buffer.len() {
         let entry = &buffer[cursor..cursor + layout.entry_stride];
@@ -231,7 +236,11 @@ fn collect_chain_segments<R: Read + Seek>(
     Ok(segments)
 }
 
-fn read_block<R: Read + Seek>(reader: &mut R, header: &HeaderInfo, pointer: u64) -> Result<Vec<u8>> {
+fn read_block<R: Read + Seek>(
+    reader: &mut R,
+    header: &HeaderInfo,
+    pointer: u64,
+) -> Result<Vec<u8>> {
     let (page, pos) = decode_pointer(pointer);
     if page == 0 || pos == 0 {
         return Err(Error::page_corruption(
@@ -255,7 +264,9 @@ fn read_block<R: Read + Seek>(reader: &mut R, header: &HeaderInfo, pointer: u64)
             break;
         }
         if offset + segment.len as usize > buffer.len() {
-            return Err(Error::page_corruption("catalog chain exceeds allocated buffer"));
+            return Err(Error::page_corruption(
+                "catalog chain exceeds allocated buffer",
+            ));
         }
         read_segment_data(
             reader,
@@ -347,10 +358,8 @@ fn parse_block(
         label_count_used = read_u64_slice(header, &buffer[50 + pad..58 + pad]);
         payload_offset += 32;
     } else {
-        label_count_capacity =
-            u64::from(read_u32_slice(header, &buffer[38 + pad..42 + pad]));
-        label_count_used =
-            u64::from(read_u32_slice(header, &buffer[42 + pad..46 + pad]));
+        label_count_capacity = u64::from(read_u32_slice(header, &buffer[38 + pad..42 + pad]));
+        label_count_used = u64::from(read_u32_slice(header, &buffer[42 + pad..46 + pad]));
     }
 
     let mut name = decode_text(&buffer[8..16], encoding);
@@ -367,7 +376,9 @@ fn parse_block(
         let start = payload_offset + pad;
         let end = start + 32;
         if end > buffer.len() {
-            return Err(Error::header_corruption("catalog long-name block truncated"));
+            return Err(Error::header_corruption(
+                "catalog long-name block truncated",
+            ));
         }
         name = decode_text(&buffer[start..end], encoding);
         pad += 32;
@@ -413,15 +424,12 @@ fn parse_value_labels(
     label_count_capacity: u64,
     value_type: ValueType,
 ) -> Result<Vec<ValueLabel>> {
-    let label_count = usize::try_from(label_count_used).map_err(|_| {
-        Error::unsupported("catalog label count exceeds platform pointer width")
-    })?;
-    let capacity = usize::try_from(label_count_capacity).map_err(|_| {
-        Error::unsupported("catalog label capacity exceeds platform pointer width")
-    })?;
-    let pad = usize::try_from(header.pad_alignment).map_err(|_| {
-        Error::unsupported("catalog label padding exceeds platform pointer width")
-    })?;
+    let label_count = usize::try_from(label_count_used)
+        .map_err(|_| Error::unsupported("catalog label count exceeds platform pointer width"))?;
+    let capacity = usize::try_from(label_count_capacity)
+        .map_err(|_| Error::unsupported("catalog label capacity exceeds platform pointer width"))?;
+    let pad = usize::try_from(header.pad_alignment)
+        .map_err(|_| Error::unsupported("catalog label padding exceeds platform pointer width"))?;
 
     let (offsets, label_blob_offset) =
         parse_value_label_offsets(bytes, header, pad, label_count, capacity)?;
@@ -463,9 +471,8 @@ fn parse_value_label_offsets(
                 ));
             }
             let label_pos = read_u32_slice(header, &entry[label_pos_offset..label_pos_offset + 4]);
-            let label_pos = usize::try_from(label_pos).map_err(|_| {
-                Error::page_corruption("catalog label index out of range")
-            })?;
+            let label_pos = usize::try_from(label_pos)
+                .map_err(|_| Error::page_corruption("catalog label index out of range"))?;
             if label_pos >= offsets.len() {
                 return Err(Error::page_corruption("catalog label index out of range"));
             }
@@ -708,12 +715,14 @@ mod tests {
         let names: Vec<&str> = layout.label_sets.iter().map(|s| s.name.as_str()).collect();
         eprintln!("label set names: {names:?}");
 
-        let has_a = layout.label_sets.iter().any(|s| {
-            normalize_format_name(&s.name) == "$A"
-        });
-        let has_b = layout.label_sets.iter().any(|s| {
-            normalize_format_name(&s.name) == "$B"
-        });
+        let has_a = layout
+            .label_sets
+            .iter()
+            .any(|s| normalize_format_name(&s.name) == "$A");
+        let has_b = layout
+            .label_sets
+            .iter()
+            .any(|s| normalize_format_name(&s.name) == "$B");
         assert!(has_a, "expected label set $A, found: {names:?}");
         assert!(has_b, "expected label set $B, found: {names:?}");
 
@@ -723,10 +732,7 @@ mod tests {
             .find(|s| normalize_format_name(&s.name) == "$A")
             .expect("label set $A");
         assert_eq!(label_a.value_type, ValueType::String);
-        assert!(
-            !label_a.labels.is_empty(),
-            "expected labels in $A"
-        );
+        assert!(!label_a.labels.is_empty(), "expected labels in $A");
         assert!(
             label_a.labels.iter().any(|l| l.label == "Male"),
             "expected 'Male' label in $A, found: {:?}",

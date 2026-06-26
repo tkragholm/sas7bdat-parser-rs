@@ -53,8 +53,14 @@ mod tests {
     #[test]
     fn direct_labels_resolve_case_insensitively() {
         // Exact label, then the to-ascii-lowercase fallback branch.
-        assert_eq!(resolve_encoding(Some("windows-1252")).name(), "windows-1252");
-        assert_eq!(resolve_encoding(Some("WINDOWS-1252")).name(), "windows-1252");
+        assert_eq!(
+            resolve_encoding(Some("windows-1252")).name(),
+            "windows-1252"
+        );
+        assert_eq!(
+            resolve_encoding(Some("WINDOWS-1252")).name(),
+            "windows-1252"
+        );
         assert_eq!(resolve_encoding(Some("UTF-8")).name(), "UTF-8");
     }
 
@@ -71,8 +77,14 @@ mod tests {
         // the `macintosh` encoding; maccyrillic and macukraine both fold onto the
         // Cyrillic Mac encoding (Ukrainian shares it).
         assert_eq!(resolve_encoding(Some("MacRoman")).name(), "macintosh");
-        assert_eq!(resolve_encoding(Some("maccyrillic")).name(), "x-mac-cyrillic");
-        assert_eq!(resolve_encoding(Some("macukraine")).name(), "x-mac-cyrillic");
+        assert_eq!(
+            resolve_encoding(Some("maccyrillic")).name(),
+            "x-mac-cyrillic"
+        );
+        assert_eq!(
+            resolve_encoding(Some("macukraine")).name(),
+            "x-mac-cyrillic"
+        );
     }
 
     #[test]
@@ -99,6 +111,9 @@ mod tests {
 
     #[test]
     fn unknown_label_falls_back_to_utf8() {
-        assert_eq!(resolve_encoding(Some("definitely-not-an-encoding")).name(), "UTF-8");
+        assert_eq!(
+            resolve_encoding(Some("definitely-not-an-encoding")).name(),
+            "UTF-8"
+        );
     }
 }

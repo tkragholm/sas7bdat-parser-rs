@@ -28,7 +28,11 @@ fn main() {
     let path = &args[1];
     let iters: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(5);
     let serial = args.get(3).is_some_and(|s| s == "serial");
-    let label = if serial { "rust-core-serial" } else { "rust-core" };
+    let label = if serial {
+        "rust-core-serial"
+    } else {
+        "rust-core"
+    };
 
     let rows = read_once(path, serial); // warmup
     let mut times = Vec::with_capacity(iters);

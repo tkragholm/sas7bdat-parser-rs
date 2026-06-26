@@ -453,7 +453,9 @@ impl ColumnBuffer<'_> {
                 build_primitive_array::<Time64NanosecondType, _, _>(
                     values.iter().copied(),
                     valid,
-                    |value| Ok(i64::from(value.seconds_since_midnight).saturating_mul(1_000_000_000)),
+                    |value| {
+                        Ok(i64::from(value.seconds_since_midnight).saturating_mul(1_000_000_000))
+                    },
                 )
             }
             Self::Utf8(Utf8Buffer {
@@ -529,7 +531,10 @@ fn column_buffer_to_arrow(buffer: ColumnBuffer<'_>, field_type: &DataType) -> Re
                 *valid,
                 |raw| {
                     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-                    Ok(((raw - SasDateTime::SECONDS_SAS_TO_UNIX as f64) * 1_000_000.0).round() as i64)
+                    Ok(
+                        ((raw - SasDateTime::SECONDS_SAS_TO_UNIX as f64) * 1_000_000.0).round()
+                            as i64,
+                    )
                 },
             )
         }

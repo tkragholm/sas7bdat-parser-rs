@@ -35,7 +35,10 @@ pub fn resolve_compression(codec: CompressionCodec) -> Compression {
 /// parquet-linter `float_encoding` and `timestamp_encoding` rules. Dictionary encoding
 /// stays enabled, so low-cardinality columns still use the dictionary and only high-
 /// cardinality columns (which would otherwise spill to PLAIN) pick up the better encoding.
-fn apply_column_encodings(mut builder: WriterPropertiesBuilder, schema: &Schema) -> WriterPropertiesBuilder {
+fn apply_column_encodings(
+    mut builder: WriterPropertiesBuilder,
+    schema: &Schema,
+) -> WriterPropertiesBuilder {
     for field in schema.fields() {
         let encoding = match field.data_type() {
             // BYTE_STREAM_SPLIT typically compresses continuous floats 2-4x better.
@@ -398,8 +401,14 @@ mod tests {
             resolve_compression(CompressionCodec::Zstd),
             Compression::ZSTD(_)
         ));
-        assert_eq!(resolve_compression(CompressionCodec::Lz4), Compression::LZ4_RAW);
-        assert_eq!(resolve_compression(CompressionCodec::Snappy), Compression::SNAPPY);
+        assert_eq!(
+            resolve_compression(CompressionCodec::Lz4),
+            Compression::LZ4_RAW
+        );
+        assert_eq!(
+            resolve_compression(CompressionCodec::Snappy),
+            Compression::SNAPPY
+        );
         assert_eq!(
             resolve_compression(CompressionCodec::None),
             Compression::UNCOMPRESSED
@@ -490,8 +499,14 @@ mod tests {
                 .unwrap_or_default()
         };
 
-        assert!(labels_of("SEXB").contains("B-Male"), "SEXB must get $B labels");
-        assert!(labels_of("SEXA").contains("A-Male"), "SEXA must get $A labels");
+        assert!(
+            labels_of("SEXB").contains("B-Male"),
+            "SEXB must get $B labels"
+        );
+        assert!(
+            labels_of("SEXA").contains("A-Male"),
+            "SEXA must get $A labels"
+        );
         // And not cross-contaminated.
         assert!(!labels_of("SEXB").contains("A-Male"));
         assert!(!labels_of("SEXA").contains("B-Male"));

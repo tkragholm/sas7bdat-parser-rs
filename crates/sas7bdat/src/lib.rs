@@ -26,11 +26,11 @@
 #![feature(portable_simd)]
 
 pub mod catalog;
-#[cfg(feature = "dictionary")]
-pub mod dictionary;
 mod columnar;
 mod compression;
 mod dataset;
+#[cfg(feature = "dictionary")]
+pub mod dictionary;
 mod encoding;
 mod error;
 mod fixture_catalog;

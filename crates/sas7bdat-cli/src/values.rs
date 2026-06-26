@@ -126,12 +126,19 @@ mod tests {
     fn format_cell_renders_temporal_values() {
         // SAS day 0 is 1960-01-01; the Unix epoch (1970-01-01) is SAS day 3653.
         assert_eq!(
-            format_cell(&CellValue::Date(SasDate { days_since_sas_epoch: 3653 }), ""),
+            format_cell(
+                &CellValue::Date(SasDate {
+                    days_since_sas_epoch: 3653
+                }),
+                ""
+            ),
             "1970-01-01"
         );
         assert_eq!(
             format_cell(
-                &CellValue::DateTime(SasDateTime { seconds_since_sas_epoch: 315_619_200 }),
+                &CellValue::DateTime(SasDateTime {
+                    seconds_since_sas_epoch: 315_619_200
+                }),
                 ""
             ),
             "1970-01-01 00:00:00"

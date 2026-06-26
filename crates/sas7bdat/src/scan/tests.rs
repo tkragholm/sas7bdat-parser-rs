@@ -1267,7 +1267,11 @@ fn make_2col_f64_dataset(pages: &[&[[f64; 2]]]) -> crate::Dataset {
 /// Build a multi-page all-`Float` dataset of `num_cols` columns laid out as fused contiguous
 /// pages of `rows_per_page` rows. Row `r`, column `c` holds `(r*num_cols+c) as f64 * 0.5`,
 /// except every 37th cell which is a SAS missing sentinel.
-fn make_wide_f64_dataset(num_cols: usize, total_rows: usize, rows_per_page: usize) -> crate::Dataset {
+fn make_wide_f64_dataset(
+    num_cols: usize,
+    total_rows: usize,
+    rows_per_page: usize,
+) -> crate::Dataset {
     let missing = SAS_NUMERIC_MISSING_SENTINEL;
     let row_len = num_cols * 8;
     let page_size = 24 + row_len * rows_per_page;
@@ -1566,13 +1570,17 @@ fn columnar_matches_row_major_multi_page_with_nulls() {
 fn columnar_falls_back_for_compressed_pages() {
     // 0xC5,'A' → RLE insert of 8 'A' bytes = one 8-byte f64 row. Compressed pages take the
     // row-major fallback inside collect_batches_columnar, so the two paths must still agree.
-    let ds = MockDatasetBuilder::new(Arc::<[u8]>::from(make_compressed_page(&[0xC5u8, b'A'], 64, 4)))
-        .with_column("CODE", LogicalType::Float, 8, 0)
-        .with_row_len(8)
-        .with_total_rows(1)
-        .with_rows_per_page(1)
-        .with_compression(CompressionKind::Row)
-        .build();
+    let ds = MockDatasetBuilder::new(Arc::<[u8]>::from(make_compressed_page(
+        &[0xC5u8, b'A'],
+        64,
+        4,
+    )))
+    .with_column("CODE", LogicalType::Float, 8, 0)
+    .with_row_len(8)
+    .with_total_rows(1)
+    .with_rows_per_page(1)
+    .with_compression(CompressionKind::Row)
+    .build();
 
     let row_major = ScanBuilder::new(&ds)
         .collect_batches()
@@ -1635,7 +1643,9 @@ mod fallback_append {
     ) -> OwnedColumnBuffer {
         let mut builder = OwnedBatchColumnBuilder::with_capacity_hint(kind, 8, 8, numeric_tile, 1);
         for &cell in cells {
-            builder.append(cell, owned_strings).expect("append should succeed");
+            builder
+                .append(cell, owned_strings)
+                .expect("append should succeed");
         }
         builder.finish()
     }
@@ -1644,7 +1654,8 @@ mod fallback_append {
     /// A `None` vector means "no nulls seen" — every row is valid.
     fn valid_at(valid: Option<&[u64]>, idx: usize) -> bool {
         valid.is_none_or(|bits| {
-            bits.get(idx / 64).is_some_and(|word| (word >> (idx % 64)) & 1 == 1)
+            bits.get(idx / 64)
+                .is_some_and(|word| (word >> (idx % 64)) & 1 == 1)
         })
     }
 
@@ -1665,7 +1676,11 @@ mod fallback_append {
         };
         assert_eq!(values, vec![0, 7, 9, 5]);
         assert!(!valid_at(valid.as_deref(), 0), "row 0 was a null");
-        assert!(valid_at(valid.as_deref(), 1) && valid_at(valid.as_deref(), 2) && valid_at(valid.as_deref(), 3));
+        assert!(
+            valid_at(valid.as_deref(), 1)
+                && valid_at(valid.as_deref(), 2)
+                && valid_at(valid.as_deref(), 3)
+        );
     }
 
     #[test]
@@ -1748,37 +1763,68 @@ mod fallback_append {
             ColumnMaterializationKind::Date,
             &[
                 PlannedCell::Null,
-                PlannedCell::Date(SasDate { days_since_sas_epoch: 42 }),
+                PlannedCell::Date(SasDate {
+                    days_since_sas_epoch: 42,
+                }),
             ],
         );
         let OwnedColumnBuffer::Date { values, valid } = date else {
             panic!("expected date buffer");
         };
-        assert_eq!(values, vec![SasDate { days_since_sas_epoch: 0 }, SasDate { days_since_sas_epoch: 42 }]);
+        assert_eq!(
+            values,
+            vec![
+                SasDate {
+                    days_since_sas_epoch: 0
+                },
+                SasDate {
+                    days_since_sas_epoch: 42
+                }
+            ]
+        );
         assert!(!valid_at(valid.as_deref(), 0));
 
         let datetime = run(
             ColumnMaterializationKind::DateTime,
-            &[PlannedCell::DateTime(SasDateTime { seconds_since_sas_epoch: 99 })],
+            &[PlannedCell::DateTime(SasDateTime {
+                seconds_since_sas_epoch: 99,
+            })],
         );
         let OwnedColumnBuffer::DateTime { values, .. } = datetime else {
             panic!("expected datetime buffer");
         };
-        assert_eq!(values, vec![SasDateTime { seconds_since_sas_epoch: 99 }]);
+        assert_eq!(
+            values,
+            vec![SasDateTime {
+                seconds_since_sas_epoch: 99
+            }]
+        );
 
         let time = run(
             ColumnMaterializationKind::Time,
-            &[PlannedCell::Time(SasTime { seconds_since_midnight: 3600 })],
+            &[PlannedCell::Time(SasTime {
+                seconds_since_midnight: 3600,
+            })],
         );
         let OwnedColumnBuffer::Time { values, .. } = time else {
             panic!("expected time buffer");
         };
-        assert_eq!(values, vec![SasTime { seconds_since_midnight: 3600 }]);
+        assert_eq!(
+            values,
+            vec![SasTime {
+                seconds_since_midnight: 3600
+            }]
+        );
 
         // ...but a raw numeric cell forces the temporal column to widen to f64.
         let widened = run(
             ColumnMaterializationKind::Date,
-            &[PlannedCell::Date(SasDate { days_since_sas_epoch: 1 }), PlannedCell::Int32(7)],
+            &[
+                PlannedCell::Date(SasDate {
+                    days_since_sas_epoch: 1,
+                }),
+                PlannedCell::Int32(7),
+            ],
         );
         let OwnedColumnBuffer::F64 { values, .. } = widened else {
             panic!("date builder should widen to f64 on a numeric cell");
@@ -1799,7 +1845,13 @@ mod fallback_append {
             ],
             &owned,
         );
-        let OwnedColumnBuffer::Utf8 { data, offsets, valid, .. } = buffer else {
+        let OwnedColumnBuffer::Utf8 {
+            data,
+            offsets,
+            valid,
+            ..
+        } = buffer
+        else {
             panic!("expected utf8 buffer");
         };
         // Offsets delimit "", "inline", "from-pool" across the shared data buffer.
@@ -1810,10 +1862,17 @@ mod fallback_append {
 
     #[test]
     fn utf8_owned_index_out_of_range_errors() {
-        let mut builder =
-            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::Utf8, 8, 8, None, 1);
+        let mut builder = OwnedBatchColumnBuilder::with_capacity_hint(
+            ColumnMaterializationKind::Utf8,
+            8,
+            8,
+            None,
+            1,
+        );
         // owned_strings is empty, so index 0 is out of range.
-        let err = builder.append(PlannedCell::StrOwned(0), &[]).expect_err("should reject");
+        let err = builder
+            .append(PlannedCell::StrOwned(0), &[])
+            .expect_err("should reject");
         assert!(err.to_string().contains("owned string index out of range"));
     }
 
@@ -1823,7 +1882,12 @@ mod fallback_append {
             ColumnMaterializationKind::RawBytes,
             &[PlannedCell::Null, PlannedCell::Bytes(&[1, 2, 3])],
         );
-        let OwnedColumnBuffer::RawBytes { data, offsets, valid } = buffer else {
+        let OwnedColumnBuffer::RawBytes {
+            data,
+            offsets,
+            valid,
+        } = buffer
+        else {
             panic!("expected raw-bytes buffer");
         };
         assert_eq!(offsets.as_slice(), &[0, 0, 3]);
@@ -1918,20 +1982,48 @@ mod fallback_append {
     #[test]
     fn type_mismatched_cells_are_rejected() {
         // Each builder rejects a cell kind it cannot represent, rather than silently coercing.
-        let mut f64_builder =
-            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::F64, 8, 8, None, 1);
+        let mut f64_builder = OwnedBatchColumnBuilder::with_capacity_hint(
+            ColumnMaterializationKind::F64,
+            8,
+            8,
+            None,
+            1,
+        );
         assert!(f64_builder.append(PlannedCell::Bytes(&[0]), &[]).is_err());
 
-        let mut utf8_builder =
-            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::Utf8, 8, 8, None, 1);
+        let mut utf8_builder = OwnedBatchColumnBuilder::with_capacity_hint(
+            ColumnMaterializationKind::Utf8,
+            8,
+            8,
+            None,
+            1,
+        );
         assert!(utf8_builder.append(PlannedCell::Int32(1), &[]).is_err());
 
-        let mut bytes_builder =
-            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::RawBytes, 8, 8, None, 1);
-        assert!(bytes_builder.append(PlannedCell::StrBorrowed("x"), &[]).is_err());
+        let mut bytes_builder = OwnedBatchColumnBuilder::with_capacity_hint(
+            ColumnMaterializationKind::RawBytes,
+            8,
+            8,
+            None,
+            1,
+        );
+        assert!(
+            bytes_builder
+                .append(PlannedCell::StrBorrowed("x"), &[])
+                .is_err()
+        );
 
-        let mut date_builder =
-            OwnedBatchColumnBuilder::with_capacity_hint(ColumnMaterializationKind::Date, 8, 8, None, 1);
-        assert!(date_builder.append(PlannedCell::StrBorrowed("x"), &[]).is_err());
+        let mut date_builder = OwnedBatchColumnBuilder::with_capacity_hint(
+            ColumnMaterializationKind::Date,
+            8,
+            8,
+            None,
+            1,
+        );
+        assert!(
+            date_builder
+                .append(PlannedCell::StrBorrowed("x"), &[])
+                .is_err()
+        );
     }
 }

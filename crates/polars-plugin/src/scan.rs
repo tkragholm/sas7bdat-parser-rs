@@ -290,8 +290,14 @@ fn scan_parallelism(ds: &Dataset) -> Parallelism {
     }
     let meta = ds.metadata();
     let decode_bytes = meta.row_count.saturating_mul(u64::from(meta.row_len));
-    let min_bytes = env_u64("SAS7BDAT_SCAN_MIN_BYTES_PER_WORKER", DEFAULT_MIN_BYTES_PER_WORKER);
-    let min_pages = env_u64("SAS7BDAT_SCAN_MIN_PAGES_PER_WORKER", DEFAULT_MIN_PAGES_PER_WORKER);
+    let min_bytes = env_u64(
+        "SAS7BDAT_SCAN_MIN_BYTES_PER_WORKER",
+        DEFAULT_MIN_BYTES_PER_WORKER,
+    );
+    let min_pages = env_u64(
+        "SAS7BDAT_SCAN_MIN_PAGES_PER_WORKER",
+        DEFAULT_MIN_PAGES_PER_WORKER,
+    );
 
     // Hand each worker a full grain; the tightest constraint decides the count.
     let workers = (requested as u64)

@@ -19,9 +19,9 @@ pub enum CompressionKind {
     Unknown,
 }
 
-/// The logical interpretation of a SAS column. 
-/// 
-/// SAS stores nearly all numeric data as 8-byte floats. `LogicalType` captures 
+/// The logical interpretation of a SAS column.
+///
+/// SAS stores nearly all numeric data as 8-byte floats. `LogicalType` captures
 /// the intent of the column based on its format and internal flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalType {
@@ -165,21 +165,39 @@ mod epoch_tests {
     #[test]
     fn date_offset_anchors_on_unix_epoch() {
         // 1970-01-01 is SAS day 3653 and must map to Arrow Date32 value 0.
-        assert_eq!(SasDate { days_since_sas_epoch: 3653 }.unix_days(), 0);
+        assert_eq!(
+            SasDate {
+                days_since_sas_epoch: 3653
+            }
+            .unix_days(),
+            0
+        );
         // 2000-01-01 is SAS day 14610 and Unix day 10957.
-        assert_eq!(SasDate { days_since_sas_epoch: 14610 }.unix_days(), 10957);
+        assert_eq!(
+            SasDate {
+                days_since_sas_epoch: 14610
+            }
+            .unix_days(),
+            10957
+        );
     }
 
     #[test]
     fn datetime_offset_anchors_on_unix_epoch() {
         // 1970-01-01T00:00:00 is SAS second 315_619_200 and must map to timestamp 0.
         assert_eq!(
-            SasDateTime { seconds_since_sas_epoch: 315_619_200 }.unix_seconds(),
+            SasDateTime {
+                seconds_since_sas_epoch: 315_619_200
+            }
+            .unix_seconds(),
             0
         );
         // 2000-01-01T00:00:00 UTC is Unix second 946_684_800.
         assert_eq!(
-            SasDateTime { seconds_since_sas_epoch: 1_262_304_000 }.unix_seconds(),
+            SasDateTime {
+                seconds_since_sas_epoch: 1_262_304_000
+            }
+            .unix_seconds(),
             946_684_800
         );
     }

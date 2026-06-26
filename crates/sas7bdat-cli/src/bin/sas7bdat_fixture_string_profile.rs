@@ -1,5 +1,5 @@
-use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
 use sas7bdat::{Dataset, LogicalType, RowIndex, RowSelection};
+use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
 use serde::Serialize;
 use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
 

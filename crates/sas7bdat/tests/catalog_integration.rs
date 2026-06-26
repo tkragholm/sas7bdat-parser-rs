@@ -1,4 +1,7 @@
-use sas7bdat::{Dataset, LabelSet, ValueKey, ValueType, catalog::normalize_format_name, catalog::parse_catalog_file};
+use sas7bdat::{
+    Dataset, LabelSet, ValueKey, ValueType, catalog::normalize_format_name,
+    catalog::parse_catalog_file,
+};
 use std::path::Path;
 
 fn fixture(rel: &str) -> std::path::PathBuf {
@@ -33,10 +36,7 @@ fn attach_catalog_populates_label_sets() {
 
     let label_a = label_sets.get("$A").expect("$A");
     assert_eq!(label_a.value_type, ValueType::String);
-    assert!(
-        !label_a.labels.is_empty(),
-        "expected labels in $A"
-    );
+    assert!(!label_a.labels.is_empty(), "expected labels in $A");
     assert!(
         label_a.labels.iter().any(|l| l.label == "Male"),
         "expected 'Male' in $A, found: {:?}",
@@ -57,14 +57,11 @@ fn column_format_links_to_label_set() {
 
     let label_sets = &ds.metadata().label_sets;
 
-    let has_labelled_columns = ds
-        .columns()
-        .iter()
-        .any(|col| {
-            col.format
-                .as_deref()
-                .is_some_and(|f| label_sets.contains_key(&normalize_format_name(f)))
-        });
+    let has_labelled_columns = ds.columns().iter().any(|col| {
+        col.format
+            .as_deref()
+            .is_some_and(|f| label_sets.contains_key(&normalize_format_name(f)))
+    });
 
     assert!(
         has_labelled_columns,

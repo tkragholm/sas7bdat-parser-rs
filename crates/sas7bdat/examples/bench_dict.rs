@@ -3,7 +3,7 @@
 //! (cold, separate pass) cost for comparison, and the cardinality classification.
 //!
 //! Run: `cargo run --release -p sas7bdat --features dictionary --example bench_dict -- <file...>`
-use sas7bdat::dictionary::{dictionary_encode, read_dictionary_columns, DictionaryPolicy};
+use sas7bdat::dictionary::{DictionaryPolicy, dictionary_encode, read_dictionary_columns};
 use sas7bdat::{Dataset, OwnedColumnBuffer};
 use std::ops::ControlFlow;
 use std::time::Instant;
@@ -30,7 +30,9 @@ fn main() {
 
         // (1) decode-only baseline: full decode incl. Utf8 build, drop each batch.
         let t_decode = min_time(iters, || {
-            ds.scan().visit_owned_batches(|_| Ok(ControlFlow::Continue(()))).expect("scan");
+            ds.scan()
+                .visit_owned_batches(|_| Ok(ControlFlow::Continue(())))
+                .expect("scan");
         });
 
         // (2) decode + dictionary built during the stream (cells cache-hot).
@@ -49,21 +51,32 @@ fn main() {
         for ci in 0..ncols {
             let bufs: Vec<&OwnedColumnBuffer> =
                 batches.iter().filter_map(|b| b.columns.get(ci)).collect();
-            if !bufs.iter().any(|b| matches!(b, OwnedColumnBuffer::Utf8 { .. })) {
+            if !bufs
+                .iter()
+                .any(|b| matches!(b, OwnedColumnBuffer::Utf8 { .. }))
+            {
                 continue;
             }
             n_string += 1;
-            cells += bufs.iter().map(|b| match b {
-                OwnedColumnBuffer::Utf8 { offsets, .. } => offsets.as_slice().len().saturating_sub(1),
-                _ => 0,
-            }).sum::<usize>();
+            cells += bufs
+                .iter()
+                .map(|b| match b {
+                    OwnedColumnBuffer::Utf8 { offsets, .. } => {
+                        offsets.as_slice().len().saturating_sub(1)
+                    }
+                    _ => 0,
+                })
+                .sum::<usize>();
             if dictionary_encode(&bufs, &policy).is_some() {
                 n_dict += 1;
             }
         }
         let t_cold = t_cold_start.elapsed().as_secs_f64();
 
-        let base = std::path::Path::new(&path).file_name().and_then(|s| s.to_str()).unwrap_or(&path);
+        let base = std::path::Path::new(&path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&path);
         println!("== {base} ==");
         println!(
             "  {n_string} string cols ({n_dict} dict / {} plain), {cells} string cells",

@@ -73,17 +73,26 @@ fn push_column_cells(col: &OwnedColumnBuffer, out: &mut Vec<(u64, bool)>) {
         }
         OwnedColumnBuffer::Date { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((u64::from(v.days_since_sas_epoch.cast_unsigned()), valid_bit(valid.as_ref(), i)));
+                out.push((
+                    u64::from(v.days_since_sas_epoch.cast_unsigned()),
+                    valid_bit(valid.as_ref(), i),
+                ));
             }
         }
         OwnedColumnBuffer::DateTime { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((v.seconds_since_sas_epoch.cast_unsigned(), valid_bit(valid.as_ref(), i)));
+                out.push((
+                    v.seconds_since_sas_epoch.cast_unsigned(),
+                    valid_bit(valid.as_ref(), i),
+                ));
             }
         }
         OwnedColumnBuffer::Time { values, valid } => {
             for (i, v) in values.iter().enumerate() {
-                out.push((u64::from(v.seconds_since_midnight.cast_unsigned()), valid_bit(valid.as_ref(), i)));
+                out.push((
+                    u64::from(v.seconds_since_midnight.cast_unsigned()),
+                    valid_bit(valid.as_ref(), i),
+                ));
             }
         }
         OwnedColumnBuffer::Utf8 {
@@ -179,16 +188,29 @@ fn main() {
         }
 
         let rel = path.strip_prefix(fixtures_root()).unwrap_or(path);
-        match (flatten(&row_major), flatten(&col_serial), flatten(&col_parallel)) {
+        match (
+            flatten(&row_major),
+            flatten(&col_serial),
+            flatten(&col_parallel),
+        ) {
             (Some(r), Some(s), Some(p)) => {
                 if r != s {
-                    mismatches.push(format!("{} : serial column-major != row-major", rel.display()));
+                    mismatches.push(format!(
+                        "{} : serial column-major != row-major",
+                        rel.display()
+                    ));
                 }
                 if r != p {
-                    mismatches.push(format!("{} : parallel column-major != row-major", rel.display()));
+                    mismatches.push(format!(
+                        "{} : parallel column-major != row-major",
+                        rel.display()
+                    ));
                 }
             }
-            _ => mismatches.push(format!("{} : column count differs across batches", rel.display())),
+            _ => mismatches.push(format!(
+                "{} : column count differs across batches",
+                rel.display()
+            )),
         }
     }
 
@@ -201,6 +223,9 @@ fn main() {
     for m in mismatches.iter().take(50) {
         println!("  MISMATCH {m}");
     }
-    assert!(mismatches.is_empty(), "column-major diverged from row-major");
+    assert!(
+        mismatches.is_empty(),
+        "column-major diverged from row-major"
+    );
     println!("\nOK: column-major == row-major on every decoded fixture.");
 }

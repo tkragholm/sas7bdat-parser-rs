@@ -178,7 +178,10 @@ fn recommend_threshold(results: &[FileResult]) -> u64 {
     const TAIL_FRACTION: f64 = 0.80;
     for i in 0..results.len() {
         let tail = &results[i..];
-        let cleared = tail.iter().filter(|r| r.speedup() >= SPEEDUP_WORTH_IT).count();
+        let cleared = tail
+            .iter()
+            .filter(|r| r.speedup() >= SPEEDUP_WORTH_IT)
+            .count();
         if cleared as f64 / tail.len() as f64 >= TAIL_FRACTION {
             return results[i].decode_bytes;
         }
@@ -201,7 +204,13 @@ fn main() -> Result<(), String> {
 
     let cores = std::thread::available_parallelism().map_or(8, std::num::NonZeroUsize::get);
     let thread_levels: Vec<usize> = args.next().map_or_else(
-        || [2usize, 4, 8].iter().copied().filter(|n| *n <= cores).collect(),
+        || {
+            [2usize, 4, 8]
+                .iter()
+                .copied()
+                .filter(|n| *n <= cores)
+                .collect()
+        },
         |csv| {
             csv.split(',')
                 .filter_map(|s| s.trim().parse::<usize>().ok())
@@ -253,7 +262,11 @@ fn main() -> Result<(), String> {
     );
     println!("{}", "-".repeat(110));
     for r in &results {
-        let flag = if r.speedup() >= SPEEDUP_WORTH_IT { "" } else { "  (serial wins)" };
+        let flag = if r.speedup() >= SPEEDUP_WORTH_IT {
+            ""
+        } else {
+            "  (serial wins)"
+        };
         println!(
             "{:>10.2}  {:>11}  {:>7}  {:>10.2}  {:>12.2}  {:>7.2}x  {:>5}  {:>11}  {}{}",
             mib(r.decode_bytes),
@@ -270,7 +283,10 @@ fn main() -> Result<(), String> {
     }
 
     let observed_crossover = recommend_threshold(&results);
-    let worth_it = results.iter().filter(|r| r.speedup() >= SPEEDUP_WORTH_IT).count();
+    let worth_it = results
+        .iter()
+        .filter(|r| r.speedup() >= SPEEDUP_WORTH_IT)
+        .count();
     // The generic default only parallelises files of ≥ 2 grains (smallest split = 2
     // workers). If the observed crossover sits at or below that floor, the default is
     // safe everywhere on this host with zero tuning.

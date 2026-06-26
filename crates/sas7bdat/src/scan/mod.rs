@@ -56,12 +56,11 @@ pub struct ScanStatsSummary {
 
 use batch::{BatchAccumulator, BatchDecodePlan, unexpected_batch_cell};
 use numeric::{
-    DateNumericValue, DateTimeNumericValue, SAS_NUMERIC_MISSING_SENTINEL, TimeNumericValue,
-    TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
-    classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
-    f64_is_i64_representable, materialize_staged_numeric_column, numeric_bits,
-    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, NUMERIC_EXP_MASK,
-    NUMERIC_FRACTION_MASK,
+    DateNumericValue, DateTimeNumericValue, NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK,
+    SAS_NUMERIC_MISSING_SENTINEL, TimeNumericValue, TypedNumericValue, classify_date_numeric_value,
+    classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
+    decode_numeric_cell, f64_is_i64_representable, materialize_staged_numeric_column, numeric_bits,
+    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
 };
 use plan::{
     ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, NumericTileMode,

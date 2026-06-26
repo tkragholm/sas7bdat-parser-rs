@@ -1,5 +1,5 @@
-use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
 use sas7bdat::{build_catalog, discover_fixture_paths};
+use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 #[global_allocator]

@@ -234,7 +234,10 @@ mod tests {
         let plain = Style::for_stderr(); // not a tty in tests -> styling off
         // Narrow budget: only the first column fits; the footer flags the rest.
         let out = render_table(&table(), plain, Some(3));
-        assert!(out.contains("+2 more cols"), "footer should note dropped columns:\n{out}");
+        assert!(
+            out.contains("+2 more cols"),
+            "footer should note dropped columns:\n{out}"
+        );
         // Header should not include the dropped third column name.
         assert!(!out.contains("ccc"));
     }

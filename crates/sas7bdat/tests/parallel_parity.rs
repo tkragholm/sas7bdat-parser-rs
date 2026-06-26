@@ -77,8 +77,7 @@ fn check_parallel_matches_serial(path: &Path) {
     if !path.exists() {
         return;
     }
-    let ds = Dataset::open(path)
-        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    let ds = Dataset::open(path).unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
 
     let serial = ds
         .scan()
@@ -106,12 +105,14 @@ fn check_parallel_matches_serial(path: &Path) {
 
     for (idx, (sf, pf)) in serial_fps.iter().zip(parallel_fps.iter()).enumerate() {
         assert_eq!(
-            sf.0, pf.0,
+            sf.0,
+            pf.0,
             "{}: batch row_base mismatch at index {idx}",
             path.display()
         );
         assert_eq!(
-            sf.1, pf.1,
+            sf.1,
+            pf.1,
             "{}: batch data mismatch at row_base {}",
             path.display(),
             sf.0

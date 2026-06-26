@@ -1,16 +1,14 @@
 use super::{
     ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, DateNumericValue,
-    DateTimeNumericValue, DecodedUtf8BatchValue, Endianness, Error, NumericTileMode,
-    OwnedColumnBuffer,
-    OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, SasDate,
-    SasDateTime, SasTime, ScanBuilder, StringDecodeKernel, TimeNumericValue, TrimMode,
-    TrimmedString, TypedNumericValue, classify_date_numeric_value, classify_datetime_numeric_value,
-    classify_time_numeric_value, classify_typed_numeric_value, decode_numeric_cell,
-    f64_is_i64_representable, materialize_staged_numeric_column, numeric_bits,
-    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
-    NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK,
+    DateTimeNumericValue, DecodedUtf8BatchValue, Endianness, Error, NUMERIC_EXP_MASK,
+    NUMERIC_FRACTION_MASK, NumericTileMode, OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell,
+    Result, RowDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime,
+    ScanBuilder, StringDecodeKernel, TimeNumericValue, TrimMode, TrimmedString, TypedNumericValue,
+    classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value,
+    classify_typed_numeric_value, decode_numeric_cell, f64_is_i64_representable,
+    materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
+    staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
-use std::simd::{Simd, cmp::SimdPartialEq};
 use crate::define_owned_column_enum;
 use crate::{
     DictionaryStaging,
@@ -20,6 +18,7 @@ use encoding_rs::WINDOWS_1252;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::ops::ControlFlow;
+use std::simd::{Simd, cmp::SimdPartialEq};
 
 #[derive(Debug, Clone)]
 pub(super) struct BatchDecodePlan {
@@ -837,8 +836,8 @@ impl BatchAccumulator {
         }
 
         self.row_count += span_len;
-        self.counters.staged_numeric += (span_len as u64)
-            .saturating_mul(self.plan.staged_numeric_cells_per_row);
+        self.counters.staged_numeric +=
+            (span_len as u64).saturating_mul(self.plan.staged_numeric_cells_per_row);
         Ok(())
     }
 
@@ -2823,7 +2822,7 @@ mod staged_string_lookup_tests {
 
 #[cfg(test)]
 mod windows_1252_tests {
-    use super::{encode_windows_1252_single_byte_utf8, WINDOWS_1252_REPLACEMENT_UTF8};
+    use super::{WINDOWS_1252_REPLACEMENT_UTF8, encode_windows_1252_single_byte_utf8};
 
     /// Encode a single windows-1252 byte and return the produced UTF-8 bytes.
     fn enc(byte: u8, strict: bool) -> Vec<u8> {

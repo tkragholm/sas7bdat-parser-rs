@@ -53,7 +53,13 @@ fn column_cells(col: &OwnedColumnBuffer) -> Vec<Cell> {
             $values
                 .iter()
                 .enumerate()
-                .map(|(i, v)| if is_valid($valid.as_ref(), i) { Cell::Num($map(v)) } else { Cell::Null })
+                .map(|(i, v)| {
+                    if is_valid($valid.as_ref(), i) {
+                        Cell::Num($map(v))
+                    } else {
+                        Cell::Null
+                    }
+                })
                 .collect()
         };
     }
@@ -62,13 +68,21 @@ fn column_cells(col: &OwnedColumnBuffer) -> Vec<Cell> {
         OwnedColumnBuffer::I64 { values, valid } => prim!(values, valid, |v: &i64| *v as f64),
         OwnedColumnBuffer::I32 { values, valid } => prim!(values, valid, |v: &i32| f64::from(*v)),
         OwnedColumnBuffer::Date { values, valid } => {
-            prim!(values, valid, |v: &sas7bdat::SasDate| f64::from(v.days_since_sas_epoch))
+            prim!(values, valid, |v: &sas7bdat::SasDate| f64::from(
+                v.days_since_sas_epoch
+            ))
         }
         OwnedColumnBuffer::DateTime { values, valid } => {
-            prim!(values, valid, |v: &sas7bdat::SasDateTime| v.seconds_since_sas_epoch as f64)
+            prim!(
+                values,
+                valid,
+                |v: &sas7bdat::SasDateTime| v.seconds_since_sas_epoch as f64
+            )
         }
         OwnedColumnBuffer::Time { values, valid } => {
-            prim!(values, valid, |v: &sas7bdat::SasTime| f64::from(v.seconds_since_midnight))
+            prim!(values, valid, |v: &sas7bdat::SasTime| f64::from(
+                v.seconds_since_midnight
+            ))
         }
         OwnedColumnBuffer::Utf8 {
             offsets,
@@ -112,7 +126,11 @@ fn our_cells(ds: &Dataset) -> Result<Vec<Vec<Cell>>, String> {
     for b in &batches {
         let cols: Vec<Vec<Cell>> = b.columns.iter().map(column_cells).collect();
         for r in 0..b.row_count {
-            rows.push(cols.iter().map(|c| c.get(r).cloned().unwrap_or(Cell::Null)).collect());
+            rows.push(
+                cols.iter()
+                    .map(|c| c.get(r).cloned().unwrap_or(Cell::Null))
+                    .collect(),
+            );
         }
     }
     Ok(rows)
@@ -127,7 +145,10 @@ fn readstat_rows(path: &Path) -> Result<Vec<Vec<String>>, String> {
         .output()
         .map_err(|e| format!("spawn readstat: {e}"))?;
     if !out.exists() {
-        return Err(format!("readstat wrote no output: {}", String::from_utf8_lossy(&res.stderr)));
+        return Err(format!(
+            "readstat wrote no output: {}",
+            String::from_utf8_lossy(&res.stderr)
+        ));
     }
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(true)
@@ -205,7 +226,11 @@ fn main() {
         let name = name.display();
 
         if ours.len() != theirs.len() {
-            failures.push(format!("{name}: rows ours={} readstat={}", ours.len(), theirs.len()));
+            failures.push(format!(
+                "{name}: rows ours={} readstat={}",
+                ours.len(),
+                theirs.len()
+            ));
             continue;
         }
         let mut ok = true;
@@ -231,7 +256,9 @@ fn main() {
                         Cell::Null => "Null".into(),
                         Cell::Skip => "Skip".into(),
                     };
-                    failures.push(format!("{name}: row {ri} col {ci} ours={shown} readstat={t:?}"));
+                    failures.push(format!(
+                        "{name}: row {ri} col {ci} ours={shown} readstat={t:?}"
+                    ));
                     ok = false;
                     break 'rows;
                 }
