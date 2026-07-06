@@ -4,8 +4,8 @@
 
 // Suppress a known clang warning about an empty translation unit on some
 // toolchains when the macro below is the only content.
-void R_init_readsas_extendr(void *dll);
+void R_init_fastsas_extendr(void *dll);
 
-void R_init_readsas(void *dll) {
-    R_init_readsas_extendr(dll);
+void R_init_fastsas(void *dll) {
+    R_init_fastsas_extendr(dll);
 }

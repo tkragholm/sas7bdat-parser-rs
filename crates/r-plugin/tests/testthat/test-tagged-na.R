@@ -1,6 +1,6 @@
 test_that("SAS special missings become haven tagged_na", {
   skip_if_not_installed("haven")
-  f <- system.file("extdata", "missing_test.sas7bdat", package = "readsas")
+  f <- system.file("extdata", "missing_test.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
 
   df <- read_sas(f)
@@ -26,8 +26,8 @@ test_that("SAS special missings become haven tagged_na", {
 
 test_that("value labels keyed on special missings map to tagged_na", {
   skip_if_not_installed("haven")
-  data <- system.file("extdata", "missing_test.sas7bdat", package = "readsas")
-  cat <- system.file("extdata", "missing_formats.sas7bcat", package = "readsas")
+  data <- system.file("extdata", "missing_test.sas7bdat", package = "fastsas")
+  cat <- system.file("extdata", "missing_formats.sas7bcat", package = "fastsas")
   skip_if(data == "" || cat == "", "bundled fixtures not installed")
 
   df <- read_sas(data, catalog = cat)

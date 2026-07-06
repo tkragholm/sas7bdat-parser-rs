@@ -1,4 +1,4 @@
-Package: readsas
+Package: fastsas
 Title: Fast SAS7BDAT Reader Backed by Rust
 Version: 0.0.0.9000
 Authors@R:

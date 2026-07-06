@@ -1,12 +1,13 @@
 [package]
-name = "readsas"
+name = "fastsas"
 version = "0.0.1"
 edition = "2021"
+license = "MIT"
 publish = false
 
 [lib]
 crate-type = ["staticlib"]
-name = "readsas"
+name = "fastsas"
 
 [dependencies]
 extendr-api = "0.7"

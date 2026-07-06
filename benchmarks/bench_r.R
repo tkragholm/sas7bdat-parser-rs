@@ -1,15 +1,15 @@
 #!/usr/bin/env Rscript
-# Time in-memory SAS7BDAT reads for readsas and haven.
-# Usage: bench_r.R <path> <iters> [tools]   tools: comma list {readsas,haven}
+# Time in-memory SAS7BDAT reads for fastsas and haven.
+# Usage: bench_r.R <path> <iters> [tools]   tools: comma list {fastsas,haven}
 suppressWarnings(suppressMessages({
-  ok_readsas <- requireNamespace("readsas", quietly = TRUE)
+  ok_fastsas <- requireNamespace("fastsas", quietly = TRUE)
   ok_haven <- requireNamespace("haven", quietly = TRUE)
 }))
 
 args <- commandArgs(trailingOnly = TRUE)
 path <- args[[1]]
 iters <- if (length(args) >= 2) as.integer(args[[2]]) else 5L
-tools <- if (length(args) >= 3) strsplit(args[[3]], ",")[[1]] else c("readsas", "haven")
+tools <- if (length(args) >= 3) strsplit(args[[3]], ",")[[1]] else c("fastsas", "haven")
 
 bench <- function(label, fn) {
   rows <- tryCatch(nrow(fn(path)), error = function(e) {
@@ -31,7 +31,7 @@ bench <- function(label, fn) {
 }
 
 readers <- list(
-  readsas = function(p) readsas::read_sas(p),
+  fastsas = function(p) fastsas::read_sas(p),
   haven = function(p) haven::read_sas(p)
 )
 for (t in tools) {

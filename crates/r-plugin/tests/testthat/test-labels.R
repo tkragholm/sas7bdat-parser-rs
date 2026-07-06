@@ -1,6 +1,6 @@
 test_that("value-label catalog produces haven_labelled columns", {
-  data <- system.file("extdata", "test_data_win.sas7bdat", package = "readsas")
-  cat <- system.file("extdata", "test_formats_win.sas7bcat", package = "readsas")
+  data <- system.file("extdata", "test_data_win.sas7bdat", package = "fastsas")
+  cat <- system.file("extdata", "test_formats_win.sas7bcat", package = "fastsas")
   skip_if(data == "" || cat == "", "bundled label fixtures not installed")
 
   df <- read_sas(data, catalog = cat)
@@ -19,7 +19,7 @@ test_that("value-label catalog produces haven_labelled columns", {
 })
 
 test_that("without a catalog, formatted columns are plain (no labels attr)", {
-  data <- system.file("extdata", "test_data_win.sas7bdat", package = "readsas")
+  data <- system.file("extdata", "test_data_win.sas7bdat", package = "fastsas")
   skip_if(data == "", "bundled fixture not installed")
 
   df <- read_sas(data) # no catalog, no same-stem sibling
@@ -28,7 +28,7 @@ test_that("without a catalog, formatted columns are plain (no labels attr)", {
 })
 
 test_that("a missing explicit catalog errors", {
-  data <- system.file("extdata", "test_data_win.sas7bdat", package = "readsas")
+  data <- system.file("extdata", "test_data_win.sas7bdat", package = "fastsas")
   skip_if(data == "", "bundled fixture not installed")
   expect_error(read_sas(data, catalog = "/no/such/catalog.sas7bcat"), "catalog")
 })

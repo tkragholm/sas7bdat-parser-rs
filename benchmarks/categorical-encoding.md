@@ -21,7 +21,7 @@ A feature-gated core module plus an opt-in flag in each binding.
   - Consumes the core's already-decoded, trimmed `Utf8` buffers (so the
     transcode/trim/empty-as-null work from `idea.md`'s `normalize.rs` is already
     done by the decoder and is not repeated).
-- **R** (`readsas`): `read_sas(path, categorical = TRUE)` → plain character
+- **R** (`fastsas`): `read_sas(path, categorical = TRUE)` → plain character
   columns become **`factor`** (integer codes + `levels`), built from the core dict.
 - **Polars** (`sas7bdat_polars`): `scan_sas(path, categorical = True)` → character
   columns become **`Categorical`** via Polars' own lazy cast.

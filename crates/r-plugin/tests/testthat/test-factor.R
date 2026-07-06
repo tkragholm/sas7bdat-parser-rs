@@ -1,5 +1,5 @@
 test_that("categorical = TRUE round-trips; low-card cols become factors", {
-  f <- system.file("extdata", "people.sas7bdat", package = "readsas")
+  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
 
   ch <- read_sas(f, categorical = FALSE)
@@ -21,8 +21,8 @@ test_that("categorical = TRUE round-trips; low-card cols become factors", {
 })
 
 test_that("value-labelled columns are not turned into plain factors", {
-  data <- system.file("extdata", "test_data_win.sas7bdat", package = "readsas")
-  cat <- system.file("extdata", "test_formats_win.sas7bcat", package = "readsas")
+  data <- system.file("extdata", "test_data_win.sas7bdat", package = "fastsas")
+  cat <- system.file("extdata", "test_formats_win.sas7bcat", package = "fastsas")
   skip_if(data == "" || cat == "", "bundled fixtures not installed")
 
   fa <- read_sas(data, catalog = cat, categorical = TRUE)

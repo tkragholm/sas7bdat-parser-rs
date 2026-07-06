@@ -491,6 +491,6 @@ fn read_sas7bdat(path: &str, catalog: Option<String>, categorical: bool) -> Robj
 }
 
 extendr_module! {
-    mod readsas;
+    mod fastsas;
     fn read_sas7bdat;
 }

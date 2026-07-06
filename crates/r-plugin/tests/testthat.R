@@ -1,4 +1,4 @@
 library(testthat)
-library(readsas)
+library(fastsas)
 
-test_check("readsas")
+test_check("fastsas")

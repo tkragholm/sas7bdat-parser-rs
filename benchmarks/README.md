@@ -1,7 +1,7 @@
 # SAS7BDAT reader benchmarks
 
 Comparing this project's three readers — the Rust core, the Polars plugin
-(`sas7bdat_polars`), and the R binding (`readsas`) — against the established
+(`sas7bdat_polars`), and the R binding (`fastsas`) — against the established
 tools: **readstat** (the C library + CLI behind everything else), **haven**
 (R → tibble, wraps ReadStat), **pyreadstat** (Python → pandas, wraps ReadStat),
 and **pandas** (`pd.read_sas`, an independent implementation).
@@ -22,7 +22,7 @@ and **pandas** (`pd.read_sas`, an independent implementation).
   | `NYYTS_2000_2020_PublicUse` | 193 MB | 121,730 × 514 | NY Youth Tobacco Survey |
   | `ahs2013n` | 2.15 GB | 70,044 × 4,041 | American Housing Survey (very wide) |
 
-- **Threads:** the Rust core, the Polars plugin, and `readsas` decode across all
+- **Threads:** the Rust core, the Polars plugin, and `fastsas` decode across all
   12 cores. readstat / haven / pyreadstat / pandas are single-threaded (ReadStat
   is a single-threaded C library).
 
@@ -34,7 +34,7 @@ All readers agreed on row counts on every file (correctness cross-check).
 |---|---:|---:|---:|---:|
 | **rust-core** (ours) | 12 | **3436** | **3555** | **3232** |
 | **sas7bdat-polars** (ours) | 12 | 2308 | 2377 | 1816 |
-| **readsas** (ours, R) | 12 | 739 | 1443 | 482 |
+| **fastsas** (ours, R) | 12 | 739 | 1443 | 482 |
 | rust-core, serial | 1 | 572 | 1047 | 1201 |
 | pandas | 1 | 258 | 216 | 429 |
 | pyreadstat | 1 | 90 | 128 | 103 |
@@ -46,7 +46,7 @@ Same data as wall-clock **min time (s)**, lower is better:
 |---|---:|---:|---:|
 | rust-core (12t) | 0.029 | 0.054 | 0.67 |
 | sas7bdat-polars (12t) | 0.043 | 0.081 | 1.19 |
-| readsas (12t) | 0.134 | 0.134 | 4.47 |
+| fastsas (12t) | 0.134 | 0.134 | 4.47 |
 | rust-core serial (1t) | 0.173 | 0.185 | 1.79 |
 | pandas (1t) | 0.384 | 0.895 | 5.02 |
 | pyreadstat (1t) | 1.098 | 1.516 | 20.95 |
@@ -87,7 +87,7 @@ compact). Design + decisions: [`categorical-encoding.md`](./categorical-encoding
 - **The Polars plugin** trails the raw core slightly (Arrow construction +
   Python boundary) but is still ~2.3 GB/s and **the fastest path that lands a
   usable DataFrame** in a host language.
-- **`readsas` beats `haven`** — its direct R competitor — by **15–24×**, and
+- **`fastsas` beats `haven`** — its direct R competitor — by **15–24×**, and
   beats `pandas` on every file. It pre-allocates each R vector at the known row
   count and fills it in place (numeric: parallel decode + one copy into the
   REALSXP; character: per-column dictionary interning via raw `SET_STRING_ELT`).
@@ -108,8 +108,8 @@ cargo build --release -p sas7bdat --example bench_read
 # Python (polars plugin / pyreadstat / pandas) — needs a venv with the plugin built
 python benchmarks/bench_py.py <file.sas7bdat> 5 polars,pyreadstat,pandas
 
-# R (readsas / haven)
-Rscript benchmarks/bench_r.R <file.sas7bdat> 5 readsas,haven
+# R (fastsas / haven)
+Rscript benchmarks/bench_r.R <file.sas7bdat> 5 fastsas,haven
 
 # CLI convert-to-CSV
 hyperfine --warmup 1 --prepare 'rm -f /tmp/a.csv /tmp/b.csv' \

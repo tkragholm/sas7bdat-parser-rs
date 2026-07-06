@@ -1,5 +1,5 @@
 test_that("temporal columns are typed by logical type, not buffer variant", {
-  f <- system.file("extdata", "dtdate.sas7bdat", package = "readsas")
+  f <- system.file("extdata", "dtdate.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled temporal fixture not installed")
 
   df <- read_sas(f)

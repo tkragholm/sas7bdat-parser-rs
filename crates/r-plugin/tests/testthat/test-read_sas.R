@@ -1,5 +1,5 @@
 test_that("read_sas returns a typed data frame", {
-  f <- system.file("extdata", "people.sas7bdat", package = "readsas")
+  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
 
   df <- read_sas(f)
