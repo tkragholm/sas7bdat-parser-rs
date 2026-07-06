@@ -7,6 +7,7 @@ name = "sas7bdat-dir-mapper"
 version = "0.1.0"
 description = "Tools for mapping out SAS7BDAT files"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.8"
 classifiers = [
   "Programming Language :: Python",

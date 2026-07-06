@@ -2,11 +2,14 @@
 
 Small, git-tracked SAS7BDAT files used by unit/integration tests in this crate.
 (The larger `fixtures/` corpus at the repo root is untracked — see its README.)
+Provenance/attribution for all tracked binary fixtures is documented in the
+repo-root `THIRD_PARTY_NOTICES.md`.
 
 ## `people_nonascii.sas7bdat`
 
 A byte-patched copy of `crates/r-plugin/inst/extdata/people.sas7bdat`
-(WINDOWS-1252, 5 rows). Row 0's `GENDER` cell byte was changed from `M` (0x4D)
+(WINDOWS-1252, 5 rows; a public synthetic teaching dataset — see
+`THIRD_PARTY_NOTICES.md`). Row 0's `GENDER` cell byte was changed from `M` (0x4D)
 to `0xE9`, which is `é` in windows-1252. Everything else is identical.
 
 Purpose: exercise the columnar decoder's **non-ASCII transcode branch** (the

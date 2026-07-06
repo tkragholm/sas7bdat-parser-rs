@@ -142,7 +142,13 @@ references and prior art for the (reverse-engineered, undocumented) SAS7BDAT for
 - **cppsas7bdat (C++)** — C++ reader used for comparison ([olivia76/cpp-sas7bdat](https://github.com/olivia76/cpp-sas7bdat)).
 - **Sas7Bdat.Core (C#)** — .NET reader ([richokelly/Sas7Bdat](https://github.com/richokelly/Sas7Bdat)).
 - **pandas (Python)** — pandas' built-in SAS reader, independent of ReadStat ([pandas-dev/pandas](https://github.com/pandas-dev/pandas/blob/main/pandas/io/sas/sas7bdat.py)).
-- **Reverse-engineered SAS7BDAT docs** — historical compatibility study and binary format notes ([BioStatMatt/sas7bdat](https://github.com/BioStatMatt/sas7bdat)).
+- **Parso (Java)** — EPAM's independent Java reader ([epam/parso](https://github.com/epam/parso)).
+- **"SAS7BDAT Database Binary Format"** — Matt Shotwell's foundational reverse-engineering
+  of the format ([vignette PDF](https://cran.r-project.org/web/packages/sas7bdat/vignettes/sas7bdat.pdf),
+  [BioStatMatt/sas7bdat](https://github.com/BioStatMatt/sas7bdat)).
+
+No code from these projects is included; outputs are validated against ReadStat,
+`pyreadstat`, and `haven` used as external oracles.
 
 ## Performance
 
@@ -154,3 +160,7 @@ Throughput on a representative production corpus (mix of compressed and uncompre
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+SAS® and SAS7BDAT are trademarks of SAS Institute Inc. This project is an independent
+open-source effort and is not affiliated with, sponsored, or endorsed by SAS Institute
+Inc.; the names are used solely to describe file-format compatibility.
