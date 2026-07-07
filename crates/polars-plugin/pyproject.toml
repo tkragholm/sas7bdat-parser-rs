@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sas7bdat-polars"
-version = "0.3.0"
+version = "0.4.0"
 description = "Thin Polars IO plugin for the sas7bdat crate"
 readme = "README.md"
 # Built against the CPython stable ABI (abi3, floor 3.12), so one cp312-abi3 wheel runs on 3.12+.
@@ -22,3 +22,7 @@ bindings = "pyo3"
 manifest-path = "Cargo.toml"
 features = ["extension-module"]
 locked = true
+# Mixed layout: the compiled extension is placed inside the `sas7bdat_polars`
+# package (as a submodule) and the hand-written `__init__.py` re-exports it and
+# adds the Python-side ergonomics (read_sas cookbook, set_scan_threads, .pyi).
+python-source = "python"

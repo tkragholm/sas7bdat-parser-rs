@@ -256,6 +256,20 @@ fn schema_for_file(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
     scan::schema_for_dataset(py, &ds)
 }
 
+/// Open a SAS7BDAT file as an iterator of Polars `DataFrame` batches.
+///
+/// A lower-level building block for streaming a file that does not fit in memory;
+/// most callers want `read_sas` (eager) or `scan_sas` (lazy) instead. Pass
+/// `with_columns` to decode only the columns you need.
+///
+/// Args:
+///     path: Path to the `.sas7bdat` file.
+///     `with_columns`: Read only these columns (recommended).
+///     predicate: Optional Polars expression applied per batch.
+///     `n_rows`: Read at most this many rows.
+///     `batch_size`: Rows per yielded batch.
+///     `catalog_path`: Optional `.sas7bcat` value-label catalog.
+///     `schema_overrides`: Optional ``{column: polars dtype}`` map.
 #[cfg(feature = "arrow")]
 #[pyfunction]
 #[pyo3(signature = (path, with_columns=None, predicate=None, n_rows=None, batch_size=None, catalog_path=None, schema_overrides=None))]
@@ -304,14 +318,34 @@ fn batch_reader(
 ///         This speeds up downstream group-by/join/sort (~10-15x) but is not a
 ///         read or memory win — Polars' ``String`` is already compact — so enable
 ///         it only when grouping/joining on the string columns.
+/// Lazily scan a SAS7BDAT file into a Polars `LazyFrame`.
+///
+/// Args:
+///     path: Path to the `.sas7bdat` file.
+///     `catalog_path`: Optional `.sas7bcat` value-label catalog to hydrate.
+///     `schema_overrides`: Optional ``{column: polars dtype}`` map applied at schema
+///         time (e.g. integer-coded columns cast to a smaller dtype).
+///     categorical: Cast string columns to ``Categorical`` in the lazy plan.
+///     columns: Read only these columns. **Strongly recommended** — SAS7BDAT is
+///         wide and row-oriented, so selecting the columns you need is the single
+///         biggest speed-up (decode one column, not all of them). Equivalent to
+///         ``.select(columns)`` but applied at the source.
+///     `n_rows`: Read at most this many rows (``.head(n_rows)``); the reader stops
+///         after the first pages, which bounds I/O on large files.
+///
+/// Performance: prefer `read_sas` for a one-shot eager read, always pass
+/// `columns`, and let the reader parallelise (env `SAS7BDAT_SCAN_THREADS`) — do
+/// not throttle Polars' own thread pool, which does not control the decoder.
 #[pyfunction]
-#[pyo3(signature = (path, catalog_path=None, schema_overrides=None, categorical=false))]
+#[pyo3(signature = (path, catalog_path=None, schema_overrides=None, categorical=false, columns=None, n_rows=None))]
 fn scan_sas(
     py: Python<'_>,
     path: &str,
     catalog_path: Option<&str>,
     schema_overrides: Option<&Bound<'_, PyDict>>,
     categorical: bool,
+    columns: Option<Vec<String>>,
+    n_rows: Option<usize>,
 ) -> PyResult<Py<PyAny>> {
     let mut ds = py
         .detach(|| Dataset::open(path))
@@ -322,11 +356,85 @@ fn scan_sas(
     apply_schema_overrides(&mut ds, schema_overrides)?;
     let ds = Arc::new(ds);
     let schema = scan::schema_for_dataset(py, &ds)?;
-    let lf = scan::register_io_source(py, ds, None, schema)?;
+    let mut lf = scan::register_io_source(py, ds, None, schema)?;
+    if columns.is_some() || n_rows.is_some() {
+        let mut bound = lf.bind(py).clone();
+        if let Some(cols) = columns {
+            bound = bound.call_method1("select", (cols,))?;
+        }
+        if let Some(n) = n_rows {
+            bound = bound.call_method1("head", (n,))?;
+        }
+        lf = bound.unbind();
+    }
     if categorical {
         return cast_strings_to_categorical(py, &lf);
     }
     Ok(lf)
+}
+
+/// Read a SAS7BDAT file eagerly into a Polars `DataFrame`.
+///
+/// The ergonomic, hard-to-misuse entry point: projection is baked in and the read
+/// uses the in-memory engine (never the streaming engine, which cannot move the
+/// reader across threads). Prefer this over ``scan_sas(...).collect()``.
+///
+/// Args:
+///     path: Path to the `.sas7bdat` file.
+///     columns: Read only these columns (recommended — see `scan_sas`).
+///     `n_rows`: Read at most this many rows.
+///     predicate: Optional Polars expression to filter rows (``.filter(predicate)``).
+///     `catalog_path`: Optional `.sas7bcat` value-label catalog.
+///     `schema_overrides`: Optional ``{column: polars dtype}`` map.
+///
+/// Returns:
+///     A Polars `DataFrame`.
+#[pyfunction]
+#[pyo3(signature = (path, columns=None, n_rows=None, predicate=None, catalog_path=None, schema_overrides=None))]
+fn read_sas(
+    py: Python<'_>,
+    path: &str,
+    columns: Option<Vec<String>>,
+    n_rows: Option<usize>,
+    predicate: Option<Py<PyAny>>,
+    catalog_path: Option<&str>,
+    schema_overrides: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Py<PyAny>> {
+    let lf = scan_sas(py, path, catalog_path, schema_overrides, false, columns, n_rows)?;
+    let mut bound = lf.bind(py).clone();
+    if let Some(pred) = predicate {
+        bound = bound.call_method1("filter", (pred,))?;
+    }
+    let df = bound.call_method0("collect")?;
+    Ok(df.unbind())
+}
+
+/// Return header-only metadata for a SAS7BDAT file, without decoding the body.
+///
+/// Returns a dict with ``path``, ``n_rows``, ``n_columns``, ``row_length_bytes``,
+/// ``page_count``, ``encoding`` and ``size_bytes`` — cheap enough to call over a
+/// whole directory tree.
+#[pyfunction]
+#[pyo3(signature = (path, catalog_path=None))]
+fn sas_info(py: Python<'_>, path: &str, catalog_path: Option<&str>) -> PyResult<Py<PyAny>> {
+    let mut ds = py
+        .detach(|| Dataset::open(path))
+        .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    if let Some(cat) = catalog_path {
+        ds.attach_catalog(cat).map_err(convert::py_err)?;
+    }
+    let meta = ds.metadata();
+    let info = PyDict::new(py);
+    info.set_item("path", path)?;
+    info.set_item("n_rows", meta.row_count)?;
+    info.set_item("n_columns", ds.columns().len())?;
+    info.set_item("row_length_bytes", meta.row_len)?;
+    info.set_item("page_count", meta.page_count)?;
+    info.set_item("encoding", meta.encoding.clone())?;
+    if let Ok(fs_meta) = std::fs::metadata(path) {
+        info.set_item("size_bytes", fs_meta.len())?;
+    }
+    Ok(info.into_any().unbind())
 }
 
 /// Append `with_columns(pl.col(pl.String).cast(pl.Categorical))` to the lazy plan
@@ -750,6 +858,17 @@ fn batch_benchmark_dict(
 }
 
 #[cfg(all(feature = "arrow", feature = "extension-module"))]
+/// Thin, fast Polars IO plugin for SAS7BDAT files.
+///
+/// Quick start:
+///     >>> import sas7bdat_polars as sp
+///     >>> df = sp.read_sas("data.sas7bdat", columns=["ID", "DATE"])   # eager, projected
+///     >>> lf = sp.scan_sas("data.sas7bdat", columns=["ID"])           # lazy
+///     >>> sp.sas_info("data.sas7bdat")                                # header-only metadata
+///
+/// Always pass ``columns`` — SAS7BDAT is wide and row-oriented, so projecting is
+/// the biggest speed-up. The reader parallelises its own decode across cores (env
+/// ``SAS7BDAT_SCAN_THREADS``); the Polars thread pool does not control it.
 #[pymodule]
 fn sas7bdat_polars(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     register_module(m)
@@ -770,6 +889,8 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(schema_for_file, m)?)?;
     m.add_function(wrap_pyfunction!(batch_reader, m)?)?;
     m.add_function(wrap_pyfunction!(scan_sas, m)?)?;
+    m.add_function(wrap_pyfunction!(read_sas, m)?)?;
+    m.add_function(wrap_pyfunction!(sas_info, m)?)?;
     m.add_function(wrap_pyfunction!(benchmark_batch_to_dataframe, m)?)?;
     m.add_function(wrap_pyfunction!(benchmark_scan_to_dataframes, m)?)?;
     m.add_function(wrap_pyfunction!(benchmark_dataframe_to_python, m)?)?;

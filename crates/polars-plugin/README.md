@@ -28,15 +28,44 @@ This wheel is tightly coupled to its build environment:
 import polars as pl
 import sas7bdat_polars as sp
 
+# Eager read — the ergonomic default. ALWAYS pass `columns`: SAS7BDAT is wide and
+# row-oriented, so projecting the columns you need is the biggest speed-up.
+df = sp.read_sas("data.sas7bdat", columns=["name", "age"])
+df = sp.read_sas("data.sas7bdat", columns=["age"], n_rows=1_000_000)   # bound I/O
+df = sp.read_sas("data.sas7bdat", columns=["age"], predicate=pl.col("age") > 30)
+
 # Lazy scan — returns a LazyFrame; filters/projections push down into the reader.
-lf = sp.scan_sas("data.sas7bdat")
-df = lf.filter(pl.col("age") > 30).select("name", "age").collect()
+lf = sp.scan_sas("data.sas7bdat", columns=["name", "age"])
+df = lf.filter(pl.col("age") > 30).collect()
+
+# Header-only metadata (row/column count, encoding, size) without decoding the body.
+info = sp.sas_info("data.sas7bdat")   # {'n_rows': ..., 'n_columns': ..., 'encoding': ...}
 
 # Hydrate value labels from a companion catalog.
 lf = sp.scan_sas("data.sas7bdat", catalog_path="formats.sas7bcat")
 
 # Inspect the Arrow schema without reading rows.
 schema = sp.schema_for_file("data.sas7bdat")
+```
+
+## Performance & threading
+
+Benchmarked on a 2.1 GB / 4041-column file (warm cache): a full `.collect()` takes
+~1.8 s (decodes every column) while `read_sas(columns=[one])` takes ~0.04 s. The rules:
+
+- **Always project** (`read_sas(columns=...)` / `scan_sas(columns=...)`). Reading one
+  column instead of all is ~50× on wide files and the biggest lever by far.
+- **Bound huge reads** with `n_rows=` when you only need a peek — the reader's row
+  limit stops after the first pages, cutting I/O.
+- **Let the reader parallelise.** It runs its own SIMD page decode across all cores;
+  tune with `set_scan_threads(n)` (or `SAS7BDAT_SCAN_THREADS`). Do **not** throttle
+  Polars' own pool (`POLARS_MAX_THREADS`) — it does not control the decoder and only
+  starves the pipeline. (The library warns if it detects this mistake.)
+- **Streaming works** (`.collect(engine="streaming")`): the reader is `Send + Sync`.
+
+```python
+sp.set_scan_threads(8)   # cap decode threads; set_scan_threads(0) resets to all cores
+sp.scan_threads()        # -> effective count
 
 # Return character columns as Categorical (low-cardinality category codes).
 lf = sp.scan_sas("survey.sas7bdat", categorical=True)
