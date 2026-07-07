@@ -123,9 +123,10 @@ fn format_datetime_f64(epoch: NaiveDateTime, seconds: f64) -> String {
 fn format_date_f64(epoch: NaiveDate, days: f64) -> String {
     #[allow(clippy::cast_possible_truncation)]
     let whole = days.round() as i64;
-    epoch
-        .checked_add_signed(Duration::days(whole))
-        .map_or_else(|| days.to_string(), |date| date.format("%Y-%m-%d").to_string())
+    epoch.checked_add_signed(Duration::days(whole)).map_or_else(
+        || days.to_string(),
+        |date| date.format("%Y-%m-%d").to_string(),
+    )
 }
 
 /// Render a `Float64` time (raw seconds since midnight) as `HH:MM:SS[.fff]`. Wraps within
@@ -173,8 +174,14 @@ mod tests {
         assert_eq!(format_cell(&CellValue::Int64(-9), f, ""), "-9");
         assert_eq!(format_cell(&CellValue::Float64(1.5), f, ""), "1.5");
         // Strings have trailing fixed-width padding trimmed.
-        assert_eq!(format_cell(&CellValue::Str("ab  "), LogicalType::String, ""), "ab");
-        assert_eq!(format_cell(&CellValue::Bytes(&[0x0f, 0xa0]), f, ""), "0x0fa0");
+        assert_eq!(
+            format_cell(&CellValue::Str("ab  "), LogicalType::String, ""),
+            "ab"
+        );
+        assert_eq!(
+            format_cell(&CellValue::Bytes(&[0x0f, 0xa0]), f, ""),
+            "0x0fa0"
+        );
     }
 
     #[test]
@@ -182,7 +189,9 @@ mod tests {
         // SAS day 0 is 1960-01-01; the Unix epoch (1970-01-01) is SAS day 3653.
         assert_eq!(
             format_cell(
-                &CellValue::Date(SasDate { days_since_sas_epoch: 3653 }),
+                &CellValue::Date(SasDate {
+                    days_since_sas_epoch: 3653
+                }),
                 LogicalType::Date,
                 ""
             ),
@@ -190,7 +199,9 @@ mod tests {
         );
         assert_eq!(
             format_cell(
-                &CellValue::DateTime(SasDateTime { seconds_since_sas_epoch: 315_619_200 }),
+                &CellValue::DateTime(SasDateTime {
+                    seconds_since_sas_epoch: 315_619_200
+                }),
                 LogicalType::DateTime,
                 ""
             ),
@@ -209,7 +220,11 @@ mod tests {
         );
         // A whole-second float datetime drops the sub-second suffix.
         assert_eq!(
-            format_cell(&CellValue::Float64(315_619_200.0), LogicalType::DateTime, ""),
+            format_cell(
+                &CellValue::Float64(315_619_200.0),
+                LogicalType::DateTime,
+                ""
+            ),
             "1970-01-01 00:00:00"
         );
         // Fractional time -> HH:MM:SS.fff since midnight.

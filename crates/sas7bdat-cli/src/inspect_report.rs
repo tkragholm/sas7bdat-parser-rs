@@ -266,7 +266,10 @@ mod tests {
         assert_eq!(humanize_format(Some("E"), f), "scientific");
 
         // Temporal columns: the Kind column already conveys it, so blank.
-        assert_eq!(humanize_format(Some("DATETIME"), LogicalType::DateTime), "-");
+        assert_eq!(
+            humanize_format(Some("DATETIME"), LogicalType::DateTime),
+            "-"
+        );
         assert_eq!(humanize_format(Some("DATE9."), LogicalType::Date), "-");
 
         // User-defined / unrecognized formats keep their raw name as a hint.

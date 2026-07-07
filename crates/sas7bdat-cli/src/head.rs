@@ -284,6 +284,10 @@ mod tests {
             total_rows: 1,
         };
         let out = render_table(&table, Style::for_stderr(), Some(1));
-        assert!(out.contains("+1,000 more cols"), "footer:\n{}", out.lines().last().unwrap_or(""));
+        assert!(
+            out.contains("+1,000 more cols"),
+            "footer:\n{}",
+            out.lines().last().unwrap_or("")
+        );
     }
 }

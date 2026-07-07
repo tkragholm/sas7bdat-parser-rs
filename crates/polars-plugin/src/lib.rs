@@ -400,7 +400,15 @@ fn read_sas(
     catalog_path: Option<&str>,
     schema_overrides: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
-    let lf = scan_sas(py, path, catalog_path, schema_overrides, false, columns, n_rows)?;
+    let lf = scan_sas(
+        py,
+        path,
+        catalog_path,
+        schema_overrides,
+        false,
+        columns,
+        n_rows,
+    )?;
     let mut bound = lf.bind(py).clone();
     if let Some(pred) = predicate {
         bound = bound.call_method1("filter", (pred,))?;
