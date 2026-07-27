@@ -41,6 +41,11 @@ pub struct FixtureProfile {
     pub page_count: u64,
     pub logical_types: LogicalTypeCounts,
     pub widths: WidthSummary,
+    // Added after the first catalogs were written. A local
+    // fixture_catalog.local.json is generated once and reused for months, so a
+    // field added here must not make every existing catalog unloadable —
+    // defaulting keeps them readable until they are regenerated.
+    #[serde(default)]
     pub temporal_formats: TemporalFormatSummary,
     pub sample: SampleSummary,
     pub tags: Vec<String>,

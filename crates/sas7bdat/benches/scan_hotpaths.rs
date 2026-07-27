@@ -17,18 +17,25 @@ use std::{
 };
 
 mod common;
-use common::{bench_raw_rows, fixture_path, load_dataset};
+use common::{bench_raw_rows, fixture_path, load_dataset, workspace_root};
 
 const BATCH_ROWS_SMALL: usize = 256;
 const BATCH_ROWS_MEDIUM: usize = 4096;
 const BATCH_ROWS_LARGE: usize = 16384;
 const PARALLEL_THREADS: usize = 4;
 
+/// Load a dataset named by a catalog entry.
+///
+/// `sas7bdat-corpus-catalog` records paths relative to the directory it was run from —
+/// the workspace root in practice (`fixtures/raw_data/...`), so that is what a relative
+/// entry resolves against. Resolving against `CARGO_MANIFEST_DIR` instead pointed every
+/// entry at a nonexistent `crates/sas7bdat/fixtures/...`; each load then failed silently
+/// and the run ended in the "matched no profiled fixtures" assert.
 fn load_dataset_path(path: &Path) -> Option<Dataset> {
     let path = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
+        workspace_root().join(path)
     };
     let bytes = fs::read(path).ok()?;
     Dataset::from_bytes(bytes).ok()
@@ -262,7 +269,9 @@ fn maybe_scan_hotpaths_from_catalog(c: &mut Criterion) -> bool {
     });
     let catalog: FixtureCatalog = serde_json::from_slice(&catalog_bytes).unwrap_or_else(|err| {
         panic!(
-            "BENCH_TAGS was set but catalog {:?} could not be parsed: {}",
+            "catalog {:?} could not be parsed: {}\n\
+             It is generated once and reused, so it may predate the current profile schema — \
+             regenerate it with `just catalog`.",
             catalog_path, err
         )
     });

@@ -8,11 +8,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Resolve a fixture path relative to the workspace `fixtures/` directory.
+///
+/// Fixtures live at the workspace root, not under this crate — joining onto
+/// `CARGO_MANIFEST_DIR` alone yields `crates/sas7bdat/fixtures/...`, which does not exist,
+/// and every `open_dataset` silently returns `None` so the benches quietly measure nothing.
 #[must_use]
 pub fn fixture_path(relative: &str) -> PathBuf {
+    workspace_root().join("fixtures").join(relative)
+}
+
+#[must_use]
+pub fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures")
-        .join(relative)
+        .join("..")
+        .join("..")
 }
 
 #[must_use]
