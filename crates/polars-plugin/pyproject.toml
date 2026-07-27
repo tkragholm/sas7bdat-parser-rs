@@ -20,7 +20,7 @@ test = ["pytest"]
 # command. It is a separate distribution on purpose: that wheel is a plain
 # binary (`py3-none-<platform>`) with no polars pin and no Python floor, so
 # CLI-only users are not dragged onto this package's `polars==1.41.*`.
-cli = ["sas7bdat-cli>=0.1.0"]
+cli = ["sas7bdat-cli>=0.5.0"]
 
 [tool.maturin]
 bindings = "pyo3"
