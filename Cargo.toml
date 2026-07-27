@@ -58,8 +58,15 @@ tracing-subscriber = "0.3.23"
 unsafe_code = "warn"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
+# priority = -1 so the groups are applied before the per-lint entries below; at equal
+# priority cargo warns and the group wins, silently undoing any specific `allow`.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# New in clippy 0.1.99 (nightly-2026-07-26): prefers `slice::as_chunks::<N>()` over
+# `chunks_exact(N)` with a literal size. All 14 sites are the SIMD decode hot paths in
+# scan/numeric.rs and scan/string.rs, where the rewrite also reshapes remainder handling —
+# a perf-sensitive change that belongs in its own benchmarked commit, not a toolchain bump.
+chunks_exact_to_as_chunks = "allow"
 
 [profile.release]
 lto = "thin"
