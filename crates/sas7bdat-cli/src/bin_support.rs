@@ -3,6 +3,10 @@ use std::{ffi::OsString, str::FromStr};
 use std::{fmt::Display, process::ExitCode};
 
 /// Convert a `Result` into a process exit code with consistent stderr output.
+///
+/// Printed with `{:#}` so an `anyhow` error shows its whole context chain on one line —
+/// `failed to read catalog x.sas7bcat: not a SAS catalog: ...` rather than just the
+/// outermost context, which on its own rarely says what actually went wrong.
 pub fn exit_code<E>(result: Result<(), E>) -> ExitCode
 where
     E: Display,
@@ -10,7 +14,7 @@ where
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("{message}");
+            eprintln!("{message:#}");
             ExitCode::FAILURE
         }
     }

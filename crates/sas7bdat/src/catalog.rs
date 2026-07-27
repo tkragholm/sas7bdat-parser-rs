@@ -1,6 +1,6 @@
 use crate::{
     encoding::resolve_encoding,
-    error::{Error, Result},
+    error::{Error, HeaderError, Result},
     internal::HeaderInfo,
     labels::{LabelSet, ValueKey, ValueLabel, ValueType},
     probe::probe_header,
@@ -14,6 +14,7 @@ use std::{
     path::Path,
 };
 
+#[derive(Debug)]
 pub struct CatalogLayout {
     pub label_sets: Vec<LabelSet>,
 }
@@ -43,9 +44,18 @@ pub fn parse_catalog_file(path: &Path) -> Result<CatalogLayout> {
 ///
 /// # Errors
 ///
-/// Returns an error if the header or catalog structure cannot be decoded.
+/// Returns an error if the source is not a catalog, or if the header or catalog
+/// structure cannot be decoded.
 pub fn parse_catalog<R: Read + Seek>(reader: &mut R) -> Result<CatalogLayout> {
     let (header, metadata) = probe_header(reader)?;
+    // Datasets and catalogs share a header layout, and `probe_header` accepts either magic.
+    // Without this check a `.sas7bdat` handed to `--catalog` would decode into an empty
+    // catalog and silently attach no labels at all.
+    if !header.is_catalog {
+        return Err(Error::Header(HeaderError::Other(
+            "not a SAS catalog: file carries the sas7bdat dataset magic number".to_owned(),
+        )));
+    }
     let encoding = resolve_encoding(metadata.encoding.as_deref());
 
     let index = CatalogueIndex::build(reader, &header)?;

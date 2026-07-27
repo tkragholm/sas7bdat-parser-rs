@@ -1,4 +1,11 @@
-#[derive(Debug, Clone, PartialEq)]
+//! Value-label sets decoded from a `.sas7bcat` catalog.
+//!
+//! `Serialize` is derived so downstream tools can persist a label set verbatim — the CLI
+//! embeds it in Parquet field metadata under `sas.value_labels`.
+
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LabelSet {
     pub name: String,
     pub value_type: ValueType,
@@ -46,13 +53,13 @@ impl LabelSet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ValueLabel {
     pub key: ValueKey,
     pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ValueKey {
     Numeric(f64),
     Integer(i32),
@@ -60,7 +67,7 @@ pub enum ValueKey {
     String(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ValueType {
     Numeric,
     String,

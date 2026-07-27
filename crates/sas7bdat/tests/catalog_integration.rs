@@ -153,3 +153,20 @@ fn label_set_lookup_returns_correct_labels() {
         }
     }
 }
+
+#[test]
+fn parsing_a_dataset_as_a_catalog_is_rejected() {
+    // Datasets and catalogs share a header layout, so the magic number is the only thing
+    // separating them. Without the check this decodes into an empty catalog and every
+    // caller silently gets no labels.
+    let data = fixture("raw_data/readstat/test_data_win.sas7bdat");
+    if !data.exists() {
+        return;
+    }
+
+    let err = parse_catalog_file(&data).expect_err("a .sas7bdat is not a catalog");
+    assert!(
+        err.to_string().contains("not a SAS catalog"),
+        "unexpected error: {err}"
+    );
+}
