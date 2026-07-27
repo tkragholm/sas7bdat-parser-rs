@@ -11,6 +11,16 @@ support projection and predicate pushdown straight into the reader.
 pip install sas7bdat-polars
 ```
 
+To also get the standalone `sas7bdat` command (convert / info / head), install the extra:
+
+```sh
+pip install "sas7bdat-polars[cli]"
+```
+
+That pulls in [`sas7bdat-cli`](https://pypi.org/project/sas7bdat-cli/), a separate binary
+wheel built from the same parser. It is kept separate on purpose: it carries no polars pin
+and no Python floor, so CLI-only users do not inherit this package's constraints.
+
 ### Version constraints
 
 This wheel is tightly coupled to its build environment:

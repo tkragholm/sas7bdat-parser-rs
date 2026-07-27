@@ -29,14 +29,18 @@ profile-leaks fixture mode projection="full" repeat="1" limit="0" batch_rows="25
     @leaks --atExit -- cargo run --release -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
 
 build-polars-plugin:
-    @uvx maturin build --release --manifest-path crates/polars_plugin/Cargo.toml
+    @uvx maturin build --release --manifest-path crates/polars-plugin/Cargo.toml
+
+# Binary wheel for PyPI (`sas7bdat-cli`): ships only the `sas7bdat` command.
+build-cli-wheel:
+    @uvx maturin build --release --manifest-path crates/sas7bdat-cli/Cargo.toml
 
 check-polars-plugin:
-    @cargo check --manifest-path crates/polars_plugin/Cargo.toml
+    @cargo check --manifest-path crates/polars-plugin/Cargo.toml
 
 test-polars-plugin:
-    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml --features arrow,extension-module
-    @.venv/bin/python -m pytest crates/polars_plugin/tests
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml --features arrow,extension-module
+    @.venv/bin/python -m pytest crates/polars-plugin/tests
 
 test-polars-plugin-rust:
     @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib
@@ -50,26 +54,26 @@ install-polars-reader-baselines:
     @.venv/bin/python -m pip install polars-readstat polars_io
 
 bench-plugin-vs-raw fixture="fixtures/ahs2013n.sas7bdat" columns="CONTROL,DEGREE,LMED" repeat="5" batch_rows="4096" limit="0":
-    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml
     @.venv/bin/python scripts/compare_plugin_vs_raw.py --fixture {{fixture}} --columns {{columns}} --repeat {{repeat}} --batch-rows {{batch_rows}} --limit {{limit}}
 
 bench-plugin-vs-raw-string-heavy fixture="fixtures/raw_data/ahs2013/owner.sas7bdat" columns="__ALL__" repeat="10" batch_rows="4096" limit="0":
     @just bench-plugin-vs-raw {{fixture}} "{{columns}}" {{repeat}} {{batch_rows}} {{limit}}
 
 bench-plugin-vs-raw-corpus repeat="5" batch_rows="4096" limit="0" catalog="fixtures/fixture_catalog.local.json":
-    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml
     @.venv/bin/python scripts/compare_plugin_vs_raw.py --suite corpus-local --catalog {{catalog}} --repeat {{repeat}} --batch-rows {{batch_rows}} --limit {{limit}}
 
 bench-plugin-vs-polars-readers-corpus repeat="5" batch_rows="4096" limit="0" catalog="fixtures/fixture_catalog.local.json":
-    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml
     @.venv/bin/python scripts/compare_plugin_vs_raw.py --suite corpus-local --catalog {{catalog}} --repeat {{repeat}} --batch-rows {{batch_rows}} --limit {{limit}} --external-readers polars-native
 
 bench-plugins-corpus repeat="5" batch_rows="4096" limit="0" catalog="fixtures/fixture_catalog.local.json":
-    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml
     @scripts/bench_plugins.py --suite corpus-local --catalog {{catalog}} --repeat {{repeat}} --batch-rows {{batch_rows}} --limit {{limit}}
 
 bench-plugins-single fixture="fixtures/ahs2013n.sas7bdat" columns="CONTROL,DEGREE,LMED" repeat="5" batch_rows="4096" limit="0":
-    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars_plugin/Cargo.toml
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml
     @scripts/bench_plugins.py --fixture {{fixture}} --columns {{columns}} --repeat {{repeat}} --batch-rows {{batch_rows}} --limit {{limit}}
 
 bench-compare fixture="fixtures/raw_data/other/cars.sas7bdat" mode="both" repeat="3" batch_rows="4096":

@@ -1,13 +1,20 @@
-# Builds sas7bdat-polars wheels natively on each platform and uploads them as
-# CI artifacts. Wheels are abi3 (cp312-abi3), so one wheel per platform covers
-# CPython 3.12+.
+# Builds two distributions natively on each platform and uploads them as CI
+# artifacts:
 #
-# On a `v*` tag, the `release` job below also publishes the built wheels to PyPI
-# automatically via Trusted Publishing (OIDC, no stored token) — see that job.
-# On branch/PR pushes the wheels are only uploaded as CI artifacts (no publish).
+#   * sas7bdat-polars (crates/polars-plugin/) — the PyO3 extension module. abi3
+#     (cp312-abi3), so one wheel per platform covers CPython 3.12+.
+#   * sas7bdat-cli (crates/sas7bdat-cli/) — the standalone `sas7bdat` command as a
+#     plain binary wheel (py3-none-<platform>): no Python floor, no polars pin.
+#     It backs the `sas7bdat-polars[cli]` extra.
 #
-# The plugin lives in crates/polars-plugin/, NOT the repo root (the root
-# pyproject.toml builds a different package), hence the explicit --manifest-path.
+# On a `v*` tag, the `release*` jobs below publish to PyPI via Trusted Publishing
+# (OIDC, no stored token). On branch/PR pushes the wheels are only uploaded as CI
+# artifacts. The two packages carry independent version numbers, so `--check-url`
+# makes a tag that only bumps one of them a no-op for the other instead of an
+# "already exists" failure.
+#
+# Neither package lives at the repo root (the root pyproject.toml builds the
+# sas7bdat-dir-mapper wheel), hence the explicit --manifest-path everywhere.
 name: wheels
 
 on:
@@ -52,6 +59,19 @@ jobs:
         with:
           name: wheels-linux-${{ matrix.target }}
           path: dist/*.whl
+      # No interpreter flag: a `bindings = "bin"` wheel embeds no Python ABI.
+      - name: Build CLI wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: '2_28'
+          rust-toolchain: nightly-2026-06-22
+          args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cli-wheels-linux-${{ matrix.target }}
+          path: dist-cli/*.whl
 
   windows:
     name: windows-x64
@@ -72,6 +92,17 @@ jobs:
         with:
           name: wheels-windows-x64
           path: dist/*.whl
+      - name: Build CLI wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x64
+          rust-toolchain: nightly-2026-06-22
+          args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cli-wheels-windows-x64
+          path: dist-cli/*.whl
 
   macos:
     name: macos-${{ matrix.target }}
@@ -98,10 +129,25 @@ jobs:
         with:
           name: wheels-macos-${{ matrix.target }}
           path: dist/*.whl
+      - name: Build CLI wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          rust-toolchain: nightly-2026-06-22
+          args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cli-wheels-macos-${{ matrix.target }}
+          path: dist-cli/*.whl
 
   # Publishes to PyPI via Trusted Publishing (OIDC) — no stored token. Runs only on a
   # v* tag, after every platform build succeeds. Requires a trusted publisher registered
-  # on PyPI for owner=tkragholm, repo=sas7bdat-parser-rs, workflow=wheels.yml.
+  # on PyPI for owner=tkragholm, repo=sas7bdat-parser-rs, workflow=wheels.yml — one per
+  # project (sas7bdat-polars and sas7bdat-cli each need their own).
+  #
+  # --check-url skips files already on PyPI, so tagging a release that bumps only one of
+  # the two packages leaves the other alone instead of failing on a duplicate upload.
   release:
     name: publish-pypi
     runs-on: ubuntu-latest
@@ -116,4 +162,25 @@ jobs:
           pattern: wheels-*
       - uses: astral-sh/setup-uv@v7
       - name: Publish to PyPI
-        run: uv publish --trusted-publishing always 'wheels-*/*.whl'
+        run: >
+          uv publish --trusted-publishing always
+          --check-url https://pypi.org/simple/
+          'wheels-*/*.whl'
+
+  release-cli:
+    name: publish-pypi-cli
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: [linux, windows, macos]
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: cli-wheels-*
+      - uses: astral-sh/setup-uv@v7
+      - name: Publish to PyPI
+        run: >
+          uv publish --trusted-publishing always
+          --check-url https://pypi.org/simple/
+          'cli-wheels-*/*.whl'

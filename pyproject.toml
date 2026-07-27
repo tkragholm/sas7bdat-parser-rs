@@ -19,4 +19,9 @@ classifiers = [
 [tool.maturin]
 bindings = "bin"
 manifest-path = "crates/sas7bdat-cli/Cargo.toml"
-cargo-extra-args = "--bin sas7bdat-dir-mapper"
+# maturin has no `--bin` filter: a `bindings = "bin"` build packages every binary
+# the cargo build produced. (`cargo-extra-args` is not a maturin 1.x key — it was
+# accepted silently and ignored, so this wheel used to ship all four binaries.)
+# The single binary is selected through the crate's feature gates instead.
+no-default-features = true
+features = ["dir-mapper"]

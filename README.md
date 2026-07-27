@@ -107,7 +107,18 @@ This repository is a Cargo workspace:
 
 ## CLI tools
 
-The `sas7bdat-cli` member provides one user-facing tool, `sas7bdat`, with subcommands:
+The `sas7bdat-cli` member provides one user-facing tool, `sas7bdat`. Install it as a
+prebuilt binary from PyPI (a plain `py3-none-<platform>` wheel — no Python version
+floor, no dependencies, Python is only the delivery mechanism):
+
+```sh
+pip install sas7bdat-cli          # or: uv tool install sas7bdat-cli
+sas7bdat info data.sas7bdat
+```
+
+`pip install "sas7bdat-polars[cli]"` installs the Polars plugin together with this CLI.
+
+From a clone, the same tool runs through cargo with subcommands:
 
 ```sh
 # Show metadata, columns, and a small sample
@@ -130,8 +141,11 @@ cargo run -p sas7bdat-cli --bin sas7bdat -- completions zsh
 ```
 
 The standalone `sas7bdat-convert` and `sas7bdat-inspect` binaries remain as backward-compatible
-aliases. Developer/profiling tools (`sas7bdat-corpus-profile`, `sas7bdat-dir-mapper`, ...) build
-only with `--features dev-tools`:
+aliases. Every user-facing binary is in the crate's `default` features (`cli`, `aliases`,
+`dir-mapper`), so a plain `cargo build`/`cargo install` gets them all; the gates exist only so
+each Python wheel can select a single binary (maturin packages *every* binary cargo produced —
+it has no `--bin` filter). Developer/profiling tools (`sas7bdat-corpus-profile`, ...) build only
+with `--features dev-tools`:
 
 ```sh
 cargo run -p sas7bdat-cli --features dev-tools --bin sas7bdat-corpus-profile -- /path/to/sas/files --format csv --out profile.csv
@@ -150,9 +164,12 @@ maturin develop --release        # build + install into the active venv
 maturin build --release          # produce a wheel under target/wheels/
 ```
 
-> Note: there are two `pyproject.toml` files in this repo with different jobs — the one in
-> `crates/polars-plugin/` builds this Polars extension, while the root one builds the
-> `sas7bdat-dir-mapper` CLI as a binary wheel.
+> Note: there are three `pyproject.toml` files in this repo, each building a different
+> distribution from the same workspace — `crates/polars-plugin/` builds this Polars
+> extension, `crates/sas7bdat-cli/` builds the `sas7bdat-cli` binary wheel, and the root
+> one builds the `sas7bdat-dir-mapper` binary wheel. Because maturin packages every binary
+> the cargo build produced, the last two pick their single binary with
+> `no-default-features` plus one feature (see `crates/sas7bdat-cli/Cargo.toml`).
 
 ## Building
 

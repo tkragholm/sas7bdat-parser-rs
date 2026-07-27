@@ -15,15 +15,18 @@ name = "sas7bdat_cli"
 [[bin]]
 name = "sas7bdat"
 path = "src/bin/sas7bdat.rs"
+required-features = ["cli"]
 
 # Thin backward-compatible aliases for the unified subcommands.
 [[bin]]
 name = "sas7bdat-convert"
 path = "src/bin/sas7bdat_convert.rs"
+required-features = ["aliases"]
 
 [[bin]]
 name = "sas7bdat-inspect"
 path = "src/bin/sas7bdat_inspect.rs"
+required-features = ["aliases"]
 
 # Developer/profiling tools — built only with `--features dev-tools` so a default
 # build/install ships just the user-facing binaries above.
@@ -50,8 +53,25 @@ required-features = ["dev-tools"]
 [[bin]]
 name = "sas7bdat-dir-mapper"
 path = "src/bin/sas7bdat_dir_mapper.rs"
+required-features = ["dir-mapper"]
 
+# Every user-facing binary is in `default`, so `cargo build` / `cargo install` /
+# `just convert` behave exactly as they did before these gates existed.
+#
+# The gates exist for the Python wheels: maturin has no `--bin` filter (a
+# `bindings = "bin"` build packages *every* binary cargo produced), so each
+# pyproject.toml selects its one binary with `no-default-features` plus the
+# matching feature — `cli` for the sas7bdat-cli wheel, `dir-mapper` for the
+# sas7bdat-dir-mapper wheel.
 [features]
+default = ["cli", "aliases", "dir-mapper"]
+# The unified `sas7bdat` binary.
+cli = []
+# The `sas7bdat-convert` / `sas7bdat-inspect` compatibility aliases.
+aliases = []
+# The `sas7bdat-dir-mapper` tool.
+dir-mapper = []
+# Developer/profiling binaries.
 dev-tools = []
 
 [dependencies]
