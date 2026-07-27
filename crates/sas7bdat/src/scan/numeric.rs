@@ -199,29 +199,29 @@ pub(super) fn materialize_staged_i64_or_f64_column(
     let mut values = Vec::with_capacity(raw_bits.len());
     match valid.as_deref() {
         None => {
-            let mut raw_chunks = raw_bits.chunks_exact(8);
-            for raw_chunk in &mut raw_chunks {
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+            for raw_chunk in raw_chunks {
                 #[allow(clippy::cast_possible_truncation)]
                 let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
+                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(converted.to_array());
             }
-            for &bits in raw_chunks.remainder() {
+            for &bits in remainder {
                 #[allow(clippy::cast_possible_truncation)]
                 values.push(f64::from_bits(bits) as i64);
             }
         }
         Some(validity) => {
             let zeros = I64x8::splat(0);
-            let mut raw_chunks = raw_bits.chunks_exact(8);
-            for (chunk_idx, raw_chunk) in raw_chunks.by_ref().enumerate() {
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+            for (chunk_idx, raw_chunk) in raw_chunks.iter().enumerate() {
                 let bit_base = chunk_idx * 8;
                 #[allow(clippy::cast_possible_truncation)]
                 let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
                 #[allow(clippy::cast_possible_truncation)]
                 let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
+                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(
                     expand_validity_byte(valid_byte)
@@ -229,8 +229,8 @@ pub(super) fn materialize_staged_i64_or_f64_column(
                         .to_array(),
                 );
             }
-            let processed = raw_bits.len() - raw_chunks.remainder().len();
-            for (offset, &bits) in raw_chunks.remainder().iter().enumerate() {
+            let processed = raw_bits.len() - remainder.len();
+            for (offset, &bits) in remainder.iter().enumerate() {
                 let idx = processed + offset;
                 #[allow(clippy::cast_possible_truncation)]
                 values.push(if valid_bit(validity, idx) {
@@ -263,18 +263,18 @@ pub(super) fn materialize_staged_date_or_f64_column(
     let mut values = Vec::with_capacity(raw_bits.len());
     match valid.as_deref() {
         None => {
-            let mut raw_chunks = raw_bits.chunks_exact(8);
-            for raw_chunk in &mut raw_chunks {
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+            for raw_chunk in raw_chunks {
                 #[allow(clippy::cast_possible_truncation)]
                 let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
+                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(converted.to_array().map(|x| SasDate {
                     #[allow(clippy::cast_possible_truncation)]
                     days_since_sas_epoch: x as i32,
                 }));
             }
-            for &bits in raw_chunks.remainder() {
+            for &bits in remainder {
                 #[allow(clippy::cast_possible_truncation)]
                 values.push(SasDate {
                     days_since_sas_epoch: f64::from_bits(bits) as i32,
@@ -283,14 +283,14 @@ pub(super) fn materialize_staged_date_or_f64_column(
         }
         Some(validity) => {
             let zeros = I64x8::splat(0);
-            let mut raw_chunks = raw_bits.chunks_exact(8);
-            for (chunk_idx, raw_chunk) in raw_chunks.by_ref().enumerate() {
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+            for (chunk_idx, raw_chunk) in raw_chunks.iter().enumerate() {
                 let bit_base = chunk_idx * 8;
                 #[allow(clippy::cast_possible_truncation)]
                 let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
                 #[allow(clippy::cast_possible_truncation)]
                 let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
+                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(
                     expand_validity_byte(valid_byte)
@@ -302,8 +302,8 @@ pub(super) fn materialize_staged_date_or_f64_column(
                         }),
                 );
             }
-            let processed = raw_bits.len() - raw_chunks.remainder().len();
-            for (offset, &bits) in raw_chunks.remainder().iter().enumerate() {
+            let processed = raw_bits.len() - remainder.len();
+            for (offset, &bits) in remainder.iter().enumerate() {
                 let idx = processed + offset;
                 values.push(if valid_bit(validity, idx) {
                     #[allow(clippy::cast_possible_truncation)]
@@ -338,17 +338,17 @@ pub(super) fn materialize_staged_datetime_or_f64_column(
     let mut values = Vec::with_capacity(raw_bits.len());
     match valid.as_deref() {
         None => {
-            let mut raw_chunks = raw_bits.chunks_exact(8);
-            for raw_chunk in &mut raw_chunks {
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+            for raw_chunk in raw_chunks {
                 #[allow(clippy::cast_possible_truncation)]
                 let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
+                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(converted.to_array().map(|x| SasDateTime {
                     seconds_since_sas_epoch: x,
                 }));
             }
-            for &bits in raw_chunks.remainder() {
+            for &bits in remainder {
                 #[allow(clippy::cast_possible_truncation)]
                 values.push(SasDateTime {
                     seconds_since_sas_epoch: f64::from_bits(bits) as i64,
@@ -357,14 +357,14 @@ pub(super) fn materialize_staged_datetime_or_f64_column(
         }
         Some(validity) => {
             let zeros = I64x8::splat(0);
-            let mut raw_chunks = raw_bits.chunks_exact(8);
-            for (chunk_idx, raw_chunk) in raw_chunks.by_ref().enumerate() {
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+            for (chunk_idx, raw_chunk) in raw_chunks.iter().enumerate() {
                 let bit_base = chunk_idx * 8;
                 #[allow(clippy::cast_possible_truncation)]
                 let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
                 #[allow(clippy::cast_possible_truncation)]
                 let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
+                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(
                     expand_validity_byte(valid_byte)
@@ -375,8 +375,8 @@ pub(super) fn materialize_staged_datetime_or_f64_column(
                         }),
                 );
             }
-            let processed = raw_bits.len() - raw_chunks.remainder().len();
-            for (offset, &bits) in raw_chunks.remainder().iter().enumerate() {
+            let processed = raw_bits.len() - remainder.len();
+            for (offset, &bits) in remainder.iter().enumerate() {
                 let idx = processed + offset;
                 values.push(if valid_bit(validity, idx) {
                     #[allow(clippy::cast_possible_truncation)]
@@ -411,16 +411,16 @@ pub(super) fn materialize_staged_time_or_f64_column(
     let mut values = Vec::with_capacity(raw_bits.len());
     match valid.as_deref() {
         None => {
-            let mut raw_chunks = raw_bits.chunks_exact(8);
-            for raw_chunk in &mut raw_chunks {
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+            for raw_chunk in raw_chunks {
                 let converted: I32x8 =
-                    F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
+                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(converted.to_array().map(|x| SasTime {
                     seconds_since_midnight: x,
                 }));
             }
-            for &bits in raw_chunks.remainder() {
+            for &bits in remainder {
                 #[allow(clippy::cast_possible_truncation)]
                 values.push(SasTime {
                     seconds_since_midnight: f64::from_bits(bits) as i32,
@@ -429,13 +429,13 @@ pub(super) fn materialize_staged_time_or_f64_column(
         }
         Some(validity) => {
             let zeros = I32x8::splat(0);
-            let mut raw_chunks = raw_bits.chunks_exact(8);
-            for (chunk_idx, raw_chunk) in raw_chunks.by_ref().enumerate() {
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+            for (chunk_idx, raw_chunk) in raw_chunks.iter().enumerate() {
                 let bit_base = chunk_idx * 8;
                 #[allow(clippy::cast_possible_truncation)]
                 let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
                 let converted: I32x8 =
-                    F64x8::from_array(U64x8::from_slice(raw_chunk).to_array().map(f64::from_bits))
+                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
                         .cast();
                 values.extend(
                     expand_validity_byte(valid_byte)
@@ -446,8 +446,8 @@ pub(super) fn materialize_staged_time_or_f64_column(
                         }),
                 );
             }
-            let processed = raw_bits.len() - raw_chunks.remainder().len();
-            for (offset, &bits) in raw_chunks.remainder().iter().enumerate() {
+            let processed = raw_bits.len() - remainder.len();
+            for (offset, &bits) in remainder.iter().enumerate() {
                 let idx = processed + offset;
                 values.push(if valid_bit(validity, idx) {
                     #[allow(clippy::cast_possible_truncation)]
@@ -511,10 +511,10 @@ fn first_non_integral_in_range_index_simd(
     let exp_mask = U64x4::splat(NUMERIC_EXP_MASK);
     let min_lanes = F64x4::splat(min);
     let max_lanes = F64x4::splat(max);
-    let mut chunks = raw_bits.chunks_exact(4);
+    let (chunks, remainder) = raw_bits.as_chunks::<4>();
 
-    for (chunk_index, chunk) in chunks.by_ref().enumerate() {
-        let bits = U64x4::from_slice(chunk);
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        let bits = U64x4::from_array(*chunk);
         let numbers = F64x4::from_array(bits.to_array().map(f64::from_bits));
         let finite = (bits & exp_mask).simd_ne(exp_mask);
         let integral = numbers.floor().simd_eq(numbers);
@@ -534,8 +534,8 @@ fn first_non_integral_in_range_index_simd(
         }
     }
 
-    let processed = raw_bits.len() - chunks.remainder().len();
-    for (offset, &bits) in chunks.remainder().iter().enumerate() {
+    let processed = raw_bits.len() - remainder.len();
+    for (offset, &bits) in remainder.iter().enumerate() {
         let index = processed + offset;
         if valid.is_some_and(|validity| !valid_bit(validity, index)) {
             continue;
@@ -568,12 +568,14 @@ pub(super) fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
     let mut processed_words = 0usize;
 
     // Process in groups of 64 rows, each producing one u64 validity word.
-    let mut chunks64 = raw_bits.chunks_exact(64);
-    for chunk64 in &mut chunks64 {
+    let (chunks64, remainder) = raw_bits.as_chunks::<64>();
+    for chunk64 in chunks64 {
         let mut valid_word = 0u64;
         let mut any_missing = false;
-        for (i, sub_chunk) in chunk64.chunks_exact(8).enumerate() {
-            let lanes = U64x8::from_slice(sub_chunk);
+        // The outer chunk is exactly 64 wide, so this inner split has no remainder.
+        let (sub_chunks, _) = chunk64.as_chunks::<8>();
+        for (i, sub_chunk) in sub_chunks.iter().enumerate() {
+            let lanes = U64x8::from_array(*sub_chunk);
             let missing_mask = ((lanes & exp_mask).simd_eq(exp_mask)
                 & (lanes & fraction_mask).simd_ne(zeros))
             .to_bitmask();
@@ -595,14 +597,13 @@ pub(super) fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
     }
 
     // Remainder: fewer than 64 rows, producing one partial validity word.
-    let remainder = chunks64.remainder();
     if !remainder.is_empty() {
         let mut valid_word = 0u64;
         let mut any_missing = false;
         let mut bit_offset = 0usize;
-        let mut sub_chunks8 = remainder.chunks_exact(8);
-        for sub_chunk in &mut sub_chunks8 {
-            let lanes = U64x8::from_slice(sub_chunk);
+        let (sub_chunks8, tail) = remainder.as_chunks::<8>();
+        for sub_chunk in sub_chunks8 {
+            let lanes = U64x8::from_array(*sub_chunk);
             let missing_mask = ((lanes & exp_mask).simd_eq(exp_mask)
                 & (lanes & fraction_mask).simd_ne(zeros))
             .to_bitmask();
@@ -613,7 +614,7 @@ pub(super) fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
             }
             bit_offset += 8;
         }
-        for &bits in sub_chunks8.remainder() {
+        for &bits in tail {
             if numeric_bits_is_missing(bits) {
                 any_missing = true;
             } else {

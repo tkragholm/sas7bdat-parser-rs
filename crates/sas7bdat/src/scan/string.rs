@@ -164,27 +164,29 @@ pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
 pub(super) fn is_ascii_simd(slice: &[u8]) -> bool {
     type U8x64 = Simd<u8, 64>;
 
-    let mut chunks = slice.chunks_exact(64);
+    let (chunks, remainder) = slice.as_chunks::<64>();
     let high_bits = U8x64::splat(0x80);
-    for chunk in &mut chunks {
-        let lanes = U8x64::from_slice(chunk);
+    for chunk in chunks {
+        let lanes = U8x64::from_array(*chunk);
         if (lanes & high_bits).reduce_or() != 0 {
             return false;
         }
     }
-    chunks.remainder().is_ascii()
+    remainder.is_ascii()
 }
 
 #[inline]
 fn is_ascii_word(slice: &[u8]) -> bool {
-    let mut chunks = slice.chunks_exact(8);
-    for chunk in &mut chunks {
-        let word = u64::from_ne_bytes(chunk.try_into().expect("8-byte chunk"));
+    let (chunks, remainder) = slice.as_chunks::<8>();
+    for chunk in chunks {
+        // `*chunk` is already [u8; 8], so this drops the try_into/expect the
+        // slice-based version needed.
+        let word = u64::from_ne_bytes(*chunk);
         if (word & ASCII_HIGH_BITS_8) != 0 {
             return false;
         }
     }
-    chunks.remainder().is_ascii()
+    remainder.is_ascii()
 }
 
 pub(super) fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> String {
