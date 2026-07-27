@@ -7,7 +7,7 @@ use sas7bdat::{
     TemporalFormatSummary, WidthSummary, build_projection, discover_fixture_paths,
     profile_dataset_with_sample, profile_fixture, summarize_scan_stats,
 };
-use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime};
+use sas7bdat_cli::exit_code;
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -762,7 +762,7 @@ fn collect_scan_rows(
 }
 
 fn main() -> ExitCode {
-    exit_code_with_init(init_profiler_runtime, run)
+    exit_code(run())
 }
 
 fn run() -> std::result::Result<(), String> {

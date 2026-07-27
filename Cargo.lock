@@ -3427,7 +3427,6 @@ name = "sas7bdat-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arrow-array",
  "arrow-schema",
  "chrono",
  "clap",
@@ -3435,7 +3434,6 @@ dependencies = [
  "csv",
  "encoding_rs",
  "glob",
- "hex",
  "indicatif",
  "mimalloc",
  "num-traits",

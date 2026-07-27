@@ -1,12 +1,12 @@
 use sas7bdat::{build_catalog, discover_fixture_paths};
-use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
+use sas7bdat_cli::{exit_code, next_parsed, next_value};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> ExitCode {
-    exit_code_with_init(init_profiler_runtime, run)
+    exit_code(run())
 }
 
 fn run() -> std::result::Result<(), String> {

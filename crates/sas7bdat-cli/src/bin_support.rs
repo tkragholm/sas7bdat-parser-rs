@@ -1,4 +1,6 @@
-use std::{ffi::OsString, fmt::Display, process::ExitCode, str::FromStr};
+#[cfg(feature = "dev-tools")]
+use std::{ffi::OsString, str::FromStr};
+use std::{fmt::Display, process::ExitCode};
 
 /// Convert a `Result` into a process exit code with consistent stderr output.
 pub fn exit_code<E>(result: Result<(), E>) -> ExitCode
@@ -14,22 +16,15 @@ where
     }
 }
 
-/// Run a binary after performing one-time initialization.
-pub fn exit_code_with_init<E, F, I>(init: I, run: F) -> ExitCode
-where
-    E: Display,
-    F: FnOnce() -> Result<(), E>,
-    I: FnOnce(),
-{
-    init();
-    exit_code(run())
-}
-
 /// Read the next flag value from an iterator.
+///
+/// Used by the hand-rolled argument parsing in the `dev-tools` binaries; the
+/// user-facing commands go through clap.
 ///
 /// # Errors
 ///
 /// Returns an error if the flag has no following value.
+#[cfg(feature = "dev-tools")]
 pub fn next_value(args: &mut impl Iterator<Item = OsString>, flag: &str) -> Result<String, String> {
     let Some(value) = args.next() else {
         return Err(format!("missing value after {flag}"));
@@ -42,6 +37,7 @@ pub fn next_value(args: &mut impl Iterator<Item = OsString>, flag: &str) -> Resu
 /// # Errors
 ///
 /// Returns an error if the flag has no following value or if parsing fails.
+#[cfg(feature = "dev-tools")]
 pub fn next_parsed<T>(args: &mut impl Iterator<Item = OsString>, flag: &str) -> Result<T, String>
 where
     T: FromStr,

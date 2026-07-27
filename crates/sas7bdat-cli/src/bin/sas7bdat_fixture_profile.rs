@@ -4,7 +4,7 @@ use sas7bdat::{
     BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions, ProjectionPreset,
     ScanStatsSummary, build_projection, summarize_scan_stats,
 };
-use sas7bdat_cli::{exit_code_with_init, init_profiler_runtime, next_parsed, next_value};
+use sas7bdat_cli::{exit_code, next_parsed, next_value};
 use serde::Serialize;
 use std::{env, path::PathBuf, process::ExitCode, time::Instant};
 
@@ -70,7 +70,7 @@ const fn mode_name(mode: ProfileMode) -> &'static str {
 }
 
 fn main() -> ExitCode {
-    exit_code_with_init(init_profiler_runtime, run)
+    exit_code(run())
 }
 
 fn run() -> std::result::Result<(), String> {
