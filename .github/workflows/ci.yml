@@ -37,6 +37,12 @@ jobs:
       - name: Clippy (warnings are errors)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # The profiling binaries and the arg-parsing helpers they use are behind
+      # `dev-tools`, which the default-feature pass above does not enable — without
+      # this step nothing in CI type-checks them and they rot silently.
+      - name: Clippy (dev-tools binaries)
+        run: cargo clippy -p sas7bdat-cli --all-targets --features dev-tools -- -D warnings
+
       - name: Test
         run: cargo test --workspace
 
