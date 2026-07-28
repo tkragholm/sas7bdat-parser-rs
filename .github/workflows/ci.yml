@@ -46,6 +46,24 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack,cargo-machete
+
+      # Declared-but-unused dependencies. Cheap, and it catches exactly the kind of
+      # drift that accumulated in sas7bdat-cli (arrow-array and hex sat in the
+      # manifest unreferenced) — the compiler never complains about those.
+      - name: Unused dependencies
+        run: cargo machete
+
+      # Every feature on its own. The default build exercises one combination, so a
+      # `#[cfg(feature = ...)]` block that stopped compiling under some other
+      # combination would otherwise only surface at release time. Use
+      # `--feature-powerset` locally for the exhaustive version; it is ~16 builds per
+      # crate and too slow to gate every PR.
+      - name: Feature combinations
+        run: cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
+
   audit:
     name: cargo audit
     runs-on: ubuntu-latest

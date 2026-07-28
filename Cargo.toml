@@ -18,13 +18,13 @@ resolver = "2"
 anyhow = "1"
 arrow-array = "59"
 arrow-schema = "59"
-bytemuck = { version = "1", features = ["derive"] }
+bytemuck = { version = "1.4", features = ["derive"] }
 bstr = "1"
 criterion = "0.8"
 clap = { version = "4", features = ["derive"] }
 csv = "1"
-chrono = { version = "0.4", default-features = false, features = ["alloc"] }
-encoding_rs = "0.8"
+chrono = { version = "0.4.10", default-features = false, features = ["alloc"] }
+encoding_rs = "0.8.11"
 glob = "0.3"
 hex = "0.4"
 hotpath = { version = "0.17", features = ["hotpath"] }
@@ -44,7 +44,7 @@ pyo3-build-config = "0.28"
 pyo3-polars = "0.27.0"
 rayon = "1"
 rmp-serde = "1"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0.130", features = ["derive"] }
 serde_json = "1"
 simdutf8 = "0.1"
 walkdir = "2"
