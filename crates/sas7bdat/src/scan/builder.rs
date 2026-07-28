@@ -462,7 +462,7 @@ impl<'a> ScanBuilder<'a> {
             let ctx = ColumnarDecodeCtx {
                 descriptors: descriptors.as_ref(),
                 raw_plan: &plan.raw,
-                file_bytes,
+                window: super::raw::PageWindow::whole_file(file_bytes),
                 row_len,
                 columnar: true,
             };
@@ -525,6 +525,7 @@ impl ScanBuilder<'_> {
             FileSource::Path(_) => return Ok(None),
         };
 
+        let window = super::raw::PageWindow::whole_file(file_bytes);
         let worker_capacity_hint = plan.capacity_hint_rows.div_ceil(workers).max(1);
         super::raw::RawScanPlan::validate_builder(self)?;
         let row_len = usize::from(self.ds.layout.row_len);
@@ -554,7 +555,7 @@ impl ScanBuilder<'_> {
         let results = descriptors
             .pages
             .par_chunks(chunk_size)
-            .map(|chunk| collect_batches_for_descriptor_chunk(file_bytes, chunk, &context))
+            .map(|chunk| collect_batches_for_descriptor_chunk(window, chunk, &context))
             .collect::<Vec<_>>();
 
         let mut batches = Vec::new();
@@ -595,7 +596,7 @@ fn column_major_file_bytes<'a>(
 struct ColumnarDecodeCtx<'a> {
     descriptors: &'a crate::internal::PageDescriptorTable,
     raw_plan: &'a super::raw::RawScanPlan,
-    file_bytes: &'a [u8],
+    window: super::raw::PageWindow<'a>,
     row_len: usize,
     columnar: bool,
 }
@@ -622,7 +623,7 @@ where
     let mut decompressed_row = Vec::new();
 
     for &descriptor in page_descriptors {
-        let page = super::raw::page_slice(ctx.file_bytes, ctx.raw_plan, descriptor)?;
+        let page = super::raw::page_slice(ctx.window, ctx.raw_plan, descriptor)?;
         stats.pages_seen = stats.pages_seen.saturating_add(1);
         stats.raw_bytes_read = stats
             .raw_bytes_read
@@ -734,7 +735,7 @@ struct DescriptorChunkContext<'a> {
 }
 
 fn collect_batches_for_descriptor_chunk(
-    file_bytes: &[u8],
+    window: super::raw::PageWindow<'_>,
     descriptor_chunk: &[crate::internal::PageDescriptor],
     context: &DescriptorChunkContext<'_>,
 ) -> Result<Vec<OwnedColumnarBatch>> {
@@ -753,7 +754,7 @@ fn collect_batches_for_descriptor_chunk(
     let ctx = ColumnarDecodeCtx {
         descriptors: context.descriptor_table,
         raw_plan: context.raw_plan,
-        file_bytes,
+        window,
         row_len: context.row_len,
         columnar: context.columnar && acc.plan_is_all_columns_staged_numeric(),
     };
@@ -778,7 +779,7 @@ enum StreamedBatchMessage {
 }
 
 fn stream_batches_for_descriptor_chunk(
-    file_bytes: &[u8],
+    window: super::raw::PageWindow<'_>,
     descriptor_chunk: &[crate::internal::PageDescriptor],
     chunk_idx: usize,
     context: &DescriptorChunkContext<'_>,
@@ -797,7 +798,7 @@ fn stream_batches_for_descriptor_chunk(
     let ctx = ColumnarDecodeCtx {
         descriptors: context.descriptor_table,
         raw_plan: context.raw_plan,
-        file_bytes,
+        window,
         row_len: context.row_len,
         columnar: context.columnar && acc.plan_is_all_columns_staged_numeric(),
     };
@@ -1010,7 +1011,7 @@ impl ScanBuilder<'_> {
         let ctx = ColumnarDecodeCtx {
             descriptors: descriptors.as_ref(),
             raw_plan: &plan.raw,
-            file_bytes,
+            window: super::raw::PageWindow::whole_file(file_bytes),
             row_len,
             columnar: true,
         };
@@ -1061,6 +1062,7 @@ impl ScanBuilder<'_> {
             FileSource::Path(_) => return Ok(None),
         };
 
+        let window = super::raw::PageWindow::whole_file(file_bytes);
         let worker_capacity_hint = plan.capacity_hint_rows.div_ceil(workers).max(1);
         super::raw::RawScanPlan::validate_builder(self)?;
         if usize::from(self.ds.layout.row_len) == 0 {
@@ -1115,7 +1117,7 @@ impl ScanBuilder<'_> {
                             break;
                         }
                         let chunk_stats = stream_batches_for_descriptor_chunk(
-                            file_bytes,
+                            window,
                             chunks[idx],
                             idx,
                             context,

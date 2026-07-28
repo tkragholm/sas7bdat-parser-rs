@@ -143,7 +143,7 @@ where
             break;
         }
 
-        let page = page_slice(file_bytes, plan, descriptor)?;
+        let page = page_slice(PageWindow::whole_file(file_bytes), plan, descriptor)?;
         ctx.stats.pages_seen = ctx.stats.pages_seen.saturating_add(1);
         ctx.stats.raw_bytes_read = ctx
             .stats
@@ -230,17 +230,43 @@ where
     Ok(false)
 }
 
+/// A window of file bytes the decoder can slice pages out of.
+///
+/// `base_offset` is where `bytes[0]` sits in the file. Whole-file sources (mmap, in-memory)
+/// use `0` and behave exactly as before; a chunked reader passes one extent at a time with
+/// its own offset, which is what lets the same decode routine run over data streamed in
+/// large positional reads instead of a mapping.
+#[derive(Clone, Copy)]
+pub(super) struct PageWindow<'a> {
+    pub bytes: &'a [u8],
+    pub base_offset: u64,
+}
+
+impl<'a> PageWindow<'a> {
+    pub(super) const fn whole_file(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            base_offset: 0,
+        }
+    }
+}
+
 pub(super) fn page_slice<'a>(
-    file_bytes: &'a [u8],
+    window: PageWindow<'a>,
     plan: &RawScanPlan,
     descriptor: PageDescriptor,
 ) -> Result<&'a [u8]> {
-    let start = usize::try_from(plan.page_offset(descriptor.page_index))
+    let absolute = plan.page_offset(descriptor.page_index);
+    let relative = absolute
+        .checked_sub(window.base_offset)
+        .ok_or_else(|| Error::unsupported("page precedes the current read window"))?;
+    let start = usize::try_from(relative)
         .map_err(|_| Error::unsupported("page offset exceeds platform usize"))?;
     let end = start
         .checked_add(plan.page_size)
         .ok_or_else(|| Error::unsupported("page end overflow"))?;
-    file_bytes
+    window
+        .bytes
         .get(start..end)
         .ok_or_else(|| Error::unsupported("page slice exceeds source bounds"))
 }
