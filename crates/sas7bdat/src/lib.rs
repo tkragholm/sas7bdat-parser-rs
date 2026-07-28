@@ -18,10 +18,21 @@
 //!
 //! # Feature flags
 //!
-//! - **`arrow`** — enables [`ScanBuilder::visit_arrow_batches`] and [`Dataset::arrow_schema`].
-//!   When active, the crate pulls in `arrow-schema` and `polars-arrow` and exposes Arrow
-//!   `RecordBatch` conversion helpers. When absent, those APIs do not exist and the rest of
-//!   the crate is unchanged.
+//! - **`arrow`** — enables [`ScanBuilder::visit_arrow_batches`] and
+//!   [`ScanBuilder::arrow_schema`]. When active, the crate pulls in `arrow-array` and
+//!   `arrow-schema` and exposes Arrow `RecordBatch` conversion helpers. When absent,
+//!   those APIs do not exist and the rest of the crate is unchanged.
+//! - **`dictionary`** — enables the [`dictionary`] module: string columns are probed for
+//!   cardinality and, when they look like category codes rather than free text, interned
+//!   into `u32` codes plus a value dictionary. That feeds an Arrow `DictionaryArray<u32>`,
+//!   and through it Polars `Categorical` and R `factor`. Adds `ahash`, `lasso2` and
+//!   `cardinality-estimator`.
+//!
+//! The remaining features exist for this repository's own tooling and carry no API
+//! stability guarantees: `hotpath-profile` (profiling instrumentation),
+//! `internal-bench` (exposes `test_utils` to the `wide_table` benchmark) and
+//! `fixture-catalog` (corpus profiling used by the benchmark harness and the
+//! `sas7bdat-cli` dev-tools binaries).
 
 #![feature(portable_simd)]
 

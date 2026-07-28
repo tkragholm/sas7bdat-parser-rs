@@ -71,10 +71,11 @@ fixture-catalog = []
 # String-column dictionary encoding: HLL cardinality gate + lasso2 interner.
 dictionary = ["dep:ahash", "dep:lasso2", "dep:cardinality-estimator"]
 
-# Build docs.rs with the `arrow` feature so the Arrow batch API is documented.
-# `hotpath-profile` is omitted: it adds internal profiling instrumentation, not public API.
+# Build docs.rs with both public features so their APIs — and the intra-doc links to
+# them from the crate-level docs — resolve. The remaining features are internal tooling
+# (profiling instrumentation, benchmark fixtures) and add no public API.
 [package.metadata.docs.rs]
-features = ["arrow"]
+features = ["arrow", "dictionary"]
 
 [lints]
 workspace = true
