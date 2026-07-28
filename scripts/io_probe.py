@@ -44,7 +44,9 @@ def list_drives() -> None:
     print("=== drives ===")
     if os.name != "nt":
         usage = shutil.disk_usage(os.sep)
-        print(f"  {os.sep}  free {usage.free / GB:,.1f} GB of {usage.total / GB:,.1f} GB")
+        print(
+            f"  {os.sep}  free {usage.free / GB:,.1f} GB of {usage.total / GB:,.1f} GB"
+        )
         print("  (drive-type detection is Windows-only)")
         return
 
@@ -75,13 +77,14 @@ def list_drives() -> None:
         print(f"  {root:<8} {kind:<12} {free:>12} {total:>12}  {unc}")
 
 
-def sequential_read(path: str, sample_bytes: int, block: int = 8 * MB) -> float:
-    """Read the first `sample_bytes` in one stream. Returns MB/s."""
+def sequential_read(path: str, base_offset: int, sample_bytes: int, block: int = 8 * MB) -> float:
+    """Read `sample_bytes` in one stream, starting at `base_offset`. Returns MB/s."""
     buf = bytearray(block)
     view = memoryview(buf)
     read_total = 0
     start = time.perf_counter()
     with open(path, "rb", buffering=0) as handle:
+        handle.seek(base_offset)
         while read_total < sample_bytes:
             got = handle.readinto(view)
             if not got:
@@ -91,8 +94,10 @@ def sequential_read(path: str, sample_bytes: int, block: int = 8 * MB) -> float:
     return (read_total / MB) / elapsed if elapsed > 0 else 0.0
 
 
-def parallel_read(path: str, sample_bytes: int, threads: int, block: int = 8 * MB) -> float:
-    """Read `sample_bytes` split across `threads` readers at different offsets.
+def parallel_read(
+    path: str, base_offset: int, sample_bytes: int, threads: int, block: int = 8 * MB
+) -> float:
+    """Read `sample_bytes` from `base_offset`, split across `threads` readers.
 
     Each thread opens its own handle and seeks to its own stripe, so this measures
     whether the storage rewards multiple outstanding requests — the property that
@@ -104,7 +109,7 @@ def parallel_read(path: str, sample_bytes: int, threads: int, block: int = 8 * M
     def worker(index: int) -> None:
         buf = bytearray(block)
         view = memoryview(buf)
-        offset = index * span
+        offset = base_offset + index * span
         end = offset + span
         with open(path, "rb", buffering=0) as handle:
             handle.seek(offset)
@@ -126,10 +131,23 @@ def parallel_read(path: str, sample_bytes: int, threads: int, block: int = 8 * M
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("file", nargs="?", help="file to probe (the .sas7bdat you plan to convert)")
-    parser.add_argument("--sample-gb", type=float, default=4.0, help="GB to read per measurement (default 4)")
-    parser.add_argument("--threads", default="1,4,8,16", help="comma-separated reader counts (default 1,4,8,16)")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "file", nargs="?", help="file to probe (the .sas7bdat you plan to convert)"
+    )
+    parser.add_argument(
+        "--sample-gb",
+        type=float,
+        default=4.0,
+        help="GB to read per measurement (default 4)",
+    )
+    parser.add_argument(
+        "--threads",
+        default="1,4,8,16",
+        help="comma-separated reader counts (default 1,4,8,16)",
+    )
     args = parser.parse_args()
 
     list_drives()
@@ -144,18 +162,35 @@ def main() -> int:
 
     size = os.path.getsize(path)
     sample = min(int(args.sample_gb * GB), size)
+    counts = [1] + [int(t) for t in args.threads.split(",") if t.strip() and int(t) > 1]
+
+    # Every measurement reads a REGION OF THE FILE NOTHING HAS TOUCHED YET. Reusing the
+    # same bytes would measure the OS file cache instead of the storage: the second pass
+    # comes out of RAM at tens of GB/s and reports an impossible speedup.
+    needed = sample * len(counts)
+    if needed > size:
+        sample = size // len(counts)
+        print(f"\n  note: sample reduced to {sample / GB:,.2f} GB so each measurement gets fresh bytes")
+    if sample < 64 * MB:
+        print("\n  file too small to measure meaningfully", file=sys.stderr)
+        return 1
+
     print(f"\n=== {path} ===")
     print(f"  size          {size / GB:,.2f} GB")
-    print(f"  sampling      {sample / GB:,.2f} GB per measurement\n")
+    print(f"  sampling      {sample / GB:,.2f} GB per measurement, each from a fresh region\n")
 
-    base = sequential_read(path, sample)
     print(f"  {'readers':>8}  {'MB/s':>9}  {'vs 1 stream':>12}   projected full pass")
-    print(f"  {1:>8}  {base:>9,.0f}  {'1.00x':>12}   {size / MB / base / 60:>6,.1f} min  (sequential)")
-
-    for count in [int(t) for t in args.threads.split(",") if t.strip() and int(t) > 1]:
-        rate = parallel_read(path, sample, count)
-        speedup = rate / base if base else 0
-        print(f"  {count:>8}  {rate:>9,.0f}  {speedup:>11,.2f}x   {size / MB / rate / 60:>6,.1f} min")
+    base = 0.0
+    for slot, count in enumerate(counts):
+        offset = slot * sample
+        if count == 1:
+            base = sequential_read(path, offset, sample)
+            rate, note = base, "  (sequential)"
+        else:
+            rate, note = parallel_read(path, offset, sample, count), ""
+        speedup = f"{rate / base:,.2f}x" if base else "n/a"
+        minutes = size / MB / rate / 60 if rate else float("inf")
+        print(f"  {count:>8}  {rate:>9,.0f}  {speedup:>12}   {minutes:>6,.1f} min{note}")
 
     print("\nHow to read this:")
     print("  * The 'projected full pass' column is the floor for ONE read of the file.")
