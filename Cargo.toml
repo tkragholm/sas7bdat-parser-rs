@@ -62,6 +62,13 @@ unsafe_code = "warn"
 # priority cargo warns and the group wins, silently undoing any specific `allow`.
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+# Lints the manifests rather than the code: wildcard dependencies, missing package
+# metadata, badly named features.
+cargo = { level = "warn", priority = -1 }
+# The one member of `cargo` that is pure noise here: every instance is a duplicate
+# version deep inside the polars/pyo3 tree (foldhash, getrandom, hashbrown, rand,
+# windows-*), which no change on our side can resolve.
+multiple_crate_versions = "allow"
 
 [profile.release]
 lto = "thin"
