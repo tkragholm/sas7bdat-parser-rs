@@ -8,7 +8,8 @@ repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
 documentation = "https://docs.rs/sas7bdat"
 readme = "README.md"
 keywords = ["sas7bdat", "sas", "arrow", "parser", "simd"]
-categories = ["parser-implementations", "science", "statistics"]
+# "statistics" is not a crates.io slug; "encoding" covers decoding the on-disk format.
+categories = ["parser-implementations", "science", "encoding"]
 
 [dependencies]
 arrow-array = { workspace = true, optional = true }
