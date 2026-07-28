@@ -1,0 +1,53 @@
+# git-cliff configuration.
+#
+# Generates Keep a Changelog sections from Conventional Commits. Scope a run to a
+# single crate with --include-path, because the three artifacts in this workspace
+# version independently:
+#
+#   git cliff --include-path 'crates/sas7bdat/**' --unreleased --tag 0.3.1 \
+#     --prepend crates/sas7bdat/CHANGELOG.md
+#
+# Commits before mid-2026 predate the Conventional Commits convention here and are
+# skipped by the parser; 0.3.0 and earlier are summarized by hand.
+
+[changelog]
+header = ""
+# Keep a Changelog headings, newest first. `version` is the --tag value, or
+# "Unreleased" when generating for untagged work.
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [Unreleased]
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+# Consumers of the crate care about behaviour, not about our CI and tooling churn,
+# so the housekeeping types are dropped rather than binned into a section.
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Changed" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^test", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^build", skip = true },
+  { message = "^style", skip = true },
+]
+filter_commits = true
+protect_breaking_commits = true
+tag_pattern = "v[0-9]*"
+sort_commits = "oldest"
