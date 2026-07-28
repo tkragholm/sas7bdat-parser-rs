@@ -314,10 +314,16 @@ pub enum OrderingMode {
     Unordered,
 }
 
+/// How many threads a scan may use to decode pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Parallelism {
+    /// Use every logical core (`available_parallelism`), clamped to the available work.
+    /// Uncapped on purpose: this crate targets large files on large hosts. A caller running
+    /// several scans at once should divide the machine itself with [`Parallelism::Threads`].
     Auto,
+    /// One thread. Decode runs on the calling thread.
     None,
+    /// Exactly this many threads, uncapped — for callers that know their own workload.
     Threads(usize),
 }
 

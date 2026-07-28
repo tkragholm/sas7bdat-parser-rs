@@ -22,17 +22,33 @@ use std::{
     time::Instant,
 };
 
+/// Thread budget for [`Parallelism::Auto`]: every logical core.
+///
+/// Deliberately uncapped. This crate's workload is large files on large machines — a 64-core
+/// server converting hundreds of gigabytes — and any fixed ceiling tuned on a developer
+/// laptop leaves most of such a host idle. `resolved_parallel_workers` still clamps to the
+/// available work, so small files do not over-spawn.
+///
+/// The caveat is that these are raw `std::thread::scope` threads rather than a shared pool,
+/// so a caller running several scans concurrently multiplies this budget. Such callers should
+/// divide the machine themselves with [`Parallelism::Threads`].
+fn auto_thread_budget() -> usize {
+    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+}
+
 fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
     match parallelism {
         Parallelism::Threads(n) => n.max(1),
-        Parallelism::None | Parallelism::Auto => 1,
+        Parallelism::Auto => auto_thread_budget(),
+        Parallelism::None => 1,
     }
 }
 
 fn resolved_parallel_workers(parallelism: Parallelism, work_items: usize) -> usize {
     match parallelism {
         Parallelism::Threads(n) => n.max(1).min(work_items.max(1)),
-        Parallelism::None | Parallelism::Auto => 1,
+        Parallelism::Auto => auto_thread_budget().min(work_items.max(1)),
+        Parallelism::None => 1,
     }
 }
 

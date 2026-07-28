@@ -272,8 +272,9 @@ fn requested_scan_threads() -> usize {
 
 /// Resolve the parallelism for one file's page decode.
 ///
-/// The crate's `Parallelism::Auto` resolves to a SINGLE worker (serial), so the plugin
-/// must opt in explicitly. But blindly fanning every file across all cores wastes
+/// The crate's `Parallelism::Auto` now uses every core, but the plugin still resolves its
+/// own count: `Auto` is a generic default, and here we know the workload. Blindly
+/// fanning every file across all cores wastes
 /// effort on the many small yearly files in a register — the threads just fight over a
 /// near-empty file. Instead of a tuned threshold, we derive the worker COUNT from the
 /// file using a hardware-stable grain size: each worker must get at least one grain of
@@ -318,11 +319,10 @@ fn run_scan(
     tx: &mpsc::SyncSender<ReaderMessage>,
 ) -> SasResult<()> {
     let projection = build_projection(ds, request.with_columns.clone())?;
-    // Decode pages across threads. The crate defaults to Parallelism::Auto, which
-    // resolves to a SINGLE worker (serial) — so without this the scan pegged one core
-    // and left large hosts at ~10% CPU. Threads(n) engages the parallel page-streaming
-    // path (ScanBuilder::try_stream_batches_parallel). Defaults to all logical cores;
-    // override with SAS7BDAT_SCAN_THREADS for tuning.
+    // Decode pages across threads. Threads(n) engages the parallel page-streaming path
+    // (ScanBuilder::try_stream_batches_parallel) with a count derived from the file, rather
+    // than accepting Parallelism::Auto's generic all-cores default. Defaults to all logical
+    // cores; override with SAS7BDAT_SCAN_THREADS for tuning.
     let mut scan = ds
         .scan()
         .with_parallelism(scan_parallelism(ds))
