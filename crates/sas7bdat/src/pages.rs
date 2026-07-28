@@ -130,6 +130,11 @@ fn accumulate_ns(acc: &mut u128, start: Option<Instant>) {
     }
 }
 
+/// Bytes read per syscall while walking page headers. Matches the extent size the scan
+/// reader uses, for the same reason: it is the read size that measured best on network
+/// storage without paying the large-read penalty.
+const DESCRIPTOR_BLOCK_BYTES: usize = 4 * 1024 * 1024;
+
 fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
     reader: &mut R,
     layout: &LayoutPlan,
@@ -155,29 +160,46 @@ fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
     let mut row_spans = Vec::new();
     let mut row_base = 0u64;
     let mut breakdown = DescriptorBreakdown::default();
-    let mut page = vec![0u8; usize::from(header.page_size)];
+    // Pages are walked in order and are contiguous on disk, so they are read in blocks
+    // rather than one syscall each. Per-page reads are latency-bound on network storage —
+    // a 100 GB file holds on the order of a million pages, and this pass runs BEFORE any
+    // row is decoded, so its round-trips are pure added wall-clock. Blocks of ~4 MB cut
+    // that by two orders of magnitude while touching the same bytes.
+    let page_size = usize::from(header.page_size);
+    let pages_per_block = (DESCRIPTOR_BLOCK_BYTES / page_size.max(1)).max(1);
+    let mut block = vec![0u8; pages_per_block * page_size];
+    let mut block_first_page = 0u64;
+    let mut block_pages = 0usize;
 
     for page_index in 0..header.page_count {
         let read_start = profile_now::<PROFILE>();
-        let page_offset = header.data_offset + page_index * u64::from(header.page_size);
-        reader
-            .seek(SeekFrom::Start(page_offset))
-            .map_err(|e| page_io_error(&e))?;
-        reader
-            .read_exact(&mut page)
-            .map_err(|e| page_io_error(&e))?;
+        if block_pages == 0 || page_index >= block_first_page + block_pages as u64 {
+            let remaining = header.page_count - page_index;
+            let want = usize::try_from(remaining.min(pages_per_block as u64)).unwrap_or(1);
+            let offset = header.data_offset + page_index * u64::from(header.page_size);
+            reader
+                .seek(SeekFrom::Start(offset))
+                .map_err(|e| page_io_error(&e))?;
+            reader
+                .read_exact(&mut block[..want * page_size])
+                .map_err(|e| page_io_error(&e))?;
+            block_first_page = page_index;
+            block_pages = want;
+        }
+        let page_start = usize::try_from(page_index - block_first_page).unwrap_or(0) * page_size;
+        let page = &block[page_start..page_start + page_size];
         accumulate_ns(&mut breakdown.page_read_ns, read_start);
         breakdown.pages_seen += 1;
 
         let header_start = profile_now::<PROFILE>();
-        let page_type = read_header_u16(&page, header.page_header_size as usize - 8, layout)?;
+        let page_type = read_header_u16(page, header.page_header_size as usize - 8, layout)?;
         let page_row_count = u64::from(read_header_u16(
-            &page,
+            page,
             header.page_header_size as usize - 6,
             layout,
         )?);
         let subheader_count = u64::from(read_header_u16(
-            &page,
+            page,
             header.page_header_size as usize - 4,
             layout,
         )?);
@@ -186,7 +208,7 @@ fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
         let classify_start = profile_now::<PROFILE>();
         let descriptor = classify_descriptor(
             layout,
-            &page,
+            page,
             DescriptorInputs {
                 page_index,
                 page_type,
