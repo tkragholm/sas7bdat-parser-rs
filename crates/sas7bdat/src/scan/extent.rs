@@ -1,21 +1,19 @@
-//! Streams a file's pages as large positional reads, for sources that cannot be mapped.
+//! Reads pages in contiguous extents, for sources that are not memory-mapped.
 //!
-//! Memory-mapping is unavailable or ruinous on network storage, and the fallback — one
-//! `seek` + `read_exact` per page on a single handle — is latency-bound: a 100 GB file holds
-//! on the order of a million pages, and one round-trip each dwarfs the transfer time. This
-//! module reads *extents* instead: contiguous runs of pages, several megabytes at a time,
-//! with a few reads in flight at once.
+//! The alternative is one `seek` + `read_exact` per page on a single handle. Pages are
+//! 64-256 KB and a 100 GB file holds on the order of a million of them, so on network
+//! storage the round-trips cost more than the transfer. An extent covers many pages in one
+//! read, and several reads run at once.
 //!
-//! The two constants below are measured, not guessed, against SMB storage over a LAN
-//! (see `scripts/io_probe.py`, which reproduces the sweep on any host):
+//! The constants below come from a sweep against SMB over a LAN; `scripts/io_probe.py`
+//! repeats it on other hosts:
 //!
 //! ```text
 //! readers:   1 -> 176 MB/s    4 -> 323    8 -> 280    16 -> 221
 //! extents:   1 MB -> 348      4 MB -> 387    8 MB -> 350    16 MB -> 361    32 MB -> 233
 //! ```
 //!
-//! Both curves fall off past their peak, so more is actively worse: concurrency beyond ~4
-//! and extents beyond ~16 MB lose throughput rather than gaining it.
+//! Throughput falls off past 4 readers and past 16 MB extents.
 
 use crate::error::Error;
 use std::{
@@ -29,14 +27,12 @@ use std::{
     },
 };
 
-/// Bytes per positional read. 4 MB measured best on SMB; the 1–16 MB range is within noise
-/// of it, while 32 MB costs ~40%. Staying at the low end of the plateau also keeps the
-/// in-flight buffer pool small.
+/// Bytes per read. 4 MB measured highest on SMB; 1-16 MB fall within about 10% of it and
+/// 32 MB costs about 40%. The low end of that range also keeps the buffer pool small.
 pub(super) const EXTENT_BYTES: usize = 4 * 1024 * 1024;
 
-/// Reads in flight. Network storage rewards a few outstanding requests and punishes many:
-/// 4 was the peak, 8 gave up 13%, 16 gave up 32%. Decode threads are counted separately —
-/// they scale with cores, this does not.
+/// Reads in flight. 4 measured highest; 8 gave up 13% and 16 gave up 32%. Decode threads
+/// are counted separately and scale with core count.
 pub(super) const MAX_READ_CONCURRENCY: usize = 4;
 
 /// One contiguous run of pages, read as a unit.
@@ -48,8 +44,7 @@ pub(super) struct Extent {
     pub bytes: Vec<u8>,
 }
 
-/// Hands decoded buffers back for reuse, so a long scan allocates a bounded number of them
-/// rather than one per extent.
+/// Returns decoded buffers for reuse, bounding allocations over a long scan.
 pub(super) type BufferReturn = SyncSender<Vec<u8>>;
 
 pub(super) struct ExtentStream {
@@ -73,9 +68,9 @@ pub(super) fn chunk_span(
 
 /// Spawn `readers` threads that fill extents for the chunks pulled from `next_chunk_idx`.
 ///
-/// Each reader owns its own file handle, so the seeks are independent — that is what makes
-/// the requests concurrent at the storage layer rather than serialized behind one cursor.
-/// Returns the receiving end plus the recycle channel; both close when the readers finish.
+/// Each reader owns a file handle, so seeks are independent rather than serialized behind a
+/// shared cursor. Returns the receiving end and the recycle channel; both close when the
+/// readers finish.
 #[derive(Clone, Copy)]
 pub(super) struct ReadPlan<'scope> {
     pub path: &'scope Path,

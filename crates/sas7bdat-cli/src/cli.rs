@@ -280,7 +280,7 @@ pub enum IoBackend {
     /// Memory-map local files; read network shares sequentially (default).
     #[default]
     Auto,
-    /// Always memory-map. Fastest locally; pathological over a network share, where every
+    /// Always memory-map. Fastest on local storage; slow over a network share, where each
     /// access becomes a round-trip.
     Mmap,
     /// Always read sequentially. The safe choice for network storage.

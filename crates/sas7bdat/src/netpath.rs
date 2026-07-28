@@ -1,14 +1,11 @@
 //! Detects whether a path lives on a network share.
 //!
-//! Memory-mapping is the right default on local storage and close to the worst case on a
-//! network share: each access becomes a page fault serviced by a round-trip, with no
-//! sequential readahead, and a multi-gigabyte file turns into millions of them. `Auto`
-//! therefore declines to map a file it can see is remote.
+//! Mapping a remote file makes each access a page fault serviced by a round-trip, with no
+//! sequential readahead. `Auto` skips mmap when it can tell the path is remote.
 //!
-//! Only Windows is probed, because that is where this crate's users mount network storage as
-//! ordinary drive letters and hit the problem without realizing the file is remote. On other
-//! platforms an NFS/SMB mount is a deliberate, visible act, and callers who need to override
-//! the choice have [`IoBackendPreference`](crate::IoBackendPreference).
+//! Only Windows is probed: there a share mounts as an ordinary drive letter, so the path
+//! alone does not identify it. Other platforms always answer `false`; callers select the
+//! backend with [`IoBackendPreference`](crate::IoBackendPreference).
 
 use std::path::Path;
 

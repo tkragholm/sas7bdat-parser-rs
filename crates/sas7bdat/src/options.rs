@@ -318,8 +318,8 @@ pub enum OrderingMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Parallelism {
     /// Use every logical core (`available_parallelism`), clamped to the available work.
-    /// Uncapped on purpose: this crate targets large files on large hosts. A caller running
-    /// several scans at once should divide the machine itself with [`Parallelism::Threads`].
+    /// A caller running several scans at once should divide the machine between them with
+    /// [`Parallelism::Threads`].
     Auto,
     /// One thread. Decode runs on the calling thread.
     None,

@@ -24,14 +24,12 @@ use std::{
 
 /// Thread budget for [`Parallelism::Auto`]: every logical core.
 ///
-/// Deliberately uncapped. This crate's workload is large files on large machines — a 64-core
-/// server converting hundreds of gigabytes — and any fixed ceiling tuned on a developer
-/// laptop leaves most of such a host idle. `resolved_parallel_workers` still clamps to the
-/// available work, so small files do not over-spawn.
+/// No fixed ceiling, since a ceiling would leave most of a many-core host idle on the large
+/// files this crate targets. `resolved_parallel_workers` clamps to the available work, so
+/// small files do not over-spawn.
 ///
-/// The caveat is that these are raw `std::thread::scope` threads rather than a shared pool,
-/// so a caller running several scans concurrently multiplies this budget. Such callers should
-/// divide the machine themselves with [`Parallelism::Threads`].
+/// These are `std::thread::scope` threads rather than a shared pool, so concurrent scans
+/// multiply the budget; those callers should set [`Parallelism::Threads`].
 fn auto_thread_budget() -> usize {
     std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }
@@ -72,10 +70,10 @@ fn balanced_chunk_size(
     by_oversubscribe.max(pages_per_batch(rows_per_page, target_rows))
 }
 
-/// Pages needed to fill one target batch. A chunk smaller than this shreds the scan into
-/// undersized batches: each chunk decodes with its own accumulator and flushes at its end,
-/// so the chunk size is also the batch size. On a wide table (4 rows per page here) a chunk
-/// picked purely by byte size would emit ~136-row batches and drown the writer in overhead.
+/// Pages needed to fill one target batch. Each chunk decodes with its own accumulator and
+/// flushes at its end, so chunk size sets batch size. Sizing a chunk by bytes alone gives
+/// 136-row batches on a table with 4 rows per page, where per-batch overhead exceeds what
+/// the larger reads save.
 fn pages_per_batch(rows_per_page: u64, target_rows: usize) -> usize {
     usize::try_from(
         u64::try_from(target_rows)
@@ -1177,10 +1175,10 @@ impl ScanBuilder<'_> {
                     }));
                 }
             } else if let Some(path) = source_path {
-                // Streamed source: a few readers keep large positional reads in flight while
-                // the decode threads consume whole extents. The two pools are sized
-                // independently — reads peak at a handful of concurrent requests on network
-                // storage, decode scales with cores.
+                // Streamed source: readers keep large reads in flight while decode threads
+                // consume whole extents. The pools are sized independently, since read
+                // throughput peaks at a few concurrent requests while decode scales with
+                // cores.
                 let stream = super::extent::spawn_readers(
                     scope,
                     super::extent::ReadPlan {
@@ -1309,9 +1307,8 @@ impl ScanBuilder<'_> {
                     .map_err(|_| Error::unsupported("parallel batch worker panicked"))?;
                 merge_scan_stats(&mut total, &worker_stats);
             }
-            // A read that failed mid-stream closes its extent channel, which the decoders
-            // read as "no more work" — so without this the scan would return a SHORT result
-            // and call it success. Surface the first I/O error instead.
+            // A failed read closes its extent channel, which decoders see as end of work,
+            // so the scan would otherwise return fewer rows and report success.
             if let Ok(err) = io_err_rx.try_recv() {
                 return Err(err);
             }

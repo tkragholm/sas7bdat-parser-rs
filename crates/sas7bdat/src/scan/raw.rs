@@ -233,9 +233,8 @@ where
 /// A window of file bytes the decoder can slice pages out of.
 ///
 /// `base_offset` is where `bytes[0]` sits in the file. Whole-file sources (mmap, in-memory)
-/// use `0` and behave exactly as before; a chunked reader passes one extent at a time with
-/// its own offset, which is what lets the same decode routine run over data streamed in
-/// large positional reads instead of a mapping.
+/// pass `0`; a chunked reader passes one extent at a time with its own offset, so both reach
+/// the same decode routine.
 #[derive(Clone, Copy)]
 pub(super) struct PageWindow<'a> {
     pub bytes: &'a [u8],

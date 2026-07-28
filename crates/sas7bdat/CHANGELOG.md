@@ -15,6 +15,39 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-28
+
+Throughput work for large files on network storage, driven by measurements against SMB
+(`scripts/io_probe.py` reproduces them). On a 104 GB file over a 341 MB/s link, a
+conversion went from ~37 minutes to ~10.
+
+### Added
+
+- Parallel decode for path sources. Pages stream as 4 MB extents read by up to 4
+  concurrent readers, each with its own file handle. Previously a path source had no
+  parallel path at all: it fell back to a serial scan issuing one `seek` + `read_exact`
+  per page.
+
+### Changed
+
+- `Parallelism::Auto` resolves to every logical core. It previously resolved to a single
+  worker, so serial decode was the default and callers had to pass
+  `Parallelism::Threads(n)` to get any parallelism.
+- `IoBackendPreference::Auto` no longer memory-maps a file on a network share. Mapping a
+  remote file turns each access into a round-trip with no readahead. On Windows, UNC paths
+  and mapped network drives are detected; other platforms are treated as local.
+  `MmapPreferred` still maps a remote file.
+- Page-descriptor compilation reads ~4 MB blocks instead of one syscall per page. The pass
+  runs before any row is decoded, and a 100 GB file holds on the order of a million pages.
+- `LabelSet`, `ValueLabel`, `ValueKey` and `ValueType` derive `Serialize`.
+
+### Fixed
+
+- A read that failed partway through a parallel scan closed its channel, which the decoders
+  saw as end of input: the scan returned fewer rows and reported success. The I/O error is
+  now returned.
+
+
 ## [0.3.0] - 2026-07-28
 
 A ground-up rewrite. **No part of the 0.2.0 public API survives**: the `dataset`,

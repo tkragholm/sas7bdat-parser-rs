@@ -130,9 +130,8 @@ fn accumulate_ns(acc: &mut u128, start: Option<Instant>) {
     }
 }
 
-/// Bytes read per syscall while walking page headers. Matches the extent size the scan
-/// reader uses, for the same reason: it is the read size that measured best on network
-/// storage without paying the large-read penalty.
+/// Bytes read per syscall while walking page headers. Matches the scan reader's extent
+/// size, which measured highest on network storage.
 const DESCRIPTOR_BLOCK_BYTES: usize = 4 * 1024 * 1024;
 
 fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
@@ -160,11 +159,9 @@ fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
     let mut row_spans = Vec::new();
     let mut row_base = 0u64;
     let mut breakdown = DescriptorBreakdown::default();
-    // Pages are walked in order and are contiguous on disk, so they are read in blocks
-    // rather than one syscall each. Per-page reads are latency-bound on network storage —
-    // a 100 GB file holds on the order of a million pages, and this pass runs BEFORE any
-    // row is decoded, so its round-trips are pure added wall-clock. Blocks of ~4 MB cut
-    // that by two orders of magnitude while touching the same bytes.
+    // Pages are contiguous and walked in order, so they are read in blocks rather than one
+    // syscall each. This pass runs before any row is decoded, and a 100 GB file holds on the
+    // order of a million pages, so per-page round-trips add directly to wall-clock.
     let page_size = usize::from(header.page_size);
     let pages_per_block = (DESCRIPTOR_BLOCK_BYTES / page_size.max(1)).max(1);
     let mut block = vec![0u8; pages_per_block * page_size];
