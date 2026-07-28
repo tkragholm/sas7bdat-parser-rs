@@ -28,6 +28,11 @@ ahash = { version = "0.8.7", optional = true }
 lasso2 = { version = "0.8", optional = true }
 cardinality-estimator = { version = "1.0.1", optional = true }
 
+# Windows-only: GetDriveTypeW, so `IoBackendPreference::Auto` can tell a mapped network
+# drive (Z:\) from local storage and decline to memory-map it. UNC paths need no syscall.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_WindowsProgramming"] }
+
 [dev-dependencies]
 criterion = { workspace = true }
 csv = { workspace = true }

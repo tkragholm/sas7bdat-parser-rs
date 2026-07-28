@@ -60,7 +60,7 @@ impl Dataset {
         let file = File::open(path).map_err(|err| Error::io_error_with_path(path, &err))?;
         let file_open_ns = file_open_start.elapsed().as_nanos();
 
-        if should_try_mmap(options.io_backend) {
+        if should_try_mmap(options.io_backend, path) {
             let mmap_start = Instant::now();
             if let Some(mmap) = try_map_file(path, &file)? {
                 let mmap_ns = mmap_start.elapsed().as_nanos();
@@ -189,7 +189,7 @@ impl Dataset {
         let path = path.as_ref();
         let _meta = fs::metadata(path).map_err(|err| Error::io_error_with_path(path, &err))?;
         let file = File::open(path).map_err(|err| Error::io_error_with_path(path, &err))?;
-        if should_try_mmap(options.io_backend)
+        if should_try_mmap(options.io_backend, path)
             && let Some(mmap) = try_map_file(path, &file)?
         {
             return Self::from_mmap(mmap, options);
@@ -540,11 +540,17 @@ impl Dataset {
     }
 }
 
-const fn should_try_mmap(preference: IoBackendPreference) -> bool {
-    matches!(
-        preference,
-        IoBackendPreference::Auto | IoBackendPreference::MmapPreferred
-    )
+/// Whether to memory-map `path` under `preference`.
+///
+/// `Auto` maps local storage and declines to map a network share: over SMB every access is a
+/// page fault serviced by a round-trip with no readahead, which turns a large file into
+/// millions of them. `MmapPreferred` still maps a remote file — it is an explicit request.
+fn should_try_mmap(preference: IoBackendPreference, path: &Path) -> bool {
+    match preference {
+        IoBackendPreference::MmapPreferred => true,
+        IoBackendPreference::Auto => !crate::netpath::is_network_path(path),
+        IoBackendPreference::BufferedPreferred | IoBackendPreference::BufferedOnly => false,
+    }
 }
 
 // The crate's single `unsafe`: a read-only mmap. Explicitly allowed so it stands out.

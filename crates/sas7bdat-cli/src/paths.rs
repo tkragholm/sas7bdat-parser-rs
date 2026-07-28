@@ -185,6 +185,7 @@ mod tests {
             validation: ValidationOptions {
                 strict_dates: false,
             },
+            io_backend: crate::cli::IoBackend::Auto,
             ui: UiOptions {
                 quiet: false,
                 progress: crate::cli::ProgressMode::Auto,

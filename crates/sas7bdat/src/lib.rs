@@ -53,6 +53,7 @@ mod internal;
 mod labels;
 mod layout;
 mod metadata;
+mod netpath;
 mod options;
 mod pages;
 mod probe;

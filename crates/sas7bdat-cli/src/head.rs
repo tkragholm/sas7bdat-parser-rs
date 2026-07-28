@@ -24,7 +24,12 @@ pub struct PreviewTable {
 ///
 /// Returns an error if the file can't be opened or a requested column doesn't exist.
 pub fn run_head(args: &HeadArgs) -> Result<()> {
-    let dataset = friendly::open(&args.input)?;
+    let dataset = friendly::open_with(
+        &args.input,
+        sas7bdat::OpenOptions::builder()
+            .io_backend(args.io_backend.preference())
+            .build(),
+    )?;
     let selection = ColumnSelection {
         names: args.columns.as_deref(),
         indices: args.column_indices.as_deref(),

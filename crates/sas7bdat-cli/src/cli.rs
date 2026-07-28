@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use sas7bdat::IoBackendPreference;
 use std::path::PathBuf;
 
 const EXAMPLES: &str = "\
@@ -95,6 +96,10 @@ pub struct ConvertArgs {
     /// Value-label catalog (.sas7bcat) used to attach labels to the output.
     #[arg(long, value_name = "FILE", help_heading = "Input")]
     pub catalog: Option<PathBuf>,
+
+    /// How to read the input: memory-map, sequential reads, or auto.
+    #[arg(long = "io-backend", value_enum, default_value_t = IoBackend::Auto, help_heading = "Input")]
+    pub io_backend: IoBackend,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -269,6 +274,30 @@ pub enum ProgressMode {
     Never,
 }
 
+/// How the reader gets at the file's bytes.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default, ValueEnum)]
+pub enum IoBackend {
+    /// Memory-map local files; read network shares sequentially (default).
+    #[default]
+    Auto,
+    /// Always memory-map. Fastest locally; pathological over a network share, where every
+    /// access becomes a round-trip.
+    Mmap,
+    /// Always read sequentially. The safe choice for network storage.
+    Buffered,
+}
+
+impl IoBackend {
+    #[must_use]
+    pub const fn preference(self) -> IoBackendPreference {
+        match self {
+            Self::Auto => IoBackendPreference::Auto,
+            Self::Mmap => IoBackendPreference::MmapPreferred,
+            Self::Buffered => IoBackendPreference::BufferedOnly,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum RecursionMode {
     Recursive,
@@ -316,6 +345,10 @@ pub struct InspectArgs {
         value_name = "IDX[,IDX]"
     )]
     pub column_indices: Option<Vec<usize>>,
+
+    /// How to read the input: memory-map, sequential reads, or auto.
+    #[arg(long = "io-backend", value_enum, default_value_t = IoBackend::Auto, help_heading = "Input")]
+    pub io_backend: IoBackend,
 }
 
 #[derive(Args, Clone)]
@@ -345,6 +378,10 @@ pub struct HeadArgs {
         value_name = "IDX[,IDX]"
     )]
     pub column_indices: Option<Vec<usize>>,
+
+    /// How to read the input: memory-map, sequential reads, or auto.
+    #[arg(long = "io-backend", value_enum, default_value_t = IoBackend::Auto, help_heading = "Input")]
+    pub io_backend: IoBackend,
 }
 
 #[derive(Args, Clone)]

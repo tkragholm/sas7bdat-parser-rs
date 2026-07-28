@@ -301,6 +301,7 @@ fn open_dataset(input: &Path, args: &ConvertArgs) -> Result<Dataset> {
         } else {
             ValidationMode::Permissive
         })
+        .io_backend(args.io_backend.preference())
         .build();
     friendly::open_with(input, open)
 }

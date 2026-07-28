@@ -18,7 +18,12 @@ const SAMPLE_ROWS: u64 = 5;
 ///
 /// Returns an error if opening or rendering the dataset fails.
 pub fn run_inspect(args: &InspectArgs) -> Result<()> {
-    let dataset = friendly::open(&args.input)?;
+    let dataset = friendly::open_with(
+        &args.input,
+        sas7bdat::OpenOptions::builder()
+            .io_backend(args.io_backend.preference())
+            .build(),
+    )?;
     let selection = ColumnSelection {
         names: args.columns.as_deref(),
         indices: args.column_indices.as_deref(),

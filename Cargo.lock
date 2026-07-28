@@ -3421,6 +3421,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simdutf8",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
