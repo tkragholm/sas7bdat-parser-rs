@@ -69,14 +69,21 @@ fn balanced_chunk_size(
 ) -> usize {
     let target_chunks = workers.saturating_mul(CHUNK_OVERSUBSCRIBE).max(1);
     let by_oversubscribe = page_count.div_ceil(target_chunks).max(1);
-    let pages_per_batch = usize::try_from(
+    by_oversubscribe.max(pages_per_batch(rows_per_page, target_rows))
+}
+
+/// Pages needed to fill one target batch. A chunk smaller than this shreds the scan into
+/// undersized batches: each chunk decodes with its own accumulator and flushes at its end,
+/// so the chunk size is also the batch size. On a wide table (4 rows per page here) a chunk
+/// picked purely by byte size would emit ~136-row batches and drown the writer in overhead.
+fn pages_per_batch(rows_per_page: u64, target_rows: usize) -> usize {
+    usize::try_from(
         u64::try_from(target_rows)
             .unwrap_or(u64::MAX)
             .div_ceil(rows_per_page.max(1)),
     )
     .unwrap_or(1)
-    .max(1);
-    by_oversubscribe.max(pages_per_batch)
+    .max(1)
 }
 
 /// Delivers buffered batches to `f` in strict chunk order, starting at
@@ -1056,28 +1063,64 @@ impl ScanBuilder<'_> {
             return Ok(None);
         }
 
-        let file_bytes: &[u8] = match &self.ds.file.source {
-            FileSource::Bytes(bytes) => bytes.as_ref(),
-            FileSource::Mmap(mmap) => &mmap[..],
-            FileSource::Path(_) => return Ok(None),
+        // Mapped and in-memory sources decode straight out of one contiguous buffer. A path
+        // source has no buffer to decode from, so pages arrive as extents streamed by a small
+        // pool of concurrent positional reads — see `super::extent`.
+        let mapped: Option<&[u8]> = match &self.ds.file.source {
+            FileSource::Bytes(bytes) => Some(bytes.as_ref()),
+            FileSource::Mmap(mmap) => Some(&mmap[..]),
+            FileSource::Path(_) => None,
+        };
+        let source_path: Option<&std::path::Path> = match &self.ds.file.source {
+            FileSource::Path(path) => Some(path.as_path()),
+            _ => None,
         };
 
-        let window = super::raw::PageWindow::whole_file(file_bytes);
         let worker_capacity_hint = plan.capacity_hint_rows.div_ceil(workers).max(1);
         super::raw::RawScanPlan::validate_builder(self)?;
         if usize::from(self.ds.layout.row_len) == 0 {
             return Ok(Some(ScanStats::default()));
         }
 
-        let chunk_size = balanced_chunk_size(
-            page_count,
-            workers,
-            self.ds.layout.rows_per_page,
-            plan.batch_row_capacity,
-        );
+        // Extent-sized chunks for streamed sources: the chunk IS the unit of I/O there, so it
+        // is sized by the measured best read size rather than by worker count.
+        let chunk_size = if mapped.is_some() {
+            balanced_chunk_size(
+                page_count,
+                workers,
+                self.ds.layout.rows_per_page,
+                plan.batch_row_capacity,
+            )
+        } else {
+            // Extent size is an I/O choice, but the chunk is also the batch boundary, so it
+            // must still cover one batch — otherwise wide tables get tiny batches.
+            super::extent::pages_per_extent(plan.raw.page_size()).max(pages_per_batch(
+                self.ds.layout.rows_per_page,
+                plan.batch_row_capacity,
+            ))
+        };
         let chunks: Vec<&[crate::internal::PageDescriptor]> =
             descriptors.pages.chunks(chunk_size).collect();
         let chunk_count = chunks.len();
+        // Byte span per chunk, precomputed so the reader threads do no descriptor work: each
+        // is one contiguous read covering that chunk's pages. Empty for mapped sources.
+        let spans: Vec<(u64, usize)> = if mapped.is_some() {
+            Vec::new()
+        } else {
+            let raw = &plan.raw;
+            chunks
+                .iter()
+                .map(|chunk| {
+                    super::extent::chunk_span(
+                        chunk,
+                        |page_index| raw.page_offset(page_index),
+                        raw.page_size(),
+                    )
+                    .ok_or_else(|| Error::unsupported("page span overflow while planning reads"))
+                })
+                .collect::<Result<Vec<_>>>()?
+        };
+        let spans = &spans;
         // Declared outside `thread::scope` so the shared reference satisfies the `'scope` bound.
         let next_chunk_idx = AtomicUsize::new(0);
         let context = DescriptorChunkContext {
@@ -1101,35 +1144,96 @@ impl ScanBuilder<'_> {
             let chunks = &chunks;
             let mut handles = Vec::with_capacity(workers);
 
-            // A fixed pool of `workers` threads pulls chunk indices from a shared counter, so
-            // `chunk_count` can exceed `workers` (giving stealing slack to balance uneven
-            // chunks) without spawning more threads than the resolved core budget. Batches stay
-            // tagged with their chunk index, so the consumer's ordered delivery is unaffected.
-            for _ in 0..workers {
-                let tx = tx.clone();
-                let stop = stop.clone();
-                let context = &context;
-                handles.push(scope.spawn(move || {
-                    let mut worker_stats = ScanStats::default();
-                    loop {
-                        let idx = next_chunk_idx.fetch_add(1, Ordering::Relaxed);
-                        if idx >= chunk_count {
-                            break;
+            let (io_err_tx, io_err_rx) = sync_channel::<Error>(workers.max(1));
+
+            if let Some(file_bytes) = mapped {
+                // A fixed pool of `workers` threads pulls chunk indices from a shared counter,
+                // so `chunk_count` can exceed `workers` (giving stealing slack to balance
+                // uneven chunks) without spawning more threads than the resolved core budget.
+                // Batches stay tagged with their chunk index, so ordered delivery is unaffected.
+                let window = super::raw::PageWindow::whole_file(file_bytes);
+                for _ in 0..workers {
+                    let tx = tx.clone();
+                    let stop = stop.clone();
+                    let context = &context;
+                    handles.push(scope.spawn(move || {
+                        let mut worker_stats = ScanStats::default();
+                        loop {
+                            let idx = next_chunk_idx.fetch_add(1, Ordering::Relaxed);
+                            if idx >= chunk_count {
+                                break;
+                            }
+                            let chunk_stats = stream_batches_for_descriptor_chunk(
+                                window,
+                                chunks[idx],
+                                idx,
+                                context,
+                                &tx,
+                                stop.as_ref(),
+                            );
+                            merge_scan_stats(&mut worker_stats, &chunk_stats);
                         }
-                        let chunk_stats = stream_batches_for_descriptor_chunk(
-                            window,
-                            chunks[idx],
-                            idx,
-                            context,
-                            &tx,
-                            stop.as_ref(),
-                        );
-                        merge_scan_stats(&mut worker_stats, &chunk_stats);
-                    }
-                    worker_stats
-                }));
+                        worker_stats
+                    }));
+                }
+            } else if let Some(path) = source_path {
+                // Streamed source: a few readers keep large positional reads in flight while
+                // the decode threads consume whole extents. The two pools are sized
+                // independently — reads peak at a handful of concurrent requests on network
+                // storage, decode scales with cores.
+                let stream = super::extent::spawn_readers(
+                    scope,
+                    super::extent::ReadPlan {
+                        path,
+                        chunks,
+                        spans,
+                        next_chunk_idx,
+                    },
+                    &stop,
+                    workers,
+                    &io_err_tx,
+                );
+                let extents = Arc::new(std::sync::Mutex::new(stream.extents));
+                let recycle = stream.recycle;
+                for _ in 0..workers {
+                    let tx = tx.clone();
+                    let stop = stop.clone();
+                    let context = &context;
+                    let extents = Arc::clone(&extents);
+                    let recycle = recycle.clone();
+                    handles.push(scope.spawn(move || {
+                        let mut worker_stats = ScanStats::default();
+                        loop {
+                            if stop.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            let Some(extent) = extents.lock().ok().and_then(|rx| rx.recv().ok())
+                            else {
+                                break;
+                            };
+                            let window = super::raw::PageWindow {
+                                bytes: &extent.bytes,
+                                base_offset: extent.base_offset,
+                            };
+                            let chunk_stats = stream_batches_for_descriptor_chunk(
+                                window,
+                                chunks[extent.chunk_idx],
+                                extent.chunk_idx,
+                                context,
+                                &tx,
+                                stop.as_ref(),
+                            );
+                            merge_scan_stats(&mut worker_stats, &chunk_stats);
+                            let mut bytes = extent.bytes;
+                            bytes.clear();
+                            let _ = recycle.send(bytes);
+                        }
+                        worker_stats
+                    }));
+                }
             }
             drop(tx);
+            drop(io_err_tx);
 
             let mut buffered = (0..chunk_count)
                 .map(|_| VecDeque::<OwnedColumnarBatch>::new())
@@ -1204,6 +1308,12 @@ impl ScanBuilder<'_> {
                     .join()
                     .map_err(|_| Error::unsupported("parallel batch worker panicked"))?;
                 merge_scan_stats(&mut total, &worker_stats);
+            }
+            // A read that failed mid-stream closes its extent channel, which the decoders
+            // read as "no more work" — so without this the scan would return a SHORT result
+            // and call it success. Surface the first I/O error instead.
+            if let Ok(err) = io_err_rx.try_recv() {
+                return Err(err);
             }
             total.decode_batches = delivered_batches;
             total.rows_emitted = delivered_rows;

@@ -144,6 +144,9 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         .set_statistics_truncate_length(Some(STATISTICS_TRUNCATE_LENGTH));
     builder = apply_column_encodings(builder, &schema);
     let props = builder.build();
+    // Kept for the per-batch conversion below: `visit_owned_batches` hands back raw column
+    // buffers, which the writer's schema turns into record batches.
+    let batch_schema = SchemaRef::clone(&schema);
     let mut writer = ArrowWriter::try_new(file, schema, Some(props))?;
     if options.embed_metadata {
         // Write as a Parquet file-level key-value pair (not Arrow schema metadata), so it is
@@ -151,9 +154,14 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         let json = sas_metadata_json(dataset, options.scan.projection)?;
         writer.append_key_value_metadata(KeyValue::new(PARQUET_METADATA_KEY.to_string(), json));
     }
-    let stats = scan.visit_arrow_batches(|batch| {
+    // Owned batches rather than `visit_arrow_batches`: the borrowed-batch scan has no
+    // parallel branch, so it decodes on one core and — for a path source — reads one page at
+    // a time. The owned path streams extents through the parallel decoder and converts here,
+    // which is the same Arrow conversion `visit_arrow_batches` would have done.
+    let stats = scan.visit_owned_batches(|batch| {
+        let record_batch = batch.into_arrow_record_batch(SchemaRef::clone(&batch_schema))?;
         writer
-            .write(&batch)
+            .write(&record_batch)
             .map_err(|err| Error::arrow(err.to_string()))?;
         Ok(ControlFlow::Continue(()))
     })?;

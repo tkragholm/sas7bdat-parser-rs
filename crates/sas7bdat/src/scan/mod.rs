@@ -25,6 +25,7 @@ use std::{
 
 mod batch;
 mod builder;
+mod extent;
 mod numeric;
 mod plan;
 mod raw;

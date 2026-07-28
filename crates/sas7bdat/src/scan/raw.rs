@@ -315,8 +315,12 @@ impl RawScanPlan {
             .is_some_and(|limit| stats.rows_emitted >= limit)
     }
 
-    const fn page_offset(self, page_index: PageIndex) -> u64 {
+    pub(super) const fn page_offset(self, page_index: PageIndex) -> u64 {
         self.data_offset + page_index.0 * self.page_stride
+    }
+
+    pub(super) const fn page_size(self) -> usize {
+        self.page_size
     }
 }
 
