@@ -73,4 +73,4 @@ different implementation with a `dataset`/`parser`/`cell` module layout and a bu
 `sas7` binary.
 
 [Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/v0.5.0...HEAD
-[0.3.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/v0.5.0
+[0.3.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.3.0

@@ -49,5 +49,7 @@ commit_parsers = [
 ]
 filter_commits = true
 protect_breaking_commits = true
-tag_pattern = "v[0-9]*"
+# Both release-tag shapes: `v0.5.0` marks a Python-package release, `sas7bdat-v0.3.0`
+# a crate release. A crate-scoped run needs the latter to bound its sections.
+tag_pattern = "(sas7bdat-)?v[0-9]+.*"
 sort_commits = "oldest"
