@@ -148,6 +148,17 @@ def main() -> int:
         default="1,4,8,16",
         help="comma-separated reader counts (default 1,4,8,16)",
     )
+    parser.add_argument(
+        "--blocks",
+        default="1,4,8,16,32",
+        help="comma-separated read sizes in MB to sweep (default 1,4,8,16,32)",
+    )
+    parser.add_argument(
+        "--block-readers",
+        type=int,
+        default=4,
+        help="reader count held fixed during the block-size sweep (default 4)",
+    )
     args = parser.parse_args()
 
     list_drives()
@@ -163,13 +174,14 @@ def main() -> int:
     size = os.path.getsize(path)
     sample = min(int(args.sample_gb * GB), size)
     counts = [1] + [int(t) for t in args.threads.split(",") if t.strip() and int(t) > 1]
+    blocks = [int(b) * MB for b in args.blocks.split(",") if b.strip()]
 
     # Every measurement reads a REGION OF THE FILE NOTHING HAS TOUCHED YET. Reusing the
     # same bytes would measure the OS file cache instead of the storage: the second pass
     # comes out of RAM at tens of GB/s and reports an impossible speedup.
-    needed = sample * len(counts)
-    if needed > size:
-        sample = size // len(counts)
+    slots = len(counts) + len(blocks)
+    if sample * slots > size:
+        sample = size // slots
         print(f"\n  note: sample reduced to {sample / GB:,.2f} GB so each measurement gets fresh bytes")
     if sample < 64 * MB:
         print("\n  file too small to measure meaningfully", file=sys.stderr)
@@ -181,16 +193,32 @@ def main() -> int:
 
     print(f"  {'readers':>8}  {'MB/s':>9}  {'vs 1 stream':>12}   projected full pass")
     base = 0.0
-    for slot, count in enumerate(counts):
+    best_concurrent = 0.0
+    slot = 0
+    for count in counts:
         offset = slot * sample
+        slot += 1
         if count == 1:
             base = sequential_read(path, offset, sample)
             rate, note = base, "  (sequential)"
         else:
             rate, note = parallel_read(path, offset, sample, count), ""
+        best_concurrent = max(best_concurrent, rate)
         speedup = f"{rate / base:,.2f}x" if base else "n/a"
         minutes = size / MB / rate / 60 if rate else float("inf")
         print(f"  {count:>8}  {rate:>9,.0f}  {speedup:>12}   {minutes:>6,.1f} min{note}")
+
+    # Read size at fixed concurrency: this picks the extent size the reader should use.
+    readers = max(1, args.block_readers)
+    print(f"\n  block-size sweep at {readers} readers")
+    print(f"  {'block':>8}  {'MB/s':>9}  {'vs best above':>14}   projected full pass")
+    for block in blocks:
+        offset = slot * sample
+        slot += 1
+        rate = parallel_read(path, offset, sample, readers, block)
+        ratio = f"{rate / best_concurrent:,.2f}x" if best_concurrent else "n/a"
+        minutes = size / MB / rate / 60 if rate else float("inf")
+        print(f"  {block // MB:>6} MB  {rate:>9,.0f}  {ratio:>14}   {minutes:>6,.1f} min")
 
     print("\nHow to read this:")
     print("  * The 'projected full pass' column is the floor for ONE read of the file.")
