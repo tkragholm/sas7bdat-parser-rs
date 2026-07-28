@@ -3417,6 +3417,7 @@ dependencies = [
  "memchr",
  "memmap2",
  "rayon",
+ "sas7bdat",
  "serde",
  "serde_json",
  "simdutf8",

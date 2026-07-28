@@ -33,6 +33,10 @@ mod dataset;
 pub mod dictionary;
 mod encoding;
 mod error;
+// In-repo tooling for the benchmark harness and the dev-tools CLI binaries, not
+// reader API — consumers have no fixture corpus to point it at. Gated the same way
+// `test_utils` is; the self dev-dependency in Cargo.toml turns it on for benches.
+#[cfg(any(test, feature = "fixture-catalog"))]
 mod fixture_catalog;
 mod internal;
 mod labels;
@@ -62,6 +66,7 @@ pub use error::{
     ArrowError, CompressionError, CorruptionError, DecodeError, Error, HeaderError, IoError,
     MetadataError, ProjectionError, Result, UnsupportedError,
 };
+#[cfg(any(test, feature = "fixture-catalog"))]
 pub use fixture_catalog::{
     FixtureCatalog, FixtureEntry, FixtureProfile, FixtureStatus, LogicalTypeCounts, NamedCount,
     ProjectionPreset, SampleSummary, TemporalFormatSummary, WidthSummary, build_catalog,

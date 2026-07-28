@@ -21,7 +21,6 @@ memchr = { workspace = true }
 memmap2 = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 simdutf8 = { workspace = true }
 # Optional string-column dictionary encoding (feature = "dictionary").
 ahash = { version = "0.8.7", optional = true }
@@ -31,6 +30,12 @@ cardinality-estimator = { version = "1.0.1", optional = true }
 [dev-dependencies]
 criterion = { workspace = true }
 csv = { workspace = true }
+# Only examples/ and benches/ use it; it was a regular dependency, so every
+# consumer of the published crate compiled it for nothing.
+serde_json = { workspace = true }
+# Self dev-dependency: turns `fixture-catalog` on for tests, benches and examples
+# without exposing it to consumers, so `cargo bench` needs no extra flags.
+sas7bdat = { path = ".", features = ["fixture-catalog"] }
 
 [[example]]
 name = "bench_dict"
@@ -59,6 +64,10 @@ arrow = ["dep:arrow-array", "dep:arrow-schema"]
 hotpath-profile = ["dep:hotpath"]
 # Exposes `test_utils` (synthetic dataset builders) for the `wide_table` benchmark.
 internal-bench = []
+# Exposes `fixture_catalog` (corpus profiling for the benchmark harness and the
+# dev-tools CLI binaries). Off by default: it is in-repo tooling, not reader API,
+# and consumers of the crate have no fixture corpus to point it at.
+fixture-catalog = []
 # String-column dictionary encoding: HLL cardinality gate + lasso2 interner.
 dictionary = ["dep:ahash", "dep:lasso2", "dep:cardinality-estimator"]
 

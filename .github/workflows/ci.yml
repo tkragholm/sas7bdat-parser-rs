@@ -64,6 +64,40 @@ jobs:
       - name: Feature combinations
         run: cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
 
+  # Coverage of the published library only. The plugins are exercised through their
+  # Python/R test suites, and the CLI has no integration tests to measure.
+  #
+  # No --fail-under-lines yet: the number (~69%) is a starting point, and the gaps
+  # worth closing are the error and format-variant paths, not the total. Add a
+  # ratchet once it has settled, so it prevents regressions rather than demanding a
+  # sprint. Note that region coverage flatters SIMD code — a chunk loop reads as
+  # covered when only the wide path ran, never the remainder.
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - name: Install llvm-tools
+        run: rustup component add llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Collect coverage
+        run: cargo llvm-cov --no-report -p sas7bdat --features arrow,dictionary
+      - name: Summary
+        run: >
+          cargo llvm-cov report --summary-only
+          --ignore-filename-regex 'test_utils\.rs|benches/|examples/'
+      - name: LCOV report
+        run: >
+          cargo llvm-cov report --lcov --output-path lcov.info
+          --ignore-filename-regex 'test_utils\.rs|benches/|examples/'
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage-lcov
+          path: lcov.info
+
   audit:
     name: cargo audit
     runs-on: ubuntu-latest

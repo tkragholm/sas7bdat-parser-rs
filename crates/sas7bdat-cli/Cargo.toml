@@ -73,7 +73,13 @@ aliases = []
 dir-mapper = []
 # Developer/profiling binaries. The tracing stack is theirs alone (only
 # sas7bdat-corpus-profile uses it), so it stays out of the shipped `sas7bdat`.
-dev-tools = ["dep:tracing", "dep:tracing-indicatif", "dep:tracing-subscriber"]
+dev-tools = [
+  "dep:tracing",
+  "dep:tracing-indicatif",
+  "dep:tracing-subscriber",
+  # the corpus binaries drive the core crate's fixture profiling
+  "sas7bdat/fixture-catalog",
+]
 
 [dependencies]
 anyhow = { workspace = true }
