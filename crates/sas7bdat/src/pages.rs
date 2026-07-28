@@ -134,6 +134,66 @@ fn accumulate_ns(acc: &mut u128, start: Option<Instant>) {
 /// size, which measured highest on network storage.
 const DESCRIPTOR_BLOCK_BYTES: usize = 4 * 1024 * 1024;
 
+/// Read one page's header fields and classify it into a descriptor.
+///
+/// `row_base` is the file-wide index of this page's first row, which the caller carries
+/// forward: the classifier needs it to cap the page at the dataset's declared row count.
+fn compile_one_descriptor<const PROFILE: bool>(
+    layout: &LayoutPlan,
+    page: &[u8],
+    page_index: u64,
+    row_base: u64,
+    row_spans: &mut Vec<RowSpan>,
+    breakdown: &mut DescriptorBreakdown,
+) -> Result<PageDescriptor> {
+    let header_start = profile_now::<PROFILE>();
+    let header_size = layout.header.page_header_size as usize;
+    let page_type = read_header_u16(page, header_size - 8, layout)?;
+    let page_row_count = u64::from(read_header_u16(page, header_size - 6, layout)?);
+    let subheader_count = u64::from(read_header_u16(page, header_size - 4, layout)?);
+    accumulate_ns(&mut breakdown.header_read_ns, header_start);
+
+    let classify_start = profile_now::<PROFILE>();
+    let descriptor = classify_descriptor(
+        layout,
+        page,
+        DescriptorInputs {
+            page_index,
+            page_type,
+            page_row_count,
+            subheader_count,
+            row_base,
+        },
+        row_spans,
+    );
+    accumulate_ns(&mut breakdown.classify_ns, classify_start);
+    descriptor
+}
+
+/// Compile the descriptor for a single page, appending any row spans it produces to
+/// `row_spans` (so `row_span_start` indexes into whatever vector the caller passes).
+///
+/// The fused scan uses this to build descriptors from the same extents it decodes, instead of
+/// walking the whole file first. It is the caller's job to check the page geometry once up
+/// front — [`compile_page_descriptors`] does that itself and this does not.
+pub(crate) fn compile_page_descriptor(
+    layout: &LayoutPlan,
+    page: &[u8],
+    page_index: u64,
+    row_base: u64,
+    row_spans: &mut Vec<RowSpan>,
+) -> Result<PageDescriptor> {
+    let mut discarded = DescriptorBreakdown::default();
+    compile_one_descriptor::<false>(
+        layout,
+        page,
+        page_index,
+        row_base,
+        row_spans,
+        &mut discarded,
+    )
+}
+
 fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
     reader: &mut R,
     layout: &LayoutPlan,
@@ -188,34 +248,14 @@ fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
         accumulate_ns(&mut breakdown.page_read_ns, read_start);
         breakdown.pages_seen += 1;
 
-        let header_start = profile_now::<PROFILE>();
-        let page_type = read_header_u16(page, header.page_header_size as usize - 8, layout)?;
-        let page_row_count = u64::from(read_header_u16(
-            page,
-            header.page_header_size as usize - 6,
-            layout,
-        )?);
-        let subheader_count = u64::from(read_header_u16(
-            page,
-            header.page_header_size as usize - 4,
-            layout,
-        )?);
-        accumulate_ns(&mut breakdown.header_read_ns, header_start);
-
-        let classify_start = profile_now::<PROFILE>();
-        let descriptor = classify_descriptor(
+        let descriptor = compile_one_descriptor::<PROFILE>(
             layout,
             page,
-            DescriptorInputs {
-                page_index,
-                page_type,
-                page_row_count,
-                subheader_count,
-                row_base,
-            },
+            page_index,
+            row_base,
             &mut row_spans,
+            &mut breakdown,
         )?;
-        accumulate_ns(&mut breakdown.classify_ns, classify_start);
 
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);
@@ -271,34 +311,14 @@ fn compile_page_descriptors_inner_in_memory<const PROFILE: bool>(
         accumulate_ns(&mut breakdown.page_read_ns, read_start);
         breakdown.pages_seen += 1;
 
-        let header_start = profile_now::<PROFILE>();
-        let page_type = read_header_u16(page, header.page_header_size as usize - 8, layout)?;
-        let page_row_count = u64::from(read_header_u16(
-            page,
-            header.page_header_size as usize - 6,
-            layout,
-        )?);
-        let subheader_count = u64::from(read_header_u16(
-            page,
-            header.page_header_size as usize - 4,
-            layout,
-        )?);
-        accumulate_ns(&mut breakdown.header_read_ns, header_start);
-
-        let classify_start = profile_now::<PROFILE>();
-        let descriptor = classify_descriptor(
+        let descriptor = compile_one_descriptor::<PROFILE>(
             layout,
             page,
-            DescriptorInputs {
-                page_index,
-                page_type,
-                page_row_count,
-                subheader_count,
-                row_base,
-            },
+            page_index,
+            row_base,
             &mut row_spans,
+            &mut breakdown,
         )?;
-        accumulate_ns(&mut breakdown.classify_ns, classify_start);
 
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);

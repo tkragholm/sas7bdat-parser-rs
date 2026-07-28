@@ -466,6 +466,14 @@ impl Dataset {
         self.projection().columns(names.iter().copied()).build()
     }
 
+    /// Whether the descriptor table has already been compiled and cached.
+    ///
+    /// The fused scan compiles descriptors as it decodes, which is only worth doing when the
+    /// table isn't already sitting in the cache from an earlier scan.
+    pub(crate) fn has_cached_descriptors(&self) -> bool {
+        self.descriptors.lock().is_ok_and(|guard| guard.is_some())
+    }
+
     pub(crate) fn descriptors(&self) -> Result<Arc<PageDescriptorTable>> {
         let descriptors = {
             let mut guard = self

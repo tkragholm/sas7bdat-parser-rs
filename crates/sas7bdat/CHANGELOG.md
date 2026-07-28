@@ -15,6 +15,26 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+### Added
+
+- Single-pass owned-batch scans of path sources. Page descriptors are now compiled from
+  the same 4 MB extents that feed decode, so the file is read once rather than twice —
+  once for the descriptor table, once for the rows. `row_base` is a running total, so a
+  sequential stage sits between the concurrent readers and the decode pool, reordering
+  extents and carrying the row index forward. The descriptor table is never built, which
+  also drops its memory: a compressed dataset previously held one row span per row for the
+  whole scan.
+
+  Fusion applies to `visit_owned_batches` (and so to the CLI's parquet export and the
+  Polars plugin) when the source is an unmapped path, the scan covers every row, and the
+  descriptor table isn't already cached. Everything else keeps the two-pass path.
+
+### Fixed
+
+- A streamed parallel scan of a path source could hang if the consumer stopped early. The
+  scan held a receiver open past the point its workers had exited, leaving a reader parked
+  on a send that would never complete.
+
 ## [0.4.0] - 2026-07-28
 
 Throughput work for large files on network storage, driven by measurements against SMB

@@ -42,7 +42,7 @@ fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
     }
 }
 
-fn resolved_parallel_workers(parallelism: Parallelism, work_items: usize) -> usize {
+pub(super) fn resolved_parallel_workers(parallelism: Parallelism, work_items: usize) -> usize {
     match parallelism {
         Parallelism::Threads(n) => n.max(1).min(work_items.max(1)),
         Parallelism::Auto => auto_thread_budget().min(work_items.max(1)),
@@ -74,7 +74,7 @@ fn balanced_chunk_size(
 /// flushes at its end, so chunk size sets batch size. Sizing a chunk by bytes alone gives
 /// 136-row batches on a table with 4 rows per page, where per-batch overhead exceeds what
 /// the larger reads save.
-fn pages_per_batch(rows_per_page: u64, target_rows: usize) -> usize {
+pub(super) fn pages_per_batch(rows_per_page: u64, target_rows: usize) -> usize {
     usize::try_from(
         u64::try_from(target_rows)
             .unwrap_or(u64::MAX)
@@ -120,6 +120,108 @@ where
         }
     }
     Ok(ControlFlow::Continue(()))
+}
+
+/// Deliver decoded batches to `f`, in chunk order unless the scan is
+/// [`OrderingMode::Unordered`]. Returns the delivered batch and row counts.
+///
+/// Every chunk index below `chunk_count` must eventually produce a `Finished`, including any
+/// the producer skipped — ordered delivery cannot advance past a chunk that never reports in.
+///
+/// Takes `rx` by value and drops it on the way out, so workers parked on a full channel are
+/// released before the caller joins them.
+pub(super) fn collect_streamed_batches<F>(
+    rx: std::sync::mpsc::Receiver<StreamedBatchMessage>,
+    ordering: OrderingMode,
+    chunk_count: usize,
+    stop: &AtomicBool,
+    f: &mut F,
+) -> Result<(u64, u64)>
+where
+    F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+{
+    let outcome = deliver_streamed_batches(rx, ordering, chunk_count, stop, f);
+    // Any exit that isn't the end of the stream leaves producers still working. They see the
+    // dropped receiver soon enough, but not while parked inside a blocking send.
+    if outcome.is_err() {
+        stop.store(true, Ordering::Relaxed);
+    }
+    outcome
+}
+
+fn deliver_streamed_batches<F>(
+    rx: std::sync::mpsc::Receiver<StreamedBatchMessage>,
+    ordering: OrderingMode,
+    chunk_count: usize,
+    stop: &AtomicBool,
+    f: &mut F,
+) -> Result<(u64, u64)>
+where
+    F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+{
+    let mut buffered = (0..chunk_count)
+        .map(|_| VecDeque::<OwnedColumnarBatch>::new())
+        .collect::<Vec<_>>();
+    let mut finished = vec![false; chunk_count];
+    let mut next_chunk = 0usize;
+    let mut delivered_batches = 0u64;
+    let mut delivered_rows = 0u64;
+
+    for message in rx {
+        match message {
+            StreamedBatchMessage::Batch { chunk_idx, batch } => {
+                if matches!(ordering, OrderingMode::Unordered) {
+                    delivered_batches = delivered_batches.saturating_add(1);
+                    delivered_rows = delivered_rows
+                        .saturating_add(u64::try_from(batch.row_count).unwrap_or(u64::MAX));
+                    if f(batch)?.is_break() {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                } else {
+                    buffered[chunk_idx].push_back(batch);
+                    if drain_ordered_batches(
+                        &mut buffered,
+                        &finished,
+                        &mut next_chunk,
+                        chunk_count,
+                        &mut delivered_batches,
+                        &mut delivered_rows,
+                        f,
+                    )?
+                    .is_break()
+                    {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                }
+            }
+            StreamedBatchMessage::Finished { chunk_idx } => {
+                finished[chunk_idx] = true;
+                if matches!(ordering, OrderingMode::Stable)
+                    && drain_ordered_batches(
+                        &mut buffered,
+                        &finished,
+                        &mut next_chunk,
+                        chunk_count,
+                        &mut delivered_batches,
+                        &mut delivered_rows,
+                        f,
+                    )?
+                    .is_break()
+                {
+                    stop.store(true, Ordering::Relaxed);
+                    break;
+                }
+            }
+            StreamedBatchMessage::Error(err) => {
+                stop.store(true, Ordering::Relaxed);
+                return Err(err);
+            }
+        }
+    }
+
+    Ok((delivered_batches, delivered_rows))
 }
 
 pub struct ScanBuilder<'a> {
@@ -548,7 +650,6 @@ impl ScanBuilder<'_> {
             plan.batch_row_capacity,
         );
         let context = DescriptorChunkContext {
-            descriptor_table: descriptors.as_ref(),
             raw_plan: &plan.raw,
             batch_plan: &plan.batch,
             row_count: self.ds.metadata.row_count,
@@ -560,7 +661,9 @@ impl ScanBuilder<'_> {
         let results = descriptors
             .pages
             .par_chunks(chunk_size)
-            .map(|chunk| collect_batches_for_descriptor_chunk(window, chunk, &context))
+            .map(|chunk| {
+                collect_batches_for_descriptor_chunk(window, descriptors.as_ref(), chunk, &context)
+            })
             .collect::<Vec<_>>();
 
         let mut batches = Vec::new();
@@ -728,19 +831,21 @@ const fn store_batch_counters(stats: &mut ScanStats, counters: super::batch::Bat
     stats.batch_fallback_cells = counters.fallback;
 }
 
-struct DescriptorChunkContext<'a> {
-    descriptor_table: &'a crate::internal::PageDescriptorTable,
-    raw_plan: &'a super::raw::RawScanPlan,
-    batch_plan: &'a BatchDecodePlan,
-    row_count: u64,
-    target_rows: usize,
-    capacity_hint_rows: usize,
-    row_len: usize,
-    columnar: bool,
+/// Inputs every chunk decode shares. The descriptor table is passed separately because the
+/// fused scan builds one per extent rather than one for the whole file.
+pub(super) struct DescriptorChunkContext<'a> {
+    pub raw_plan: &'a super::raw::RawScanPlan,
+    pub batch_plan: &'a BatchDecodePlan,
+    pub row_count: u64,
+    pub target_rows: usize,
+    pub capacity_hint_rows: usize,
+    pub row_len: usize,
+    pub columnar: bool,
 }
 
 fn collect_batches_for_descriptor_chunk(
     window: super::raw::PageWindow<'_>,
+    descriptor_table: &crate::internal::PageDescriptorTable,
     descriptor_chunk: &[crate::internal::PageDescriptor],
     context: &DescriptorChunkContext<'_>,
 ) -> Result<Vec<OwnedColumnarBatch>> {
@@ -757,7 +862,7 @@ fn collect_batches_for_descriptor_chunk(
     .with_materialize_threads(1);
 
     let ctx = ColumnarDecodeCtx {
-        descriptors: context.descriptor_table,
+        descriptors: descriptor_table,
         raw_plan: context.raw_plan,
         window,
         row_len: context.row_len,
@@ -772,7 +877,7 @@ fn collect_batches_for_descriptor_chunk(
     Ok(batches)
 }
 
-enum StreamedBatchMessage {
+pub(super) enum StreamedBatchMessage {
     Batch {
         chunk_idx: usize,
         batch: OwnedColumnarBatch,
@@ -783,8 +888,9 @@ enum StreamedBatchMessage {
     Error(Error),
 }
 
-fn stream_batches_for_descriptor_chunk(
+pub(super) fn stream_batches_for_descriptor_chunk(
     window: super::raw::PageWindow<'_>,
+    descriptor_table: &crate::internal::PageDescriptorTable,
     descriptor_chunk: &[crate::internal::PageDescriptor],
     chunk_idx: usize,
     context: &DescriptorChunkContext<'_>,
@@ -801,7 +907,7 @@ fn stream_batches_for_descriptor_chunk(
     let mut decode_batches = 0u64;
 
     let ctx = ColumnarDecodeCtx {
-        descriptors: context.descriptor_table,
+        descriptors: descriptor_table,
         raw_plan: context.raw_plan,
         window,
         row_len: context.row_len,
@@ -855,7 +961,7 @@ fn stream_batches_for_descriptor_chunk(
     stats
 }
 
-const fn merge_scan_stats(into: &mut ScanStats, from: &ScanStats) {
+pub(super) const fn merge_scan_stats(into: &mut ScanStats, from: &ScanStats) {
     into.rows_seen = into.rows_seen.saturating_add(from.rows_seen);
     into.rows_emitted = into.rows_emitted.saturating_add(from.rows_emitted);
     into.pages_seen = into.pages_seen.saturating_add(from.pages_seen);
@@ -977,6 +1083,11 @@ impl ScanBuilder<'_> {
     {
         let plan = ScanPlan::new(self)?;
         let column_major = matches!(self.column_major, ColumnMajorDecode::On);
+        // One pass where it applies: compiling descriptors and decoding rows from the same
+        // reads halves the bytes moved, which is the whole cost on a network share.
+        if let Some(stats) = super::fused::try_stream_batches_fused(self, &plan, column_major, f)? {
+            return Ok(stats);
+        }
         if let Some(stats) = self.try_stream_batches_parallel(&plan, column_major, f)? {
             return Ok(stats);
         }
@@ -1119,10 +1230,10 @@ impl ScanBuilder<'_> {
                 .collect::<Result<Vec<_>>>()?
         };
         let spans = &spans;
-        // Declared outside `thread::scope` so the shared reference satisfies the `'scope` bound.
+        // Declared outside `thread::scope` so the shared references satisfy the `'scope` bound.
         let next_chunk_idx = AtomicUsize::new(0);
+        let descriptor_table = descriptors.as_ref();
         let context = DescriptorChunkContext {
-            descriptor_table: descriptors.as_ref(),
             raw_plan: &plan.raw,
             batch_plan: &plan.batch,
             row_count: self.ds.metadata.row_count,
@@ -1163,6 +1274,7 @@ impl ScanBuilder<'_> {
                             }
                             let chunk_stats = stream_batches_for_descriptor_chunk(
                                 window,
+                                descriptor_table,
                                 chunks[idx],
                                 idx,
                                 context,
@@ -1183,7 +1295,6 @@ impl ScanBuilder<'_> {
                     scope,
                     super::extent::ReadPlan {
                         path,
-                        chunks,
                         spans,
                         next_chunk_idx,
                     },
@@ -1215,6 +1326,7 @@ impl ScanBuilder<'_> {
                             };
                             let chunk_stats = stream_batches_for_descriptor_chunk(
                                 window,
+                                descriptor_table,
                                 chunks[extent.chunk_idx],
                                 extent.chunk_idx,
                                 context,
@@ -1222,84 +1334,31 @@ impl ScanBuilder<'_> {
                                 stop.as_ref(),
                             );
                             merge_scan_stats(&mut worker_stats, &chunk_stats);
-                            let mut bytes = extent.bytes;
-                            bytes.clear();
-                            let _ = recycle.send(bytes);
+                            let _ = recycle.send(extent.bytes);
                         }
                         worker_stats
                     }));
                 }
+                // The workers hold the only handles that matter now. Keeping these alive here
+                // would leave a reader parked on a send no one will ever receive, or on a
+                // recycled buffer no one will ever return, once the consumer stops early.
+                drop(extents);
+                drop(recycle);
             }
             drop(tx);
             drop(io_err_tx);
 
-            let mut buffered = (0..chunk_count)
-                .map(|_| VecDeque::<OwnedColumnarBatch>::new())
-                .collect::<Vec<_>>();
-            let mut finished = vec![false; chunk_count];
-            let mut next_chunk = 0usize;
-            let mut delivered_batches = 0u64;
-            let mut delivered_rows = 0u64;
-
-            while let Ok(message) = rx.recv() {
-                match message {
-                    StreamedBatchMessage::Batch { chunk_idx, batch } => {
-                        if matches!(self.ordering, OrderingMode::Unordered) {
-                            delivered_batches = delivered_batches.saturating_add(1);
-                            delivered_rows = delivered_rows
-                                .saturating_add(u64::try_from(batch.row_count).unwrap_or(u64::MAX));
-                            if f(batch)?.is_break() {
-                                stop.store(true, Ordering::Relaxed);
-                                break;
-                            }
-                        } else {
-                            buffered[chunk_idx].push_back(batch);
-                            if drain_ordered_batches(
-                                &mut buffered,
-                                &finished,
-                                &mut next_chunk,
-                                chunk_count,
-                                &mut delivered_batches,
-                                &mut delivered_rows,
-                                f,
-                            )?
-                            .is_break()
-                            {
-                                stop.store(true, Ordering::Relaxed);
-                                break;
-                            }
-                        }
-                    }
-                    StreamedBatchMessage::Finished { chunk_idx } => {
-                        finished[chunk_idx] = true;
-                        if matches!(self.ordering, OrderingMode::Stable)
-                            && drain_ordered_batches(
-                                &mut buffered,
-                                &finished,
-                                &mut next_chunk,
-                                chunk_count,
-                                &mut delivered_batches,
-                                &mut delivered_rows,
-                                f,
-                            )?
-                            .is_break()
-                        {
-                            stop.store(true, Ordering::Relaxed);
-                            break;
-                        }
-                    }
-                    StreamedBatchMessage::Error(err) => {
-                        stop.store(true, Ordering::Relaxed);
-                        drop(rx);
+            let (delivered_batches, delivered_rows) =
+                match collect_streamed_batches(rx, self.ordering, chunk_count, stop.as_ref(), f) {
+                    Ok(counts) => counts,
+                    Err(err) => {
                         for handle in handles {
                             let _ = handle.join();
                         }
                         return Err(err);
                     }
-                }
-            }
+                };
 
-            drop(rx);
             let mut total = ScanStats::default();
             for handle in handles {
                 let worker_stats = handle

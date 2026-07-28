@@ -2027,3 +2027,176 @@ mod fallback_append {
         );
     }
 }
+
+/// The fused single-pass scan reads the file once, compiling page descriptors from the same
+/// extents it decodes. These tests pin down when it engages and — the property that makes it
+/// worth having — that engaging it never builds the descriptor table.
+mod fused_scan {
+    use crate::{
+        Dataset, IoBackendPreference, OpenOptions, Parallelism,
+        scan::{ScanBuilder, fused::try_stream_batches_fused, plan::ScanPlan},
+    };
+    use std::{ops::ControlFlow, path::PathBuf};
+
+    /// A multi-page uncompressed fixture: single-page files fall back by design.
+    fn multi_page_fixture() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/raw_data/pandas/0x40controlbyte.sas7bdat")
+    }
+
+    fn open(backend: IoBackendPreference) -> Option<Dataset> {
+        let path = multi_page_fixture();
+        if !path.exists() {
+            return None;
+        }
+        Some(
+            Dataset::open_with(&path, OpenOptions::builder().io_backend(backend).build())
+                .expect("open fixture"),
+        )
+    }
+
+    /// Run the fused path and report the rows it delivered, or `None` if it declined.
+    fn run(builder: &ScanBuilder<'_>) -> Option<u64> {
+        let plan = ScanPlan::new(builder).expect("scan plan");
+        let mut rows = 0u64;
+        let stats = try_stream_batches_fused(builder, &plan, true, &mut |batch| {
+            rows += u64::try_from(batch.row_count).unwrap_or(0);
+            Ok(ControlFlow::Continue(()))
+        })
+        .expect("fused scan");
+        stats.map(|_| rows)
+    }
+
+    #[test]
+    fn reads_every_row_without_compiling_a_descriptor_table() {
+        let Some(ds) = open(IoBackendPreference::BufferedOnly) else {
+            return;
+        };
+        let builder = ds.scan().with_parallelism(Parallelism::Threads(4));
+        let rows = run(&builder).expect("fused path should engage for a multi-page buffered file");
+
+        assert_eq!(rows, ds.metadata().row_count);
+        assert!(
+            !ds.has_cached_descriptors(),
+            "the point of fusing is that the separate descriptor pass never runs"
+        );
+    }
+
+    #[test]
+    fn declines_for_mapped_sources() {
+        let Some(ds) = open(IoBackendPreference::MmapPreferred) else {
+            return;
+        };
+        let builder = ds.scan().with_parallelism(Parallelism::Threads(4));
+        assert!(
+            run(&builder).is_none(),
+            "a mapped file has no reads to save"
+        );
+    }
+
+    #[test]
+    fn declines_once_the_descriptor_table_is_cached() {
+        let Some(ds) = open(IoBackendPreference::BufferedOnly) else {
+            return;
+        };
+        ds.descriptors().expect("descriptors");
+        let builder = ds.scan().with_parallelism(Parallelism::Threads(4));
+        assert!(
+            run(&builder).is_none(),
+            "recompiling descriptors that are already in hand is pure loss"
+        );
+    }
+
+    #[test]
+    fn declines_for_partial_scans() {
+        let Some(ds) = open(IoBackendPreference::BufferedOnly) else {
+            return;
+        };
+        let limited = ds.scan().with_parallelism(Parallelism::Threads(4)).limit(8);
+        assert!(run(&limited).is_none(), "a row limit ends the scan early");
+
+        let selected = ds.scan().with_parallelism(Parallelism::Threads(4)).select(
+            crate::RowSelection::Range {
+                start: crate::types::RowIndex(1),
+                end: crate::types::RowIndex(4),
+            },
+        );
+        assert!(
+            run(&selected).is_none(),
+            "reads are planned from whole-file geometry"
+        );
+    }
+
+    /// 37 MB: several extents, so readers, parse, and decoders are all mid-flight when the
+    /// consumer quits. Each stage has to notice; if one parks on a channel, this hangs.
+    fn multi_extent_fixture() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../fixtures/education-edu-demog-and-geog-estimate/GRF14/grf14_lea_blkgrp.sas7bdat",
+        )
+    }
+
+    #[test]
+    fn stops_when_the_consumer_breaks() {
+        let path = multi_extent_fixture();
+        if !path.exists() {
+            return;
+        }
+        let ds = Dataset::open_with(
+            &path,
+            OpenOptions::builder()
+                .io_backend(IoBackendPreference::BufferedOnly)
+                .build(),
+        )
+        .expect("open fixture");
+
+        let builder = ds.scan().with_parallelism(Parallelism::Threads(4));
+        let plan = ScanPlan::new(&builder).expect("scan plan");
+        let mut batches = 0u32;
+        let stats = try_stream_batches_fused(&builder, &plan, true, &mut |_| {
+            batches += 1;
+            Ok(ControlFlow::Break(()))
+        })
+        .expect("fused scan");
+
+        assert!(stats.is_some(), "fused path should have engaged");
+        assert_eq!(batches, 1, "delivery stops at the first batch");
+    }
+
+    #[test]
+    fn reports_a_consumer_error() {
+        let path = multi_extent_fixture();
+        if !path.exists() {
+            return;
+        }
+        let ds = Dataset::open_with(
+            &path,
+            OpenOptions::builder()
+                .io_backend(IoBackendPreference::BufferedOnly)
+                .build(),
+        )
+        .expect("open fixture");
+
+        let builder = ds.scan().with_parallelism(Parallelism::Threads(4));
+        let plan = ScanPlan::new(&builder).expect("scan plan");
+        let result = try_stream_batches_fused(&builder, &plan, true, &mut |_| {
+            Err(crate::Error::unsupported("consumer gave up"))
+        });
+
+        assert!(
+            result.is_err(),
+            "the consumer's error must reach the caller"
+        );
+    }
+
+    #[test]
+    fn declines_without_a_thread_budget() {
+        let Some(ds) = open(IoBackendPreference::BufferedOnly) else {
+            return;
+        };
+        let builder = ds.scan().with_parallelism(Parallelism::None);
+        assert!(
+            run(&builder).is_none(),
+            "the pipeline needs more than one thread"
+        );
+    }
+}

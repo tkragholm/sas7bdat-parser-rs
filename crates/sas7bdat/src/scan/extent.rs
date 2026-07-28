@@ -66,6 +66,31 @@ pub(super) fn chunk_span(
     Some((start, len))
 }
 
+/// Byte spans for a whole-file scan, planned from the header geometry alone: extent `i` covers
+/// `pages_per_chunk` pages starting at page `i * pages_per_chunk`, with a shorter final extent.
+///
+/// The fused scan needs a read plan before any descriptor exists, so it cannot use
+/// [`chunk_span`]. Returns `None` if the geometry overflows.
+pub(super) fn plan_spans_from_geometry(
+    data_offset: u64,
+    page_size: usize,
+    page_count: u64,
+    pages_per_chunk: usize,
+) -> Option<Vec<(u64, usize)>> {
+    let page_size_u64 = u64::try_from(page_size).ok()?;
+    let per_chunk = u64::try_from(pages_per_chunk.max(1)).ok()?;
+    let chunk_count = usize::try_from(page_count.div_ceil(per_chunk)).ok()?;
+    let mut spans = Vec::with_capacity(chunk_count);
+    for chunk_idx in 0..chunk_count {
+        let first_page = u64::try_from(chunk_idx).ok()?.checked_mul(per_chunk)?;
+        let pages = per_chunk.min(page_count.checked_sub(first_page)?);
+        let offset = data_offset.checked_add(first_page.checked_mul(page_size_u64)?)?;
+        let len = usize::try_from(pages.checked_mul(page_size_u64)?).ok()?;
+        spans.push((offset, len));
+    }
+    Some(spans)
+}
+
 /// Spawn `readers` threads that fill extents for the chunks pulled from `next_chunk_idx`.
 ///
 /// Each reader owns a file handle, so seeks are independent rather than serialized behind a
@@ -74,7 +99,7 @@ pub(super) fn chunk_span(
 #[derive(Clone, Copy)]
 pub(super) struct ReadPlan<'scope> {
     pub path: &'scope Path,
-    pub chunks: &'scope [&'scope [crate::internal::PageDescriptor]],
+    /// One (offset, length) per extent; its length is the extent count.
     pub spans: &'scope [(u64, usize)],
     pub next_chunk_idx: &'scope AtomicUsize,
 }
@@ -88,7 +113,6 @@ pub(super) fn spawn_readers<'scope>(
 ) -> ExtentStream {
     let ReadPlan {
         path,
-        chunks,
         spans,
         next_chunk_idx,
     } = plan;
@@ -121,7 +145,7 @@ pub(super) fn spawn_readers<'scope>(
                     break;
                 }
                 let idx = next_chunk_idx.fetch_add(1, Ordering::Relaxed);
-                if idx >= chunks.len() {
+                if idx >= spans.len() {
                     break;
                 }
                 let (offset, len) = spans[idx];
@@ -130,8 +154,12 @@ pub(super) fn spawn_readers<'scope>(
                     .ok()
                     .and_then(|rx| rx.recv().ok())
                     .unwrap_or_default();
-                bytes.clear();
-                bytes.resize(len, 0);
+                // Grow only, then trim: `read_exact` overwrites every byte, so a recycled
+                // buffer needs no clearing, and clearing it would memset each extent twice.
+                if bytes.len() < len {
+                    bytes.resize(len, 0);
+                }
+                bytes.truncate(len);
                 if let Err(err) = file
                     .seek(SeekFrom::Start(offset))
                     .and_then(|_| file.read_exact(&mut bytes))
@@ -172,7 +200,43 @@ pub(super) const fn pages_per_extent(page_size: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{EXTENT_BYTES, MAX_READ_CONCURRENCY, pages_per_extent};
+    use super::{EXTENT_BYTES, MAX_READ_CONCURRENCY, pages_per_extent, plan_spans_from_geometry};
+
+    #[test]
+    fn geometry_spans_tile_the_pages_exactly() {
+        // 10 pages of 64 KB starting at 0x10000, four pages per extent.
+        let spans = plan_spans_from_geometry(65_536, 65_536, 10, 4).expect("spans");
+        assert_eq!(
+            spans,
+            vec![
+                (65_536, 4 * 65_536),
+                (65_536 + 4 * 65_536, 4 * 65_536),
+                // The last extent is short rather than reading past the final page.
+                (65_536 + 8 * 65_536, 2 * 65_536),
+            ]
+        );
+
+        // Every page is covered once: the spans are contiguous and sum to the whole file.
+        let total: usize = spans.iter().map(|(_, len)| len).sum();
+        assert_eq!(total, 10 * 65_536);
+        for pair in spans.windows(2) {
+            assert_eq!(pair[0].0 + pair[0].1 as u64, pair[1].0);
+        }
+    }
+
+    #[test]
+    fn geometry_spans_handle_the_degenerate_cases() {
+        assert_eq!(
+            plan_spans_from_geometry(0, 1024, 1, 8),
+            Some(vec![(0, 1024)])
+        );
+        assert_eq!(plan_spans_from_geometry(0, 1024, 0, 8), Some(Vec::new()));
+        // A zero chunk size would divide by zero; it is clamped to one page per extent.
+        assert_eq!(
+            plan_spans_from_geometry(0, 1024, 2, 0),
+            Some(vec![(0, 1024), (1024, 1024)])
+        );
+    }
 
     #[test]
     fn extent_holds_whole_pages() {
