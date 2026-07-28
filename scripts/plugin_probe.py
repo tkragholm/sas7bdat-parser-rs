@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
-"""Probe SAS7BDAT decode throughput through the installed sas7bdat-polars plugin.
-
-Why this exists: the `sas7bdat convert` CLI decodes single-threaded (its parquet
-path has no parallel branch), while this plugin decodes with a real thread pool.
-So on a big machine the plugin may already be the faster route — and it can write
-parquet through Polars' own streaming writer. This script measures whether that is
-true on YOUR storage before you commit hours to a full run.
-
-Every measurement is bounded by --rows, so a probe takes minutes, not hours.
+"""Measure SAS7BDAT decode throughput through the installed sas7bdat-polars plugin.
 
     python plugin_probe.py "E:\\path\\big.sas7bdat"
     python plugin_probe.py "E:\\path\\big.sas7bdat" --rows 2000000 --threads 1,4,8,16
     python plugin_probe.py "E:\\path\\big.sas7bdat" --sink F:\\scratch\\probe.parquet
 
-Nothing is written unless you pass --sink.
+Bounded by --rows, so a probe takes minutes. Writes nothing unless --sink is given.
 """
 
 from __future__ import annotations
@@ -59,8 +51,11 @@ def main() -> int:
     try:
         import polars as pl
         import sas7bdat_polars as sp
-    except ImportError as exc:  # pragma: no cover - environment dependent
-        print(f"import failed: {exc}\ninstall with: pip install \"sas7bdat-polars[cli]\"", file=sys.stderr)
+    except ImportError as exc:
+        print(
+            f'import failed: {exc}\ninstall with: pip install "sas7bdat-polars[cli]"',
+            file=sys.stderr,
+        )
         return 1
 
     path = args.file
@@ -73,8 +68,6 @@ def main() -> int:
     total_rows = int(info["n_rows"])
     row_len = int(info.get("row_length_bytes") or 0)
     rows = min(args.rows, total_rows)
-    # Bytes of source actually traversed for `rows` rows — the honest denominator for a
-    # throughput figure, since a bounded probe never touches the whole file.
     probe_bytes = rows * row_len if row_len else size * rows / max(total_rows, 1)
 
     print(f"=== {path} ===")
@@ -84,14 +77,18 @@ def main() -> int:
     print(f"  encoding        {info.get('encoding')}")
     print(f"  plugin version  {getattr(sp, '__version__', '?')}, polars {pl.__version__}")
     print(f"  default threads {sp.scan_threads()}")
-    print(f"\n  probing {rows:,} rows = {probe_bytes / GB:,.2f} GB of source per measurement\n")
+    print(
+        f"\n  probing {rows:,} rows = {probe_bytes / GB:,.2f} GB of source per measurement\n"
+    )
 
     columns = [c.strip() for c in args.columns.split(",")] if args.columns else None
     if columns:
         print(f"  projecting {len(columns)} column(s)\n")
 
     counts = [int(t) for t in args.threads.split(",") if t.strip()]
-    print(f"  {'threads':>8}  {'seconds':>9}  {'MB/s':>9}  {'vs 1 thread':>12}   full-file estimate")
+    print(
+        f"  {'threads':>8}  {'seconds':>9}  {'MB/s':>9}  {'vs 1 thread':>12}   full-file estimate"
+    )
     base = 0.0
     for count in counts:
         sp.set_scan_threads(count)
@@ -107,7 +104,9 @@ def main() -> int:
         speedup = f"{rate / base:,.2f}x" if base else "n/a"
         full_min = (size / MB / rate / 60) if rate else float("inf")
         flag = "" if got == rows else f"  (returned {got:,} rows)"
-        print(f"  {count:>8}  {elapsed:>9,.1f}  {rate:>9,.0f}  {speedup:>12}   {full_min:>6,.1f} min{flag}")
+        print(
+            f"  {count:>8}  {elapsed:>9,.1f}  {rate:>9,.0f}  {speedup:>12}   {full_min:>6,.1f} min{flag}"
+        )
 
     if args.sink:
         best = max(counts)
@@ -120,18 +119,18 @@ def main() -> int:
         out_size = os.path.getsize(args.sink) if os.path.isfile(args.sink) else 0
         rate = (probe_bytes / MB) / elapsed if elapsed else 0.0
         print(f"  {elapsed:,.1f}s  ({rate:,.0f} MB/s of source)")
-        print(f"  output {out_size / MB:,.1f} MB  ->  compression {probe_bytes / out_size:,.1f}x" if out_size else "  output missing")
-        print(f"  full-file estimate: {size / MB / rate / 60:,.1f} min, ~{size / max(probe_bytes, 1) * out_size / GB:,.1f} GB of parquet")
+        if out_size:
+            print(
+                f"  output {out_size / MB:,.1f} MB  ->  compression {probe_bytes / out_size:,.1f}x"
+            )
+            print(
+                f"  full-file estimate: {size / MB / rate / 60:,.1f} min, "
+                f"~{size / max(probe_bytes, 1) * out_size / GB:,.1f} GB of parquet"
+            )
+        else:
+            print("  output missing")
 
     sp.set_scan_threads(0)
-    print("\nHow to read this:")
-    print("  * MB/s is source bytes decoded per second. Compare it with the sequential")
-    print("    and concurrent read rates from io_probe.py: if decode tops out well below")
-    print("    the storage rate, decode is the limit; if it tracks the storage rate, I/O is.")
-    print("  * If more threads stop helping, that is the plateau worth knowing before")
-    print("    running the full file.")
-    print("  * The full-file estimate assumes the probed rows are representative; wide")
-    print("    string columns decode slower than numeric ones.")
     return 0
 
 
