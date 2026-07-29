@@ -169,6 +169,15 @@ pub struct OutputOptions {
     #[arg(long, help_heading = "Output")]
     pub overwrite: bool,
 
+    /// Stage outputs in this directory, then move them to the destination.
+    ///
+    /// Every output is written to a temporary file and moved into place when it is complete,
+    /// so a run that fails or is interrupted leaves nothing behind. By default that temporary
+    /// sits beside the destination; point this at a local disk to keep the write off a network
+    /// link until there is a finished file to send.
+    #[arg(long, value_name = "DIR", help_heading = "Output")]
+    pub tmp_dir: Option<PathBuf>,
+
     /// Embed SAS metadata (labels, formats, kinds, widths) into the Parquet file's
     /// key-value metadata under the `sas7bdat.metadata` key.
     #[arg(long, help_heading = "Output")]
@@ -439,6 +448,7 @@ mod tests {
             no_header: false,
             flatten: false,
             overwrite: false,
+            tmp_dir: None,
             parquet_metadata: false,
             parquet_row_group_size: None,
             parquet_target_bytes: None,

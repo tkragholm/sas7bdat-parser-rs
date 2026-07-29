@@ -58,6 +58,10 @@ shares this repository but ships on PyPI under its own version.
 
 ### Changed
 
+- **(CLI)** Outputs are written to a temporary file and moved into place when complete, so a
+  run that fails or is interrupted leaves nothing at the destination. By default the
+  temporary sits beside the output, making the move a rename. `--tmp-dir` stages somewhere
+  else — point it at a local disk and only the finished file crosses a network link.
 - **(CLI)** Parquet output goes through a 1 MB buffer. parquet-rs wraps the sink in a
   `BufWriter` of its own, but at the 8 KiB default, which a column chunk writes straight
   past — so each one was its own round trip to a network share.

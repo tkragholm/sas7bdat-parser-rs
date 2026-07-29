@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use sas7bdat::{Dataset, OpenOptions, ScanProgress, ScanProgressObserver, ValidationMode};
 use std::fs;
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -176,6 +176,7 @@ fn convert_one(
         fs::create_dir_all(parent)?;
     }
 
+    let staged = staging_path(&output, args.output.tmp_dir.as_deref())?;
     let dataset = open_dataset(input, args)?;
     let columns = ColumnSelection {
         names: args.columns.as_deref(),
@@ -200,63 +201,18 @@ fn convert_one(
     };
 
     let started = Instant::now();
-    let rows = match args.output.effective_sink() {
-        SinkKind::Parquet => {
-            let row_group_rows = match (
-                args.output.parquet_row_group_size,
-                args.output.parquet_target_bytes,
-            ) {
-                (Some(rows), _) => Some(rows),
-                (None, Some(bytes)) => {
-                    let row_len = usize::try_from(dataset.metadata().row_len)
-                        .unwrap_or(0)
-                        .max(1);
-                    Some((bytes / row_len).max(1))
-                }
-                (None, None) => None,
-            };
-            write_parquet(
-                &dataset,
-                &output,
-                WriteOptions {
-                    row_group_rows,
-                    batch_rows: row_group_rows,
-                    scan,
-                    catalog,
-                    embed_metadata: args.output.parquet_metadata,
-                    compression: crate::export::resolve_compression(args.output.compression),
-                },
-            )
-        }
-        SinkKind::Csv => {
-            let delimiter = args.output.delimiter.unwrap_or(',') as u8;
-            write_csv_or_tsv(
-                &dataset,
-                &output,
-                DelimitedWriteOptions {
-                    delimiter,
-                    headers: !args.output.no_header,
-                    scan,
-                },
-            )
-        }
-        SinkKind::Tsv => {
-            let delimiter = args.output.delimiter.unwrap_or('\t') as u8;
-            write_csv_or_tsv(
-                &dataset,
-                &output,
-                DelimitedWriteOptions {
-                    delimiter,
-                    headers: !args.output.no_header,
-                    scan,
-                },
-            )
-        }
-    };
+    let rows = write_output(&dataset, &staged, args, scan, catalog);
     if let (Some(progress), Some(bar)) = (progress, file_bar) {
         progress.remove_file_bar(&bar);
     }
-    let rows = rows?;
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(err) => {
+            let _ = fs::remove_file(&staged);
+            return Err(err);
+        }
+    };
+    publish(&staged, &output)?;
     let elapsed = started.elapsed();
     let bytes = fs::metadata(&output).map_or(0, |meta| meta.len());
 
@@ -336,6 +292,109 @@ fn should_show_progress(args: &ConvertArgs) -> bool {
         ProgressMode::Always => true,
         ProgressMode::Auto => std::io::stderr().is_terminal(),
     }
+}
+
+/// Run the conversion into `staged`, choosing the writer from the requested format.
+fn write_output(
+    dataset: &Dataset,
+    staged: &Path,
+    args: &ConvertArgs,
+    scan: ScanOptions<'_>,
+    catalog: Option<&Catalog>,
+) -> Result<u64> {
+    match args.output.effective_sink() {
+        SinkKind::Parquet => {
+            let row_group_rows = match (
+                args.output.parquet_row_group_size,
+                args.output.parquet_target_bytes,
+            ) {
+                (Some(rows), _) => Some(rows),
+                (None, Some(bytes)) => {
+                    let row_len = usize::try_from(dataset.metadata().row_len)
+                        .unwrap_or(0)
+                        .max(1);
+                    Some((bytes / row_len).max(1))
+                }
+                (None, None) => None,
+            };
+            write_parquet(
+                &dataset,
+                &staged,
+                WriteOptions {
+                    row_group_rows,
+                    batch_rows: row_group_rows,
+                    scan,
+                    catalog,
+                    embed_metadata: args.output.parquet_metadata,
+                    compression: crate::export::resolve_compression(args.output.compression),
+                },
+            )
+        }
+        SinkKind::Csv => {
+            let delimiter = args.output.delimiter.unwrap_or(',') as u8;
+            write_csv_or_tsv(
+                &dataset,
+                &staged,
+                DelimitedWriteOptions {
+                    delimiter,
+                    headers: !args.output.no_header,
+                    scan,
+                },
+            )
+        }
+        SinkKind::Tsv => {
+            let delimiter = args.output.delimiter.unwrap_or('\t') as u8;
+            write_csv_or_tsv(
+                &dataset,
+                &staged,
+                DelimitedWriteOptions {
+                    delimiter,
+                    headers: !args.output.no_header,
+                    scan,
+                },
+            )
+        }
+    }
+}
+
+/// Where a conversion writes before it has something worth keeping.
+///
+/// The name carries the process id and a counter, so two inputs whose file names collide can
+/// still stage into the same directory.
+fn staging_path(output: &Path, tmp_dir: Option<&Path>) -> Result<PathBuf> {
+    static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+    let mut name = output.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(
+        ".{}-{}.part",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    match tmp_dir {
+        Some(dir) => {
+            fs::create_dir_all(dir)?;
+            Ok(dir.join(name))
+        }
+        None => Ok(output.with_file_name(name)),
+    }
+}
+
+/// Move a finished output into place.
+///
+/// A rename when the two sit on one volume, which is atomic and free. A copy when they do not,
+/// which is what `--tmp-dir` asks for: the write lands on a local disk and only the finished
+/// file crosses the network.
+fn publish(staged: &Path, output: &Path) -> Result<()> {
+    // Rename refuses to clobber on Windows, and an existing output here has already been
+    // cleared by the --overwrite check.
+    if output.exists() {
+        fs::remove_file(output)?;
+    }
+    if fs::rename(staged, output).is_ok() {
+        return Ok(());
+    }
+    fs::copy(staged, output)?;
+    fs::remove_file(staged)?;
+    Ok(())
 }
 
 /// A per-file bar and the scan observer that drives it, if progress is being shown.
@@ -466,6 +525,7 @@ mod tests {
                 no_header: false,
                 flatten: false,
                 overwrite: false,
+                tmp_dir: None,
                 parquet_row_group_size: None,
                 parquet_target_bytes: None,
                 parquet_metadata: false,
@@ -515,6 +575,44 @@ mod tests {
         let (bar, observer) = file_progress(Some(&state), Path::new("Cargo.toml"));
         assert!(bar.is_none(), "64 concurrent bars would be noise");
         assert!(observer.is_none());
+    }
+
+    /// The default keeps the temporary beside the destination, so the move into place is a
+    /// rename on one volume rather than a copy across two.
+    #[test]
+    fn staging_defaults_to_the_destination_directory() {
+        let out = Path::new("/data/out/table.parquet");
+        let staged = super::staging_path(out, None).expect("staging path");
+        assert_eq!(staged.parent(), out.parent());
+        assert_ne!(staged, out);
+        assert!(staged.to_string_lossy().ends_with(".part"));
+    }
+
+    /// Two inputs can share a file name without sharing a temporary.
+    #[test]
+    fn staging_names_do_not_collide() {
+        let dir = std::env::temp_dir();
+        let first = super::staging_path(Path::new("/a/table.parquet"), Some(&dir)).expect("first");
+        let second =
+            super::staging_path(Path::new("/b/table.parquet"), Some(&dir)).expect("second");
+        assert_eq!(first.parent(), Some(dir.as_path()));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn publishing_moves_the_file_into_place() {
+        let dir = std::env::temp_dir().join(format!("sas7bdat-publish-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let staged = dir.join("staged.part");
+        let out = dir.join("final.parquet");
+        std::fs::write(&staged, b"payload").expect("write");
+        std::fs::write(&out, b"stale").expect("write");
+
+        super::publish(&staged, &out).expect("publish");
+
+        assert_eq!(std::fs::read(&out).expect("read"), b"payload");
+        assert!(!staged.exists(), "the temporary is gone");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

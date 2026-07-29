@@ -173,6 +173,7 @@ mod tests {
                 no_header: false,
                 flatten,
                 overwrite: false,
+                tmp_dir: None,
                 parquet_row_group_size: None,
                 parquet_target_bytes: None,
                 parquet_metadata: false,
