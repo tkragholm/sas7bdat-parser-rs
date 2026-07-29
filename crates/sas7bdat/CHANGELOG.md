@@ -15,6 +15,18 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+### Fixed
+
+- **(CLI)** A conversion of more than about 2.1 billion rows failed part-way with `Parquet
+  does not support more than 32767 row groups per file`. Row groups held 65,536 rows
+  whatever the file's size, and 32,767 of those cover 2,147,418,112 rows — which a 234 GiB
+  SAS file went past. Row groups are now sized from the declared row count, and the writer
+  doubles both of its triggers as it goes, so the count stays inside the format's limit
+  without needing a row count it can trust.
+- **(CLI)** `--parquet-row-group-size` no longer sets the scan's batch size too. The writer
+  gathers scan batches into row groups, so the two are independent — and tying them meant a
+  large row group stretched the read extents to match, undoing the read tuning.
+
 ## [0.5.0] - 2026-07-29
 
 Read the file once instead of twice, and stop encoding Parquet on a single core. Together

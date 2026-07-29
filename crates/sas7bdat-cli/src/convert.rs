@@ -322,7 +322,10 @@ fn write_output(
                 staged,
                 WriteOptions {
                     row_group_rows,
-                    batch_rows: row_group_rows,
+                    // Not tied to the row group size: the writer accumulates scan batches into
+                    // row groups, so a large row group no longer means large scan batches —
+                    // which would otherwise stretch the read extents to match.
+                    batch_rows: None,
                     scan,
                     catalog,
                     embed_metadata: args.output.parquet_metadata,

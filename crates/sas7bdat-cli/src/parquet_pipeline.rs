@@ -46,6 +46,64 @@ const ROW_GROUP_INPUT_BYTE_CAP: usize = 256 * 1024 * 1024;
 /// how many run at once, and so how the work splits between row groups and columns.
 const IN_FLIGHT_INPUT_BUDGET: usize = 1024 * 1024 * 1024;
 
+/// Parquet records a row group's ordinal in an `i16`, so a file cannot hold more than this
+/// many however large it is.
+const MAX_ROW_GROUPS: usize = 32_767;
+
+/// Row groups to write before the target size doubles, and how that budget shrinks.
+///
+/// A fixed row target puts a hard ceiling on a file — at 65,536 rows it is about 2.1 billion,
+/// which real SAS files exceed. Doubling the target each time a stage is spent, while halving
+/// the stage, keeps the total under [`MAX_ROW_GROUPS`] no matter how many rows arrive: each
+/// stage covers as many rows as the one before it, so fifteen or so stages span more rows than
+/// any file will hold. It needs no row count, which matters because the header's is not always
+/// to be believed.
+const FIRST_STAGE_ROW_GROUPS: usize = MAX_ROW_GROUPS / 2;
+
+/// Ceiling on the grown byte cap. Both triggers have to grow together — a row group closed by
+/// bytes ignores the row target entirely, so raising only the target would leave the row group
+/// count free to run past the limit anyway. Matching [`IN_FLIGHT_INPUT_BUDGET`] means the worst
+/// case is one row group encoding at a time.
+const MAX_ROW_GROUP_INPUT_BYTES: usize = IN_FLIGHT_INPUT_BUDGET;
+
+/// Grows both row group triggers so a file cannot run out of row groups.
+struct RowGroupSizer {
+    target: usize,
+    bytes: usize,
+    stage: usize,
+    left: usize,
+}
+
+impl RowGroupSizer {
+    fn new(target: usize) -> Self {
+        Self {
+            target: target.max(1),
+            bytes: ROW_GROUP_INPUT_BYTE_CAP,
+            stage: FIRST_STAGE_ROW_GROUPS,
+            left: FIRST_STAGE_ROW_GROUPS,
+        }
+    }
+
+    const fn target(&self) -> usize {
+        self.target
+    }
+
+    const fn byte_cap(&self) -> usize {
+        self.bytes
+    }
+
+    /// Account for one dispatched row group, doubling both triggers when a stage runs out.
+    fn dispatched(&mut self) {
+        self.left = self.left.saturating_sub(1);
+        if self.left == 0 {
+            self.target = self.target.saturating_mul(2);
+            self.bytes = self.bytes.saturating_mul(2).min(MAX_ROW_GROUP_INPUT_BYTES);
+            self.stage = (self.stage / 2).max(1);
+            self.left = self.stage;
+        }
+    }
+}
+
 /// The shared encoding pool.
 ///
 /// One pool for the process, not one per file: `--jobs` converts several files at once, and a
@@ -109,7 +167,7 @@ pub struct RowGroupPipeline<W: Write + Send> {
     factory: ArrowRowGroupWriterFactory,
     pool: &'static rayon::ThreadPool,
     schema: SchemaRef,
-    target_rows: usize,
+    sizer: RowGroupSizer,
 
     /// Batches for the row group currently being filled.
     pending: Vec<RecordBatch>,
@@ -147,7 +205,7 @@ impl<W: Write + Send> RowGroupPipeline<W> {
             factory,
             pool,
             schema,
-            target_rows: target_rows.max(1),
+            sizer: RowGroupSizer::new(target_rows),
             pending: Vec::new(),
             pending_rows: 0,
             pending_bytes: 0,
@@ -176,7 +234,7 @@ impl<W: Write + Send> RowGroupPipeline<W> {
             .sum::<usize>();
         self.pending.push(batch);
 
-        if self.pending_rows >= self.target_rows || self.pending_bytes >= ROW_GROUP_INPUT_BYTE_CAP {
+        if self.pending_rows >= self.sizer.target() || self.pending_bytes >= self.sizer.byte_cap() {
             self.dispatch()?;
         }
         Ok(())
@@ -216,6 +274,7 @@ impl<W: Write + Send> RowGroupPipeline<W> {
 
         let index = self.next_dispatch;
         self.next_dispatch += 1;
+        self.sizer.dispatched();
         let writers = self.factory.create_column_writers(index)?;
         if writers.len() != self.schema.fields().len() {
             return Err(anyhow!(
@@ -507,6 +566,54 @@ mod tests {
 
         let _ = std::fs::remove_file(&serial_path);
         let _ = std::fs::remove_file(&parallel_path);
+    }
+
+    /// The failure this guards against: a fixed 65,536-row target caps a file at about 2.1
+    /// billion rows, and a 234 GiB SAS file went past it.
+    #[test]
+    fn row_groups_stay_within_the_parquet_limit() {
+        let mut sizer = super::RowGroupSizer::new(65_536);
+        let mut groups = 0usize;
+        let mut rows = 0u64;
+        // Fill every row group the format allows and count the rows they cover.
+        while groups < super::MAX_ROW_GROUPS {
+            rows += sizer.target() as u64;
+            sizer.dispatched();
+            groups += 1;
+        }
+        assert!(
+            rows > 10_000_000_000,
+            "the row groups a file can hold should cover more rows than any SAS file will, got {rows}"
+        );
+        assert!(sizer.target() > 65_536, "the target grew");
+    }
+
+    /// A row group closed by bytes ignores the row target, so the byte cap has to grow too or
+    /// the count runs past the limit regardless of how large the target got.
+    #[test]
+    fn the_byte_cap_grows_with_the_row_target() {
+        let mut sizer = super::RowGroupSizer::new(65_536);
+        let start = sizer.byte_cap();
+        for _ in 0..super::MAX_ROW_GROUPS {
+            sizer.dispatched();
+        }
+        assert!(sizer.byte_cap() > start, "the byte cap grew");
+        assert!(
+            sizer.byte_cap() <= super::MAX_ROW_GROUP_INPUT_BYTES,
+            "and stayed bounded"
+        );
+    }
+
+    /// Row groups must not shrink back, or the count would run away again.
+    #[test]
+    fn the_row_target_only_grows() {
+        let mut sizer = super::RowGroupSizer::new(1024);
+        let mut previous = sizer.target();
+        for _ in 0..super::MAX_ROW_GROUPS {
+            assert!(sizer.target() >= previous);
+            previous = sizer.target();
+            sizer.dispatched();
+        }
     }
 
     #[test]

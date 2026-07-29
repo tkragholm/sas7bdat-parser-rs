@@ -19,6 +19,24 @@ const STATISTICS_TRUNCATE_LENGTH: usize = 64;
 /// Bytes buffered ahead of the output file.
 const OUTPUT_BUFFER_BYTES: usize = 1024 * 1024;
 
+/// Rows per row group when nothing else says.
+const DEFAULT_ROW_GROUP_ROWS: u64 = 65_536;
+
+/// Row groups to aim for at most, against a Parquet file's hard limit of 32,767.
+const ROW_GROUP_BUDGET: u64 = 16_384;
+
+/// Rows per row group for a dataset of `total_rows`.
+///
+/// The default is fine until a file is large enough that 32,767 row groups will not cover it —
+/// at 65,536 rows each that is about 2.1 billion rows, which real SAS files reach. Sizing from
+/// the declared row count keeps a big file well inside the limit and gives it the larger row
+/// groups it wants anyway. The count is only a starting point: `parquet_pipeline` grows the
+/// target further if more rows turn up than the header admitted.
+fn default_row_group_rows(total_rows: u64) -> usize {
+    let needed = total_rows.div_ceil(ROW_GROUP_BUDGET);
+    usize::try_from(DEFAULT_ROW_GROUP_ROWS.max(needed)).unwrap_or(usize::MAX)
+}
+
 /// Map the user-facing codec choice to a parquet compression setting.
 // Zstd level 3 is a compile-time constant and always valid, so this never panics.
 #[must_use]
@@ -146,7 +164,10 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         options.catalog,
         options.scan.projection,
     )?;
-    let row_group_rows = options.row_group_rows.unwrap_or(65_536).max(1);
+    let row_group_rows = options
+        .row_group_rows
+        .unwrap_or_else(|| default_row_group_rows(dataset.metadata().row_count))
+        .max(1);
     let mut builder = WriterProperties::builder()
         .set_max_row_group_row_count(Some(row_group_rows))
         .set_compression(options.compression)
@@ -433,6 +454,24 @@ fn write_cell_field<W: Write>(
 
 #[cfg(test)]
 mod tests {
+    /// A file too big for 32,767 row groups at the default size must get larger ones.
+    #[test]
+    fn row_group_size_scales_with_the_row_count() {
+        use super::default_row_group_rows;
+        assert_eq!(default_row_group_rows(0), 65_536);
+        assert_eq!(default_row_group_rows(1_000_000), 65_536);
+
+        // The row count that broke a real conversion, and one the header reported as u32::MAX.
+        for rows in [2_147_483_648u64, 4_294_967_295] {
+            let size = default_row_group_rows(rows);
+            let groups = rows.div_ceil(size as u64);
+            assert!(
+                groups <= 32_767,
+                "{rows} rows at {size} per group needs {groups} row groups"
+            );
+        }
+    }
+
     use super::{apply_column_encodings, attach_value_labels, resolve_compression};
     use crate::catalog::{LabelSet, ValueKey, ValueLabel, ValueType};
     use crate::cli::CompressionCodec;

@@ -3426,7 +3426,7 @@ dependencies = [
 
 [[package]]
 name = "sas7bdat-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -3452,7 +3452,7 @@ dependencies = [
 
 [[package]]
 name = "sas7bdat-polars"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arrow-schema",
  "bytemuck",
