@@ -8,6 +8,7 @@ pub mod friendly;
 pub mod head;
 pub mod inspect;
 pub mod inspect_report;
+pub mod parquet_pipeline;
 pub mod paths;
 pub mod sas_metadata;
 pub mod selection;

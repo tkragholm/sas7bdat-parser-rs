@@ -16,6 +16,9 @@ use parquet::schema::types::ColumnPath;
 /// own page-index default.
 const STATISTICS_TRUNCATE_LENGTH: usize = 64;
 
+/// Bytes buffered ahead of the output file.
+const OUTPUT_BUFFER_BYTES: usize = 1024 * 1024;
+
 /// Map the user-facing codec choice to a parquet compression setting.
 // Zstd level 3 is a compile-time constant and always valid, so this never panics.
 #[must_use]
@@ -58,13 +61,14 @@ fn apply_column_encodings(
     }
     builder
 }
+use crate::parquet_pipeline;
 use sas7bdat::{
     BatchHint, CellValue, ColumnMeta, Dataset, Error, Parallelism, Projection, RowSelection,
     ScanBuilder,
 };
 use std::fmt::Write as _;
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
@@ -125,7 +129,10 @@ pub struct DelimitedWriteOptions<'a> {
 ///
 /// Returns the number of rows written.
 pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>) -> Result<u64> {
-    let file = File::create(output)?;
+    // The output is small next to the input, but on a network share every write is a round
+    // trip, and parquet-rs's own sink buffer is the 8 KiB default that large column chunks skip
+    // straight past.
+    let file = BufWriter::with_capacity(OUTPUT_BUFFER_BYTES, File::create(output)?);
     let mut scan = apply_scan_options(dataset, options.scan);
     if let Some(rows) = options.batch_rows {
         scan = scan.with_batch_hint(BatchHint::Rows(rows.max(1)));
@@ -136,8 +143,9 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         options.catalog,
         options.scan.projection,
     )?;
+    let row_group_rows = options.row_group_rows.unwrap_or(65_536).max(1);
     let mut builder = WriterProperties::builder()
-        .set_max_row_group_row_count(Some(options.row_group_rows.unwrap_or(65_536).max(1)))
+        .set_max_row_group_row_count(Some(row_group_rows))
         .set_compression(options.compression)
         // Keep column-chunk statistics small for long strings (parquet-linter
         // `string_statistics`); page-index stats are already truncated by parquet-rs.
@@ -147,13 +155,38 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
     // Kept for the per-batch conversion below: `visit_owned_batches` hands back raw column
     // buffers, which the writer's schema turns into record batches.
     let batch_schema = SchemaRef::clone(&schema);
-    let mut writer = ArrowWriter::try_new(file, schema, Some(props))?;
+    let mut writer = ArrowWriter::try_new(file, SchemaRef::clone(&schema), Some(props))?;
     if options.embed_metadata {
         // Write as a Parquet file-level key-value pair (not Arrow schema metadata), so it is
         // visible to plain Parquet readers — e.g. DuckDB's `parquet_kv_metadata()`.
+        // Recorded on the file writer, so it survives the handover below.
         let json = sas_metadata_json(dataset, options.scan.projection)?;
         writer.append_key_value_metadata(KeyValue::new(PARQUET_METADATA_KEY.to_string(), json));
     }
+
+    // `ArrowWriter::write` encodes on the calling thread, which leaves the conversion running
+    // its dictionaries, encodings, statistics and compression on one core. Hand the row groups
+    // to a pool instead where the schema allows it; `parquet_pipeline` explains the split.
+    if parquet_pipeline::is_available(&schema, options.scan.parse_threads) {
+        let (file_writer, factory) = writer.into_serialized_writer()?;
+        let mut pipeline = parquet_pipeline::RowGroupPipeline::new(
+            file_writer,
+            factory,
+            schema,
+            row_group_rows,
+            options.scan.parse_threads,
+        )?;
+        let stats = scan.visit_owned_batches(|batch| {
+            let record_batch = batch.into_arrow_record_batch(SchemaRef::clone(&batch_schema))?;
+            pipeline
+                .push(record_batch)
+                .map_err(|err| Error::arrow(err.to_string()))?;
+            Ok(ControlFlow::Continue(()))
+        })?;
+        pipeline.finish()?;
+        return Ok(stats.rows_emitted);
+    }
+
     // Owned batches rather than `visit_arrow_batches`: the borrowed-batch scan has no
     // parallel branch, so it decodes on one core and — for a path source — reads one page at
     // a time. The owned path streams extents through the parallel decoder and converts here,

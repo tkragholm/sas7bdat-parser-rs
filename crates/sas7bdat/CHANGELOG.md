@@ -15,8 +15,26 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+This file covers the library crate. Two entries below describe the `sas7bdat` CLI, which
+shares this repository but ships on PyPI under its own version.
+
 ### Added
 
+- **(CLI)** Parquet row groups are encoded across cores instead of on the thread that reads
+  them. With the input cached, so decode and I/O are as cheap as they get, that single
+  thread was 80-90% of a conversion. Row groups are the axis that scales here — production
+  SAS files often carry 10 columns and sometimes 3, so splitting by column alone would
+  leave most of a large host idle. Several row groups encode at once and are written in
+  file order; their columns are encoded in parallel too, which is what covers tables wide
+  enough that one row group already fills the pool. Isolated on 12 cores, zstd-3:
+
+  | columns | serial | parallel | |
+  |---|---|---|---|
+  | 3 | 177 ms | 26 ms | 6.8× |
+  | 10 | 611 ms | 82 ms | 7.4× |
+  | 28 | 1.85 s | 246 ms | 7.5× |
+
+  `--parse-threads` now sets the thread budget for encoding as well as decoding.
 - Single-pass owned-batch scans of path sources. Page descriptors are now compiled from
   the same 4 MB extents that feed decode, so the file is read once rather than twice —
   once for the descriptor table, once for the rows. `row_base` is a running total, so a
@@ -28,6 +46,12 @@ earlier are written by hand.
   Fusion applies to `visit_owned_batches` (and so to the CLI's parquet export and the
   Polars plugin) when the source is an unmapped path, the scan covers every row, and the
   descriptor table isn't already cached. Everything else keeps the two-pass path.
+
+### Changed
+
+- **(CLI)** Parquet output goes through a 1 MB buffer. parquet-rs wraps the sink in a
+  `BufWriter` of its own, but at the 8 KiB default, which a column chunk writes straight
+  past — so each one was its own round trip to a network share.
 
 ### Fixed
 

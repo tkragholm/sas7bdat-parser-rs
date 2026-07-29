@@ -228,7 +228,7 @@ pub struct ExecutionOptions {
     )]
     pub jobs: Option<usize>,
 
-    /// Parser threads per file.
+    /// Threads per file, for both decoding and Parquet encoding. Defaults to every core.
     #[arg(
         long = "parse-threads",
         value_name = "N",
