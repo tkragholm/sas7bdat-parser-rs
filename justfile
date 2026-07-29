@@ -121,3 +121,12 @@ convert *args:
 
 inspect *args:
     @cargo run --manifest-path crates/sas7bdat-cli/Cargo.toml --bin sas7bdat-inspect -- {{args}}
+
+# Build the network-storage lab image (see test-lab/README.md).
+lab-build:
+    @test-lab/lab.sh --build
+
+# Run a command against storage that reads like a slow share.
+#   just lab 5 340 sas7bdat convert /mnt/in/f.sas7bdat --out-dir /mnt/out --io-backend buffered
+lab latency="5" rate="340" *args:
+    @LATENCY={{latency}} RATE={{rate}} test-lab/lab.sh {{args}}
