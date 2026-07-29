@@ -62,7 +62,7 @@ shares this repository but ships on PyPI under its own version.
 ## [0.4.0] - 2026-07-28
 
 Throughput work for large files on network storage, driven by measurements against SMB
-(`scripts/io_probe.py` reproduces them). On a 104 GB file over a 341 MB/s link, a
+(`scripts/probe.py` reproduces them). On a 104 GB file over a 341 MB/s link, a
 conversion went from ~37 minutes to ~10.
 
 ### Added

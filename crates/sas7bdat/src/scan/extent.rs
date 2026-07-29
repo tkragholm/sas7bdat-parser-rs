@@ -5,7 +5,7 @@
 //! storage the round-trips cost more than the transfer. An extent covers many pages in one
 //! read, and several reads run at once.
 //!
-//! The constants below come from a sweep against SMB over a LAN; `scripts/io_probe.py`
+//! The constants below come from a sweep against SMB over a LAN; `scripts/probe.py`
 //! repeats it on other hosts:
 //!
 //! ```text
