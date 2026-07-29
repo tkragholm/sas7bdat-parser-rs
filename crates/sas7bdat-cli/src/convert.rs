@@ -318,8 +318,8 @@ fn write_output(
                 (None, None) => None,
             };
             write_parquet(
-                &dataset,
-                &staged,
+                dataset,
+                staged,
                 WriteOptions {
                     row_group_rows,
                     batch_rows: row_group_rows,
@@ -333,8 +333,8 @@ fn write_output(
         SinkKind::Csv => {
             let delimiter = args.output.delimiter.unwrap_or(',') as u8;
             write_csv_or_tsv(
-                &dataset,
-                &staged,
+                dataset,
+                staged,
                 DelimitedWriteOptions {
                     delimiter,
                     headers: !args.output.no_header,
@@ -345,8 +345,8 @@ fn write_output(
         SinkKind::Tsv => {
             let delimiter = args.output.delimiter.unwrap_or('\t') as u8;
             write_csv_or_tsv(
-                &dataset,
-                &staged,
+                dataset,
+                staged,
                 DelimitedWriteOptions {
                     delimiter,
                     headers: !args.output.no_header,

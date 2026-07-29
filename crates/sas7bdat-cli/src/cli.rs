@@ -26,6 +26,9 @@ pub struct Cli {
     pub command: Command,
 }
 
+// One of these is parsed per process and then matched on. Boxing the largest variant to
+// even them out would cost an allocation and buy nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum Command {
     /// Convert SAS7BDAT files to Parquet, CSV, or TSV.
