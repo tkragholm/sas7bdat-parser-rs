@@ -35,6 +35,15 @@ shares this repository but ships on PyPI under its own version.
   | 28 | 1.85 s | 246 ms | 7.5× |
 
   `--parse-threads` now sets the thread budget for encoding as well as decoding.
+- Progress reporting from the parallel and fused scans. The observer registered with
+  `ScanBuilder::with_progress` was only ever called from the serial page loop, so the paths
+  that handle large files reported nothing at all. Counters are now updated as each chunk
+  completes and reported as batches are delivered.
+- `ScanBuilder::with_progress_observer`, taking an already-shared `ScanProgressObserver` so
+  one callback can be reused across scans without being boxed again.
+- **(CLI)** A per-file progress bar showing bytes read, rate and ETA, under the existing
+  file-count bar. A single multi-minute conversion previously showed only `0/1 files`.
+  Suppressed above eight concurrent files, where the bars would be noise.
 - Single-pass owned-batch scans of path sources. Page descriptors are now compiled from
   the same 4 MB extents that feed decode, so the file is read once rather than twice —
   once for the descriptor table, once for the rows. `row_base` is a running total, so a

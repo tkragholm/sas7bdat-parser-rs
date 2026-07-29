@@ -102,5 +102,5 @@ pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};
 pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
 pub use scan::{
     BatchSink, OwnedBatchScanBreakdown, RawRowSink, RowSink, ScanBuilder, ScanProgress,
-    ScanStatsSummary,
+    ScanProgressObserver, ScanStatsSummary,
 };

@@ -122,6 +122,66 @@ where
     Ok(ControlFlow::Continue(()))
 }
 
+/// Counters the parallel paths bump as each chunk finishes.
+///
+/// The serial scan reports progress from the loop that reads the pages. A parallel scan has no
+/// such loop — the workers only surrender their statistics when they are joined, which is after
+/// the scan is over. These are updated per chunk instead, so the collector can report while the
+/// work is still running.
+#[derive(Default)]
+pub(super) struct ProgressCounters {
+    pages: std::sync::atomic::AtomicU64,
+    compressed_pages: std::sync::atomic::AtomicU64,
+    bytes: std::sync::atomic::AtomicU64,
+    rows_seen: std::sync::atomic::AtomicU64,
+}
+
+impl ProgressCounters {
+    pub(super) fn add(&self, stats: &ScanStats) {
+        self.pages.fetch_add(stats.pages_seen, Ordering::Relaxed);
+        self.compressed_pages
+            .fetch_add(stats.compressed_pages, Ordering::Relaxed);
+        self.bytes
+            .fetch_add(stats.raw_bytes_read, Ordering::Relaxed);
+        self.rows_seen.fetch_add(stats.rows_seen, Ordering::Relaxed);
+    }
+}
+
+/// What the collector needs to report progress: where to send it, the running counters, and
+/// the totals to measure them against.
+#[derive(Clone, Copy)]
+pub(super) struct ProgressReport<'a> {
+    pub observer: Option<&'a ScanProgressObserver>,
+    pub counters: &'a ProgressCounters,
+    pub total_pages: u64,
+    pub estimated_total_bytes: u64,
+}
+
+impl ProgressReport<'_> {
+    /// Snapshot of a scan in flight. Called once per delivered batch, which for a large file
+    /// is a few thousand times over many minutes.
+    fn emit(self, rows_emitted: u64) {
+        let Some(observer) = self.observer else {
+            return;
+        };
+        observer(ScanProgress {
+            pages_seen: self.counters.pages.load(Ordering::Relaxed),
+            total_pages: self.total_pages,
+            raw_bytes_read: self.counters.bytes.load(Ordering::Relaxed),
+            estimated_total_bytes: self.estimated_total_bytes,
+            compressed_pages: self.counters.compressed_pages.load(Ordering::Relaxed),
+            // A chunk only reports once it is fully decoded, so the running count can lag the
+            // rows already handed over.
+            rows_seen: self
+                .counters
+                .rows_seen
+                .load(Ordering::Relaxed)
+                .max(rows_emitted),
+            rows_emitted,
+        });
+    }
+}
+
 /// Deliver decoded batches to `f`, in chunk order unless the scan is
 /// [`OrderingMode::Unordered`]. Returns the delivered batch and row counts.
 ///
@@ -135,12 +195,13 @@ pub(super) fn collect_streamed_batches<F>(
     ordering: OrderingMode,
     chunk_count: usize,
     stop: &AtomicBool,
+    progress: ProgressReport<'_>,
     f: &mut F,
 ) -> Result<(u64, u64)>
 where
     F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
 {
-    let outcome = deliver_streamed_batches(rx, ordering, chunk_count, stop, f);
+    let outcome = deliver_streamed_batches(rx, ordering, chunk_count, stop, progress, f);
     // Any exit that isn't the end of the stream leaves producers still working. They see the
     // dropped receiver soon enough, but not while parked inside a blocking send.
     if outcome.is_err() {
@@ -154,6 +215,7 @@ fn deliver_streamed_batches<F>(
     ordering: OrderingMode,
     chunk_count: usize,
     stop: &AtomicBool,
+    progress: ProgressReport<'_>,
     f: &mut F,
 ) -> Result<(u64, u64)>
 where
@@ -195,6 +257,7 @@ where
                         break;
                     }
                 }
+                progress.emit(delivered_rows);
             }
             StreamedBatchMessage::Finished { chunk_idx } => {
                 finished[chunk_idx] = true;
@@ -213,6 +276,9 @@ where
                     stop.store(true, Ordering::Relaxed);
                     break;
                 }
+                // A chunk finishing can release batches that arrived out of order, including
+                // the last ones in the file, so this is not only a batch-message concern.
+                progress.emit(delivered_rows);
             }
             StreamedBatchMessage::Error(err) => {
                 stop.store(true, Ordering::Relaxed);
@@ -325,15 +391,22 @@ impl<'a> ScanBuilder<'a> {
 
     /// Register a progress callback for long-running scans.
     ///
-    /// The observer is called after each page is processed with a [`ScanProgress`] snapshot.
-    /// Useful for reporting progress on large files. The callback must be `Send + Sync` because
-    /// it may be invoked from a scan thread.
+    /// The observer receives a [`ScanProgress`] snapshot as the scan runs: after each page on
+    /// the serial path, and after each delivered batch on the parallel ones. The callback must
+    /// be `Send + Sync` because it may be invoked from a scan thread.
     #[must_use]
-    pub fn with_progress<F>(mut self, observer: F) -> Self
+    pub fn with_progress<F>(self, observer: F) -> Self
     where
         F: Fn(ScanProgress) + Send + Sync + 'static,
     {
-        self.progress = Some(std::sync::Arc::new(observer));
+        self.with_progress_observer(std::sync::Arc::new(observer))
+    }
+
+    /// [`Self::with_progress`] for an observer that is already shared, so one callback can be
+    /// reused across scans without being boxed again.
+    #[must_use]
+    pub fn with_progress_observer(mut self, observer: ScanProgressObserver) -> Self {
+        self.progress = Some(observer);
         self
     }
 
@@ -1233,6 +1306,16 @@ impl ScanBuilder<'_> {
         // Declared outside `thread::scope` so the shared references satisfy the `'scope` bound.
         let next_chunk_idx = AtomicUsize::new(0);
         let descriptor_table = descriptors.as_ref();
+        let counters = ProgressCounters::default();
+        let counters = &counters;
+        let progress = ProgressReport {
+            observer: self.progress.as_ref(),
+            counters,
+            total_pages: u64::try_from(page_count).unwrap_or(u64::MAX),
+            estimated_total_bytes: u64::try_from(page_count)
+                .unwrap_or(u64::MAX)
+                .saturating_mul(u64::try_from(plan.raw.page_size()).unwrap_or(0)),
+        };
         let context = DescriptorChunkContext {
             raw_plan: &plan.raw,
             batch_plan: &plan.batch,
@@ -1281,6 +1364,7 @@ impl ScanBuilder<'_> {
                                 &tx,
                                 stop.as_ref(),
                             );
+                            counters.add(&chunk_stats);
                             merge_scan_stats(&mut worker_stats, &chunk_stats);
                         }
                         worker_stats
@@ -1333,6 +1417,7 @@ impl ScanBuilder<'_> {
                                 &tx,
                                 stop.as_ref(),
                             );
+                            counters.add(&chunk_stats);
                             merge_scan_stats(&mut worker_stats, &chunk_stats);
                             let _ = recycle.send(extent.bytes);
                         }
@@ -1348,16 +1433,22 @@ impl ScanBuilder<'_> {
             drop(tx);
             drop(io_err_tx);
 
-            let (delivered_batches, delivered_rows) =
-                match collect_streamed_batches(rx, self.ordering, chunk_count, stop.as_ref(), f) {
-                    Ok(counts) => counts,
-                    Err(err) => {
-                        for handle in handles {
-                            let _ = handle.join();
-                        }
-                        return Err(err);
+            let (delivered_batches, delivered_rows) = match collect_streamed_batches(
+                rx,
+                self.ordering,
+                chunk_count,
+                stop.as_ref(),
+                progress,
+                f,
+            ) {
+                Ok(counts) => counts,
+                Err(err) => {
+                    for handle in handles {
+                        let _ = handle.join();
                     }
-                };
+                    return Err(err);
+                }
+            };
 
             let mut total = ScanStats::default();
             for handle in handles {

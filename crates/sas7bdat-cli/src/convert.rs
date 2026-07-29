@@ -13,10 +13,11 @@ use crate::style::Style;
 use anyhow::{Result, anyhow};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use rayon::prelude::*;
-use sas7bdat::{Dataset, OpenOptions, ValidationMode};
+use sas7bdat::{Dataset, OpenOptions, ScanProgress, ScanProgressObserver, ValidationMode};
 use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
@@ -44,7 +45,14 @@ pub fn run_convert(args: &ConvertArgs) -> Result<()> {
     let started = Instant::now();
 
     let run_one = |root: &Path, input: &Path| -> (std::path::PathBuf, Result<ConvertOutcome>) {
-        let result = convert_one(root, input, args, catalog.as_ref(), print_each);
+        let result = convert_one(
+            root,
+            input,
+            args,
+            catalog.as_ref(),
+            print_each,
+            progress.as_ref(),
+        );
         if let Some(progress) = progress.as_ref() {
             progress.tick();
             if result.is_err() {
@@ -152,6 +160,7 @@ fn convert_one(
     args: &ConvertArgs,
     catalog: Option<&Catalog>,
     print_each: bool,
+    progress: Option<&ProgressState>,
 ) -> Result<ConvertOutcome> {
     let output = args.output.out.as_ref().map_or_else(
         || compute_output_path(root, input, args),
@@ -182,10 +191,12 @@ fn convert_one(
         RowWindow::new(args.skip, args.max_rows),
         dataset.metadata().row_count,
     );
+    let (file_bar, observer) = file_progress(progress, input);
     let scan = ScanOptions {
         selection,
         projection: projection.as_ref(),
         parse_threads: args.execution.parse_threads,
+        progress: observer.as_ref(),
     };
 
     let started = Instant::now();
@@ -241,7 +252,11 @@ fn convert_one(
                 },
             )
         }
-    }?;
+    };
+    if let (Some(progress), Some(bar)) = (progress, file_bar) {
+        progress.remove_file_bar(&bar);
+    }
+    let rows = rows?;
     let elapsed = started.elapsed();
     let bytes = fs::metadata(&output).map_or(0, |meta| meta.len());
 
@@ -323,10 +338,31 @@ fn should_show_progress(args: &ConvertArgs) -> bool {
     }
 }
 
+/// A per-file bar and the scan observer that drives it, if progress is being shown.
+///
+/// Bytes rather than rows: on a network share the read rate is the number worth watching, and
+/// it is what tells you whether a long conversion is progressing or stalled.
+fn file_progress(
+    progress: Option<&ProgressState>,
+    input: &Path,
+) -> (Option<ProgressBar>, Option<ScanProgressObserver>) {
+    let bar = progress.and_then(|progress| progress.file_bar(input));
+    let observer = bar.as_ref().map(|bar| {
+        let bar = bar.clone();
+        Arc::new(move |snapshot: ScanProgress| bar.set_position(snapshot.raw_bytes_read))
+            as ScanProgressObserver
+    });
+    (bar, observer)
+}
+
+/// Files converted at once above which per-file bars become noise rather than information.
+const MAX_FILE_BARS: usize = 8;
+
 struct ProgressState {
     multi: MultiProgress,
     overall: ProgressBar,
     failed: AtomicUsize,
+    per_file_bars: usize,
 }
 
 impl ProgressState {
@@ -352,7 +388,41 @@ impl ProgressState {
             multi,
             overall,
             failed: AtomicUsize::new(0),
+            per_file_bars: usize::from(args.execution.jobs.unwrap_or(1) <= MAX_FILE_BARS),
         })
+    }
+
+    /// A second bar tracking bytes read within one file, so a single multi-minute conversion
+    /// shows movement instead of sitting at the same file count.
+    ///
+    /// Only while files are converted a few at a time: `--jobs 64` would stack 64 of these.
+    fn file_bar(&self, input: &Path) -> Option<ProgressBar> {
+        if self.per_file_bars == 0 {
+            return None;
+        }
+        let total = fs::metadata(input).map_or(0, |meta| meta.len());
+        let bar = self
+            .multi
+            .insert_after(&self.overall, ProgressBar::new(total));
+        bar.set_style(
+            ProgressStyle::with_template(
+                "  {spinner:.green} [{bar:32.cyan/blue}] {bytes}/{total_bytes} · {binary_bytes_per_sec} · {msg}",
+            )
+            .ok()?
+            .progress_chars("=>-")
+            .tick_chars("-\\|/ "),
+        );
+        bar.set_message(
+            input
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+        );
+        Some(bar)
+    }
+
+    fn remove_file_bar(&self, bar: &ProgressBar) {
+        bar.finish_and_clear();
+        self.multi.remove(bar);
     }
 
     /// Advance the bar by one completed file (whether it succeeded or failed).
@@ -374,8 +444,85 @@ impl ProgressState {
 
 #[cfg(test)]
 mod tests {
-    use super::{failures_message, human_duration};
+    use super::{ProgressState, failures_message, file_progress, human_duration};
+    use crate::cli::{
+        ConvertArgs, ExecutionOptions, OutputOptions, ProgressMode, RecursionMode, UiOptions,
+        ValidationOptions,
+    };
+    use sas7bdat::ScanProgress;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
+
+    fn args(jobs: Option<usize>) -> ConvertArgs {
+        ConvertArgs {
+            inputs: vec![PathBuf::from("input.sas7bdat")],
+            recursive: RecursionMode::Recursive,
+            output: OutputOptions {
+                out_dir: None,
+                out: None,
+                sink: None,
+                compression: crate::cli::CompressionCodec::Zstd,
+                delimiter: None,
+                no_header: false,
+                flatten: false,
+                overwrite: false,
+                parquet_row_group_size: None,
+                parquet_target_bytes: None,
+                parquet_metadata: false,
+            },
+            execution: ExecutionOptions {
+                jobs,
+                parse_threads: None,
+                fail_fast: false,
+            },
+            validation: ValidationOptions {
+                strict_dates: false,
+            },
+            io_backend: crate::cli::IoBackend::Auto,
+            ui: UiOptions {
+                quiet: false,
+                progress: ProgressMode::Always,
+            },
+            skip: None,
+            max_rows: None,
+            columns: None,
+            column_indices: None,
+            catalog: None,
+        }
+    }
+
+    /// A multi-minute conversion of one file has to show movement, which means the scan's byte
+    /// counter has to reach the bar.
+    #[test]
+    fn the_file_bar_follows_bytes_read() {
+        let state = ProgressState::new(&args(None), 1).expect("progress enabled");
+        let (bar, observer) = file_progress(Some(&state), Path::new("Cargo.toml"));
+        let bar = bar.expect("a per-file bar");
+        let observer = observer.expect("an observer");
+
+        observer(ScanProgress {
+            raw_bytes_read: 4096,
+            ..ScanProgress::default()
+        });
+
+        assert_eq!(bar.position(), 4096);
+        state.remove_file_bar(&bar);
+    }
+
+    #[test]
+    fn per_file_bars_stop_once_many_files_run_at_once() {
+        let state = ProgressState::new(&args(Some(64)), 64).expect("progress enabled");
+        let (bar, observer) = file_progress(Some(&state), Path::new("Cargo.toml"));
+        assert!(bar.is_none(), "64 concurrent bars would be noise");
+        assert!(observer.is_none());
+    }
+
+    #[test]
+    fn no_progress_state_means_no_observer() {
+        let (bar, observer) = file_progress(None, Path::new("Cargo.toml"));
+        assert!(bar.is_none());
+        assert!(observer.is_none());
+    }
 
     #[test]
     fn human_duration_picks_a_sensible_unit() {

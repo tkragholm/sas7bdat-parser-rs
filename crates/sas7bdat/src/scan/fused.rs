@@ -23,8 +23,9 @@ use super::{
     ControlFlow, Error, FileSource, OwnedColumnarBatch, Result, RowSelection, ScanBuilder,
     ScanStats,
     builder::{
-        DescriptorChunkContext, StreamedBatchMessage, collect_streamed_batches, merge_scan_stats,
-        pages_per_batch, resolved_parallel_workers, stream_batches_for_descriptor_chunk,
+        DescriptorChunkContext, ProgressCounters, ProgressReport, StreamedBatchMessage,
+        collect_streamed_batches, merge_scan_stats, pages_per_batch, resolved_parallel_workers,
+        stream_batches_for_descriptor_chunk,
     },
     extent::{Extent, ExtentStream, ReadPlan, pages_per_extent, plan_spans_from_geometry},
     plan::ScanPlan,
@@ -62,6 +63,8 @@ struct FusedRun<'a> {
     spans: &'a [(u64, usize)],
     workers: usize,
     ordering: super::OrderingMode,
+    observer: Option<&'a super::ScanProgressObserver>,
+    total_pages: u64,
     decode: DescriptorChunkContext<'a>,
     parse: ParseContext<'a>,
 }
@@ -140,6 +143,8 @@ where
         spans: &spans,
         workers,
         ordering: builder.ordering,
+        observer: builder.progress.as_ref(),
+        total_pages: page_count,
         decode: DescriptorChunkContext {
             raw_plan: &plan.raw,
             batch_plan: &plan.batch,
@@ -184,8 +189,18 @@ where
     F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
 {
     let workers = run.workers;
-    // Declared outside `thread::scope` so the shared reference satisfies the `'scope` bound.
+    // Declared outside `thread::scope` so the shared references satisfy the `'scope` bound.
     let next_chunk_idx = AtomicUsize::new(0);
+    let counters = ProgressCounters::default();
+    let counters = &counters;
+    let progress = ProgressReport {
+        observer: run.observer,
+        counters,
+        total_pages: run.total_pages,
+        estimated_total_bytes: run
+            .total_pages
+            .saturating_mul(u64::try_from(run.parse.page_size).unwrap_or(0)),
+    };
 
     std::thread::scope(|scope| -> Result<(ScanStats, u64)> {
         let (tx, rx) = sync_channel::<StreamedBatchMessage>(workers.saturating_mul(2).max(1));
@@ -248,6 +263,7 @@ where
                         &tx,
                         stop.as_ref(),
                     );
+                    counters.add(&chunk_stats);
                     merge_scan_stats(&mut worker_stats, &chunk_stats);
                     let _ = recycle.send(fused.extent.bytes);
                 }
@@ -262,37 +278,56 @@ where
         drop(recycle);
         drop(parsed_rx);
 
-        let collected =
-            collect_streamed_batches(rx, run.ordering, run.parse.chunk_count, stop.as_ref(), f);
-        let candidate_rows = parse_handle
-            .join()
-            .map_err(|_| Error::unsupported("fused descriptor stage panicked"))?;
-        let (delivered_batches, delivered_rows) = match collected {
-            Ok(counts) => counts,
-            Err(err) => {
-                for handle in handles {
-                    let _ = handle.join();
-                }
-                return Err(err);
-            }
-        };
+        let collected = collect_streamed_batches(
+            rx,
+            run.ordering,
+            run.parse.chunk_count,
+            stop.as_ref(),
+            progress,
+            f,
+        );
+        join_stages(collected, parse_handle, handles, &io_err_rx)
+    })
+}
 
-        let mut total = ScanStats::default();
-        for handle in handles {
-            let worker_stats = handle
-                .join()
-                .map_err(|_| Error::unsupported("parallel batch worker panicked"))?;
-            merge_scan_stats(&mut total, &worker_stats);
-        }
-        // A failed read closes its extent channel, which the parse stage sees as end of work,
-        // so the scan would otherwise return fewer rows and report success.
-        if let Ok(err) = io_err_rx.try_recv() {
+/// Wind the pipeline down and merge what every stage reported.
+///
+/// The parse stage is joined first: the decode workers only see their channel close once it
+/// drops the sending end.
+fn join_stages(
+    collected: Result<(u64, u64)>,
+    parse_handle: std::thread::ScopedJoinHandle<'_, u64>,
+    handles: Vec<std::thread::ScopedJoinHandle<'_, ScanStats>>,
+    io_err_rx: &Receiver<Error>,
+) -> Result<(ScanStats, u64)> {
+    let candidate_rows = parse_handle
+        .join()
+        .map_err(|_| Error::unsupported("fused descriptor stage panicked"))?;
+    let (delivered_batches, delivered_rows) = match collected {
+        Ok(counts) => counts,
+        Err(err) => {
+            for handle in handles {
+                let _ = handle.join();
+            }
             return Err(err);
         }
-        total.decode_batches = delivered_batches;
-        total.rows_emitted = delivered_rows;
-        Ok((total, candidate_rows))
-    })
+    };
+
+    let mut total = ScanStats::default();
+    for handle in handles {
+        let worker_stats = handle
+            .join()
+            .map_err(|_| Error::unsupported("parallel batch worker panicked"))?;
+        merge_scan_stats(&mut total, &worker_stats);
+    }
+    // A failed read closes its extent channel, which the parse stage sees as end of work, so
+    // the scan would otherwise return fewer rows and report success.
+    if let Ok(err) = io_err_rx.try_recv() {
+        return Err(err);
+    }
+    total.decode_batches = delivered_batches;
+    total.rows_emitted = delivered_rows;
+    Ok((total, candidate_rows))
 }
 
 /// Compile descriptors for extents in file order, forwarding each to the decode pool.

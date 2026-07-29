@@ -64,7 +64,7 @@ fn apply_column_encodings(
 use crate::parquet_pipeline;
 use sas7bdat::{
     BatchHint, CellValue, ColumnMeta, Dataset, Error, Parallelism, Projection, RowSelection,
-    ScanBuilder,
+    ScanBuilder, ScanProgressObserver,
 };
 use std::fmt::Write as _;
 use std::fs::File;
@@ -73,14 +73,16 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct ScanOptions<'a> {
     pub selection: Option<RowSelection>,
     pub projection: Option<&'a Projection>,
     pub parse_threads: Option<usize>,
+    /// Borrowed rather than owned so `ScanOptions` stays `Copy`.
+    pub progress: Option<&'a ScanProgressObserver>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct WriteOptions<'a> {
     pub row_group_rows: Option<usize>,
     pub batch_rows: Option<usize>,
@@ -102,6 +104,7 @@ impl WriteOptions<'_> {
                 selection: None,
                 projection: None,
                 parse_threads: None,
+                progress: None,
             },
             catalog: None,
             embed_metadata: false,
@@ -116,7 +119,7 @@ impl Default for WriteOptions<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct DelimitedWriteOptions<'a> {
     pub delimiter: u8,
     pub headers: bool,
@@ -274,6 +277,9 @@ fn apply_scan_options<'a>(dataset: &'a Dataset, options: ScanOptions<'a>) -> Sca
     }
     if let Some(threads) = options.parse_threads {
         scan = scan.with_parallelism(Parallelism::Threads(threads.max(1)));
+    }
+    if let Some(observer) = options.progress {
+        scan = scan.with_progress_observer(Arc::clone(observer));
     }
     scan
 }
