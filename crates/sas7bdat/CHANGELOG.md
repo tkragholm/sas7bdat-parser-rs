@@ -5,8 +5,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate 
 [Cargo's SemVer rules](https://doc.rust-lang.org/cargo/reference/semver.html).
 
 This file covers the Rust crate only. The Python packages built from this repository —
-`sas7bdat-polars` and `sas7bdat-cli` — carry their own version line, currently 0.5.x, and
-git tags (`v0.5.0`, …) track *those*, not this crate. A tag name is not this crate's
+`sas7bdat-polars` and `sas7bdat-cli` — carry their own version line, currently 0.7.x, and
+git tags (`v0.7.0`, …) track *those*, not this crate. A tag name is not this crate's
 version.
 
 Entries from 0.4.0 onward are generated from Conventional Commits with
@@ -15,8 +15,12 @@ earlier are written by hand.
 
 ## [Unreleased]
 
-This file covers the library crate. Two entries below describe the `sas7bdat` CLI, which
-shares this repository but ships on PyPI under its own version.
+## [0.5.0] - 2026-07-29
+
+Read the file once instead of twice, and stop encoding Parquet on a single core. Together
+these are what a conversion on network storage was waiting on. Entries marked **(CLI)**
+describe the `sas7bdat` command, which shares this repository but ships on PyPI under its
+own version (0.7.0).
 
 ### Added
 
@@ -162,5 +166,6 @@ Released before this changelog was kept; see the git history. 0.2.0 was a
 different implementation with a `dataset`/`parser`/`cell` module layout and a bundled
 `sas7` binary.
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.5.0...HEAD
+[0.5.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.5.0
 [0.3.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.3.0
