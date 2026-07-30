@@ -122,13 +122,22 @@ jobs:
       # `dataset_open_path` replays the same .sas7bdat inputs through `Dataset::open`,
       # which reaches the fused single-pass scan that in-memory sources decline.
       # `catalog_parse` takes the .sas7bcat inputs, a different format.
+      #
+      # `--target` is not optional here. cargo-fuzz defaults it to the triple of its own
+      # executable, not the toolchain's host, and install-action ships a musl-linked
+      # binary — so the default builds for x86_64-unknown-linux-musl and fails with
+      # "sanitizer is incompatible with statically linked libc". Taking the triple from
+      # rustc pins it to the toolchain that actually has a sanitizer runtime, and keeps
+      # working if the runner image ever changes architecture.
       - name: Replay fuzz artifacts under ASan
         run: |
           cd crates/sas7bdat
-          cargo fuzz run dataset_from_bytes tests/fixtures/fuzz -- -runs=0
-          cargo fuzz run dataset_open_path tests/fixtures/fuzz -- -runs=0
-          cargo fuzz run columnar_offsets tests/fixtures/fuzz -- -runs=0
-          cargo fuzz run catalog_parse tests/fixtures/fuzz/catalog -- -runs=0
+          host=$(rustc -vV | awk '/^host:/{print $2}')
+          echo "building fuzz targets for $host"
+          cargo fuzz run --target "$host" dataset_from_bytes tests/fixtures/fuzz -- -runs=0
+          cargo fuzz run --target "$host" dataset_open_path tests/fixtures/fuzz -- -runs=0
+          cargo fuzz run --target "$host" columnar_offsets tests/fixtures/fuzz -- -runs=0
+          cargo fuzz run --target "$host" catalog_parse tests/fixtures/fuzz/catalog -- -runs=0
 
   audit:
     name: cargo audit
