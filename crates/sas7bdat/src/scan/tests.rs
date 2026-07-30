@@ -63,6 +63,73 @@ fn trim_and_classify_ascii_fast_path_handles_all_space_width_12() {
     assert!(trimmed.is_ascii);
 }
 
+/// Differential test against the obvious implementation.
+///
+/// `trim_and_classify_ascii` picks one of four kernels by width — a 16-lane vector, a
+/// 32-lane vector, an 8-byte word scan, or a 64-lane vector — and the interesting bugs
+/// live at the boundaries between them and in the vector kernels' zero padding. Rather
+/// than guess which cases matter, compare every width from 0 to 80 against a definition
+/// nobody can get wrong.
+#[test]
+fn trim_and_classify_ascii_matches_a_naive_reference() {
+    fn reference(slice: &[u8]) -> (&[u8], bool) {
+        let mut end = slice.len();
+        while end > 0 && (slice[end - 1] == b' ' || slice[end - 1] == 0) {
+            end -= 1;
+        }
+        let trimmed = &slice[..end];
+        (trimmed, trimmed.iter().all(u8::is_ascii))
+    }
+
+    // Byte alphabets chosen to exercise the trim mask, the padding lanes and the
+    // high-bit test: both trim bytes, an ASCII content byte, and a non-ASCII one.
+    let alphabet = [b' ', 0u8, b'x', 0xE9];
+    let mut buf = Vec::new();
+
+    for len in 0..=80usize {
+        // A handful of deterministic patterns per length, including all-trim,
+        // all-content, and content in the last position (nothing to trim).
+        for seed in 0..24u32 {
+            buf.clear();
+            for i in 0..len {
+                // A cheap LCG keeps this deterministic without a dependency. `len` never
+                // exceeds 80, so the index always fits a u32.
+                let step = u32::try_from(i).expect("length is bounded by 80");
+                let pick = (seed
+                    .wrapping_mul(1_664_525)
+                    .wrapping_add(step.wrapping_mul(1_013_904_223)))
+                    >> 24;
+                buf.push(alphabet[(pick as usize) % alphabet.len()]);
+            }
+
+            let (want_bytes, want_ascii) = reference(&buf);
+            let got = trim_and_classify_ascii(&buf);
+            assert_eq!(
+                got.bytes, want_bytes,
+                "len={len} seed={seed} input={buf:?}: trimmed bytes differ"
+            );
+            assert_eq!(
+                got.is_ascii, want_ascii,
+                "len={len} seed={seed} input={buf:?}: is_ascii differs"
+            );
+        }
+
+        // Explicit edge shapes the pseudo-random patterns may not produce at every width.
+        for shape in [vec![b' '; len], vec![0u8; len], vec![b'x'; len]] {
+            let (want_bytes, want_ascii) = reference(&shape);
+            let got = trim_and_classify_ascii(&shape);
+            assert_eq!(
+                got.bytes, want_bytes,
+                "len={len}: uniform shape trimmed wrong"
+            );
+            assert_eq!(
+                got.is_ascii, want_ascii,
+                "len={len}: uniform shape ascii wrong"
+            );
+        }
+    }
+}
+
 #[test]
 fn raw_scan_decompresses_rle_rows() {
     let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, b'A'], 64, 4));
