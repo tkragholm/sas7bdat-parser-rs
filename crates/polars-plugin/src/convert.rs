@@ -1,8 +1,9 @@
 #![allow(clippy::redundant_pub_crate)]
-// This module is the zero-copy bridge to polars-arrow: it builds Arrow arrays from
-// scanner-produced buffers via `*_unchecked` constructors. Each `unsafe` site carries a
-// SAFETY justification of the offset/UTF-8 invariants the scanner guarantees.
-#![allow(unsafe_code)]
+// This module is the bridge to polars-arrow. It builds Arrow arrays from
+// scanner-produced buffers using polars-arrow's *checked* constructors, so the crate
+// needs no `unsafe` here: the scanner's offset and UTF-8 invariants are verified at this
+// boundary rather than assumed. See `trusted_large_offsets_buffer` for why the previous
+// `*_unchecked` + `debug_assert` arrangement was unsound in release builds.
 
 #[cfg(feature = "arrow")]
 use arrow_schema::{DataType as ArrowSchemaDataType, TimeUnit as ArrowSchemaTimeUnit};
@@ -13,7 +14,7 @@ use polars_arrow::{
     array::{Array, BinaryArray, PrimitiveArray, Utf8Array},
     bitmap::MutableBitmap,
     datatypes::{ArrowDataType, ArrowSchema, Field, TimeUnit as PlTimeUnit},
-    offset::{Offsets, OffsetsBuffer},
+    offset::OffsetsBuffer,
     record_batch::RecordBatch as PolarsRecordBatch,
 };
 #[cfg(feature = "arrow")]
@@ -23,16 +24,14 @@ use pyo3::{
     types::{PyDict, PyModule},
 };
 #[cfg(feature = "arrow")]
-use sas7bdat::{
-    Error, LabelSet, OwnedColumnBuffer, Result as SasResult, SasDate, SasDateTime, TrustedOffsets,
-};
+use sas7bdat::{Error, LabelSet, OwnedColumnBuffer, Result, SasDate, SasDateTime, TrustedOffsets};
 #[cfg(feature = "arrow")]
 use std::io::Write;
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
 
 #[cfg(feature = "arrow")]
-pub(super) fn build_polars_schema(arrow_schema: &arrow_schema::Schema) -> SasResult<ArrowSchema> {
+pub(super) fn build_polars_schema(arrow_schema: &arrow_schema::Schema) -> Result<ArrowSchema> {
     let fields: Vec<Field> = arrow_schema
         .fields()
         .iter()
@@ -40,7 +39,7 @@ pub(super) fn build_polars_schema(arrow_schema: &arrow_schema::Schema) -> SasRes
             let dtype = arrow_dt_to_polars_arrow(field.data_type()).map_err(Error::arrow)?;
             Ok(Field::new(field.name().as_str().into(), dtype, true))
         })
-        .collect::<SasResult<Vec<_>>>()?;
+        .collect::<Result<Vec<_>>>()?;
     ArrowSchema::from_iter_check_duplicates(fields).map_err(|err| Error::arrow(err.to_string()))
 }
 
@@ -74,7 +73,7 @@ pub(super) fn owned_batch_to_dataframe(
     batch: sas7bdat::OwnedColumnarBatch,
     schema: Arc<ArrowSchema>,
     label_mapping: &[Option<LabelSet>],
-) -> SasResult<DataFrame> {
+) -> Result<DataFrame> {
     let row_count = batch.row_count;
     let mut arrays: Vec<Box<dyn Array>> = Vec::with_capacity(batch.columns.len());
     // Target dtype per column, in column order. A temporal column whose values do
@@ -92,7 +91,7 @@ pub(super) fn owned_batch_to_dataframe(
         if let Some(label_set) = label_set {
             arrays.push(Box::new(owned_column_to_labelled_utf8(
                 col, label_set, row_count,
-            )));
+            )?));
             continue;
         }
         let target_dtype = field_dtypes.get(col_idx);
@@ -229,12 +228,12 @@ pub(super) fn owned_batch_to_dataframe(
                 data,
                 valid,
                 ..
-            } => Box::new(trusted_large_utf8_array(offsets, data, valid, row_count)),
+            } => Box::new(trusted_large_utf8_array(offsets, data, valid, row_count)?),
             OwnedColumnBuffer::RawBytes {
                 offsets,
                 data,
                 valid,
-            } => Box::new(trusted_large_binary_array(offsets, data, valid, row_count)),
+            } => Box::new(trusted_large_binary_array(offsets, data, valid, row_count)?),
         };
         arrays.push(array);
     }
@@ -254,7 +253,7 @@ fn owned_column_to_labelled_utf8(
     col: OwnedColumnBuffer,
     label_set: &LabelSet,
     row_count: usize,
-) -> Utf8Array<i64> {
+) -> Result<Utf8Array<i64>> {
     let mut offsets: Vec<i64> = Vec::with_capacity(row_count + 1);
     // Labels are short category names; pre-size to avoid repeated reallocation as
     // `data` grows. A modest per-row estimate covers the common case.
@@ -348,65 +347,65 @@ fn owned_column_to_labelled_utf8(
     }
 
     let bitmap = validity.into();
-    // SAFETY: offsets are built by appending data.len() after each extend (monotonically
-    // non-decreasing) and zero-copying for null rows, so Arrow offset invariants hold.
-    let offs_buf = unsafe { Offsets::new_unchecked(offsets).into() };
-    // SAFETY: all label strings come from &str literals or format!() — valid UTF-8.
-    unsafe {
-        Utf8Array::<i64>::new_unchecked(
-            ArrowDataType::LargeUtf8,
-            offs_buf,
-            data.into(),
-            Some(bitmap),
-        )
-    }
+    // These offsets and bytes are built locally — label `&str`s and `format!` output — so
+    // the invariants genuinely do hold here, unlike the scanner-fed paths above. Using the
+    // checked constructor anyway costs one pass over a short label buffer and lets this
+    // module drop `unsafe` entirely, which is worth more than the pass costs.
+    let offs_buf = OffsetsBuffer::try_from(offsets)
+        .map_err(|err| Error::arrow(format!("invalid label-column offsets: {err}")))?;
+    Utf8Array::<i64>::try_new(
+        ArrowDataType::LargeUtf8,
+        offs_buf,
+        data.into(),
+        Some(bitmap),
+    )
+    .map_err(|err| Error::arrow(format!("invalid label-mapped column: {err}")))
+}
+
+/// Converts scanner offsets into an Arrow offsets buffer, validated.
+///
+/// This used to be `Offsets::new_unchecked` behind a `debug_assert`, which meant the
+/// shipped release wheel handed unvalidated offsets to Polars and Polars indexed the
+/// data buffer with them — an out-of-bounds read if the scanner ever got a length wrong.
+/// The scanner's builders are careful, but every length they work from is derived from a
+/// file-controlled column width, and a debug-only guard in front of a release-reachable
+/// `unsafe` is exactly the shape that let a 67-byte numeric column reach
+/// `numeric_bits`'s `unreachable!()`.
+///
+/// `OffsetsBuffer::try_from` covers the first offset and monotonicity, in a loop
+/// polars-arrow deliberately keeps auto-vectorizable. The remaining condition — the final
+/// offset against the values length, which is what actually overruns the buffer — is
+/// checked by both callers' `try_new`: `BinaryArray` via `try_check_offsets_bounds`
+/// (O(1)) and `Utf8Array` via `try_check_utf8`. So `TrustedOffsets::validate_for_values_len`
+/// is not called here; it would be a third pass over the same data for a condition
+/// already covered twice.
+#[cfg(feature = "arrow")]
+fn trusted_large_offsets_buffer(offsets: TrustedOffsets) -> Result<OffsetsBuffer<i64>> {
+    OffsetsBuffer::try_from(offsets.into_inner())
+        .map_err(|err| Error::arrow(format!("Arrow rejected the scanner's offsets: {err}")))
 }
 
 #[cfg(feature = "arrow")]
-fn trusted_large_offsets_buffer(offsets: TrustedOffsets, data_len: usize) -> OffsetsBuffer<i64> {
-    offsets.debug_assert_valid_for_values_len(data_len);
-
-    // SAFETY:
-    // `TrustedOffsets` is only produced by the scanner's variable-width builders in
-    // `sas7bdat`. Those builders:
-    // - initialize offsets with a single `0`
-    // - append the current data length after each pushed value
-    // - repeat the previous offset for nulls
-    // This guarantees non-negative, monotonically non-decreasing Arrow offsets.
-    // Debug builds re-check the final offset matches `data_len` at this boundary.
-    unsafe { Offsets::new_unchecked(offsets.into_inner()).into() }
-}
-
-#[cfg(feature = "arrow")]
+/// The UTF-8 validity check was also `debug_assert` only, so release builds constructed a
+/// `Utf8Array` — whose contents Polars hands out as `&str` — over unvalidated bytes.
+/// `try_new` validates the UTF-8 and the offsets-against-values length together, so this
+/// needs no `unsafe` at all.
+///
+/// It costs an O(bytes) UTF-8 pass that partly duplicates what the scanner's strict path
+/// already did. That is affordable here specifically: this module is the Polars bridge,
+/// and the CLI's bulk conversion goes through `arrow-array` instead, so the large-file
+/// path does not pay for it.
 fn trusted_large_utf8_array(
     offsets: TrustedOffsets,
     data: Vec<u8>,
     valid: Option<Vec<u64>>,
     row_count: usize,
-) -> Utf8Array<i64> {
-    let offs_buf = trusted_large_offsets_buffer(offsets, data.len());
+) -> Result<Utf8Array<i64>> {
+    let offs_buf = trusted_large_offsets_buffer(offsets)?;
     let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
 
-    #[cfg(debug_assertions)]
-    {
-        debug_assert!(
-            std::str::from_utf8(&data).is_ok(),
-            "scanner-produced Utf8 column must contain valid UTF-8 bytes"
-        );
-    }
-
-    // SAFETY:
-    // `TrustedOffsets` guarantees Arrow offset invariants for this `data` buffer.
-    // Scanner-produced `Utf8` buffers are built only from:
-    // - ASCII slices
-    // - source slices that passed `from_utf8`
-    // - decoded/encoded scratch strings from the configured encoding path
-    // - explicit scalar-to-UTF-8 encoding for windows-1252 single-byte decoding
-    // Therefore the concatenated `data` buffer is valid UTF-8, and debug builds
-    // assert that directly here.
-    unsafe {
-        Utf8Array::<i64>::new_unchecked(ArrowDataType::LargeUtf8, offs_buf, data.into(), bitmap)
-    }
+    Utf8Array::<i64>::try_new(ArrowDataType::LargeUtf8, offs_buf, data.into(), bitmap)
+        .map_err(|err| Error::arrow(format!("scanner produced an invalid Utf8 column: {err}")))
 }
 
 #[cfg(feature = "arrow")]
@@ -415,16 +414,12 @@ fn trusted_large_binary_array(
     data: Vec<u8>,
     valid: Option<Vec<u64>>,
     row_count: usize,
-) -> BinaryArray<i64> {
-    let offs_buf = trusted_large_offsets_buffer(offsets, data.len());
+) -> Result<BinaryArray<i64>> {
+    let offs_buf = trusted_large_offsets_buffer(offsets)?;
     let bitmap = valid.map(|v| bits_to_bitmap(&v, row_count));
 
-    // SAFETY:
-    // `TrustedOffsets` guarantees Arrow offset invariants for this `data` buffer,
-    // and debug builds already checked the final offset against `data.len()`.
-    unsafe {
-        BinaryArray::<i64>::new_unchecked(ArrowDataType::LargeBinary, offs_buf, data.into(), bitmap)
-    }
+    BinaryArray::<i64>::try_new(ArrowDataType::LargeBinary, offs_buf, data.into(), bitmap)
+        .map_err(|err| Error::arrow(format!("scanner produced an invalid Binary column: {err}")))
 }
 
 #[cfg(feature = "arrow")]
