@@ -26,6 +26,8 @@ use std::time::Instant;
 struct ConvertOutcome {
     rows: u64,
     bytes: u64,
+    /// Size of the source `.sas7bdat`, which is what throughput is measured against.
+    input_bytes: u64,
 }
 
 /// # Errors
@@ -92,7 +94,13 @@ pub fn run_convert(args: &ConvertArgs) -> Result<()> {
         };
 
     finish_progress(progress.as_ref());
-    report(&outcomes, started.elapsed(), args, files.len() > 1)
+    report(
+        &outcomes,
+        started.elapsed(),
+        args,
+        files.len() > 1,
+        print_each,
+    )
 }
 
 /// Print grouped failures and (for multi-file runs) a final aggregate summary, then
@@ -102,10 +110,12 @@ fn report(
     elapsed: std::time::Duration,
     args: &ConvertArgs,
     multi: bool,
+    printed_each: bool,
 ) -> Result<()> {
     let mut ok = 0usize;
     let mut rows = 0u64;
     let mut bytes = 0u64;
+    let mut input_bytes = 0u64;
     let mut failures: Vec<(&Path, String)> = Vec::new();
     for (path, result) in outcomes {
         match result {
@@ -113,6 +123,7 @@ fn report(
                 ok += 1;
                 rows += outcome.rows;
                 bytes += outcome.bytes;
+                input_bytes += outcome.input_bytes;
             }
             Err(err) => failures.push((path, err.to_string())),
         }
@@ -128,8 +139,11 @@ fn report(
         }
     }
 
-    // One closing summary line for batch runs (single-file runs already printed their line).
-    if multi && !args.ui.quiet {
+    // A closing line whenever the run didn't already account for itself per file. Without the
+    // `!printed_each` half, a single file converted with a progress bar — the default on a
+    // terminal, and exactly how a long benchmark run is invoked — finished with the bar erased
+    // and no total printed at all: no elapsed time, no throughput.
+    if (multi || !printed_each) && !args.ui.quiet {
         let style = Style::for_stdout();
         let mark = if failures.is_empty() {
             style.check()
@@ -137,14 +151,20 @@ fn report(
             style.cross()
         };
         let total = outcomes.len();
-        println!(
-            "{mark} {} of {} files · {} rows · {} · {}",
+        let mut line = format!(
+            "{mark} {} of {} files · {} rows · {} → {} · {}",
             crate::values::thousands(ok as u64),
             crate::values::thousands(total as u64),
             crate::values::thousands(rows),
+            crate::values::human_bytes(input_bytes),
             crate::values::human_bytes(bytes),
             human_duration(elapsed),
         );
+        if let Some(rate) = throughput(input_bytes, elapsed) {
+            line.push_str(" · ");
+            line.push_str(&rate);
+        }
+        println!("{line}");
     }
 
     if failures.is_empty() {
@@ -215,11 +235,45 @@ fn convert_one(
     publish(&staged, &output)?;
     let elapsed = started.elapsed();
     let bytes = fs::metadata(&output).map_or(0, |meta| meta.len());
+    let input_bytes = fs::metadata(input).map_or(0, |meta| meta.len());
 
     if print_each {
-        print_success(input, &output, rows, written_cols, bytes, elapsed);
+        print_success(
+            input,
+            &output,
+            rows,
+            written_cols,
+            input_bytes,
+            bytes,
+            elapsed,
+        );
     }
-    Ok(ConvertOutcome { rows, bytes })
+    Ok(ConvertOutcome {
+        rows,
+        bytes,
+        input_bytes,
+    })
+}
+
+/// Sustained throughput over the *source* bytes, which is the figure to compare runs by.
+///
+/// Input rather than output: the same file compresses to a different size under a different
+/// codec or dictionary policy, so an output-based rate moves when nothing about the read did.
+/// `None` when there is nothing meaningful to divide.
+/// Below a millisecond the rate is noise divided by noise, and it would print next to a
+/// `0 ms` duration — so it is omitted rather than shown as a contradiction.
+#[allow(clippy::cast_precision_loss)]
+fn throughput(input_bytes: u64, elapsed: std::time::Duration) -> Option<String> {
+    let seconds = elapsed.as_secs_f64();
+    if input_bytes == 0 || elapsed.as_millis() == 0 {
+        return None;
+    }
+    let mib = input_bytes as f64 / (1024.0 * 1024.0) / seconds;
+    Some(if mib >= 100.0 {
+        format!("{mib:.0} MiB/s")
+    } else {
+        format!("{mib:.1} MiB/s")
+    })
 }
 
 /// Print the styled, one-line success summary for a converted file.
@@ -228,15 +282,21 @@ fn print_success(
     output: &Path,
     rows: u64,
     cols: usize,
+    input_size: u64,
     size: u64,
     elapsed: std::time::Duration,
 ) {
     let style = Style::for_stdout();
-    let detail = format!(
-        "{rows} rows · {cols} cols · {} · {}",
+    let mut detail = format!(
+        "{rows} rows · {cols} cols · {} → {} · {}",
+        crate::values::human_bytes(input_size),
         crate::values::human_bytes(size),
         human_duration(elapsed)
     );
+    if let Some(rate) = throughput(input_size, elapsed) {
+        detail.push_str(" · ");
+        detail.push_str(&rate);
+    }
     println!(
         "{} {} {} {}   {}",
         style.check(),
@@ -324,8 +384,10 @@ fn write_output(
                     row_group_rows,
                     // Not tied to the row group size: the writer accumulates scan batches into
                     // row groups, so a large row group no longer means large scan batches —
-                    // which would otherwise stretch the read extents to match.
-                    batch_rows: None,
+                    // which would otherwise stretch the read extents to match. `--batch-rows`
+                    // sets it independently for anyone who wants the larger batches back.
+                    batch_rows: args.execution.batch_rows,
+                    encode_in_flight_bytes: args.execution.encode_in_flight_bytes,
                     scan,
                     catalog,
                     embed_metadata: args.output.parquet_metadata,
@@ -536,6 +598,8 @@ mod tests {
             execution: ExecutionOptions {
                 jobs,
                 parse_threads: None,
+                batch_rows: None,
+                encode_in_flight_bytes: None,
                 fail_fast: false,
             },
             validation: ValidationOptions {
@@ -636,5 +700,25 @@ mod tests {
     fn failures_message_is_grammatical() {
         assert_eq!(failures_message(1), "1 file failed to convert");
         assert_eq!(failures_message(3), "3 files failed to convert");
+    }
+
+    #[test]
+    fn throughput_reports_input_mib_per_second() {
+        use super::throughput;
+        use std::time::Duration;
+
+        // 2 MiB in 2 s is 1 MiB/s; sub-100 rates keep a decimal.
+        assert_eq!(
+            throughput(2 * 1024 * 1024, Duration::from_secs(2)).as_deref(),
+            Some("1.0 MiB/s")
+        );
+        // At or above 100 the decimal is dropped — these are the numbers runs get compared by.
+        assert_eq!(
+            throughput(1024 * 1024 * 1024, Duration::from_secs(2)).as_deref(),
+            Some("512 MiB/s")
+        );
+        // Nothing to divide, and nothing measurable to divide by.
+        assert!(throughput(0, Duration::from_secs(1)).is_none());
+        assert!(throughput(1024, Duration::from_micros(500)).is_none());
     }
 }

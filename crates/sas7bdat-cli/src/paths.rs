@@ -181,6 +181,8 @@ mod tests {
             execution: ExecutionOptions {
                 jobs: None,
                 parse_threads: None,
+                batch_rows: None,
+                encode_in_flight_bytes: None,
                 fail_fast: false,
             },
             validation: ValidationOptions {

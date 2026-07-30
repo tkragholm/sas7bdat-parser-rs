@@ -283,6 +283,9 @@ pub struct ScanOptions<'a> {
 pub struct WriteOptions<'a> {
     pub row_group_rows: Option<usize>,
     pub batch_rows: Option<usize>,
+    /// Decoded bytes allowed in row groups that are encoding but not yet written; `None`
+    /// keeps the pipeline's default. Decides how many row groups encode concurrently.
+    pub encode_in_flight_bytes: Option<usize>,
     pub scan: ScanOptions<'a>,
     pub catalog: Option<&'a Catalog>,
     /// Embed SAS dataset/column metadata into the Parquet file's key-value metadata.
@@ -297,6 +300,7 @@ impl WriteOptions<'_> {
         Self {
             row_group_rows: None,
             batch_rows: None,
+            encode_in_flight_bytes: None,
             scan: ScanOptions {
                 selection: None,
                 projection: None,
@@ -380,6 +384,7 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
             schema,
             row_group_rows,
             options.scan.parse_threads,
+            options.encode_in_flight_bytes,
         )?;
         // No Arrow conversion here on purpose. This closure runs on the scan's collector
         // thread -- the single thread that sees every batch in file order -- so work placed

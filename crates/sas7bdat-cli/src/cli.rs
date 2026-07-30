@@ -249,6 +249,34 @@ pub struct ExecutionOptions {
     )]
     pub parse_threads: Option<usize>,
 
+    /// Rows per scan batch. Defaults to one read extent's worth.
+    ///
+    /// Independent of `--parquet-row-group-size`: the writer gathers scan batches into row
+    /// groups. Each batch costs serial work on the collector thread, so a larger value takes
+    /// that stage off the critical path — at the cost of stretching the read extents, since a
+    /// batch cannot span one.
+    #[arg(
+        long = "batch-rows",
+        value_name = "ROWS",
+        help_heading = "Tuning",
+        hide_short_help = true
+    )]
+    pub batch_rows: Option<usize>,
+
+    /// Decoded bytes that may sit in row groups being encoded but not yet written.
+    ///
+    /// This is what decides how many row groups encode at once, and so how the work splits
+    /// between the row-group and column axes. The column axis tops out at the column count, so
+    /// on a narrow table this is what fills a large host: raise it when cores sit idle at a
+    /// large `--parquet-row-group-size`. Defaults to 1 GiB.
+    #[arg(
+        long = "encode-in-flight-bytes",
+        value_name = "BYTES",
+        help_heading = "Tuning",
+        hide_short_help = true
+    )]
+    pub encode_in_flight_bytes: Option<usize>,
+
     /// Stop at the first file that fails (default: convert the rest and report at the end).
     #[arg(long, help_heading = "Execution")]
     pub fail_fast: bool,

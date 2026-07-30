@@ -29,8 +29,28 @@ earlier are written by hand.
   `sas.logical_type: TIME` metadata entry (exported as `SAS_LOGICAL_TYPE_KEY`), which
   survives a Parquet round-trip, so the clock-time intent is still recoverable.
 
+### Added
+
+- **(CLI)** `--batch-rows` sets the scan batch size independently of
+  `--parquet-row-group-size`. Each batch costs serial work on the collector thread, so a
+  larger value takes that stage off the critical path, at the cost of stretching read extents.
+  The plumbing already existed but nothing could reach it.
+- **(CLI)** `--encode-in-flight-bytes` caps the decoded bytes held by row groups that are
+  encoding but not yet written, which is what decides how many encode concurrently. The column
+  axis tops out at the column count, so on a narrow table this is what fills a large host —
+  raise it when cores sit idle at a large `--parquet-row-group-size`. Defaults to 1 GiB.
+- **(CLI)** The conversion summary now reports source size and sustained throughput
+  (`2.0 GB → 180.7 MB · 1.5 s · 1373 MiB/s`). Throughput is measured over *input* bytes,
+  since output size moves with the codec and dictionary policy and so cannot be compared
+  across runs.
+
 ### Fixed
 
+- **(CLI)** A single file converted with a progress bar — the default on a terminal — printed
+  no summary at all. The bar was erased on completion and neither the per-file line (suppressed
+  so it cannot corrupt the bar) nor the aggregate line (batch runs only) was written, so a long
+  conversion ended with no elapsed time and no row count. The closing line is now printed
+  whenever the run did not already account for itself per file.
 - **(CLI)** A SAS `TIME` value outside `[0, 24h)` printed as `00:00:00` in both `head` and
   CSV export. `NaiveTime` cannot represent such a value, and the fallback silently
   substituted midnight — so 359,280 seconds (99h48m) was written to CSV as midnight, with no

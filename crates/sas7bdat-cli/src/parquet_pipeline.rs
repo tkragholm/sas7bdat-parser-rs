@@ -181,6 +181,8 @@ pub struct RowGroupPipeline<W: Write + Send> {
     next_write: usize,
     in_flight: usize,
     in_flight_bytes: usize,
+    /// Ceiling on `in_flight_bytes`; see [`IN_FLIGHT_INPUT_BUDGET`] for what it trades off.
+    in_flight_budget: usize,
     /// Row groups that finished ahead of their turn.
     reordered: HashMap<usize, Vec<ArrowColumnChunk>>,
 
@@ -198,6 +200,7 @@ impl<W: Write + Send> RowGroupPipeline<W> {
         schema: SchemaRef,
         target_rows: usize,
         threads: Option<usize>,
+        in_flight_budget: Option<usize>,
     ) -> Result<Self> {
         let pool =
             encode_pool(threads).ok_or_else(|| anyhow!("could not start the encoding pool"))?;
@@ -215,6 +218,10 @@ impl<W: Write + Send> RowGroupPipeline<W> {
             next_write: 0,
             in_flight: 0,
             in_flight_bytes: 0,
+            // A budget of 0 would stall the pipeline, so treat it as "use the default".
+            in_flight_budget: in_flight_budget
+                .filter(|bytes| *bytes > 0)
+                .unwrap_or(IN_FLIGHT_INPUT_BUDGET),
             reordered: HashMap::new(),
             tx,
             rx,
@@ -312,7 +319,7 @@ impl<W: Write + Send> RowGroupPipeline<W> {
 
     fn has_room_for(&self, input_bytes: usize) -> bool {
         self.in_flight < self.pool.current_num_threads()
-            && self.in_flight_bytes + input_bytes <= IN_FLIGHT_INPUT_BUDGET
+            && self.in_flight_bytes + input_bytes <= self.in_flight_budget
     }
 
     /// Wait for one row group to finish encoding.
@@ -549,6 +556,7 @@ mod tests {
             factory,
             SchemaRef::clone(&schema),
             ROW_GROUP_ROWS,
+            None,
             None,
         )
         .expect("pipeline");
