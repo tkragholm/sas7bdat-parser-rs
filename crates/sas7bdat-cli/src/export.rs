@@ -52,13 +52,151 @@ pub fn resolve_compression(codec: CompressionCodec) -> Compression {
     }
 }
 
+/// Most rows read to estimate per-column cardinality before the real conversion starts.
+///
+/// Large enough that a distinct ratio means something, small enough that the read is a few
+/// pages even on a network share — about 5 MB at the 623-byte rows this converter is tuned
+/// against, against inputs measured in hundreds of gigabytes.
+const CARDINALITY_SAMPLE_ROWS: u64 = 8192;
+
+/// Fewest rows worth sampling. Below this a distinct ratio says too little to act on.
+const MIN_SAMPLE_ROWS: u64 = 1024;
+
+/// Cells the sampler will look at, across all columns.
+///
+/// Without this the sample costs `rows × columns`, and a 4,041-column table would hash 33
+/// million cells before the conversion starts — measured at 0.85 s, which turned an 8% size
+/// win into a 1.55x slowdown. Budgeting cells instead of rows keeps the sample's cost flat
+/// as tables get wider; a wide table simply reads fewer rows, and the threshold argument
+/// still holds at 1,024 (a column cannot be 85% distinct across a thousand rows and be
+/// low-cardinality overall).
+const CARDINALITY_SAMPLE_CELLS: u64 = 4_194_304;
+
+/// Distinct values per 100 rows above which a column's dictionary is turned off.
+///
+/// Deliberately high, and integer so the comparison is exact. See
+/// [`high_cardinality_columns`] for why the threshold is set to make one kind of mistake and
+/// not the other.
+const HIGH_CARDINALITY_PERCENT: usize = 85;
+
+/// Files below this many rows are converted without sampling at all: the dictionary work
+/// they do is too small to be worth a second read of the input.
+const MIN_ROWS_TO_SAMPLE: u64 = CARDINALITY_SAMPLE_ROWS * 4;
+
+/// Columns whose dictionary should be turned off, by name.
+///
+/// Parquet builds a dictionary **per row group**, so a column the dictionary cannot
+/// usefully compress does not pay once — it re-interns every value, in every row group, for
+/// the whole file. On a wide fixture that interning (hashing, `memcmp`, spill, fall back) is
+/// 36% of all conversion work. Turning it off for those columns skips it and lets the
+/// configured fallback encoding apply to the whole column instead of the tail after a spill.
+///
+/// It cannot be a blanket setting. Measured across 20 fixtures, disabling dictionaries for
+/// every float column shrank 14 of them by up to 15% and *grew* 6 by as much as 62% — the
+/// losers being survey data, where categorical codes are stored as doubles and the dictionary
+/// is doing exactly its job.
+///
+/// So the decision is per column and, more importantly, asymmetric. The two ways to be wrong
+/// are not equally bad:
+///
+/// - Leaving the dictionary on for a column that turns out to be high-cardinality costs what
+///   the current code already costs. Parquet spills and falls back. No regression.
+/// - Turning it off for a column that is really low-cardinality throws away the compression
+///   that made those 6 fixtures smaller. That is the expensive mistake.
+///
+/// A sample can only support one of those directions. A distinct ratio near 1.0 in a sample
+/// is strong evidence of high cardinality overall — a column cannot be nearly all-distinct in
+/// a sample and still be low-cardinality. The converse does not hold: a low ratio in the
+/// first rows says nothing, because the file may be sorted or clustered. So the rule only
+/// ever fires on the direction the evidence supports, and every uncertain column keeps
+/// today's behaviour.
+fn high_cardinality_columns(dataset: &Dataset, options: &ScanOptions<'_>) -> Vec<String> {
+    if dataset.metadata().row_count < MIN_ROWS_TO_SAMPLE {
+        return Vec::new();
+    }
+
+    let columns = u64::try_from(dataset.columns().len().max(1)).unwrap_or(u64::MAX);
+    let budget_rows = (CARDINALITY_SAMPLE_CELLS / columns).max(MIN_SAMPLE_ROWS);
+    let sample_limit = budget_rows.min(CARDINALITY_SAMPLE_ROWS);
+    let sample_rows = usize::try_from(sample_limit).unwrap_or(usize::MAX);
+    // Multiply before dividing. Dividing first truncates the cap below the threshold the
+    // filter later applies, and a column whose set stops growing one short of the bar can
+    // never clear it -- which silently turns the whole check into a no-op.
+    let cap = sample_rows * HIGH_CARDINALITY_PERCENT / 100;
+    let mut distinct: Vec<HashSet<u64>> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    let mut rows = 0usize;
+
+    let scanned = apply_scan_options(dataset, *options)
+        .limit(sample_limit)
+        .visit_rows(|row| {
+            if distinct.is_empty() {
+                distinct.resize_with(row.len(), HashSet::new);
+                names = row.iter_named().map(|(name, _)| name.to_owned()).collect();
+            }
+            for (index, cell) in row.iter().enumerate() {
+                if let Some(key) = cell_hash(cell) {
+                    // Once a column is past the threshold it cannot come back under it, so
+                    // stop growing its set. Bounds the sampler's memory on wide tables.
+                    let set = &mut distinct[index];
+                    if set.len() <= cap {
+                        set.insert(key);
+                    }
+                }
+            }
+            rows += 1;
+            Ok(ControlFlow::Continue(()))
+        });
+
+    // A failed sample is not a failed conversion: fall back to leaving every dictionary on,
+    // which is what the converter did before this existed.
+    if scanned.is_err() || rows == 0 {
+        return Vec::new();
+    }
+
+    names
+        .into_iter()
+        .zip(distinct)
+        .filter(|(_, set)| set.len() * 100 >= rows * HIGH_CARDINALITY_PERCENT)
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// Hash of one cell's value, or `None` for null.
+///
+/// A hash rather than the value itself: keying a `HashSet` on the cell would allocate a
+/// `String` for every string cell, and at millions of sampled cells that allocation was the
+/// sampler's dominant cost. Hashing reads the bytes in place.
+///
+/// A collision merges two distinct values into one, which can only lower a column's distinct
+/// count and so only make the check *less* likely to fire. That is the safe direction: the
+/// cost of missing a high-cardinality column is today's behaviour, while wrongly firing on a
+/// low-cardinality one would throw away real compression.
+///
+/// Floats are hashed by their bits, which is what the dictionary itself keys on.
+fn cell_hash(cell: &CellValue<'_>) -> Option<u64> {
+    let mut hasher = DefaultHasher::new();
+    match cell {
+        CellValue::Null => return None,
+        CellValue::Int32(v) => v.hash(&mut hasher),
+        CellValue::Int64(v) => v.hash(&mut hasher),
+        CellValue::Float64(v) => v.to_bits().hash(&mut hasher),
+        CellValue::Str(s) => s.hash(&mut hasher),
+        CellValue::Bytes(b) => b.hash(&mut hasher),
+        CellValue::Date(d) => d.days_since_sas_epoch.hash(&mut hasher),
+        CellValue::DateTime(d) => d.seconds_since_sas_epoch.hash(&mut hasher),
+        CellValue::Time(t) => t.seconds_since_midnight.hash(&mut hasher),
+    }
+    Some(hasher.finish())
+}
+
 /// Set the per-column *fallback* encoding for the types where it pays off, matching the
-/// parquet-linter `float_encoding` and `timestamp_encoding` rules. Dictionary encoding
-/// stays enabled, so low-cardinality columns still use the dictionary and only high-
-/// cardinality columns (which would otherwise spill to PLAIN) pick up the better encoding.
+/// parquet-linter `float_encoding` and `timestamp_encoding` rules, and turn the dictionary
+/// off for the columns [`high_cardinality_columns`] found it cannot help.
 fn apply_column_encodings(
     mut builder: WriterPropertiesBuilder,
     schema: &Schema,
+    high_cardinality: &[String],
 ) -> WriterPropertiesBuilder {
     for field in schema.fields() {
         let encoding = match field.data_type() {
@@ -72,8 +210,11 @@ fn apply_column_encodings(
             | DataType::Time64(_) => Some(Encoding::DELTA_BINARY_PACKED),
             _ => None,
         };
+        let path = ColumnPath::from(field.name().as_str());
+        if high_cardinality.iter().any(|name| name == field.name()) {
+            builder = builder.set_column_dictionary_enabled(path.clone(), false);
+        }
         if let Some(encoding) = encoding {
-            let path = ColumnPath::from(field.name().as_str());
             builder = builder.set_column_encoding(path, encoding);
         }
     }
@@ -84,8 +225,11 @@ use sas7bdat::{
     BatchHint, CellValue, ColumnMeta, Dataset, Error, Parallelism, Projection, RowSelection,
     ScanBuilder, ScanProgressObserver,
 };
+use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write as _;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{BufWriter, Write};
 use std::ops::ControlFlow;
 use std::path::Path;
@@ -174,7 +318,9 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         // Keep column-chunk statistics small for long strings (parquet-linter
         // `string_statistics`); page-index stats are already truncated by parquet-rs.
         .set_statistics_truncate_length(Some(STATISTICS_TRUNCATE_LENGTH));
-    builder = apply_column_encodings(builder, &schema);
+    // Sampled before the writer exists, because parquet needs its properties up front.
+    let high_cardinality = high_cardinality_columns(dataset, &options.scan);
+    builder = apply_column_encodings(builder, &schema, &high_cardinality);
     let props = builder.build();
     // Kept for the per-batch conversion below: `visit_owned_batches` hands back raw column
     // buffers, which the writer's schema turns into record batches.
@@ -513,7 +659,7 @@ mod tests {
             Field::new("txt", DataType::Utf8, false),
             Field::new("int", DataType::Int64, false),
         ]);
-        let props = apply_column_encodings(WriterProperties::builder(), &schema).build();
+        let props = apply_column_encodings(WriterProperties::builder(), &schema, &[]).build();
         // Set as the per-column fallback encoding; dictionary stays enabled globally.
         assert_eq!(
             props.encoding(&ColumnPath::from("flt")),
