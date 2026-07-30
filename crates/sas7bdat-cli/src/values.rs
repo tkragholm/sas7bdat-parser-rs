@@ -1,7 +1,7 @@
 //! Render a borrowed [`CellValue`] as a human-readable display string, used by the
 //! `head` preview and the `info` sample. (CSV export has its own zero-alloc path.)
 
-use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime};
 use sas7bdat::{CellValue, LogicalType};
 use std::fmt::Write as _;
 
@@ -64,12 +64,14 @@ pub fn format_cell(cell: &CellValue<'_>, kind: LogicalType, null_repr: &str) -> 
         CellValue::Int64(value) => value.to_string(),
         // A temporal column whose cell didn't fit a whole integer unit arrives here as a
         // raw `Float64` of SAS-epoch units; render it as the column's declared type.
-        CellValue::Float64(value) => match kind {
-            LogicalType::DateTime => format_datetime_f64(datetime_epoch, *value),
-            LogicalType::Date => format_date_f64(date_epoch, *value),
-            LogicalType::Time => format_time_f64(*value),
-            _ => value.to_string(),
-        },
+        CellValue::Float64(value) => {
+            let mut out = String::new();
+            if write_temporal_f64(&mut out, kind, *value, date_epoch, datetime_epoch) {
+                out
+            } else {
+                value.to_string()
+            }
+        }
         CellValue::Bytes(value) => {
             let mut out = String::with_capacity(2 + value.len() * 2);
             out.push_str("0x");
@@ -87,12 +89,47 @@ pub fn format_cell(cell: &CellValue<'_>, kind: LogicalType, null_repr: &str) -> 
             datetime.format("%Y-%m-%d %H:%M:%S").to_string()
         }
         CellValue::Time(value) => {
-            let seconds = u32::try_from(value.seconds_since_midnight).unwrap_or(0);
-            NaiveTime::from_num_seconds_from_midnight_opt(seconds, 0)
-                .unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).expect("valid midnight"))
-                .format("%H:%M:%S")
-                .to_string()
+            let mut out = String::new();
+            write_sas_time(&mut out, f64::from(value.seconds_since_midnight));
+            out
         }
+    }
+}
+
+/// Render a SAS TIME value — a signed count of seconds since midnight — into `out` as
+/// `[-]HH:MM:SS[.fff]`.
+///
+/// Hours are neither wrapped at 24 nor clamped. SAS stores TIME as a plain numeric, and real
+/// files carry values outside `[0, 24h)`: 359,280 seconds renders as `99:48:00`, not
+/// `03:48:00`, because wrapping would print an instant the file does not contain. In-range
+/// values are unaffected — they produce the same two-digit hour as before.
+///
+/// Both cell shapes of a TIME column come through here — whole seconds arrive as
+/// [`CellValue::Time`], values with a fractional part widen to [`CellValue::Float64`] — so a
+/// column renders one way down its whole length rather than alternating representations.
+///
+/// The sub-second part prints as milliseconds when it is a whole number of them, and as
+/// microseconds otherwise, so a value is never rounded away to `.000`.
+pub fn write_sas_time(out: &mut String, seconds: f64) {
+    let micros = microseconds(seconds);
+    if micros < 0 {
+        out.push('-');
+    }
+    let magnitude = micros.unsigned_abs();
+    let (whole, sub) = (magnitude / 1_000_000, magnitude % 1_000_000);
+    let _ = write!(
+        out,
+        "{:02}:{:02}:{:02}",
+        whole / 3600,
+        (whole / 60) % 60,
+        whole % 60
+    );
+    if sub % 1000 == 0 {
+        if sub != 0 {
+            let _ = write!(out, ".{:03}", sub / 1000);
+        }
+    } else {
+        let _ = write!(out, ".{sub:06}");
     }
 }
 
@@ -105,41 +142,54 @@ fn microseconds(seconds: f64) -> i64 {
     (seconds * 1_000_000.0).round() as i64
 }
 
-/// Render a `Float64` datetime (raw seconds since the SAS epoch) as a timestamp,
+/// Render a `Float64` datetime (raw seconds since the SAS epoch) into `out` as a timestamp,
 /// preserving any sub-second part. Falls back to the raw number if out of chrono range.
-fn format_datetime_f64(epoch: NaiveDateTime, seconds: f64) -> String {
+pub fn write_datetime_f64(out: &mut String, epoch: NaiveDateTime, seconds: f64) {
     let micros = microseconds(seconds);
     let Some(dt) = epoch.checked_add_signed(Duration::microseconds(micros)) else {
-        return seconds.to_string();
+        let _ = write!(out, "{seconds}");
+        return;
     };
     if micros % 1_000_000 == 0 {
-        dt.format("%Y-%m-%d %H:%M:%S").to_string()
+        let _ = write!(out, "{}", dt.format("%Y-%m-%d %H:%M:%S"));
     } else {
-        dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
+        let _ = write!(out, "{}", dt.format("%Y-%m-%d %H:%M:%S%.3f"));
     }
 }
 
-/// Render a `Float64` date (raw days since the SAS epoch, rounded to a whole day).
-fn format_date_f64(epoch: NaiveDate, days: f64) -> String {
+/// Render a `Float64` date (raw days since the SAS epoch, rounded to a whole day) into `out`.
+pub fn write_date_f64(out: &mut String, epoch: NaiveDate, days: f64) {
     #[allow(clippy::cast_possible_truncation)]
     let whole = days.round() as i64;
-    epoch.checked_add_signed(Duration::days(whole)).map_or_else(
-        || days.to_string(),
-        |date| date.format("%Y-%m-%d").to_string(),
-    )
+    match epoch.checked_add_signed(Duration::days(whole)) {
+        Some(date) => {
+            let _ = write!(out, "{}", date.format("%Y-%m-%d"));
+        }
+        None => {
+            let _ = write!(out, "{days}");
+        }
+    }
 }
 
-/// Render a `Float64` time (raw seconds since midnight) as `HH:MM:SS[.fff]`. Wraps within
-/// the day (SAS times are seconds-since-midnight, occasionally outside `[0, 24h)`).
-fn format_time_f64(seconds: f64) -> String {
-    let micros = microseconds(seconds);
-    let midnight = NaiveTime::from_hms_opt(0, 0, 0).expect("valid midnight");
-    let (time, _) = midnight.overflowing_add_signed(Duration::microseconds(micros));
-    if micros % 1_000_000 == 0 {
-        time.format("%H:%M:%S").to_string()
-    } else {
-        time.format("%H:%M:%S%.3f").to_string()
+/// Render a temporal cell that widened to `Float64` (raw SAS-epoch units) into `out` as the
+/// column's declared type. Returns `false` for a non-temporal `kind`, leaving `out` untouched
+/// so the caller can write the value as a plain number.
+///
+/// Shared by [`format_cell`] and the CSV writer so the two never disagree about a cell.
+pub fn write_temporal_f64(
+    out: &mut String,
+    kind: LogicalType,
+    value: f64,
+    date_epoch: NaiveDate,
+    datetime_epoch: NaiveDateTime,
+) -> bool {
+    match kind {
+        LogicalType::DateTime => write_datetime_f64(out, datetime_epoch, value),
+        LogicalType::Date => write_date_f64(out, date_epoch, value),
+        LogicalType::Time => write_sas_time(out, value),
+        _ => return false,
     }
+    true
 }
 
 #[cfg(test)]
@@ -206,6 +256,63 @@ mod tests {
                 ""
             ),
             "1970-01-01 00:00:00"
+        );
+    }
+
+    /// A SAS TIME outside `[0, 24h)` must render its real elapsed value, not a wrapped or
+    /// clamped clock. These used to collapse to `00:00:00`: `NaiveTime` has no representation
+    /// for them, and the fallback silently substituted midnight in both `head` and the CSV.
+    #[test]
+    fn format_cell_renders_out_of_range_times() {
+        use sas7bdat::SasTime;
+        let time = |seconds| {
+            format_cell(
+                &CellValue::Time(SasTime {
+                    seconds_since_midnight: seconds,
+                }),
+                LogicalType::Time,
+                "",
+            )
+        };
+        // 359,280s is 99h48m — the value that read back as midnight.
+        assert_eq!(time(359_280), "99:48:00");
+        assert_eq!(time(86_400), "24:00:00");
+        // Negative offsets failed the `u32::try_from` and hit the same fallback.
+        assert_eq!(time(-77), "-00:01:17");
+        // In-range values are untouched by the change.
+        assert_eq!(time(0), "00:00:00");
+        assert_eq!(time(69_507), "19:18:27");
+    }
+
+    /// The whole-second and widened-`Float64` cells of one TIME column must agree: they used
+    /// to print as a clock string and a raw number respectively, in the same column.
+    #[test]
+    fn time_column_renders_one_way_for_both_cell_shapes() {
+        use sas7bdat::SasTime;
+        let t = LogicalType::Time;
+        assert_eq!(
+            format_cell(
+                &CellValue::Time(SasTime {
+                    seconds_since_midnight: 69_507
+                }),
+                t,
+                ""
+            ),
+            "19:18:27"
+        );
+        assert_eq!(
+            format_cell(&CellValue::Float64(69_507.95), t, ""),
+            "19:18:27.950"
+        );
+        // Out-of-range on the float side wraps no more than on the integer side.
+        assert_eq!(
+            format_cell(&CellValue::Float64(359_960.4), t, ""),
+            "99:59:20.400"
+        );
+        // Sub-millisecond precision survives rather than rounding to `.000`.
+        assert_eq!(
+            format_cell(&CellValue::Float64(1.000_1), t, ""),
+            "00:00:01.000100"
         );
     }
 

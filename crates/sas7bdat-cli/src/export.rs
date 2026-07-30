@@ -3,7 +3,7 @@ use crate::cli::CompressionCodec;
 use crate::sas_metadata::{DatasetMetaJson, PARQUET_METADATA_KEY};
 use anyhow::Result;
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
-use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime};
 use csv::WriterBuilder;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, Encoding, ZstdLevel};
@@ -254,8 +254,8 @@ fn apply_column_encodings(
 }
 use crate::parquet_pipeline;
 use sas7bdat::{
-    BatchHint, CellValue, ColumnMeta, Dataset, Error, Parallelism, Projection, RowSelection,
-    ScanBuilder, ScanProgressObserver,
+    BatchHint, CellValue, ColumnMeta, Dataset, Error, LogicalType, Parallelism, Projection,
+    RowSelection, ScanBuilder, ScanProgressObserver,
 };
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
@@ -445,6 +445,32 @@ pub fn write_csv_or_tsv(
     // Precompute the SAS epoch once instead of rebuilding it per date/time cell.
     let (date_epoch, datetime_epoch) = sas_epochs();
 
+    // Logical type per emitted column, in the same order as `header_names`. A temporal cell
+    // that didn't fit a whole integer unit arrives as a raw `Float64` of SAS-epoch units;
+    // without the column's type here it would be written as a bare number next to properly
+    // formatted siblings, so one column could emit two representations.
+    let logical_types: Vec<LogicalType> = options.scan.projection.map_or_else(
+        || {
+            dataset
+                .columns()
+                .iter()
+                .map(|column| column.logical_type)
+                .collect()
+        },
+        |projection| {
+            projection
+                .columns()
+                .iter()
+                .map(|column| {
+                    dataset
+                        .columns()
+                        .get(column.index)
+                        .map_or(LogicalType::Float, |meta| meta.logical_type)
+                })
+                .collect()
+        },
+    );
+
     let mut wrote_header = false;
     // Reused across every cell so formatting numerics/dates allocates no per-cell String.
     let mut scratch = String::new();
@@ -455,9 +481,20 @@ pub fn write_csv_or_tsv(
                 .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
             wrote_header = true;
         }
-        for cell in row.iter() {
-            write_cell_field(&mut writer, &mut scratch, cell, date_epoch, datetime_epoch)
-                .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
+        for (index, cell) in row.iter().enumerate() {
+            let kind = logical_types
+                .get(index)
+                .copied()
+                .unwrap_or(LogicalType::Float);
+            write_cell_field(
+                &mut writer,
+                &mut scratch,
+                cell,
+                kind,
+                date_epoch,
+                datetime_epoch,
+            )
+            .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
         }
         // Terminate the record after the field sequence.
         writer
@@ -577,10 +614,15 @@ const fn sas_epochs() -> (NaiveDate, NaiveDateTime) {
 /// String and null cells are written straight from their borrowed bytes; everything else is
 /// formatted into the shared `scratch` buffer, so no per-cell `String` is allocated. The SAS
 /// epoch is passed in precomputed rather than rebuilt per cell.
+///
+/// `kind` is the column's logical type, used to render a temporal cell that widened to
+/// `Float64` as its declared type rather than as a raw SAS-epoch number — the same rule
+/// [`crate::values::format_cell`] applies, so `head` and the CSV agree.
 fn write_cell_field<W: Write>(
     writer: &mut csv::Writer<W>,
     scratch: &mut String,
     cell: &CellValue<'_>,
+    kind: LogicalType,
     date_epoch: NaiveDate,
     datetime_epoch: NaiveDateTime,
 ) -> csv::Result<()> {
@@ -599,7 +641,13 @@ fn write_cell_field<W: Write>(
         }
         CellValue::Float64(value) => {
             scratch.clear();
-            let _ = write!(scratch, "{value}");
+            // A temporal column whose cell didn't fit a whole integer unit arrives here as a
+            // raw `Float64` of SAS-epoch units; render it as the column's declared type so it
+            // matches its whole-valued neighbours. A genuine numeric stays a number.
+            if !crate::values::write_temporal_f64(scratch, kind, *value, date_epoch, datetime_epoch)
+            {
+                let _ = write!(scratch, "{value}");
+            }
             writer.write_field(scratch.as_bytes())
         }
         CellValue::Bytes(value) => {
@@ -624,10 +672,7 @@ fn write_cell_field<W: Write>(
         }
         CellValue::Time(value) => {
             scratch.clear();
-            let seconds = u32::try_from(value.seconds_since_midnight).unwrap_or(0);
-            let time = NaiveTime::from_num_seconds_from_midnight_opt(seconds, 0)
-                .unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).expect("valid midnight"));
-            let _ = write!(scratch, "{}", time.format("%H:%M:%S"));
+            crate::values::write_sas_time(scratch, f64::from(value.seconds_since_midnight));
             writer.write_field(scratch.as_bytes())
         }
     }
