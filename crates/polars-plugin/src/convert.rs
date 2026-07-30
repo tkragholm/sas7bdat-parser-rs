@@ -58,6 +58,10 @@ pub(super) fn arrow_dt_to_polars_arrow(dt: &ArrowSchemaDataType) -> Result<Arrow
         | ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond) => {
             ArrowDataType::Time64(PlTimeUnit::Nanosecond)
         }
+        // SAS TIME columns arrive as Duration — see the Time arm in `owned_batch_to_dataframe`.
+        ArrowSchemaDataType::Duration(ArrowSchemaTimeUnit::Nanosecond) => {
+            ArrowDataType::Duration(PlTimeUnit::Nanosecond)
+        }
         ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Microsecond, None) => {
             ArrowDataType::Timestamp(PlTimeUnit::Microsecond, None)
         }
@@ -151,7 +155,7 @@ pub(super) fn owned_batch_to_dataframe(
                             row_count,
                         ))
                     }
-                    Some(ArrowDataType::Time64(PlTimeUnit::Nanosecond)) => {
+                    Some(ArrowDataType::Duration(PlTimeUnit::Nanosecond)) => {
                         #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
                         let nanos: Vec<i64> = values
                             .iter()
@@ -160,7 +164,7 @@ pub(super) fn owned_batch_to_dataframe(
                             })
                             .collect();
                         Box::new(primitive_array_with_optional_validity(
-                            ArrowDataType::Time64(PlTimeUnit::Nanosecond),
+                            ArrowDataType::Duration(PlTimeUnit::Nanosecond),
                             nanos,
                             valid,
                             row_count,
@@ -205,20 +209,16 @@ pub(super) fn owned_batch_to_dataframe(
                 ))
             }
             OwnedColumnBuffer::Time { values, valid } => {
-                // SAS time values are seconds and CAN fall outside a clock day — elapsed-time
-                // data may be >= 24h or negative. `pl.Time` (Time64) only represents [0, 24h),
-                // so such values surface as null in the resulting column. This is a deliberate
-                // limitation: we keep the ergonomic `pl.Time` dtype for the common clock-time
-                // case rather than widening every time column to `pl.Duration`. The core
-                // `OwnedColumnBuffer::Time` retains the exact second value (verified against
-                // readstat); callers needing out-of-range times can read the core batches
-                // directly or post-process. (verified vs pyreadstat: only out-of-range cells
-                // differ, by nulling.)
+                // `pl.Duration`, not `pl.Time`: SAS time values are seconds and CAN fall
+                // outside a clock day — elapsed-time data may be >= 24h or negative, which
+                // `pl.Time` (Time64, defined over [0, 24h)) cannot represent and used to
+                // surface as null. Both dtypes carry the same i64 nanoseconds, so a caller
+                // who knows the column is a clock time can `.cast(pl.Time)` for free.
                 let nanos = values
                     .into_iter()
                     .map(|value| i64::from(value.seconds_since_midnight) * 1_000_000_000)
                     .collect();
-                let dtype = ArrowDataType::Time64(PlTimeUnit::Nanosecond);
+                let dtype = ArrowDataType::Duration(PlTimeUnit::Nanosecond);
                 Box::new(primitive_array_with_optional_validity(
                     dtype, nanos, valid, row_count,
                 ))
@@ -470,6 +470,10 @@ pub(super) fn polars_dtype(
         ArrowSchemaDataType::Time32(ArrowSchemaTimeUnit::Second)
         | ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond) => {
             polars.getattr("Time")?.unbind()
+        }
+        // SAS TIME columns arrive as Duration — see the Time arm in `owned_batch_to_dataframe`.
+        ArrowSchemaDataType::Duration(ArrowSchemaTimeUnit::Nanosecond) => {
+            polars.getattr("Duration")?.call1(("ns",))?.unbind()
         }
         ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Microsecond, None) => {
             polars.getattr("Datetime")?.call1(("us",))?.unbind()

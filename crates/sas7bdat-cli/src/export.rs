@@ -239,7 +239,10 @@ fn apply_column_encodings(
             | DataType::Date64
             | DataType::Timestamp(_, _)
             | DataType::Time32(_)
-            | DataType::Time64(_) => Some(Encoding::DELTA_BINARY_PACKED),
+            | DataType::Time64(_)
+            // SAS TIME columns are Duration, not Time64 — see `scan::plan::arrow_data_type`.
+            // Without this arm they would silently lose the temporal encoding.
+            | DataType::Duration(_) => Some(Encoding::DELTA_BINARY_PACKED),
             _ => None,
         };
         let path = ColumnPath::from(field.name().as_str());

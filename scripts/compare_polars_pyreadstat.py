@@ -87,7 +87,9 @@ def our_matrix(path):
             exprs.append((c.cast(pl.Int64) + DAYS_SAS_TO_UNIX).cast(pl.Float64).alias(name))
         elif isinstance(dtype, pl.Datetime):
             exprs.append((c.cast(pl.Int64).cast(pl.Float64) / 1e6 + SECS_SAS_TO_UNIX).alias(name))
-        elif dtype == pl.Time:
+        elif dtype == pl.Time or isinstance(dtype, pl.Duration):
+            # SAS TIME columns arrive as Duration('ns') — pl.Time cannot hold the values
+            # outside [0, 24h) that real files carry. Both are i64 nanoseconds physically.
             exprs.append((c.cast(pl.Int64).cast(pl.Float64) / 1e9).alias(name))
         else:
             exprs.append(c)
@@ -114,7 +116,6 @@ def main():
     matched = skipped = 0
     cells = 0
     mojibake_only = 0
-    time_overflow = 0
     failures = []
     for path in fixtures:
         try:
@@ -143,12 +144,10 @@ def main():
                 ca, cb = canon(ov), canon(rv)
                 if cells_match(ca, cb):
                     continue
-                # Documented limitation: SAS Time values outside [0,24h) can't be held by
-                # pl.Time and surface as null (the plugin keeps pl.Time by design; see
-                # convert.rs). The core decode has the correct raw value (verified vs readstat).
-                if ca is None and cb and cb[0] == "time":
-                    time_overflow += 1
-                    continue
+                # There is deliberately no tolerance for out-of-range SAS TIME values here.
+                # They used to surface as null because the plugin declared pl.Time, whose
+                # domain is [0, 24h); it now declares Duration('ns') and carries them exactly,
+                # so a null on our side is a real regression and must fail the comparison.
                 # Tolerate the intentional mojibake auto-repair divergence on strings (the
                 # plugin's default fixes double-encoded text; pyreadstat decodes literally).
                 if ca and cb and ca[0] == "str" and cb[0] == "str":
@@ -167,7 +166,6 @@ def main():
     print(f"fixtures matched: {matched}")
     print(f"cells compared:   {cells}")
     print(f"mojibake-tolerated string cells: {mojibake_only}")
-    print(f"pl.Time-overflow nulls (documented limitation): {time_overflow}")
     print(f"skipped (unreadable by one side): {skipped}")
     print(f"failures: {len(failures)}")
     for f in failures[:60]:

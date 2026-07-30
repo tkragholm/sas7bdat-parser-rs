@@ -34,6 +34,8 @@ mod row_decode;
 mod string;
 
 pub use builder::ScanBuilder;
+#[cfg(feature = "arrow")]
+pub use plan::SAS_LOGICAL_TYPE_KEY;
 
 /// User-facing scan statistics returned by all public scan methods.
 ///

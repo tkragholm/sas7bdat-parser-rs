@@ -7,6 +7,8 @@ use super::{
 #[cfg(feature = "arrow")]
 use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
 #[cfg(feature = "arrow")]
+use std::collections::HashMap;
+#[cfg(feature = "arrow")]
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -293,6 +295,17 @@ pub(super) fn effective_scan_row_capacity_hint(builder: &ScanBuilder<'_>) -> usi
     usize::try_from(limited_rows).unwrap_or(usize::MAX).max(1)
 }
 
+/// Field metadata key marking a column that SAS declared with a TIME format.
+///
+/// The Arrow type for such a column is `Duration`, not `Time64` (see [`arrow_data_type`]),
+/// which loses the *intent* that the number is a time of day even though it loses no data.
+/// A consumer that knows its values are in `[0, 24h)` can use this to re-type the column as
+/// a clock time — the i64 payload is bit-identical, so that is a free re-label, not a
+/// re-encode. Parquet round-trips field metadata through its `ARROW:schema` key, so this
+/// survives a `convert`.
+#[cfg(feature = "arrow")]
+pub const SAS_LOGICAL_TYPE_KEY: &str = "sas.logical_type";
+
 #[cfg(feature = "arrow")]
 pub(super) fn arrow_schema_for_plan(plan: &ScanPlan) -> SchemaRef {
     let fields = plan
@@ -300,7 +313,17 @@ pub(super) fn arrow_schema_for_plan(plan: &ScanPlan) -> SchemaRef {
         .names
         .iter()
         .zip(plan.batch.column_kinds.iter().copied())
-        .map(|(name, kind)| Field::new(name, arrow_data_type(kind), true))
+        .map(|(name, kind)| {
+            let field = Field::new(name, arrow_data_type(kind), true);
+            if matches!(kind, ColumnMaterializationKind::Time) {
+                field.with_metadata(HashMap::from([(
+                    SAS_LOGICAL_TYPE_KEY.to_owned(),
+                    "TIME".to_owned(),
+                )]))
+            } else {
+                field
+            }
+        })
         .collect::<Vec<_>>();
     Arc::new(Schema::new(fields))
 }
@@ -316,7 +339,19 @@ const fn arrow_data_type(kind: ColumnMaterializationKind) -> DataType {
         // temporal type, and sub-second SAS datetimes/times must survive (see the
         // schema-aware conversion in `columnar.rs`).
         ColumnMaterializationKind::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
-        ColumnMaterializationKind::Time => DataType::Time64(TimeUnit::Nanosecond),
+        // Duration, not Time64. SAS stores TIME as a plain numeric count of seconds since
+        // midnight, and real files carry values outside `[0, 24h)` — an elapsed duration
+        // recorded with a TIME format, or a negative offset. `Time64(Nanosecond)` is defined
+        // only over `[0, 24h)`, so such a column is data we can write but no spec-following
+        // reader will give back: Arrow-rs, DuckDB and pyarrow all null it on read. The two
+        // types have the *same* i64 nanosecond payload, so this costs nothing in size or
+        // convertibility and buys the whole SAS domain. `SAS_LOGICAL_TYPE_KEY` records the
+        // clock-time intent for consumers that want to narrow it back.
+        //
+        // Choosing per file (Time64 when everything fits, Duration otherwise) would need a
+        // full pre-pass: the schema is fixed before the first batch and Arrow streams cannot
+        // change it midway, and no metadata declares a TIME column's range.
+        ColumnMaterializationKind::Time => DataType::Duration(TimeUnit::Nanosecond),
         ColumnMaterializationKind::Utf8 => DataType::Utf8,
         ColumnMaterializationKind::RawBytes => DataType::Binary,
     }

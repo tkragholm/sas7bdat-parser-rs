@@ -7,7 +7,7 @@ use arrow_array::{
     ArrayRef, RecordBatch,
     builder::{BinaryBuilder, PrimitiveBuilder, StringBuilder},
     types::{
-        ArrowPrimitiveType, Date32Type, Float64Type, Int32Type, Int64Type, Time64NanosecondType,
+        ArrowPrimitiveType, Date32Type, DurationNanosecondType, Float64Type, Int32Type, Int64Type,
         TimestampMicrosecondType,
     },
 };
@@ -496,7 +496,9 @@ impl ColumnBuffer<'_> {
                 )
             }
             Self::Time(PrimitiveBuffer { values, valid }) => {
-                build_primitive_array::<Time64NanosecondType, _, _>(
+                // Duration, not Time64: SAS TIME is a signed count of seconds since midnight
+                // and is not confined to `[0, 24h)`. See `scan::plan::arrow_data_type`.
+                build_primitive_array::<DurationNanosecondType, _, _>(
                     values.iter().copied(),
                     valid,
                     |value| {
@@ -597,12 +599,14 @@ fn column_buffer_to_arrow(buffer: ColumnBuffer<'_>, field_type: &DataType) -> Re
                 },
             )
         }
-        (DataType::Time64(TimeUnit::Nanosecond), ColumnBuffer::F64(buf)) => {
+        (DataType::Duration(TimeUnit::Nanosecond), ColumnBuffer::F64(buf)) => {
             let PrimitiveBuffer { values, valid } = buf;
-            build_primitive_array::<Time64NanosecondType, _, _>(
+            build_primitive_array::<DurationNanosecondType, _, _>(
                 values.iter().copied(),
                 *valid,
                 |raw| {
+                    // A float->int cast saturates in Rust, so a value beyond i64 nanoseconds
+                    // (~292 years) pins to the bound rather than wrapping to nonsense.
                     #[allow(clippy::cast_possible_truncation)]
                     Ok((raw * 1_000_000_000.0).round() as i64)
                 },

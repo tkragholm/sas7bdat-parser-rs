@@ -86,9 +86,10 @@ const fn arrow_data_type_for_logical_type(logical_type: LogicalType) -> ArrowSch
         LogicalType::DateTime => {
             ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Microsecond, None)
         }
-        // Time64 (pl.Time) spans only [0, 24h); SAS time values >= 24h or negative surface as
-        // null here by design — see the Time arm in `convert.rs`.
-        LogicalType::Time => ArrowSchemaDataType::Time64(ArrowSchemaTimeUnit::Nanosecond),
+        // Duration (pl.Duration), not Time64 (pl.Time): SAS TIME is a signed count of seconds
+        // since midnight and is not confined to [0, 24h). Matches the core Arrow schema — see
+        // `scan::plan::arrow_data_type` in the sas7bdat crate.
+        LogicalType::Time => ArrowSchemaDataType::Duration(ArrowSchemaTimeUnit::Nanosecond),
         LogicalType::Bytes => ArrowSchemaDataType::Binary,
     }
 }

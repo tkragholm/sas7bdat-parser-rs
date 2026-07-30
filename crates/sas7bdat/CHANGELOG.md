@@ -15,8 +15,33 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (Arrow schema).** A SAS `TIME` column is now `Duration(Nanosecond)` instead of
+  `Time64(Nanosecond)`, in the library's Arrow schema, in Parquet output, and in the Polars
+  plugin (`pl.Duration` rather than `pl.Time`). SAS stores `TIME` as a plain numeric count of
+  seconds since midnight, and real files carry values outside `[0, 24h)` — an elapsed
+  duration recorded with a `TIME` format, or a negative offset. `Time64` is defined only over
+  `[0, 24h)`, so those columns were written correctly but read back as **null** by every
+  spec-following reader (arrow-rs, pyarrow, DuckDB, Polars). Both types carry the same `i64`
+  nanosecond payload, so the change costs nothing in file size and a caller who knows a
+  column is a clock time can `.cast(pl.Time)` for free. Fields also carry a
+  `sas.logical_type: TIME` metadata entry (exported as `SAS_LOGICAL_TYPE_KEY`), which
+  survives a Parquet round-trip, so the clock-time intent is still recoverable.
+
 ### Fixed
 
+- **(CLI)** A SAS `TIME` value outside `[0, 24h)` printed as `00:00:00` in both `head` and
+  CSV export. `NaiveTime` cannot represent such a value, and the fallback silently
+  substituted midnight — so 359,280 seconds (99h48m) was written to CSV as midnight, with no
+  error. Out-of-range and negative times now render their real elapsed value (`99:48:00`,
+  `-00:01:17`); in-range values are unchanged.
+- **(CLI)** CSV export ignored a column's logical type for temporal cells that widened to
+  `Float64` (any sub-second date/datetime/time), writing raw SAS-epoch numbers next to
+  properly formatted neighbours — one column could emit `19:18:27.950`, `00:00:00` and
+  `359960.4` in three consecutive rows. `head` and CSV now share one formatter per type.
+- **(CLI)** A SAS `TIME` value with a sub-millisecond fraction rendered as `.000`. It now
+  keeps microsecond precision.
 - **(CLI)** A conversion of more than about 2.1 billion rows failed part-way with `Parquet
   does not support more than 32767 row groups per file`. Row groups held 65,536 rows
   whatever the file's size, and 32,767 of those cover 2,147,418,112 rows — which a 234 GiB
