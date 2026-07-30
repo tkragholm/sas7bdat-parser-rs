@@ -126,6 +126,56 @@ fn decode_rle_command(control: u8, input: &[u8], cursor: &mut usize) -> Result<R
     })
 }
 
+/// How far a short-form RLE op may write past the length it actually produces.
+///
+/// The short command families encode runs of at most 32 bytes — copies via commands 8
+/// and 9 (1..=32 bytes), fills via 12 through 15 (2..=18). At those sizes a call into
+/// `memcpy`/`memset` costs about as much as the bytes it moves, and profiling a
+/// production-shaped file (14 columns, RLE) put `_platform_memset` and
+/// `_platform_memmove` at 678 samples against `decompress_row`'s own 721.
+///
+/// So the short forms store a fixed 32 bytes regardless of the true run length and then
+/// `truncate` back, which is the same trick LZ4 and zstd call "wildcopy". The long-form
+/// commands carry their own length bytes and are meant for long runs, where the libc
+/// call is the right tool; they keep it.
+///
+/// The buffer is reserved with this much slack so the overshoot always lands inside
+/// already-allocated capacity, which is what keeps this safe code: `extend_from_slice`
+/// with a fixed-size array cannot reallocate, and `truncate` on `u8` just moves `len`.
+const WILD_OVERRUN: usize = 32;
+
+/// Copy `len` bytes by way of one fixed-width store, or report that it does not apply.
+///
+/// Returns `false` when the run is too long for the fixed store, or when `src` has fewer
+/// than `WILD_OVERRUN` readable bytes — near the end of the input the overshoot would
+/// read past the slice, so the caller falls back to the exact copy. Both callers have
+/// already bounds-checked `len` itself against the input and the row.
+#[inline]
+fn wild_copy(output: &mut Vec<u8>, src: &[u8], len: usize) -> bool {
+    if len > WILD_OVERRUN || src.len() < WILD_OVERRUN {
+        return false;
+    }
+    let end = output.len() + len;
+    let block: [u8; WILD_OVERRUN] = src[..WILD_OVERRUN]
+        .try_into()
+        .expect("slice length checked above");
+    output.extend_from_slice(&block);
+    output.truncate(end);
+    true
+}
+
+/// Fill `len` bytes by way of one fixed-width splat store, or report that it does not apply.
+#[inline]
+fn wild_fill(output: &mut Vec<u8>, byte: u8, len: usize) -> bool {
+    if len > WILD_OVERRUN {
+        return false;
+    }
+    let end = output.len() + len;
+    output.extend_from_slice(&[byte; WILD_OVERRUN]);
+    output.truncate(end);
+    true
+}
+
 pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -> Result<()> {
     // Build the row incrementally: each output byte is written exactly once.
     // (Pre-`resize`-ing to zeros would memset the whole row and then overwrite
@@ -146,7 +196,9 @@ pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
             if output.len().saturating_add(op.copy_len) > expected_len {
                 return Err(compression_error("RLE copy exceeds output length"));
             }
-            output.extend_from_slice(&input[cursor..cursor + op.copy_len]);
+            if !wild_copy(output, &input[cursor..], op.copy_len) {
+                output.extend_from_slice(&input[cursor..cursor + op.copy_len]);
+            }
             cursor += op.copy_len;
         }
 
@@ -154,7 +206,9 @@ pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
             if output.len().saturating_add(op.insert_len) > expected_len {
                 return Err(compression_error("RLE insert exceeds output length"));
             }
-            output.resize(output.len() + op.insert_len, op.insert_byte);
+            if !wild_fill(output, op.insert_byte, op.insert_len) {
+                output.resize(output.len() + op.insert_len, op.insert_byte);
+            }
         }
     }
 
@@ -173,9 +227,13 @@ pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
 /// row length far larger than the page size, so this is the second line of defence
 /// rather than the only one — a machine with enough RAM would happily satisfy a
 /// multi-gigabyte reservation and then spend the scan filling it.
+/// The `WILD_OVERRUN` slack is what makes [`wild_copy`] and [`wild_fill`] safe *and*
+/// fast: with it, their fixed-size `extend_from_slice` can never hit the reallocation
+/// path, so the whole short-run case stays a store into memory we already own.
 #[inline]
 fn reserve_row(output: &mut Vec<u8>, expected_len: usize) -> Result<()> {
-    let extra = expected_len.saturating_sub(output.capacity());
+    let want = expected_len.saturating_add(WILD_OVERRUN);
+    let extra = want.saturating_sub(output.capacity());
     output
         .try_reserve(extra)
         .map_err(|_| compression_error("cannot allocate a buffer for the declared row length"))
