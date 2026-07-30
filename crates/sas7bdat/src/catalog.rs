@@ -453,6 +453,11 @@ fn parse_value_labels(
     )
 }
 
+/// Smallest a value-label entry can be: the 6-byte entry header with a zero-length
+/// payload. The loop below refuses anything shorter, so this is what bounds how many
+/// entries a block of a given size can possibly hold.
+const MIN_VALUE_ENTRY_BYTES: usize = 6;
+
 fn parse_value_label_offsets(
     bytes: &[u8],
     header: &HeaderInfo,
@@ -460,7 +465,29 @@ fn parse_value_label_offsets(
     label_count: usize,
     capacity: usize,
 ) -> Result<(Vec<usize>, usize)> {
-    let mut offsets = vec![0usize; label_count];
+    // `label_count` is `label_count_used`, a u32/u64 lifted straight out of the catalog,
+    // and it sizes this table. A fuzz case declaring 1,313,169,229 labels reached
+    // `calloc(10505353832)` on a catalog of a few KB. The block cannot hold more entries
+    // than its own length allows, so the claim is refutable here rather than trusted.
+    //
+    // `capacity` needs no equivalent check: the loop errors out as soon as fewer than
+    // MIN_VALUE_ENTRY_BYTES remain, so it cannot run more than that many iterations
+    // however large the declared capacity is.
+    let describable = bytes.len() / MIN_VALUE_ENTRY_BYTES;
+    if label_count > describable {
+        return Err(Error::page_corruption(format!(
+            "catalog declares {label_count} value labels, more than the {} byte block could hold",
+            bytes.len()
+        )));
+    }
+
+    // Fallible: `vec![0usize; n]` aborts the process through `handle_alloc_error`, which
+    // the Python and R bindings cannot recover from.
+    let mut offsets: Vec<usize> = Vec::new();
+    offsets
+        .try_reserve(label_count)
+        .map_err(|_| Error::page_corruption("cannot allocate a catalog value-label table"))?;
+    offsets.resize(label_count, 0usize);
     let mut cursor = 0usize;
 
     for i in 0..capacity {
