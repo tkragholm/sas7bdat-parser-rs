@@ -127,6 +127,7 @@ jobs:
           cd crates/sas7bdat
           cargo fuzz run dataset_from_bytes tests/fixtures/fuzz -- -runs=0
           cargo fuzz run dataset_open_path tests/fixtures/fuzz -- -runs=0
+          cargo fuzz run columnar_offsets tests/fixtures/fuzz -- -runs=0
           cargo fuzz run catalog_parse tests/fixtures/fuzz/catalog -- -runs=0
 
   audit:

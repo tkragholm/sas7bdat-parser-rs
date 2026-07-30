@@ -34,6 +34,10 @@ fuzz-seed target="dataset_from_bytes":
 fuzz-seed-path:
     @just fuzz-seed dataset_open_path
 
+# Seed the columnar-offsets target from the same .sas7bdat corpus.
+fuzz-seed-offsets:
+    @just fuzz-seed columnar_offsets
+
 # Seed the catalog target from the .sas7bcat fixtures. Only two exist, so this corpus
 # is thin -- expect it to grow mostly by mutation.
 fuzz-seed-catalog:
