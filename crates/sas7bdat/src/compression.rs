@@ -131,7 +131,7 @@ pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
     // (Pre-`resize`-ing to zeros would memset the whole row and then overwrite
     // every byte during decode, doubling the writes on this per-row hot path.)
     output.clear();
-    output.reserve(expected_len);
+    reserve_row(output, expected_len)?;
     let mut cursor = 0usize;
 
     while cursor < input.len() && output.len() < expected_len {
@@ -165,11 +165,40 @@ pub fn decompress_rle(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
     Ok(())
 }
 
+/// Reserve room for one decompressed row, fallibly.
+///
+/// `expected_len` is the declared row length, so it is file-controlled. `reserve` would
+/// route a failure through `handle_alloc_error` and abort the process, which is not a
+/// recoverable error for the Python and R bindings. `parse_layout` separately refuses a
+/// row length far larger than the page size, so this is the second line of defence
+/// rather than the only one — a machine with enough RAM would happily satisfy a
+/// multi-gigabyte reservation and then spend the scan filling it.
+#[inline]
+fn reserve_row(output: &mut Vec<u8>, expected_len: usize) -> Result<()> {
+    let extra = expected_len.saturating_sub(output.capacity());
+    output
+        .try_reserve(extra)
+        .map_err(|_| compression_error("cannot allocate a buffer for the declared row length"))
+}
+
+/// Refuse an emit that would push the row past its declared length.
+///
+/// The RLE decoder checks this inline before every copy and insert. RDC did not: it
+/// grew `output` freely and only compared lengths after the loop, so a crafted stream
+/// ballooned the buffer first and failed second. One 3-byte RDC token can emit up to
+/// 4114 bytes (`19 + 15 + 255 * 16`), which is roughly 1371x amplification per input
+/// byte — enough for a small page to drive a multi-hundred-megabyte allocation.
+#[inline]
+fn ensure_room(output: &[u8], add: usize, expected_len: usize) -> Result<()> {
+    if output.len().saturating_add(add) > expected_len {
+        return Err(compression_error("RDC output exceeds expected row length"));
+    }
+    Ok(())
+}
+
 pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -> Result<()> {
     output.clear();
-    if output.capacity() < expected_len {
-        output.reserve(expected_len - output.capacity());
-    }
+    reserve_row(output, expected_len)?;
     let mut cursor = 0usize;
 
     // Each 16-bit big-endian prefix word describes the next up-to-16 tokens:
@@ -185,6 +214,7 @@ pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
                 if cursor >= input.len() {
                     break 'words;
                 }
+                ensure_room(output, 1, expected_len)?;
                 output.push(input[cursor]);
                 cursor += 1;
                 continue;
@@ -199,6 +229,7 @@ pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
 
             if marker <= 0x0F {
                 let fill_len = 3 + usize::from(marker);
+                ensure_room(output, fill_len, expected_len)?;
                 output.resize(output.len() + fill_len, next);
             } else if (marker >> 4) == 1 {
                 if cursor >= input.len() {
@@ -207,6 +238,7 @@ pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
                 let fill_len = 19 + usize::from(marker & 0x0F) + usize::from(next) * 16;
                 let fill_byte = input[cursor];
                 cursor += 1;
+                ensure_room(output, fill_len, expected_len)?;
                 output.resize(output.len() + fill_len, fill_byte);
             } else if (marker >> 4) == 2 {
                 if cursor >= input.len() {
@@ -215,10 +247,12 @@ pub fn decompress_rdc(input: &[u8], expected_len: usize, output: &mut Vec<u8>) -
                 let copy_len = 16 + usize::from(input[cursor]);
                 cursor += 1;
                 let back = 3 + usize::from(marker & 0x0F) + usize::from(next) * 16;
+                ensure_room(output, copy_len, expected_len)?;
                 copy_backref(output, back, copy_len)?;
             } else {
                 let copy_len = usize::from(marker >> 4);
                 let back = 3 + usize::from(marker & 0x0F) + usize::from(next) * 16;
+                ensure_room(output, copy_len, expected_len)?;
                 copy_backref(output, back, copy_len)?;
             }
         }
@@ -249,7 +283,9 @@ fn copy_backref(output: &mut Vec<u8>, back: usize, len: usize) -> Result<()> {
     } else {
         // Overlapping run: copy byte-by-byte so each freshly written byte can feed later
         // positions of this same copy.
-        output.reserve(len);
+        output
+            .try_reserve(len)
+            .map_err(|_| compression_error("cannot allocate for an RDC overlapping copy"))?;
         for i in 0..len {
             let byte = output[start + i];
             output.push(byte);
@@ -267,6 +303,32 @@ fn compression_error(message: impl Into<String>) -> Error {
 #[cfg(test)]
 mod tests {
     use super::{decompress_rdc, decompress_rle};
+
+    /// RDC used to grow `output` freely and only compare lengths after the loop, so a
+    /// stream whose tokens emit far more than the row can hold ballooned the buffer
+    /// first and failed second. One `marker >> 4 == 1` token emits
+    /// `19 + (marker & 0x0F) + next * 16` bytes — 4114 at maximum — from three input
+    /// bytes, so a page's worth of them reached hundreds of megabytes.
+    ///
+    /// The failure has to arrive without the buffer ever exceeding the row length.
+    #[test]
+    fn rdc_refuses_a_token_that_overflows_the_declared_row() {
+        // One prefix word marking a single non-literal token, then a max-length fill:
+        // marker 0x1F -> 19 + 15 + 255 * 16 = 4114 bytes of 0xAA.
+        let compressed = [0x80, 0x00, 0x1F, 0xFF, 0xAA];
+        let mut output = Vec::new();
+        let err = decompress_rdc(&compressed, 16, &mut output)
+            .expect_err("a 4114-byte fill must not be accepted into a 16-byte row");
+        assert!(
+            err.to_string().contains("exceeds expected row length"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            output.len() <= 16,
+            "buffer grew to {} bytes for a 16-byte row",
+            output.len()
+        );
+    }
 
     #[test]
     fn decompresses_simple_rle_literal_fill() {
