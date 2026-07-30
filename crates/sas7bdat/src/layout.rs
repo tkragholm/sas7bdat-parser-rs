@@ -40,6 +40,25 @@ const MAX_COLUMNS: usize = 1 << 20;
 /// to 3..=8 bytes, so 8 is the format's own ceiling rather than a policy choice.
 const MAX_NUMERIC_WIDTH: u32 = 8;
 
+/// How much larger than one page a row may claim to be.
+///
+/// For an uncompressed layout `row_len <= page_size` is a physical fact: the row's bytes
+/// sit verbatim inside a page. A compressed row only needs its *compressed* form to fit,
+/// so its uncompressed length can legitimately exceed the page, and this multiple is the
+/// headroom for that.
+///
+/// The declared row length is what `decompress_row` reserves per row, so an unchecked
+/// one is an allocation primitive: a fuzz case declaring a 4.26 GB row drove
+/// `malloc(4261413064)` on a file of a few KB. A fallible reserve alone does not fix
+/// that — a machine with spare RAM satisfies the request and then spends the scan
+/// filling it — so the claim needs refuting up front.
+///
+/// Measured across 324 corpus fixtures, the worst `row_len / page_size` ratio is 0.38
+/// uncompressed and 0.04 compressed, and the largest row is 29,576 bytes. 16x leaves
+/// ~42x of headroom over anything real while refusing the near-`u32::MAX` claims that
+/// corruption produces.
+const MAX_ROW_LEN_PAGE_MULTIPLE: u64 = 16;
+
 /// Smallest metadata footprint a described column can have: one 8-byte entry in a
 /// column-name subheader. Attribute and format entries are larger, so the name
 /// stride is what bounds how many columns a given number of bytes can describe.
@@ -307,6 +326,14 @@ pub fn parse_layout<R: Read + Seek>(
     let row_info = state
         .row_info
         .ok_or_else(|| metadata_error("row size subheader missing from SAS metadata"))?;
+
+    let max_row_len = u64::from(header.page_size.0).saturating_mul(MAX_ROW_LEN_PAGE_MULTIPLE);
+    if u64::from(row_info.row_length) > max_row_len {
+        return Err(metadata_error(format!(
+            "SAS metadata declares a {} byte row, more than {MAX_ROW_LEN_PAGE_MULTIPLE}x the {} byte page size",
+            row_info.row_length, header.page_size.0
+        )));
+    }
 
     let column_count = state
         .column_count
