@@ -9,8 +9,12 @@
 //! Drop new artifacts into that directory and they are covered automatically. Add an
 //! entry to `EXPECTED` when the artifact's whole point is a specific diagnostic.
 
-use sas7bdat::Dataset;
-use std::{fs, path::PathBuf};
+use sas7bdat::{Dataset, Parallelism};
+use std::{fs, hint::black_box, ops::ControlFlow, path::PathBuf};
+
+/// Enough rows to cross a page boundary and drive the decompressor, few enough that a
+/// header claiming billions of rows does not turn the test into a hang.
+const SCAN_ROW_CAP: usize = 4096;
 
 /// Artifacts whose error message is itself part of the regression, as
 /// `(file stem, substring the message must contain)`.
@@ -28,6 +32,11 @@ const EXPECTED: &[(&str, &str)] = &[
     // is a `debug_assert!`. A panic out of a library is not a recoverable error for the
     // Python and R bindings, so the width is now rejected at open time.
     ("panic_numeric_width_over_8", "numeric but 67 bytes wide"),
+    // A 44 KB file declaring a 4,261,413,064-byte row. `decompress_row` reserves the
+    // declared row length per row, so the claim was an allocation primitive:
+    // `malloc(4261413064)` on a file of a few KB. Only reachable through a scan, which
+    // is why the loop below scans rather than stopping at open.
+    ("oom_declared_row_length", "byte row"),
 ];
 
 fn fuzz_fixture_dir() -> PathBuf {
@@ -53,10 +62,28 @@ fn fuzz_artifacts_open_without_aborting_or_exhausting_memory() {
         let bytes =
             fs::read(&path).unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()));
 
-        // The assertion is that this returns at all. A regression reintroducing the
-        // unbounded allocation does not fail here — it takes the whole test process
-        // down, which is the signal.
-        let outcome = Dataset::from_bytes(bytes);
+        // Open *and* scan. Opening alone is not enough: the row-length artifact was
+        // only reachable through decompression, several frames past `from_bytes`, so a
+        // test that stops at open would not have exercised the decompressor at all.
+        // This mirrors what the fuzz target does, which is what found these.
+        //
+        // The assertion is that the sequence returns at all. A regression
+        // reintroducing an unbounded allocation does not fail here — it takes the
+        // whole test process down, which is the signal.
+        let outcome = Dataset::from_bytes(bytes).and_then(|dataset| {
+            let mut seen = 0usize;
+            dataset
+                .scan()
+                .with_parallelism(Parallelism::None)
+                .visit_rows(|row| {
+                    black_box(row.len());
+                    seen += 1;
+                    if seen >= SCAN_ROW_CAP {
+                        return Ok(ControlFlow::Break(()));
+                    }
+                    Ok(ControlFlow::Continue(()))
+                })
+        });
 
         let stem = path
             .file_stem()
@@ -64,7 +91,7 @@ fn fuzz_artifacts_open_without_aborting_or_exhausting_memory() {
             .unwrap_or_default();
         if let Some((_, needle)) = EXPECTED.iter().find(|(name, _)| *name == stem) {
             let err = outcome.err().unwrap_or_else(|| {
-                panic!("{stem} is expected to be rejected, but it parsed successfully")
+                panic!("{stem} is expected to be rejected, but it parsed and scanned cleanly")
             });
             let message = err.to_string();
             assert!(

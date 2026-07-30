@@ -47,6 +47,16 @@ explored. A numeric wider than 8 bytes reached `scan::numeric::numeric_bits`, wh
 `_ => unreachable!()` arm panics in release as well as debug (the `slice.len() <= 8`
 check above it is only a `debug_assert!`). Width is now validated at open time.
 
+- `oom_declared_row_length.sas7bdat` (44 KB) declares a 4,261,413,064-byte row
+
+`decompress_row` reserves the declared row length once per row, so the claim was an
+allocation primitive: `malloc(4261413064)`. Found by seeding a corpus with only the
+34 compressed fixtures — they are 9% of the corpus, so a general run almost never
+built a valid compressed page. Note this one is reachable *only through a scan*, not
+through `Dataset::open`, and not through `sas7bdat convert` (which decodes columnar
+while the fuzz target uses `visit_rows`). That is why `fuzz_regressions.rs` scans
+each artifact rather than stopping at open.
+
 To add more: run `just fuzz`, then copy anything that lands in
 `crates/sas7bdat/fuzz/artifacts/<target>/` into this directory and add it to
 `EXPECTED` in `tests/fuzz_regressions.rs`.
