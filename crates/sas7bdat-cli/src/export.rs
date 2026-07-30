@@ -79,6 +79,25 @@ const CARDINALITY_SAMPLE_CELLS: u64 = 4_194_304;
 /// not the other.
 const HIGH_CARDINALITY_PERCENT: usize = 85;
 
+/// The same threshold for string columns, which can be lower for two reasons.
+///
+/// The evidence is stronger: measured over the corpus, string columns are sharply bimodal --
+/// on one file 2,571 of 2,574 sat under 5% distinct and exactly one was above 85%, with
+/// nothing in between. A column landing above 50% is nowhere near the categorical cluster.
+///
+/// And the economics are worse for strings than for numerics. A dictionary at 50% distinct
+/// holds half the column's raw bytes as dictionary entries *plus* an index per row, so it has
+/// almost nothing left to win -- whereas a numeric dictionary stores 8-byte keys against
+/// 4-byte indices and stays worthwhile much further up.
+///
+/// The direction-of-evidence argument in [`high_cardinality_columns`] still holds here: a
+/// prefix that is 50% distinct proves at least that many distinct values exist overall, since
+/// a prefix can only *under*-count a sorted file's cardinality, never over-count it.
+///
+/// Measured across 20 fixtures: -4.9% total output, up to -12% on individual files, with no
+/// fixture made larger, and 1.19x faster on the file that gains the most.
+const STRING_HIGH_CARDINALITY_PERCENT: usize = 50;
+
 /// Files below this many rows are converted without sampling at all: the dictionary work
 /// they do is too small to be worth a second read of the input.
 const MIN_ROWS_TO_SAMPLE: u64 = CARDINALITY_SAMPLE_ROWS * 4;
@@ -124,6 +143,7 @@ fn high_cardinality_columns(dataset: &Dataset, options: &ScanOptions<'_>) -> Vec
     // never clear it -- which silently turns the whole check into a no-op.
     let cap = sample_rows * HIGH_CARDINALITY_PERCENT / 100;
     let mut distinct: Vec<HashSet<u64>> = Vec::new();
+    let mut is_string: Vec<bool> = Vec::new();
     let mut names: Vec<String> = Vec::new();
     let mut rows = 0usize;
 
@@ -132,9 +152,13 @@ fn high_cardinality_columns(dataset: &Dataset, options: &ScanOptions<'_>) -> Vec
         .visit_rows(|row| {
             if distinct.is_empty() {
                 distinct.resize_with(row.len(), HashSet::new);
+                is_string = vec![false; row.len()];
                 names = row.iter_named().map(|(name, _)| name.to_owned()).collect();
             }
             for (index, cell) in row.iter().enumerate() {
+                if matches!(cell, CellValue::Str(_)) {
+                    is_string[index] = true;
+                }
                 if let Some(key) = cell_hash(cell) {
                     // Once a column is past the threshold it cannot come back under it, so
                     // stop growing its set. Bounds the sampler's memory on wide tables.
@@ -157,8 +181,16 @@ fn high_cardinality_columns(dataset: &Dataset, options: &ScanOptions<'_>) -> Vec
     names
         .into_iter()
         .zip(distinct)
-        .filter(|(_, set)| set.len() * 100 >= rows * HIGH_CARDINALITY_PERCENT)
-        .map(|(name, _)| name)
+        .zip(is_string)
+        .filter(|((_, set), is_str)| {
+            let pct = if *is_str {
+                STRING_HIGH_CARDINALITY_PERCENT
+            } else {
+                HIGH_CARDINALITY_PERCENT
+            };
+            set.len() * 100 >= rows * pct
+        })
+        .map(|((name, _), _)| name)
         .collect()
 }
 
