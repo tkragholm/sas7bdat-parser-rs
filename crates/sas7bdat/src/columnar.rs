@@ -345,6 +345,52 @@ define_owned_column_enum! {
 }
 
 impl OwnedColumnBuffer {
+    /// Bytes this column holds on the heap. See [`OwnedColumnarBatch::heap_bytes`].
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        fn validity(valid: Option<&Vec<u64>>) -> usize {
+            valid.map_or(0, |bits| bits.len() * size_of::<u64>())
+        }
+        match self {
+            Self::I32 { values, valid } => {
+                values.len() * size_of::<i32>() + validity(valid.as_ref())
+            }
+            Self::I64 { values, valid } => {
+                values.len() * size_of::<i64>() + validity(valid.as_ref())
+            }
+            Self::F64 { values, valid } => {
+                values.len() * size_of::<f64>() + validity(valid.as_ref())
+            }
+            Self::Date { values, valid } => {
+                values.len() * size_of::<crate::metadata::SasDate>() + validity(valid.as_ref())
+            }
+            Self::DateTime { values, valid } => {
+                values.len() * size_of::<crate::metadata::SasDateTime>() + validity(valid.as_ref())
+            }
+            Self::Time { values, valid } => {
+                values.len() * size_of::<crate::metadata::SasTime>() + validity(valid.as_ref())
+            }
+            Self::Utf8 {
+                offsets,
+                data,
+                valid,
+                dictionary_ids,
+            } => {
+                offsets.len() * size_of::<i64>()
+                    + data.len()
+                    + validity(valid.as_ref())
+                    + dictionary_ids
+                        .as_ref()
+                        .map_or(0, |ids| ids.len() * size_of::<u32>())
+            }
+            Self::RawBytes {
+                offsets,
+                data,
+                valid,
+            } => offsets.len() * size_of::<i64>() + data.len() + validity(valid.as_ref()),
+        }
+    }
+
     #[must_use]
     pub fn as_borrowed(&self) -> ColumnBuffer<'_> {
         match self {
@@ -495,6 +541,19 @@ impl OwnedColumnarBatch {
             .iter()
             .map(OwnedColumnBuffer::as_borrowed)
             .collect()
+    }
+
+    /// Bytes this batch holds on the heap.
+    ///
+    /// For consumers that budget memory over batches they have not converted yet — the
+    /// Parquet writer sizes row groups this way, so that it can decide when a row group is
+    /// full without first turning every batch into Arrow arrays.
+    ///
+    /// Counts buffer contents, not capacity, and ignores the enum's own inline size. It is
+    /// a budgeting figure, not an allocator accounting.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.columns.iter().map(OwnedColumnBuffer::heap_bytes).sum()
     }
 
     #[cfg(feature = "arrow")]

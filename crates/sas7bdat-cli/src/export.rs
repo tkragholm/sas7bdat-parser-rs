@@ -200,10 +200,13 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
             row_group_rows,
             options.scan.parse_threads,
         )?;
+        // No Arrow conversion here on purpose. This closure runs on the scan's collector
+        // thread -- the single thread that sees every batch in file order -- so work placed
+        // here is serial however wide the rest of the pipeline is. The conversion now happens
+        // inside the encode task; see `parquet_pipeline::convert_batches`.
         let stats = scan.visit_owned_batches(|batch| {
-            let record_batch = batch.into_arrow_record_batch(SchemaRef::clone(&batch_schema))?;
             pipeline
-                .push(record_batch)
+                .push(batch)
                 .map_err(|err| Error::arrow(err.to_string()))?;
             Ok(ControlFlow::Continue(()))
         })?;

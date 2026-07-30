@@ -32,6 +32,7 @@ use parquet::arrow::arrow_writer::{
 use parquet::errors::ParquetError;
 use parquet::file::writer::SerializedFileWriter;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use sas7bdat::OwnedColumnarBatch;
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::OnceLock;
@@ -169,8 +170,9 @@ pub struct RowGroupPipeline<W: Write + Send> {
     schema: SchemaRef,
     sizer: RowGroupSizer,
 
-    /// Batches for the row group currently being filled.
-    pending: Vec<RecordBatch>,
+    /// Batches for the row group currently being filled, still in the scanner's own
+    /// columnar form. They become Arrow record batches inside the encode task, not here.
+    pending: Vec<OwnedColumnarBatch>,
     pending_rows: usize,
     pending_bytes: usize,
 
@@ -222,16 +224,16 @@ impl<W: Write + Send> RowGroupPipeline<W> {
     /// # Errors
     ///
     /// Returns an error if a row group fails to encode or the file cannot be written.
-    pub fn push(&mut self, batch: RecordBatch) -> Result<()> {
-        if batch.num_rows() == 0 {
+    pub fn push(&mut self, batch: OwnedColumnarBatch) -> Result<()> {
+        if batch.row_count == 0 {
             return Ok(());
         }
-        self.pending_rows += batch.num_rows();
-        self.pending_bytes += batch
-            .columns()
-            .iter()
-            .map(|column| column.get_array_memory_size())
-            .sum::<usize>();
+        self.pending_rows += batch.row_count;
+        // `heap_bytes` rather than Arrow's `get_array_memory_size`, because the batch is
+        // deliberately still unconverted at this point. Both are estimates of the same
+        // thing -- how much input this row group is carrying -- and the row-group sizing
+        // only needs them to be proportional.
+        self.pending_bytes += batch.heap_bytes();
         self.pending.push(batch);
 
         if self.pending_rows >= self.sizer.target() || self.pending_bytes >= self.sizer.byte_cap() {
@@ -287,7 +289,12 @@ impl<W: Write + Send> RowGroupPipeline<W> {
         let schema = SchemaRef::clone(&self.schema);
         let tx = self.tx.clone();
         self.pool.spawn(move || {
-            let chunks = encode_row_group(&schema, writers, &batches);
+            // The Arrow conversion runs here, on a pool thread, rather than on the thread
+            // that called `push`. That caller is the scan's collector: it is the one thread
+            // that sees every batch in order, so anything done there is serial no matter how
+            // many cores the rest of the pipeline has.
+            let chunks = convert_batches(&schema, batches)
+                .and_then(|converted| encode_row_group(&schema, writers, &converted));
             // The receiver outlives every task it dispatched, so this only fails if the
             // pipeline was already torn down by an earlier error.
             let _ = tx.send(Encoded {
@@ -353,6 +360,25 @@ impl<W: Write + Send> RowGroupPipeline<W> {
 /// Each column reads its own slice of every batch, so the columns share nothing and the tasks
 /// are independent. On a narrow table this is only a handful of tasks — the row groups running
 /// alongside it are what fill the pool.
+/// Turn a row group's worth of scanner batches into Arrow record batches.
+///
+/// Runs inside the encode task. The conversion is per-batch and independent, so it goes
+/// through the pool in parallel; order is preserved because `into_par_iter().collect()`
+/// keeps the input order, and row order within a row group has to match the scan's.
+fn convert_batches(
+    schema: &SchemaRef,
+    batches: Vec<OwnedColumnarBatch>,
+) -> Result<Vec<RecordBatch>, ParquetError> {
+    batches
+        .into_par_iter()
+        .map(|batch| {
+            batch
+                .into_arrow_record_batch(SchemaRef::clone(schema))
+                .map_err(|err| ParquetError::General(err.to_string()))
+        })
+        .collect()
+}
+
 fn encode_row_group(
     schema: &Schema,
     writers: Vec<ArrowColumnWriter>,
@@ -379,7 +405,7 @@ fn encode_row_group(
 mod tests {
     use super::{RowGroupPipeline, schema_is_flat};
     use arrow_array::{
-        ArrayRef, Float64Array, Int32Array, RecordBatch, StringArray,
+        RecordBatch,
         cast::AsArray,
         types::{Float64Type, Int32Type},
     };
@@ -387,6 +413,7 @@ mod tests {
     use parquet::arrow::ArrowWriter;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use parquet::file::properties::WriterProperties;
+    use sas7bdat::{OwnedColumnBuffer, OwnedColumnarBatch, TrustedOffsets};
     use std::fs::File;
     use std::sync::Arc;
 
@@ -395,22 +422,52 @@ mod tests {
 
     /// Every value is a function of its file-wide row index, so reading the file back proves
     /// both that no row was lost and that the row groups landed in the order they were filled.
-    fn batch(schema: &SchemaRef, first_row: usize, columns: usize) -> RecordBatch {
+    /// Built in the scanner's own columnar form, which is what the pipeline now takes, so
+    /// the test covers the Arrow conversion inside the encode task as well as the ordering.
+    fn batch(first_row: usize, columns: usize) -> OwnedColumnarBatch {
         let rows = first_row..first_row + ROWS_PER_BATCH;
-        let arrays: Vec<ArrayRef> = (0..columns)
+        let columns = (0..columns)
             .map(|column| match column % 3 {
-                0 => Arc::new(Int32Array::from_iter_values(
-                    rows.clone().map(|row| i32::try_from(row % 1000).unwrap()),
-                )) as ArrayRef,
-                1 => Arc::new(Float64Array::from_iter_values(
-                    rows.clone().map(|row| row as f64 * 0.5),
-                )) as ArrayRef,
-                _ => Arc::new(StringArray::from_iter_values(
-                    rows.clone().map(|row| format!("r{row}")),
-                )) as ArrayRef,
+                0 => OwnedColumnBuffer::I32 {
+                    values: rows
+                        .clone()
+                        .map(|row| i32::try_from(row % 1000).unwrap())
+                        .collect(),
+                    valid: None,
+                },
+                1 => OwnedColumnBuffer::F64 {
+                    values: rows.clone().map(|row| row as f64 * 0.5).collect(),
+                    valid: None,
+                },
+                _ => {
+                    let mut offsets = TrustedOffsets::with_capacity_for_rows(ROWS_PER_BATCH);
+                    let mut data = Vec::new();
+                    for row in rows.clone() {
+                        data.extend_from_slice(format!("r{row}").as_bytes());
+                        offsets.push_current_data_len(data.len()).expect("offset");
+                    }
+                    OwnedColumnBuffer::Utf8 {
+                        offsets,
+                        data,
+                        valid: None,
+                        dictionary_ids: None,
+                    }
+                }
             })
             .collect();
-        RecordBatch::try_new(SchemaRef::clone(schema), arrays).expect("batch")
+        OwnedColumnarBatch {
+            row_base: (first_row as u64).into(),
+            row_count: ROWS_PER_BATCH,
+            columns,
+        }
+    }
+
+    /// The same batch as [`batch`], converted. The serial arm of the byte-for-byte test needs
+    /// Arrow input, and converting the owned batch keeps both arms provably identical.
+    fn arrow_batch(schema: &SchemaRef, first_row: usize, columns: usize) -> RecordBatch {
+        batch(first_row, columns)
+            .into_arrow_record_batch(SchemaRef::clone(schema))
+            .expect("convert")
     }
 
     fn schema_of(columns: usize) -> SchemaRef {
@@ -497,7 +554,7 @@ mod tests {
         .expect("pipeline");
         for index in 0..batches {
             pipeline
-                .push(batch(&schema, index * ROWS_PER_BATCH, columns))
+                .push(batch(index * ROWS_PER_BATCH, columns))
                 .expect("push");
         }
         pipeline.finish().expect("finish");
@@ -549,7 +606,7 @@ mod tests {
         .expect("writer");
         for index in 0..batches {
             writer
-                .write(&batch(&schema, index * ROWS_PER_BATCH, columns))
+                .write(&arrow_batch(&schema, index * ROWS_PER_BATCH, columns))
                 .expect("write");
         }
         writer.close().expect("close");
