@@ -102,6 +102,13 @@ const DICT_SLOT_MASK: usize = DICT_CAPACITY - 1;
 const MAX_DICT_ENTRIES: usize = 200;
 const MAX_STAGED_STRING_WIDTH: u32 = 20;
 const INLINE_DICT_KEY_BYTES: usize = 16;
+
+/// Ceiling on one column's pre-allocated variable-width buffer.
+///
+/// Advisory, like the row hint in `scan::plan`: the buffer grows on demand, so this
+/// changes nothing except how much a pathological width claim pre-allocates. 64 MiB is
+/// far above any real batch — a 65,536-row batch of 8-byte numerics is 512 KiB.
+const MAX_PREALLOC_BYTES_PER_COLUMN: usize = 64 << 20;
 const DICT_ID_NONE: u32 = u32::MAX;
 const DICT_DISABLE_MIN_LOOKUPS: u32 = 512;
 const DICT_DISABLE_MIN_LOOKUPS_ZERO_PROMOTIONS: u32 = 256;
@@ -1427,10 +1434,16 @@ impl OwnedBatchColumnBuilder {
         numeric_tile: Option<NumericTileMode>,
         utf8_data_capacity_multiplier: usize,
     ) -> Self {
-        let base_variable_capacity =
-            target_rows.saturating_mul(usize::try_from(width_hint).unwrap_or(0));
-        let utf8_variable_capacity =
-            base_variable_capacity.saturating_mul(utf8_data_capacity_multiplier.max(1));
+        // Clamped independently of the row hint `ScanPlan` already bounds, because
+        // `width_hint` is a `u32` column width and the UTF-8 multiplier scales on top of
+        // it — so the byte product can overshoot even when the row count is sane. Like
+        // the row hint this is advisory: both buffers grow on demand.
+        let base_variable_capacity = target_rows
+            .saturating_mul(usize::try_from(width_hint).unwrap_or(0))
+            .min(MAX_PREALLOC_BYTES_PER_COLUMN);
+        let utf8_variable_capacity = base_variable_capacity
+            .saturating_mul(utf8_data_capacity_multiplier.max(1))
+            .min(MAX_PREALLOC_BYTES_PER_COLUMN);
         match kind {
             ColumnMaterializationKind::I32 => Self::I32 {
                 values: Vec::with_capacity(target_rows),

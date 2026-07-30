@@ -26,7 +26,12 @@ impl ScanPlan {
         let projection_names = projection.map(|projection| projection.names.as_ref());
         let row = RowDecodePlan::new_with_projection(builder, projection_plan, projection_names)?;
         let batch_row_capacity = resolve_batch_row_capacity(builder)?;
-        let capacity_hint_rows = effective_scan_row_capacity_hint(builder).min(batch_row_capacity);
+        let row_len = usize::from(builder.ds.layout.row_len).max(1);
+        let capacity_hint_rows = effective_scan_row_capacity_hint(builder)
+            .min(batch_row_capacity)
+            .min(MAX_CAPACITY_HINT_ROWS)
+            .min(MAX_BATCH_PREALLOC_BYTES / row_len)
+            .max(1);
         let batch = BatchDecodePlan::new(builder, row.clone())?;
         Ok(Self {
             raw,
@@ -39,6 +44,27 @@ impl ScanPlan {
 }
 
 const AUTO_BATCH_ROWS_MIN: usize = 4096;
+
+/// Ceilings on the batch pre-allocation hint.
+///
+/// The hint is advisory. It pre-sizes the batch column buffers and every one of them
+/// grows on demand, so clamping it can only make a pathological file pre-allocate less
+/// — it cannot change how many rows a batch holds or what a scan produces. That is what
+/// makes bounding it here safe in a way that rejecting the input would not be.
+///
+/// It needs bounding because both inputs are file-controlled and neither is checked
+/// geometrically: [`effective_scan_row_capacity_hint`] is the declared row count, which
+/// this reader already knows can read `u32::MAX`, and `BatchHint::Auto` resolves
+/// `batch_row_capacity` from the declared `rows_per_page`. With both large, a fuzz case
+/// reached `Vec::with_capacity` for 876 GB.
+///
+/// Two ceilings, because either factor alone is insufficient. The row cap handles a
+/// tiny `row_len`, where a byte budget would permit hundreds of millions of rows. The
+/// byte budget handles wide rows, and it scales correctly with column count without
+/// needing to know it: every column occupies at least one byte of the row, so
+/// `columns * width` is at most `row_len` and the whole batch stays inside the budget.
+const MAX_CAPACITY_HINT_ROWS: usize = 1 << 20;
+const MAX_BATCH_PREALLOC_BYTES: usize = 256 << 20;
 #[derive(Debug, Clone)]
 pub(super) struct CompiledColumnPlan {
     pub(super) start: usize,
