@@ -344,9 +344,15 @@ pub enum BatchHint {
 /// whenever its preconditions don't hold, so output is identical either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnMajorDecode {
-    /// Never use the column-major path (default).
+    /// Never use the column-major path.
     Off,
     /// Use the column-major path whenever its preconditions hold; row-major otherwise.
+    ///
+    /// This is the default — see `ScanBuilder::new`. Reading it as opt-in understates what
+    /// the scanner already does: the repository's own `wide_table` benchmark puts this
+    /// path 1.4x to 2.1x ahead of row-major from 16 to 1024 columns, and
+    /// `examples/verify_columnar.rs` decodes every corpus fixture both ways to confirm
+    /// the results are byte-identical.
     On,
 }
 
