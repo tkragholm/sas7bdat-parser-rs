@@ -36,6 +36,10 @@ const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
 /// derived per file and is far tighter for everything but a genuinely huge input.
 const MAX_COLUMNS: usize = 1 << 20;
 
+/// Widest a numeric column can be: SAS stores numerics as IEEE-754 doubles truncated
+/// to 3..=8 bytes, so 8 is the format's own ceiling rather than a policy choice.
+const MAX_NUMERIC_WIDTH: u32 = 8;
+
 /// Smallest metadata footprint a described column can have: one 8-byte entry in a
 /// column-name subheader. Attribute and format entries are larger, so the name
 /// stride is what bounds how many columns a given number of bytes can describe.
@@ -353,7 +357,20 @@ pub fn parse_layout<R: Read + Seek>(
             let label = state.text_store.resolve(column.label_ref);
             let logical_type = infer_logical_type(column.type_code, format.as_deref());
 
-            ColumnMeta {
+            // SAS stores a numeric as a truncated IEEE-754 double, so its width is
+            // 1..=8 bytes by construction. A wider one is corrupt, and it used to reach
+            // `numeric_bits`, whose `unreachable!` arm panics — in release too, since
+            // the length guard above it is only a `debug_assert!`. Rejecting here turns
+            // that into an `Err` at open time, at the one point every decode path
+            // (row, columnar, projected, fused) draws its widths from.
+            if logical_type.is_numeric() && column.width > MAX_NUMERIC_WIDTH {
+                return Err(metadata_error(format!(
+                    "column {} ({name}) is numeric but {} bytes wide; SAS numerics are at most {MAX_NUMERIC_WIDTH}",
+                    column.index, column.width
+                )));
+            }
+
+            Ok(ColumnMeta {
                 index: column.index,
                 name,
                 logical_type,
@@ -361,9 +378,9 @@ pub fn parse_layout<R: Read + Seek>(
                 offset: column.offset,
                 label,
                 format,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     Ok((
         LayoutPlan {

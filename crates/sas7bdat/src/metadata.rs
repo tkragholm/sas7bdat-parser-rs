@@ -41,6 +41,23 @@ pub enum LogicalType {
     Bytes,
 }
 
+impl LogicalType {
+    /// Whether the column's bytes are a SAS numeric.
+    ///
+    /// True for every variant that decodes through the numeric path, temporal types
+    /// included: SAS stores dates, datetimes, and times as numbers, and the logical
+    /// type only records how to interpret them afterwards. The two false cases are
+    /// [`String`](Self::String) and [`Bytes`](Self::Bytes), which are read as raw
+    /// character data.
+    #[must_use]
+    pub const fn is_numeric(self) -> bool {
+        match self {
+            Self::Integer | Self::Float | Self::Date | Self::DateTime | Self::Time => true,
+            Self::String | Self::Bytes => false,
+        }
+    }
+}
+
 /// A wrapper for SAS date values (days since 1960-01-01).
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
