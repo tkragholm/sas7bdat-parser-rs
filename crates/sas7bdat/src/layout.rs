@@ -23,6 +23,40 @@ const SIG_COLUMN_NAME: u32 = 0xFFFF_FFFF;
 const SIG_COLUMN_ATTRS: u32 = 0xFFFF_FFFC;
 const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
 
+/// Absolute ceiling on the column table, as a resource limit rather than a format rule.
+///
+/// sas7bdat declares no column ceiling: the 32,767-variable figure people quote is
+/// a limit on a SAS *data set*, and SAS documents a far larger theoretical maximum,
+/// so a format-derived bound would risk rejecting files SAS itself can write. What
+/// this bound exists for is that the declared column count is four bytes of the
+/// input, and every path that turns it into `Vec` length is an amplifier. At 2^20 it
+/// sits ~32x above the data-set limit — high enough that no real file reaches it.
+///
+/// This is only the backstop. The effective limit is [`column_ceiling`], which is
+/// derived per file and is far tighter for everything but a genuinely huge input.
+const MAX_COLUMNS: usize = 1 << 20;
+
+/// Smallest metadata footprint a described column can have: one 8-byte entry in a
+/// column-name subheader. Attribute and format entries are larger, so the name
+/// stride is what bounds how many columns a given number of bytes can describe.
+const MIN_BYTES_PER_COLUMN: u64 = 8;
+
+/// How many columns this file could possibly describe, from its own geometry.
+///
+/// A column is only real once a subheader describes it, and every such description
+/// costs at least [`MIN_BYTES_PER_COLUMN`] inside a page. So the file's own size is
+/// an honest upper bound on its column count — one that needs no format lore and no
+/// guess about what is "reasonable". It turns the declared count from something we
+/// allocate against into something we can immediately sanity-check: an 18 KB file
+/// claiming 67 million columns is refutable from the geometry alone.
+fn column_ceiling(header: &HeaderInfo) -> usize {
+    let addressable = u64::from(header.page_size.0).saturating_mul(header.page_count);
+    let ceiling = addressable / MIN_BYTES_PER_COLUMN;
+    usize::try_from(ceiling)
+        .unwrap_or(MAX_COLUMNS)
+        .min(MAX_COLUMNS)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct TextRef {
     index: u16,
@@ -154,16 +188,51 @@ struct MetadataState {
     names_seen: usize,
     attrs_seen: usize,
     formats_seen: usize,
+    /// Upper bound on `columns`, from the file's geometry. See [`column_ceiling`].
+    column_ceiling: usize,
 }
 
 impl MetadataState {
-    fn ensure_column(&mut self, index: usize) -> &mut ColumnBuilder {
+    /// Reserve capacity for a column count the file *claims*.
+    ///
+    /// Capacity only — never length. The claim is four bytes of untrusted input, so
+    /// letting it set `columns.len()` is what allowed an 18 KB file to ask for 2.5 GiB.
+    /// Reserving instead keeps the pre-sizing win for well-formed wide tables while
+    /// leaving the table's length a function of columns actually described.
+    ///
+    /// Clamped to the geometric ceiling, not to `MAX_COLUMNS`: a claim the file is too
+    /// small to back is not worth allocating for, so the same 18 KB file reserves for
+    /// ~2.3k columns rather than the 1M backstop.
+    fn reserve_columns(&mut self, claimed: u32) -> Result<()> {
+        let want = (claimed as usize).min(self.column_ceiling);
+        let extra = want.saturating_sub(self.columns.len());
+        self.columns.try_reserve(extra).map_err(|_| {
+            metadata_error("cannot allocate a column table for the declared column count")
+        })
+    }
+
+    /// Grow the column table to cover `index`, bounded and fallibly.
+    ///
+    /// `try_reserve` rather than a bare `resize_with`: the infallible path routes
+    /// allocation failure through `handle_alloc_error`, which aborts the process.
+    /// This crate is loaded into Python and R interpreters, where an abort kills the
+    /// host with no recoverable error, so allocation has to be an `Err` instead.
+    fn ensure_column(&mut self, index: usize) -> Result<&mut ColumnBuilder> {
+        if index >= self.column_ceiling {
+            return Err(metadata_error(
+                "SAS metadata describes more columns than the file has room to describe",
+            ));
+        }
         if index >= self.columns.len() {
+            let extra = index + 1 - self.columns.len();
+            self.columns
+                .try_reserve(extra)
+                .map_err(|_| metadata_error("cannot allocate a column table"))?;
             self.columns.resize_with(index + 1, ColumnBuilder::default);
         }
         let column = &mut self.columns[index];
         column.index = index;
-        column
+        Ok(column)
     }
 
     fn is_complete(&self) -> bool {
@@ -203,6 +272,7 @@ pub fn parse_layout<R: Read + Seek>(
     let encoding = resolve_encoding(metadata.encoding.as_deref());
     let mut state = MetadataState {
         text_store: TextStore::new(encoding),
+        column_ceiling: column_ceiling(&header),
         ..MetadataState::default()
     };
 
@@ -237,6 +307,23 @@ pub fn parse_layout<R: Read + Seek>(
     let column_count = state
         .column_count
         .unwrap_or_else(|| u32::try_from(state.columns.len()).unwrap_or(u32::MAX));
+
+    // Reconcile the declared count against the columns actually described.
+    //
+    // Overshoot is normal and stays a truncate: a column-name subheader is sized in
+    // whole entries, so the last one routinely has slack past the final real column.
+    //
+    // A shortfall means the metadata never described every column it declared. That
+    // used to be papered over — the count materialised the table up front, so missing
+    // columns silently became zero-width entries named `COL{n}`, and the caller could
+    // not tell an invented column from a real one. Reject instead: handing back
+    // fabricated schema is worse than refusing the file.
+    let described = state.columns.len();
+    if described < column_count as usize {
+        return Err(metadata_error(format!(
+            "SAS metadata declares {column_count} columns but describes only {described}"
+        )));
+    }
     state.columns.truncate(column_count as usize);
 
     let compression =
@@ -362,7 +449,7 @@ fn parse_column_name_subheader(
             header.endianness,
             get_range(bytes, cursor, cursor + 6, "column name text ref")?,
         );
-        let column = state.ensure_column(start_index + offset);
+        let column = state.ensure_column(start_index + offset)?;
         column.name_ref = text_ref;
         cursor += chunk_width;
     }
@@ -383,7 +470,7 @@ fn parse_column_attrs_subheader(
 
     for offset in 0..entries {
         let index = start_index + offset;
-        let column = state.ensure_column(index);
+        let column = state.ensure_column(index)?;
         if header.uses_u64_pointers {
             column.offset = u32::try_from(read_u64(
                 header.endianness,
@@ -424,7 +511,7 @@ fn parse_column_format_subheader(
     header: &HeaderInfo,
 ) -> Result<()> {
     let index = state.formats_seen;
-    let column = state.ensure_column(index);
+    let column = state.ensure_column(index)?;
     if header.uses_u64_pointers {
         column.format_ref = parse_text_ref(
             header.endianness,
@@ -462,11 +549,23 @@ fn parse_column_size_subheader(
         ))
     };
     let count = u32::try_from(raw_count).map_err(|_| metadata_error("column count exceeds u32"))?;
-    state.column_count = Some(count);
-    for idx in 0..count as usize {
-        state.ensure_column(idx);
+
+    // Refute an impossible claim here rather than letting it fail late. The file cannot
+    // describe more columns than it has bytes for, so a count past the geometric ceiling
+    // is corrupt on its face — and saying so at the source gives a better error than the
+    // declared-vs-described mismatch it would otherwise surface as.
+    if count as usize > state.column_ceiling {
+        return Err(metadata_error(format!(
+            "SAS metadata declares {count} columns, more than this {} byte file could describe",
+            u64::from(header.page_size.0).saturating_mul(header.page_count)
+        )));
     }
-    Ok(())
+
+    state.column_count = Some(count);
+    // Record the claim and reserve against it, but do not materialise it: the column
+    // table's length is set by the name/attrs/format subheaders that actually
+    // describe columns. `parse_layout` reconciles the two afterwards.
+    state.reserve_columns(count)
 }
 
 fn parse_row_size_subheader(bytes: &[u8], header: &HeaderInfo) -> Result<RowInfoRaw> {
