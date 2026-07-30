@@ -70,6 +70,22 @@ profile-leaks fixture mode projection="full" repeat="1" limit="0" batch_rows="25
 build-polars-plugin:
     @uvx maturin build --release --manifest-path crates/polars-plugin/Cargo.toml
 
+# Windows CLI tuned for the deployment server (96-core EPYC, Zen 5), cross-built from
+# macOS. `RUSTFLAGS` overrides `[target.x86_64-pc-windows-msvc]` in .cargo/config.toml
+# rather than merging with it, so this replaces the v3 baseline with znver5.
+#
+# Deliberately NOT the default in .cargo/config.toml: that file also governs the PyPI
+# wheel builds in wheels.yml, and an AVX-512 binary dies with an illegal instruction on
+# any CPU without it — which is every Intel consumer part since Alder Lake. The published
+# wheels stay on x86-64-v3 (AVX2).
+#
+# Verified by `cargo asm`: this puts the string kernel's Simd<u8, 64> and the numeric
+# gather's 8-lane u64 tile in one zmm register each, where v3 splits both into two
+# 256-bit halves. Zen 5 runs AVX-512 on a full 512-bit datapath with no clock penalty.
+build-cli-server:
+    @RUSTFLAGS="-C target-cpu=znver5" cargo xwin build --profile dist --target x86_64-pc-windows-msvc -p sas7bdat-cli --bin sas7bdat
+    @printf 'built: target/x86_64-pc-windows-msvc/dist/sas7bdat.exe\n'
+
 # Binary wheel for PyPI (`sas7bdat-cli`): ships only the `sas7bdat` command.
 build-cli-wheel:
     @uvx maturin build --release --manifest-path crates/sas7bdat-cli/Cargo.toml

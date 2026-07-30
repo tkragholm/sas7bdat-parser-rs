@@ -9,10 +9,15 @@
 # and `is_ascii_simd`'s inner loop collapses to two instructions per 64 bytes
 # (`vptestmd` + `kortestw`).
 #
-# Not enabled, because it is not a free switch: a CPU without AVX-512 dies with an
-# illegal instruction at startup, and older Intel parts downclock under heavy AVX-512.
-# Check the deployment CPU first (`Get-CimInstance Win32_Processor | Select Name`), and
-# only then whether the workload is CPU-bound enough for it to matter.
+# This file also governs the PyPI wheel builds in .github/workflows/wheels.yml, so it
+# must stay at a baseline those wheels can rely on. AVX-512 is absent from every Intel
+# consumer part since Alder Lake, and a binary that uses it dies with an illegal
+# instruction on such a CPU — at import, with no useful error. v3 (AVX2, 2013) is the
+# floor the published artifacts commit to.
+#
+# The deployment server is a 96-core EPYC (Zen 5), which runs AVX-512 on a full 512-bit
+# datapath with no clock penalty. It gets a tuned build via `just build-cli-server`,
+# where RUSTFLAGS overrides this section rather than merging with it.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 
