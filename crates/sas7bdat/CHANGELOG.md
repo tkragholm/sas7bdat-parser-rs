@@ -5,15 +5,15 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate 
 [Cargo's SemVer rules](https://doc.rust-lang.org/cargo/reference/semver.html).
 
 This file covers the Rust crate only. The Python packages built from this repository —
-`sas7bdat-polars` and `sas7bdat-cli` — carry their own version line, currently 0.7.x, and
-git tags (`v0.7.0`, …) track *those*, not this crate. A tag name is not this crate's
+`sas7bdat-polars` and `sas7bdat-cli` — carry their own version line, currently 0.8.x, and
+git tags (`v0.8.0`, …) track *those*, not this crate. A tag name is not this crate's
 version.
 
 Entries from 0.4.0 onward are generated from Conventional Commits with
 [git-cliff](https://git-cliff.org) (`cliff.toml` at the repository root); 0.3.0 and
 earlier are written by hand.
 
-## [Unreleased]
+## [0.6.0] - 2026-07-30
 
 ### Changed
 
@@ -223,6 +223,7 @@ Released before this changelog was kept; see the git history. 0.2.0 was a
 different implementation with a `dataset`/`parser`/`cell` module layout and a bundled
 `sas7` binary.
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.5.0...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.6.0...HEAD
+[0.6.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.6.0
 [0.5.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.5.0
 [0.3.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.3.0
