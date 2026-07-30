@@ -98,6 +98,31 @@ jobs:
           name: coverage-lcov
           path: lcov.info
 
+  fuzz-regressions:
+    name: fuzz regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      # `-runs=0` is what makes this a replay: every input in the directory is executed
+      # once and the process exits. Without it, a directory argument is treated as a
+      # corpus to *extend* and the job fuzzes until the runner times out (and writes
+      # new units into the tracked fixture directory). `-runs=0` also does not write.
+      #
+      # So this cannot flake and cannot turn CI red on a newly discovered bug; it fails
+      # only if a fixed crash comes back. tests/fuzz_regressions.rs asserts the same
+      # inputs at the library level — what this adds is AddressSanitizer, which the
+      # normal test binary is not built with. Hunting for *new* bugs stays local
+      # (`just fuzz`), because the seed corpus lives in the untracked repo-root
+      # fixtures/ and is not available to CI.
+      - name: Replay fuzz artifacts under ASan
+        run: >
+          cd crates/sas7bdat &&
+          cargo fuzz run dataset_from_bytes tests/fixtures/fuzz -- -runs=0
+
   audit:
     name: cargo audit
     runs-on: ubuntu-latest

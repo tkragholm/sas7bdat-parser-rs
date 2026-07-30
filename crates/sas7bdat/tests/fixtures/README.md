@@ -23,7 +23,35 @@ byte forces a real windows-1252 → UTF-8 conversion. Used by
 uncompressed fixture does not reach — covering it would need a compressed
 windows-1252 fixture with non-ASCII data.)
 
-Regenerate (if the base fixture ever changes):
+## `fuzz/`
+
+Crash artifacts produced by `crates/sas7bdat/fuzz` (libFuzzer, via `cargo fuzz`).
+These are machine-generated mutations of the repo-root corpus, not third-party
+data, so they need no attribution entry. Used by `tests/fuzz_regressions.rs`.
+
+- `oom_declared_column_count_8k.sas7bdat` (18 KB) declares 1,085,348,864 columns
+- `oom_declared_column_count_32k.sas7bdat` (34 KB) declares 2,863,311,531 columns
+
+Both once drove `MetadataState::ensure_column` to ask the allocator for 2.5 GiB
+during *metadata* parsing, before any row was read — reachable from `Dataset::open`
+as well as `from_bytes`, so the CLI and both language plugins inherited it. The
+declared count is now checked against how many columns the file has bytes to
+describe, and neither reaches an allocation.
+
+- `panic_numeric_width_over_8.sas7bdat` (122 KB) declares column 5 as numeric and
+  67 bytes wide
+
+Surfaced on the next fuzz run after the OOM was fixed, which is the point: the OOM
+had been ending every run after ~9k executions, so nothing downstream of it was being
+explored. A numeric wider than 8 bytes reached `scan::numeric::numeric_bits`, whose
+`_ => unreachable!()` arm panics in release as well as debug (the `slice.len() <= 8`
+check above it is only a `debug_assert!`). Width is now validated at open time.
+
+To add more: run `just fuzz`, then copy anything that lands in
+`crates/sas7bdat/fuzz/artifacts/<target>/` into this directory and add it to
+`EXPECTED` in `tests/fuzz_regressions.rs`.
+
+Regenerate `people_nonascii.sas7bdat` (if the base fixture ever changes):
 
 ```python
 data = bytearray(open("crates/r-plugin/inst/extdata/people.sas7bdat", "rb").read())

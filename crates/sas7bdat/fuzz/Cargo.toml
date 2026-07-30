@@ -1,0 +1,37 @@
+[package]
+name = "sas7bdat-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+# `dictionary` is on because the string path's interner + cardinality gate is
+# reachable only with it, and that code reads attacker-controlled lengths.
+[dependencies.sas7bdat]
+path = ".."
+features = ["dictionary"]
+
+# Own workspace: keeps the fuzz crate out of `cargo clippy --workspace
+# --all-targets`, which CI runs with `-D warnings` and which cannot build a
+# libfuzzer target.
+[workspace]
+members = ["."]
+
+# Fuzzing wants release codegen with assertions left in: overflow and slice
+# bounds checks are the things most likely to catch a bad header field.
+[profile.release]
+debug = 1
+debug-assertions = true
+overflow-checks = true
+
+[[bin]]
+name = "dataset_from_bytes"
+path = "fuzz_targets/dataset_from_bytes.rs"
+test = false
+doc = false
+bench = false

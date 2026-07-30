@@ -12,6 +12,28 @@ catalog-stdout sample_rows="64":
 correctness-all:
     @cargo test -q -p sas7bdat --test fixture_smoke
 
+# cargo-fuzz resolves `./fuzz` relative to the cwd, so it only works from the
+# crate dir — hence the `cd` in these three wrappers.
+# Fuzz the in-memory read path (header -> layout -> descriptors -> row decode).
+fuzz seconds="60" target="dataset_from_bytes":
+    @cd crates/sas7bdat && cargo fuzz run {{target}} -- -max_len=262144 -max_total_time={{seconds}}
+
+# Starting from real headers is the difference between finding parser bugs and
+# burning the run on inputs the magic-number check rejects. Skips files over
+# 2 MB: libFuzzer slows badly on large units and the small fixtures already
+# cover every layout variant.
+# Seed the corpus from fixtures/ (idempotent).
+fuzz-seed target="dataset_from_bytes":
+    @mkdir -p crates/sas7bdat/fuzz/corpus/{{target}}
+    @find fixtures -name '*.sas7bdat' -type f -size -2M -exec sh -c 'cp -n "$1" crates/sas7bdat/fuzz/corpus/{{target}}/"$(shasum -a 256 "$1" | cut -c1-16)"' _ {} \;
+    @printf 'corpus units: %s\n' "$(ls crates/sas7bdat/fuzz/corpus/{{target}} | wc -l | tr -d ' ')"
+
+# The path is relative to the crate dir and must keep the `fuzz/` prefix, e.g.
+# fuzz/artifacts/dataset_from_bytes/oom-abc123.
+# Reproduce one saved crash artifact.
+fuzz-repro artifact target="dataset_from_bytes":
+    @cd crates/sas7bdat && cargo fuzz run {{target}} {{artifact}}
+
 profile fixture mode projection="full" repeat="1" limit="0" batch_rows="256" io_backend="auto":
     @cargo run --release -p sas7bdat-cli --features dev-tools --bin sas7bdat-fixture-profile -- --fixture {{fixture}} --mode {{mode}} --projection {{projection}} --repeat {{repeat}} --limit {{limit}} --batch-rows {{batch_rows}} --io-backend {{io_backend}}
 
