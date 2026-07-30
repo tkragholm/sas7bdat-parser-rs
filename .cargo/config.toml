@@ -1,3 +1,18 @@
+# `x86-64-v3` is AVX2 (256-bit). Verified with `cargo asm` that the SIMD kernels do
+# vectorize under it — `is_ascii_simd` becomes `vpor` + `vptest` + branch per 64 bytes,
+# and `gather_staged_8byte_le`'s missing-test becomes `vpcmpeqq`/`vpand`.
+#
+# But both kernels are sized for 512-bit: `Simd<u8, 64>` in scan::string and
+# `LANES = 8` u64s in scan::batch are each exactly one AVX-512 zmm register. Under v3
+# every one of those is split into two 256-bit halves plus a fold. Rebuilt with
+# `x86-64-v4`, `trim_and_classify_for_mode` goes from 19 ymm / 0 zmm to 0 ymm / 8 zmm,
+# and `is_ascii_simd`'s inner loop collapses to two instructions per 64 bytes
+# (`vptestmd` + `kortestw`).
+#
+# Not enabled, because it is not a free switch: a CPU without AVX-512 dies with an
+# illegal instruction at startup, and older Intel parts downclock under heavy AVX-512.
+# Check the deployment CPU first (`Get-CimInstance Win32_Processor | Select Name`), and
+# only then whether the workload is CPU-bound enough for it to matter.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 
