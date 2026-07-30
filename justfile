@@ -28,6 +28,19 @@ fuzz-seed target="dataset_from_bytes":
     @find fixtures -name '*.sas7bdat' -type f -size -2M -exec sh -c 'cp -n "$1" crates/sas7bdat/fuzz/corpus/{{target}}/"$(shasum -a 256 "$1" | cut -c1-16)"' _ {} \;
     @printf 'corpus units: %s\n' "$(ls crates/sas7bdat/fuzz/corpus/{{target}} | wc -l | tr -d ' ')"
 
+# Seed the path-source target from the same .sas7bdat corpus. That target reaches the
+# fused single-pass scan, which declines on in-memory sources, so it explores a
+# pipeline `dataset_from_bytes` never enters.
+fuzz-seed-path:
+    @just fuzz-seed dataset_open_path
+
+# Seed the catalog target from the .sas7bcat fixtures. Only two exist, so this corpus
+# is thin -- expect it to grow mostly by mutation.
+fuzz-seed-catalog:
+    @mkdir -p crates/sas7bdat/fuzz/corpus/catalog_parse
+    @find fixtures crates/r-plugin/inst/extdata -iname '*.sas7bcat' -type f -exec sh -c 'cp -n "$1" crates/sas7bdat/fuzz/corpus/catalog_parse/"$(shasum -a 256 "$1" | cut -c1-16)"' _ {} \;
+    @printf 'corpus units: %s\n' "$(ls crates/sas7bdat/fuzz/corpus/catalog_parse | wc -l | tr -d ' ')"
+
 # The path is relative to the crate dir and must keep the `fuzz/` prefix, e.g.
 # fuzz/artifacts/dataset_from_bytes/oom-abc123.
 # Reproduce one saved crash artifact.

@@ -57,6 +57,28 @@ through `Dataset::open`, and not through `sas7bdat convert` (which decodes colum
 while the fuzz target uses `visit_rows`). That is why `fuzz_regressions.rs` scans
 each artifact rather than stopping at open.
 
+- `oom_batch_capacity_hint.sas7bdat` (9 KB) declares `rows_per_page` and a row count
+  that together inflate the batch pre-allocation hint
+
+`BatchAccumulator::new` sized every column buffer from
+`min(declared_row_count, rows_per_page)` times the column width, and both inputs are
+declared fields with no geometric check — `Vec::with_capacity` for 876 GB. Reached only
+through `visit_batches`, which is why `fuzz_regressions.rs` visits batches as well as
+rows, and why it runs the two scans independently rather than chaining them: this file
+fails row visiting on an unrelated bounds check, which would short-circuit the batch
+scan that actually matters. Fixed by clamping the hint, which is advisory — the buffers
+grow on demand — so there is no diagnostic to assert for this one.
+
+### `fuzz/catalog/`
+
+`.sas7bcat` inputs for the value-label parser, a separate format reached by
+`Dataset::attach_catalog` and `catalog::parse_catalog`.
+
+- `oom_declared_label_count.sas7bcat` (22 KB) declares 1,313,169,229 value labels
+
+`label_count_used` is a u64 straight out of the file that sized a `Vec`, giving
+`calloc(10505353832)`. Now bounded by how many 6-byte entries the block could hold.
+
 To add more: run `just fuzz`, then copy anything that lands in
 `crates/sas7bdat/fuzz/artifacts/<target>/` into this directory and add it to
 `EXPECTED` in `tests/fuzz_regressions.rs`.

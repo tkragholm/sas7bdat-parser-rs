@@ -7,10 +7,15 @@
 //! catches them by the run dying instead of finishing.
 //!
 //! Drop new artifacts into that directory and they are covered automatically. Add an
-//! entry to `EXPECTED` when the artifact's whole point is a specific diagnostic.
+//! entry to `EXPECTED` when the artifact's whole point is a specific diagnostic, or to
+//! `EXPECTED_NO_DIAGNOSTIC` when it is not — a bug fixed by clamping an allocation
+//! rather than refusing input leaves no message worth pinning, and whatever error the
+//! file happens to produce is incidental.
+//!
+//! `catalog/` holds `.sas7bcat` inputs for the separate value-label parser.
 
 use sas7bdat::{Dataset, Parallelism};
-use std::{fs, hint::black_box, ops::ControlFlow, path::PathBuf};
+use std::{fs, hint::black_box, io::Cursor, ops::ControlFlow, path::PathBuf};
 
 /// Enough rows to cross a page boundary and drive the decompressor, few enough that a
 /// header claiming billions of rows does not turn the test into a hang.
@@ -39,6 +44,22 @@ const EXPECTED: &[(&str, &str)] = &[
     ("oom_declared_row_length", "byte row"),
 ];
 
+/// Artifacts with no entry in [`EXPECTED`], listed here only so the completeness check
+/// below can tell "deliberately unasserted" from "fixture went missing".
+///
+/// These are the cases where the fix was a clamp rather than a rejection, so there is no
+/// diagnostic to assert — the regression signal is memory, and the only observable
+/// contract is that the run finishes. Whatever error they do or do not return is
+/// incidental and must not be pinned.
+const EXPECTED_NO_DIAGNOSTIC: &[&str] = &[
+    // 9 KB, 204 rows, 4 columns — a plausible-looking file whose declared `rows_per_page`
+    // and row count together drove `BatchAccumulator::new` to ask for 876 GB through
+    // `OwnedBatchColumnBuilder::with_capacity_hint`. Reached only via `visit_batches`.
+    // It happens to fail row visiting on an unrelated bounds check; that is not the
+    // regression and is deliberately not asserted.
+    "oom_batch_capacity_hint",
+];
+
 fn fuzz_fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fuzz")
 }
@@ -58,21 +79,31 @@ fn fuzz_artifacts_open_without_aborting_or_exhausting_memory() {
         .map(|entry| entry.path());
 
     let mut exercised = 0usize;
+    let mut seen_stems: Vec<String> = Vec::new();
     for path in entries {
         let bytes =
             fs::read(&path).unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()));
 
-        // Open *and* scan. Opening alone is not enough: the row-length artifact was
-        // only reachable through decompression, several frames past `from_bytes`, so a
-        // test that stops at open would not have exercised the decompressor at all.
-        // This mirrors what the fuzz target does, which is what found these.
+        // Open *and* scan. Opening alone is not enough: the row-length artifact was only
+        // reachable through decompression, several frames past `from_bytes`, so a test
+        // that stops at open would not have exercised the decompressor at all.
         //
-        // The assertion is that the sequence returns at all. A regression
-        // reintroducing an unbounded allocation does not fail here — it takes the
-        // whole test process down, which is the signal.
-        let outcome = Dataset::from_bytes(bytes).and_then(|dataset| {
+        // Row visiting and batch visiting run *independently*, not chained. Chaining
+        // them with `and_then` looked tidier and was wrong: `oom_batch_capacity_hint`
+        // fails row visiting on an unrelated (and correct) bounds check, which
+        // short-circuited the batch scan — the one path that exercises the
+        // pre-allocation hint the artifact exists for. Each scan gets its own attempt,
+        // exactly as the fuzz target does.
+        //
+        // The assertion is that all of this returns. A regression reintroducing an
+        // unbounded allocation does not fail an `assert!` — it takes the whole test
+        // process down, which is the signal.
+        let open = Dataset::from_bytes(bytes);
+        let mut first_error = open.as_ref().err().map(ToString::to_string);
+
+        if let Ok(dataset) = open.as_ref() {
             let mut seen = 0usize;
-            dataset
+            let rows = dataset
                 .scan()
                 .with_parallelism(Parallelism::None)
                 .visit_rows(|row| {
@@ -82,31 +113,93 @@ fn fuzz_artifacts_open_without_aborting_or_exhausting_memory() {
                         return Ok(ControlFlow::Break(()));
                     }
                     Ok(ControlFlow::Continue(()))
-                })
-        });
+                });
+            if let Err(err) = rows {
+                first_error.get_or_insert_with(|| err.to_string());
+            }
+
+            let mut batch_rows = 0usize;
+            let batches = dataset
+                .scan()
+                .with_parallelism(Parallelism::None)
+                .visit_batches(|batch| {
+                    batch_rows += batch.row_count;
+                    if batch_rows >= SCAN_ROW_CAP {
+                        return Ok(ControlFlow::Break(()));
+                    }
+                    Ok(ControlFlow::Continue(()))
+                });
+            if let Err(err) = batches {
+                first_error.get_or_insert_with(|| err.to_string());
+            }
+        }
 
         let stem = path
             .file_stem()
             .and_then(|stem| stem.to_str())
             .unwrap_or_default();
         if let Some((_, needle)) = EXPECTED.iter().find(|(name, _)| *name == stem) {
-            let err = outcome.err().unwrap_or_else(|| {
+            let message = first_error.clone().unwrap_or_else(|| {
                 panic!("{stem} is expected to be rejected, but it parsed and scanned cleanly")
             });
-            let message = err.to_string();
             assert!(
                 message.contains(needle),
                 "{stem}: expected the error to mention {needle:?}, got {message:?}"
             );
         }
 
+        seen_stems.push(stem.to_owned());
         exercised += 1;
     }
 
-    assert_eq!(
-        exercised,
-        EXPECTED.len(),
-        "every entry in EXPECTED should correspond to a fixture on disk, and vice versa"
+    // Catch a fixture that was renamed or deleted out from under an EXPECTED entry,
+    // which would otherwise leave the entry silently unasserted.
+    for (name, _) in EXPECTED {
+        assert!(
+            seen_stems.iter().any(|stem| stem == name),
+            "{name} is in EXPECTED but no such fixture is on disk"
+        );
+    }
+    for name in EXPECTED_NO_DIAGNOSTIC {
+        assert!(
+            seen_stems.iter().any(|stem| stem == name),
+            "{name} is in EXPECTED_NO_DIAGNOSTIC but no such fixture is on disk"
+        );
+    }
+    assert!(exercised >= EXPECTED.len() + EXPECTED_NO_DIAGNOSTIC.len());
+}
+
+/// The `.sas7bcat` value-label parser is a separate format with its own declared counts.
+/// `label_count_used` is a u64 straight out of the file that sized a `Vec`, and a 22 KB
+/// catalog declaring 1,313,169,229 labels reached `calloc(10505353832)`.
+#[test]
+fn catalog_fuzz_artifacts_parse_without_exhausting_memory() {
+    let dir = fuzz_fixture_dir().join("catalog");
+    let mut exercised = 0usize;
+    for entry in fs::read_dir(&dir)
+        .unwrap_or_else(|err| panic!("cannot read {}: {err}", dir.display()))
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "sas7bcat") {
+            continue;
+        }
+        let bytes =
+            fs::read(&path).unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()));
+
+        // Same narrow contract: it must return. A regression allocates instead.
+        let outcome = sas7bdat::catalog::parse_catalog(&mut Cursor::new(bytes.as_slice()));
+        if let Ok(layout) = outcome {
+            for set in &layout.label_sets {
+                black_box(set.labels.len());
+            }
+        }
+        exercised += 1;
+    }
+    assert!(
+        exercised > 0,
+        "no catalog artifacts found in {}",
+        dir.display()
     );
 }
 

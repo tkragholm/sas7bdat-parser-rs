@@ -118,10 +118,16 @@ jobs:
       # normal test binary is not built with. Hunting for *new* bugs stays local
       # (`just fuzz`), because the seed corpus lives in the untracked repo-root
       # fixtures/ and is not available to CI.
+      #
+      # `dataset_open_path` replays the same .sas7bdat inputs through `Dataset::open`,
+      # which reaches the fused single-pass scan that in-memory sources decline.
+      # `catalog_parse` takes the .sas7bcat inputs, a different format.
       - name: Replay fuzz artifacts under ASan
-        run: >
-          cd crates/sas7bdat &&
+        run: |
+          cd crates/sas7bdat
           cargo fuzz run dataset_from_bytes tests/fixtures/fuzz -- -runs=0
+          cargo fuzz run dataset_open_path tests/fixtures/fuzz -- -runs=0
+          cargo fuzz run catalog_parse tests/fixtures/fuzz/catalog -- -runs=0
 
   audit:
     name: cargo audit
