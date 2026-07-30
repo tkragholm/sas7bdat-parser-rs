@@ -825,45 +825,33 @@ mod tests {
         assert!(batch.num_rows() > 0);
     }
 
-    /// Regression: SAS TIME is a signed count of seconds since midnight, not a clock time.
-    /// This fixture holds values well past 24h (row 51 is 359,280s = 99h48m). Declaring
-    /// `Time64(Nanosecond)`, whose domain is `[0, 24h)`, wrote correct integers under a
-    /// logical type that forbids them — so arrow-rs, pyarrow and `DuckDB` all read them back
-    /// as null. `Duration(Nanosecond)` has the same i64 payload and the whole SAS range.
+    /// Regression: a TIME column must be declared over a domain its values cannot escape.
+    /// `Time64(Nanosecond)` covers only `[0, 24h)`, so a SAS TIME past midnight-plus-a-day
+    /// was written correctly and read back as null by every spec-following reader.
+    ///
+    /// The schema is asserted against a synthesized dataset rather than a corpus file: the
+    /// repo-root `fixtures/` tree is untracked and absent in CI.
     #[cfg(feature = "arrow")]
     #[test]
-    fn out_of_range_time_columns_export_as_durations_without_nulling() {
-        use arrow_array::{Array, DurationNanosecondArray};
+    fn time_columns_are_declared_as_durations() {
+        use crate::metadata::LogicalType;
+        use crate::test_utils::MockDatasetBuilder;
         use arrow_schema::{DataType, TimeUnit};
+        use std::sync::Arc;
 
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../fixtures/raw_data/csharp/date_format_time.sas7bdat");
-        let ds = Dataset::open(&path).expect("open date_format_time");
-        let batches = ds.scan().collect_arrow_batches().expect("arrow conversion");
-        let batch = batches.first().expect("at least one batch");
+        let ds = MockDatasetBuilder::new(Arc::<[u8]>::from(vec![0u8; 512]))
+            .with_column("t", LogicalType::Time, 8, 0)
+            .with_row_len(8)
+            .with_total_rows(0)
+            .build();
+        let schema = ds.scan().arrow_schema().expect("schema");
+        let field = schema.field(0);
 
-        let field = batch.schema_ref().field(0).clone();
-        assert_eq!(
-            field.data_type(),
-            &DataType::Duration(TimeUnit::Nanosecond),
-            "a TIME column must not be declared over a domain its values escape"
-        );
+        assert_eq!(field.data_type(), &DataType::Duration(TimeUnit::Nanosecond));
         // The clock-time intent survives the widened type, for consumers that want it back.
         assert_eq!(
-            field.metadata().get(crate::scan::SAS_LOGICAL_TYPE_KEY),
+            field.metadata().get(crate::SAS_LOGICAL_TYPE_KEY),
             Some(&"TIME".to_owned())
         );
-
-        let column = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<DurationNanosecondArray>()
-            .expect("Duration(ns) column");
-        // 359,280s is past 24h and used to survive the write but not the read.
-        assert!(
-            column.is_valid(51),
-            "an out-of-range TIME must not be nulled"
-        );
-        assert_eq!(column.value(51), 359_280 * 1_000_000_000);
     }
 }

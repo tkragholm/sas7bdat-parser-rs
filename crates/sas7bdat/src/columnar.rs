@@ -752,4 +752,74 @@ mod tests {
         };
         assert!(offsets.validate_for_values_len(2).is_err());
     }
+
+    /// Regression: a SAS TIME is a signed count of seconds since midnight and is not confined
+    /// to a clock day. Under the old `Time64(Nanosecond)` declaration these integers were
+    /// written faithfully but fell outside the type's `[0, 24h)` domain, so arrow-rs, pyarrow,
+    /// `DuckDB` and Polars all handed back null. `Duration(Nanosecond)` carries the same i64
+    /// payload over the whole SAS range.
+    #[cfg(feature = "arrow")]
+    #[test]
+    fn out_of_range_times_convert_to_durations_without_nulling() {
+        use super::{ColumnBuffer, PrimitiveBuffer};
+        use crate::metadata::SasTime;
+        use arrow_array::{Array, DurationNanosecondArray};
+        use arrow_schema::{DataType, TimeUnit};
+
+        let time = |seconds| SasTime {
+            seconds_since_midnight: seconds,
+        };
+        // 99h48m (the value that motivated this), exactly 24h, a negative offset, and an
+        // ordinary clock time that must be unaffected.
+        let values = [time(359_280), time(86_400), time(-77), time(69_507)];
+        let array = ColumnBuffer::Time(PrimitiveBuffer {
+            values: &values,
+            valid: None,
+        })
+        .into_arrow_array()
+        .expect("time column converts");
+
+        assert_eq!(array.data_type(), &DataType::Duration(TimeUnit::Nanosecond));
+        let column = array
+            .as_any()
+            .downcast_ref::<DurationNanosecondArray>()
+            .expect("Duration(ns) column");
+        assert_eq!(
+            column.null_count(),
+            0,
+            "the declared type must not null any in-domain SAS value"
+        );
+        assert_eq!(column.value(0), 359_280 * 1_000_000_000);
+        assert_eq!(column.value(1), 86_400 * 1_000_000_000);
+        assert_eq!(column.value(2), -77 * 1_000_000_000);
+        assert_eq!(column.value(3), 69_507 * 1_000_000_000);
+    }
+
+    /// The same, for a TIME column that widened to `F64` because its values carried a
+    /// fractional part. It reaches Arrow through the schema-aware path instead.
+    #[cfg(feature = "arrow")]
+    #[test]
+    fn widened_fractional_times_convert_to_durations() {
+        use super::{ColumnBuffer, PrimitiveBuffer, column_buffer_to_arrow};
+        use arrow_array::{Array, DurationNanosecondArray};
+        use arrow_schema::{DataType, TimeUnit};
+
+        let values = [359_960.4_f64, -77.001];
+        let array = column_buffer_to_arrow(
+            ColumnBuffer::F64(PrimitiveBuffer {
+                values: &values,
+                valid: None,
+            }),
+            &DataType::Duration(TimeUnit::Nanosecond),
+        )
+        .expect("widened time column converts");
+
+        let column = array
+            .as_any()
+            .downcast_ref::<DurationNanosecondArray>()
+            .expect("Duration(ns) column");
+        assert_eq!(column.null_count(), 0);
+        assert_eq!(column.value(0), 359_960_400_000_000);
+        assert_eq!(column.value(1), -77_001_000_000);
+    }
 }
