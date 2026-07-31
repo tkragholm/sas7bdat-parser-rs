@@ -43,6 +43,19 @@ jobs:
       - name: Clippy (dev-tools binaries)
         run: cargo clippy -p sas7bdat-cli --all-targets --features dev-tools -- -D warnings
 
+      # The R binding is its own crate with its own lockfile, deliberately outside
+      # the workspace (see the root Cargo.toml), so none of the passes above touch
+      # it. Nothing compiled it in CI and it drifted: its lockfile was still pinning
+      # sas7bdat 0.3.0, and listing a serde_json the core dropped in 0.4.0, long
+      # after the core reached 0.6.0. `--locked` is the point of this step as much
+      # as clippy is — it fails on exactly that staleness instead of papering over
+      # it by silently re-resolving.
+      - name: Clippy (R binding, outside the workspace)
+        run: >
+          cargo clippy --locked
+          --manifest-path crates/r-plugin/src/rust/Cargo.toml
+          --all-targets -- -D warnings
+
       - name: Test
         run: cargo test --workspace
 
