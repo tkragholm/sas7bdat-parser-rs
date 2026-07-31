@@ -88,11 +88,11 @@ where
         u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX),
     );
 
-    for descriptor in descriptors.pages.iter().copied() {
-        if plan.should_stop(&ctx.stats) {
-            break;
-        }
-
+    // Only the descriptors whose rows the window actually wants. Slicing here means a bounded
+    // scan neither reads nor faults in the pages outside it, and it costs a whole-file scan
+    // nothing — `page_range` returns the full slice for an unbounded window.
+    let page_range = plan.window.page_range(&descriptors.pages);
+    for descriptor in descriptors.pages[page_range].iter().copied() {
         ctx.stats.pages_seen = ctx.stats.pages_seen.saturating_add(1);
         load_descriptor_page(reader, plan, descriptor, &mut ctx.page, &mut ctx.stats)?;
         if emit_rows_from_page(
@@ -138,11 +138,11 @@ where
         u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX),
     );
 
-    for descriptor in descriptors.pages.iter().copied() {
-        if plan.should_stop(&ctx.stats) {
-            break;
-        }
-
+    // Only the descriptors whose rows the window actually wants. Slicing here means a bounded
+    // scan neither reads nor faults in the pages outside it, and it costs a whole-file scan
+    // nothing — `page_range` returns the full slice for an unbounded window.
+    let page_range = plan.window.page_range(&descriptors.pages);
+    for descriptor in descriptors.pages[page_range].iter().copied() {
         let page = page_slice(PageWindow::whole_file(file_bytes), plan, descriptor)?;
         ctx.stats.pages_seen = ctx.stats.pages_seen.saturating_add(1);
         ctx.stats.raw_bytes_read = ctx
@@ -270,6 +270,85 @@ pub(super) fn page_slice<'a>(
         .ok_or_else(|| Error::unsupported("page slice exceeds source bounds"))
 }
 
+/// The absolute row range a scan emits, resolved from [`RowSelection`] and
+/// [`ScanBuilder::limit`](super::ScanBuilder::limit) together.
+///
+/// The two used to be enforced by separate mechanisms with opposite costs: the selection was
+/// a per-row predicate that kept parallelism but never stopped the scan, while the limit
+/// stopped early but disabled every parallel path — it counted *emitted* rows, which is a
+/// per-worker quantity and therefore meaningless once decode is split across threads. Resolving
+/// both to one absolute `[start, end)` in row indices makes the bound worker-independent, so a
+/// bounded scan can be parallel and stop early at the same time.
+///
+/// `end` is deliberately not clamped to the declared row count: the count comes from the file
+/// header and this reader already handles files where it is wrong, so clamping would truncate
+/// a scan that the unclamped predicate would have completed.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RowWindow {
+    start: u64,
+    end: u64,
+}
+
+impl RowWindow {
+    pub(super) fn resolve(selection: RowSelection, limit: Option<u64>) -> Self {
+        let (start, end) = match selection {
+            RowSelection::All => (0, u64::MAX),
+            RowSelection::Range { start, end } => (start.0, end.0),
+            RowSelection::First(n) => (0, n),
+        };
+        let start = start.min(end);
+        // A limit counts rows *within* the selection, so it bounds the window's own end.
+        let end = limit.map_or(end, |limit| end.min(start.saturating_add(limit)));
+        Self { start, end }
+    }
+
+    const fn contains(self, row: RowIndex) -> bool {
+        row.0 >= self.start && row.0 < self.end
+    }
+
+    #[cfg(test)]
+    pub(super) const fn start_for_test(self) -> u64 {
+        self.start
+    }
+
+    #[cfg(test)]
+    pub(super) const fn end_for_test(self) -> u64 {
+        self.end
+    }
+
+    /// Whether this window covers every row, which is what lets the fused and column-major
+    /// paths engage — both plan their reads from file geometry rather than from row indices.
+    pub(super) const fn is_whole_file(self) -> bool {
+        self.start == 0 && self.end == u64::MAX
+    }
+
+    /// Rows this window spans, saturating for the unbounded case.
+    pub(super) const fn len(self) -> u64 {
+        self.end.saturating_sub(self.start)
+    }
+
+    /// First row index past `descriptor`'s rows.
+    fn descriptor_end(descriptor: &PageDescriptor) -> u64 {
+        descriptor
+            .row_base
+            .0
+            .saturating_add(u64::from(descriptor.row_count))
+    }
+
+    /// The contiguous descriptor range covering this window.
+    ///
+    /// Sound because `row_base` is a running total over pages in file order, so it is
+    /// non-decreasing and a row range maps to one slice rather than a scattered set.
+    pub(super) fn page_range(self, pages: &[PageDescriptor]) -> std::ops::Range<usize> {
+        if self.is_whole_file() {
+            return 0..pages.len();
+        }
+        let first = pages.partition_point(|page| Self::descriptor_end(page) <= self.start);
+        let last = pages.partition_point(|page| page.row_base.0 < self.end);
+        first..last.max(first)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RawScanPlan {
     row_len: usize,
@@ -277,8 +356,7 @@ pub(super) struct RawScanPlan {
     page_stride: u64,
     data_offset: u64,
     compression: crate::metadata::CompressionKind,
-    row_limit: Option<u64>,
-    row_selection: RowSelection,
+    window: RowWindow,
 }
 
 impl RawScanPlan {
@@ -304,14 +382,12 @@ impl RawScanPlan {
             page_stride: u64::from(builder.ds.layout.header.page_size),
             data_offset: builder.ds.layout.header.data_offset,
             compression: builder.ds.layout.compression,
-            row_limit: builder.row_limit,
-            row_selection: builder.row_selection,
+            window: builder.row_window(),
         }
     }
 
-    fn should_stop(self, stats: &ScanStats) -> bool {
-        self.row_limit
-            .is_some_and(|limit| stats.rows_emitted >= limit)
+    pub(super) const fn window(self) -> RowWindow {
+        self.window
     }
 
     pub(super) const fn page_offset(self, page_index: PageIndex) -> u64 {
@@ -323,29 +399,13 @@ impl RawScanPlan {
     }
 }
 
-pub(super) fn row_selected(selection: RowSelection, row_index: RowIndex) -> bool {
-    match selection {
-        RowSelection::All => true,
-        RowSelection::Range { start, end } => (start..end).contains(&row_index),
-        RowSelection::First(n) => row_index.0 < n,
-    }
-}
-
 pub(super) fn prepare_row_visit(
     plan: &RawScanPlan,
     stats: &mut ScanStats,
     row_index: RowIndex,
 ) -> bool {
     stats.rows_seen = stats.rows_seen.saturating_add(1);
-    if !row_selected(plan.row_selection, row_index) {
-        return false;
-    }
-    if let Some(limit) = plan.row_limit
-        && stats.rows_emitted >= limit
-    {
-        return false;
-    }
-    true
+    plan.window.contains(row_index)
 }
 
 pub(super) const fn finish_row_visit(stats: &mut ScanStats, flow: ControlFlow<()>) -> bool {

@@ -1,7 +1,7 @@
 use super::raw::RawScanPlan;
 use super::{
     BatchDecodePlan, BatchHint, ColumnMeta, DecodeMode, Encoding, Error, LogicalType,
-    ProjectedColumnPlan, Result, RowDecodePlan, RowSelection, ScanBuilder, StringDecodeKernel,
+    ProjectedColumnPlan, Result, RowDecodePlan, ScanBuilder, StringDecodeKernel,
     StringDecodeOptions, UTF_8, Utf8ValidationMode,
 };
 #[cfg(feature = "arrow")]
@@ -280,19 +280,13 @@ pub(super) fn resolve_batch_row_capacity(builder: &ScanBuilder<'_>) -> Result<us
 }
 
 pub(super) fn effective_scan_row_capacity_hint(builder: &ScanBuilder<'_>) -> usize {
-    let total_rows = match builder.row_selection {
-        RowSelection::All => builder.ds.metadata.row_count,
-        RowSelection::Range { start, end } => {
-            let end = u64::from(end).min(builder.ds.metadata.row_count);
-            let start = u64::from(start).min(end);
-            end.saturating_sub(start)
-        }
-        RowSelection::First(n) => n.min(builder.ds.metadata.row_count),
-    };
-    let limited_rows = builder
-        .row_limit
-        .map_or(total_rows, |limit| total_rows.min(limit));
-    usize::try_from(limited_rows).unwrap_or(usize::MAX).max(1)
+    // The window is unbounded for a whole-file scan, so the declared row count is what caps
+    // the hint there; a bounded window caps it itself.
+    let rows = builder
+        .row_window()
+        .len()
+        .min(builder.ds.metadata.row_count);
+    usize::try_from(rows).unwrap_or(usize::MAX).max(1)
 }
 
 /// Field metadata key marking a column that SAS declared with a TIME format.

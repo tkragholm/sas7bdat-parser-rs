@@ -20,8 +20,7 @@
 //! would otherwise walk in the separate pass.
 
 use super::{
-    ControlFlow, Error, FileSource, OwnedColumnarBatch, Result, RowSelection, ScanBuilder,
-    ScanStats,
+    ControlFlow, Error, FileSource, OwnedColumnarBatch, Result, ScanBuilder, ScanStats,
     builder::{
         DescriptorChunkContext, ProgressCounters, ProgressReport, StreamedBatchMessage,
         collect_streamed_batches, merge_scan_stats, pages_per_batch, resolved_parallel_workers,
@@ -91,7 +90,7 @@ where
     let FileSource::Path(path) = &builder.ds.file.source else {
         return Ok(None);
     };
-    if builder.row_limit.is_some() || !matches!(builder.row_selection, RowSelection::All) {
+    if !builder.row_window().is_whole_file() {
         return Ok(None);
     }
     if builder.ds.has_cached_descriptors() {

@@ -325,6 +325,13 @@ impl<'a> ScanBuilder<'a> {
         }
     }
 
+    /// The absolute row range this scan emits, resolving [`Self::select`] and [`Self::limit`]
+    /// into one bound. Every path that needs to know which rows are wanted goes through here,
+    /// so the two knobs cannot drift apart in cost or meaning again.
+    pub(super) fn row_window(&self) -> super::raw::RowWindow {
+        super::raw::RowWindow::resolve(self.row_selection, self.row_limit)
+    }
+
     #[must_use]
     pub const fn with_projection(mut self, projection: &'a Projection) -> Self {
         self.projection = Some(projection);
@@ -626,16 +633,14 @@ impl<'a> ScanBuilder<'a> {
 }
 
 /// In-memory file bytes for the column-major path, or `None` if it must not engage: the path
-/// only handles whole-file (`RowSelection::All`, no limit) scans of an in-memory source. The
-/// caller additionally requires an all-staged-numeric plan.
+/// only handles whole-file scans of an in-memory source, because its fill walks a page's rows
+/// by position rather than by row index. The caller additionally requires an all-staged-numeric
+/// plan.
 fn column_major_file_bytes<'a>(
     builder: &'a ScanBuilder<'_>,
     column_major: bool,
 ) -> Option<&'a [u8]> {
-    if !column_major
-        || !matches!(builder.row_selection, RowSelection::All)
-        || builder.row_limit.is_some()
-    {
+    if !column_major || !builder.row_window().is_whole_file() {
         return None;
     }
     match &builder.ds.file.source {
@@ -1071,9 +1076,14 @@ impl ScanBuilder<'_> {
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
         let descriptors = self.ds.descriptors()?;
-        let page_count = descriptors.pages.len();
+        // Chunk only the pages the window wants. A bounded scan is parallel now that the bound
+        // is an absolute row range rather than a per-worker emitted-row count, so this is what
+        // keeps it from also reading the rest of the file. Worker count follows the windowed
+        // page count, so a small limit does not spawn a thread per idle core.
+        let window_pages = plan.raw.window().page_range(&descriptors.pages);
+        let page_count = window_pages.len();
         let workers = resolved_parallel_workers(self.parallelism, page_count);
-        if workers <= 1 || page_count <= 1 || self.row_limit.is_some() {
+        if workers <= 1 || page_count <= 1 {
             return Ok(None);
         }
 
@@ -1114,7 +1124,7 @@ impl ScanBuilder<'_> {
             ))
         };
         let chunks: Vec<&[crate::internal::PageDescriptor]> =
-            descriptors.pages.chunks(chunk_size).collect();
+            descriptors.pages[window_pages].chunks(chunk_size).collect();
         let chunk_count = chunks.len();
         // Byte span per chunk, precomputed so the reader threads do no descriptor work: each
         // is one contiguous read covering that chunk's pages. Empty for mapped sources.
@@ -1156,7 +1166,7 @@ impl ScanBuilder<'_> {
             row_len: usize::from(self.ds.layout.row_len),
             // The column-major fill ignores row selection, so it only applies to whole-file
             // scans; each worker additionally requires an all-staged-numeric plan.
-            columnar: column_major && matches!(self.row_selection, RowSelection::All),
+            columnar: column_major && self.row_window().is_whole_file(),
         };
 
         let total_stats = std::thread::scope(|scope| -> Result<ScanStats> {

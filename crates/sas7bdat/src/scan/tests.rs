@@ -2199,3 +2199,91 @@ mod fused_scan {
         );
     }
 }
+
+// ─── row window resolution and descriptor pruning ───────────────────────────
+mod row_window {
+    use crate::internal::{PageDescriptor, PageExecClass};
+    use crate::options::RowSelection;
+    use crate::scan::raw::RowWindow;
+    use crate::types::{ByteOffset, PageIndex, RowIndex};
+
+    fn window(selection: RowSelection, limit: Option<u64>) -> (u64, u64) {
+        let w = RowWindow::resolve(selection, limit);
+        (w.start_for_test(), w.end_for_test())
+    }
+
+    #[test]
+    fn selection_and_limit_resolve_to_one_range() {
+        // No bound at all stays unbounded, so the fused and column-major paths still engage.
+        assert_eq!(window(RowSelection::All, None), (0, u64::MAX));
+        assert!(RowWindow::resolve(RowSelection::All, None).is_whole_file());
+
+        // The two spellings of "first n" agree — the whole point of the unification.
+        assert_eq!(window(RowSelection::First(10), None), (0, 10));
+        assert_eq!(window(RowSelection::All, Some(10)), (0, 10));
+
+        assert_eq!(window(RowSelection::range(5, 20), None), (5, 20));
+
+        // A limit counts rows *within* the selection, so it shortens the window's end rather
+        // than being measured from row zero.
+        assert_eq!(window(RowSelection::range(5, 20), Some(3)), (5, 8));
+        // ...and never lengthens it past the selection.
+        assert_eq!(window(RowSelection::range(5, 20), Some(999)), (5, 20));
+
+        // An inverted range is empty, matching the old `(start..end).contains` predicate.
+        assert_eq!(window(RowSelection::range(20, 5), None), (5, 5));
+        assert_eq!(window(RowSelection::First(0), None), (0, 0));
+    }
+
+    #[test]
+    fn limit_does_not_overflow_at_the_end_of_the_row_space() {
+        let (start, end) = window(RowSelection::range(u64::MAX - 1, u64::MAX), Some(u64::MAX));
+        assert_eq!((start, end), (u64::MAX - 1, u64::MAX));
+    }
+
+    fn page(row_base: u64, row_count: u32) -> PageDescriptor {
+        PageDescriptor {
+            page_index: PageIndex(0),
+            row_base: RowIndex(row_base),
+            row_count,
+            data_start: ByteOffset(0),
+            row_span_start: 0,
+            row_span_count: 0,
+            exec_class: PageExecClass::FusedContiguousUncompressed,
+        }
+    }
+
+    #[test]
+    fn page_range_covers_exactly_the_pages_holding_the_window() {
+        // 4 pages of 10 rows: [0,10) [10,20) [20,30) [30,40)
+        let pages: Vec<PageDescriptor> = (0..4).map(|i| page(i * 10, 10)).collect();
+        let range = |sel, limit| RowWindow::resolve(sel, limit).page_range(&pages);
+
+        // Unbounded scans must not pay for pruning, and must not lose a page to it.
+        assert_eq!(range(RowSelection::All, None), 0..4);
+
+        // A window inside one page touches only that page.
+        assert_eq!(range(RowSelection::range(12, 15), None), 1..2);
+        // Straddling a boundary takes both.
+        assert_eq!(range(RowSelection::range(9, 11), None), 0..2);
+        // Exact page boundaries do not drag in the neighbour.
+        assert_eq!(range(RowSelection::range(10, 20), None), 1..2);
+        assert_eq!(range(RowSelection::First(10), None), 0..1);
+        // A limit prunes the tail the selection alone would have kept.
+        assert_eq!(range(RowSelection::range(5, 40), Some(3)), 0..1);
+        // Past the end yields nothing rather than a reversed range.
+        assert_eq!(range(RowSelection::range(100, 200), None), 4..4);
+        assert!(range(RowSelection::First(0), None).is_empty());
+    }
+
+    #[test]
+    fn page_range_skips_leading_metadata_pages() {
+        // Metadata pages carry no rows and share the row_base of the page that follows.
+        let pages = vec![page(0, 0), page(0, 10), page(10, 0), page(10, 10)];
+        let range = RowWindow::resolve(RowSelection::range(10, 20), None).page_range(&pages);
+        // Only the second data page is needed; the zero-row pages before it are not read.
+        assert_eq!(pages[range.clone()].len(), range.len());
+        assert!(range.contains(&3));
+        assert!(!range.contains(&1));
+    }
+}

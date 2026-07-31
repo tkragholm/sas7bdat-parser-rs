@@ -17,6 +17,24 @@ earlier are written by hand.
 
 ### Changed
 
+- **Bounded scans are now parallel and stop early.** `RowSelection` and
+  `ScanBuilder::limit` were enforced by two separate mechanisms with opposite costs: the
+  selection was a per-row predicate that kept parallelism but never ended the scan, while the
+  limit ended it early but disabled every parallel path — it counted *emitted* rows, a
+  per-worker quantity that is meaningless once decode is split across threads. Both now resolve
+  to one absolute `[start, end)` row range, which is worker-independent, so the parallel and
+  fused paths accept a bounded scan; and because page descriptors carry `row_base`, that range
+  maps to a contiguous slice of pages, so pages outside the window are never read or faulted in.
+
+  Measured on a 138,929-row fixture: `.limit(130_000)` went from 157 ms to 24 ms (6.6× — it was
+  silently single-threaded), and `select(First(100))` from 1090 µs to 181 µs (6× — it used to
+  walk every page). The two spellings now perform identically, as their documentation always
+  claimed. Whole-file scans are unaffected: the window is unbounded, and page pruning
+  short-circuits to the full descriptor slice.
+
+  This reaches the Polars plugin directly — `n_rows` pushdown uses `limit`, so every Polars
+  query carrying one was running on a single core.
+
 - **Breaking (API).** `IoBackendPreference` has three variants instead of four:
   `MmapPreferred` is now `Mmap`, `BufferedOnly` is now `Buffered`, and `BufferedPreferred` is
   gone — it took the same branch as `BufferedOnly` in the only place the setting is read, so
