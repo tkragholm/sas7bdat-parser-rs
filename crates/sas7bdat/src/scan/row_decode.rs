@@ -164,7 +164,7 @@ impl RowDecodePlan {
 
     pub(super) fn validate_row_bounds(&self, row: &[u8]) -> Result<()> {
         if row.len() < self.max_end {
-            return Err(Error::unsupported("column slice exceeds row bounds"));
+            return Err(Error::corruption("column slice exceeds row bounds"));
         }
         Ok(())
     }
@@ -622,7 +622,7 @@ pub(super) fn materialize_planned_cells<'a>(
             PlannedCell::StrOwned(index) => crate::row::CellValue::Str(
                 owned_strings
                     .get(index)
-                    .ok_or_else(|| Error::unsupported("owned string index out of range"))?
+                    .ok_or_else(|| Error::internal("owned string index out of range"))?
                     .as_str(),
             ),
             PlannedCell::Bytes(value) => crate::row::CellValue::Bytes(value),

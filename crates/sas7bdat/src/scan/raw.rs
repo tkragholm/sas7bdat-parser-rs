@@ -258,16 +258,16 @@ pub(super) fn page_slice<'a>(
     let absolute = plan.page_offset(descriptor.page_index);
     let relative = absolute
         .checked_sub(window.base_offset)
-        .ok_or_else(|| Error::unsupported("page precedes the current read window"))?;
+        .ok_or_else(|| Error::internal("page precedes the current read window"))?;
     let start = usize::try_from(relative)
         .map_err(|_| Error::unsupported("page offset exceeds platform usize"))?;
     let end = start
         .checked_add(plan.page_size)
-        .ok_or_else(|| Error::unsupported("page end overflow"))?;
+        .ok_or_else(|| Error::corruption("page end overflow"))?;
     window
         .bytes
         .get(start..end)
-        .ok_or_else(|| Error::unsupported("page slice exceeds source bounds"))
+        .ok_or_else(|| Error::corruption("page slice exceeds source bounds"))
 }
 
 /// The absolute row range a scan emits, resolved from [`RowSelection`] and
@@ -441,11 +441,11 @@ pub(super) fn descriptor_spans(
             usize::try_from(descriptor.row_span_count)
                 .map_err(|_| Error::unsupported("row span count exceeds platform usize"))?,
         )
-        .ok_or_else(|| Error::unsupported("row span range overflow"))?;
+        .ok_or_else(|| Error::corruption("row span range overflow"))?;
     descriptors
         .row_spans
         .get(span_start..span_end)
-        .ok_or_else(|| Error::unsupported("row span range exceeds descriptor table"))
+        .ok_or_else(|| Error::corruption("row span range exceeds descriptor table"))
 }
 
 pub(super) fn emit_contiguous_rows<F>(
@@ -471,12 +471,12 @@ where
                     .unwrap_or(usize::MAX)
                     .saturating_mul(plan.row_len),
             )
-            .ok_or_else(|| Error::unsupported("row offset overflow"))?;
+            .ok_or_else(|| Error::corruption("row offset overflow"))?;
         let end = start
             .checked_add(plan.row_len)
-            .ok_or_else(|| Error::unsupported("row end overflow"))?;
+            .ok_or_else(|| Error::corruption("row end overflow"))?;
         let Some(bytes) = page.get(start..end) else {
-            return Err(Error::unsupported("row slice exceeds page bounds"));
+            return Err(Error::corruption("row slice exceeds page bounds"));
         };
 
         if finish_row_visit(stats, f(row_index, bytes)?) {
@@ -509,9 +509,9 @@ where
             .map_err(|_| Error::unsupported("row span length exceeds platform usize"))?;
         let end = start
             .checked_add(len)
-            .ok_or_else(|| Error::unsupported("row span end overflow"))?;
+            .ok_or_else(|| Error::corruption("row span end overflow"))?;
         let Some(raw_bytes) = page.get(start..end) else {
-            return Err(Error::unsupported("row span exceeds page bounds"));
+            return Err(Error::corruption("row span exceeds page bounds"));
         };
 
         let bytes = match span.kind {

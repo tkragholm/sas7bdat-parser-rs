@@ -140,7 +140,7 @@ pub(super) fn compile_column_plan(
         .map_err(|_| Error::unsupported("column width exceeds platform usize"))?;
     let end = start
         .checked_add(width_usize)
-        .ok_or_else(|| Error::unsupported("column end overflow"))?;
+        .ok_or_else(|| Error::corruption("column end overflow"))?;
     let kernel = compile_decode_kernel(builder, column.logical_type);
     Ok(CompiledColumnPlan {
         start,

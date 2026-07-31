@@ -300,7 +300,7 @@ fn join_stages(
 ) -> Result<(ScanStats, u64)> {
     let candidate_rows = parse_handle
         .join()
-        .map_err(|_| Error::unsupported("fused descriptor stage panicked"))?;
+        .map_err(|_| Error::internal("fused descriptor stage panicked"))?;
     let (delivered_batches, delivered_rows) = match collected {
         Ok(counts) => counts,
         Err(err) => {
@@ -315,7 +315,7 @@ fn join_stages(
     for handle in handles {
         let worker_stats = handle
             .join()
-            .map_err(|_| Error::unsupported("parallel batch worker panicked"))?;
+            .map_err(|_| Error::internal("parallel batch worker panicked"))?;
         merge_scan_stats(&mut total, &worker_stats);
     }
     // A failed read closes its extent channel, which the parse stage sees as end of work, so
@@ -416,7 +416,7 @@ fn compile_extent_descriptors(
         let start = page_offset * ctx.page_size;
         let page = bytes
             .get(start..start + ctx.page_size)
-            .ok_or_else(|| Error::unsupported("page slice exceeds extent bounds"))?;
+            .ok_or_else(|| Error::corruption("page slice exceeds extent bounds"))?;
         let descriptor = crate::pages::compile_page_descriptor(
             ctx.layout,
             page,

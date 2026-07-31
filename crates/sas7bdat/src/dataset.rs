@@ -479,7 +479,7 @@ impl Dataset {
             let mut guard = self
                 .descriptors
                 .lock()
-                .map_err(|_| Error::unsupported("descriptor cache poisoned"))?;
+                .map_err(|_| Error::internal("descriptor cache poisoned"))?;
             if let Some(descriptors) = guard.as_ref() {
                 return Ok(Arc::clone(descriptors));
             }

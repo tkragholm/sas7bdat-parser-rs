@@ -78,7 +78,7 @@ impl TrustedOffsets {
             ));
         };
         if first != 0 {
-            return Err(Error::unsupported("trusted offsets must start at zero"));
+            return Err(Error::internal("trusted offsets must start at zero"));
         }
 
         let mut previous = first;

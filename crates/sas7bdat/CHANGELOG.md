@@ -60,6 +60,16 @@ earlier are written by hand.
 
 ### Added
 
+- `Error::Internal` (with `InternalError` and `Error::internal`) and `Error::corruption`, a
+  general constructor for the existing `Corruption` variant. `Error::unsupported` had become a
+  catch-all covering five unrelated failure kinds at 62 call sites, which mattered because this
+  crate parses untrusted files: a caller could not tell "your file is corrupt" from "this
+  reader has a bug" from "this build cannot read that shape yet". 15 sites that a truncated or
+  hostile file can reach (`row span exceeds page bounds`, `page slice exceeds source bounds`,
+  the offset overflows) are now `Corruption`; 8 that are reader invariants (`compiled plan did
+  not match column builder`, poisoned locks, worker panics) are now `Internal`, which prints
+  "(please report)". `Unsupported` keeps what it should always have meant: genuinely
+  unimplemented layouts, unsupported mode combinations, and platform width limits.
 - `ProfileMode` and `ProjectionPreset::as_str` in the `fixture-catalog` module, so the two
   profiling binaries share one definition instead of carrying identical copies. In-repo
   tooling behind an off-by-default feature; no stability guarantee.

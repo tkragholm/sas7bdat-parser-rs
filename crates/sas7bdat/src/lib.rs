@@ -75,8 +75,8 @@ pub(crate) mod types;
 
 pub use dataset::{Dataset, OpenBreakdown};
 pub use error::{
-    ArrowError, CompressionError, CorruptionError, DecodeError, Error, HeaderError, IoError,
-    MetadataError, ProjectionError, Result, UnsupportedError,
+    ArrowError, CompressionError, CorruptionError, DecodeError, Error, HeaderError, InternalError,
+    IoError, MetadataError, ProjectionError, Result, UnsupportedError,
 };
 #[cfg(any(test, feature = "fixture-catalog"))]
 pub use fixture_catalog::{

@@ -1168,7 +1168,7 @@ impl ScanBuilder<'_> {
                         |page_index| raw.page_offset(page_index),
                         raw.page_size(),
                     )
-                    .ok_or_else(|| Error::unsupported("page span overflow while planning reads"))
+                    .ok_or_else(|| Error::corruption("page span overflow while planning reads"))
                 })
                 .collect::<Result<Vec<_>>>()?
         };
@@ -1369,7 +1369,7 @@ impl ScanBuilder<'_> {
             for handle in handles {
                 let worker_stats = handle
                     .join()
-                    .map_err(|_| Error::unsupported("parallel batch worker panicked"))?;
+                    .map_err(|_| Error::internal("parallel batch worker panicked"))?;
                 merge_scan_stats(&mut total, &worker_stats);
             }
             // A failed read closes its extent channel, which decoders see as end of work,

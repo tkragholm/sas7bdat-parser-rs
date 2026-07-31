@@ -106,6 +106,18 @@ pub struct UnsupportedError {
     pub feature: String,
 }
 
+/// An invariant inside the reader was violated — a bug here, not a problem with the file.
+///
+/// Kept distinct from [`CorruptionError`] because the two ask different things of whoever sees
+/// them. Corruption means the input is not a readable SAS7BDAT and the caller should look at
+/// their file; this means the reader compiled a plan it then failed to honour, a worker panicked,
+/// or a lock was poisoned, and the caller should report it. Neither is `Unsupported`, which
+/// promises the file is fine and this build simply cannot read that shape yet.
+#[derive(Debug, Clone)]
+pub struct InternalError {
+    pub message: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum Error {
     Io(IoError),
@@ -117,6 +129,7 @@ pub enum Error {
     Arrow(ArrowError),
     Corruption(CorruptionError),
     Unsupported(UnsupportedError),
+    Internal(InternalError),
 }
 
 impl Error {
@@ -148,6 +161,23 @@ impl Error {
     #[must_use]
     pub fn io_error_with_path(path: impl Into<PathBuf>, err: &std::io::Error) -> Self {
         Self::io_with_path(path, err.to_string())
+    }
+
+    /// The file is not a readable SAS7BDAT: its own declared geometry is inconsistent or
+    /// points outside the data. Use this, not [`Self::unsupported`], for anything a
+    /// hostile or truncated file could cause.
+    #[must_use]
+    pub fn corruption(message: impl Into<String>) -> Self {
+        Self::Corruption(CorruptionError::Other(message.into()))
+    }
+
+    /// A reader invariant was violated. Not reachable from any input — if one of these fires,
+    /// it is a bug in this crate.
+    #[must_use]
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal(InternalError {
+            message: message.into(),
+        })
     }
 
     #[must_use]
@@ -204,8 +234,40 @@ impl fmt::Display for Error {
             Self::Arrow(err) => write!(f, "arrow error: {}", err.message),
             Self::Corruption(err) => write!(f, "corruption error: {err}"),
             Self::Unsupported(err) => write!(f, "unsupported: {}", err.feature),
+            Self::Internal(err) => write!(f, "internal error: {} (please report)", err.message),
         }
     }
 }
 
 impl StdError for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    /// The three kinds ask different things of whoever reads them, so they must not render
+    /// alike: corruption points at the file, internal points at this crate, unsupported says
+    /// the file is fine but this build cannot read that shape.
+    #[test]
+    fn the_three_failure_kinds_render_distinctly() {
+        assert_eq!(
+            Error::corruption("row span exceeds page bounds").to_string(),
+            "corruption error: row span exceeds page bounds"
+        );
+        assert_eq!(
+            Error::internal("compiled plan did not match column builder").to_string(),
+            "internal error: compiled plan did not match column builder (please report)"
+        );
+        assert_eq!(
+            Error::unsupported("this compressed page layout is not implemented yet").to_string(),
+            "unsupported: this compressed page layout is not implemented yet"
+        );
+    }
+
+    #[test]
+    fn constructors_pick_the_matching_variant() {
+        assert!(matches!(Error::corruption("x"), Error::Corruption(_)));
+        assert!(matches!(Error::internal("x"), Error::Internal(_)));
+        assert!(matches!(Error::unsupported("x"), Error::Unsupported(_)));
+    }
+}

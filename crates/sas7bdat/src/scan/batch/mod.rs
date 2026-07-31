@@ -195,9 +195,9 @@ impl BatchAccumulator {
             .checked_add(span_len)
             .and_then(|rows| rows.checked_mul(row_len))
             .and_then(|span_bytes| span_bytes.checked_add(data_start))
-            .ok_or_else(|| Error::unsupported("contiguous span byte range overflow"))?;
+            .ok_or_else(|| Error::corruption("contiguous span byte range overflow"))?;
         if row_len < max_end || span_end_byte > page.len() {
-            return Err(Error::unsupported("contiguous span exceeds page bounds"));
+            return Err(Error::corruption("contiguous span exceeds page bounds"));
         }
 
         if self.row_base.is_none() {
@@ -1043,7 +1043,7 @@ impl OwnedBatchColumnBuilder {
                         valid,
                         owned_strings
                             .get(index)
-                            .ok_or_else(|| Error::unsupported("owned string index out of range"))?
+                            .ok_or_else(|| Error::internal("owned string index out of range"))?
                             .as_bytes(),
                     )?;
                     push_dictionary_id(dictionary_ids, DICT_ID_NONE);
