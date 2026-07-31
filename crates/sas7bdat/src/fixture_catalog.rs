@@ -1,4 +1,6 @@
-use crate::{CellValue, Dataset, LogicalType, Projection, Result, RowSelection, ScanStatsSummary};
+use crate::{
+    CellValue, Dataset, DecodeMode, LogicalType, Projection, Result, RowSelection, ScanStatsSummary,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
@@ -669,6 +671,73 @@ impl ProjectionPreset {
             "mixed" => Some(Self::Mixed),
             _ => None,
         }
+    }
+
+    /// The spelling [`Self::parse`] accepts. Kept beside it so the two cannot drift.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Numeric => "numeric",
+            Self::Strings => "strings",
+            Self::Mixed => "mixed",
+        }
+    }
+}
+
+/// Which scan shape a profiling run exercises.
+///
+/// Lives here rather than in the profiling binaries because both of them need it and had
+/// identical copies; it pairs with [`ProjectionPreset`] as the other half of "how was this
+/// profile run configured".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileMode {
+    RawRows,
+    TypedRows,
+    TypedLosslessRows,
+    TypedBatches,
+    TypedLosslessBatches,
+}
+
+impl ProfileMode {
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "raw_rows" => Some(Self::RawRows),
+            "typed_rows" => Some(Self::TypedRows),
+            "typed_lossless_rows" => Some(Self::TypedLosslessRows),
+            "typed_batches" => Some(Self::TypedBatches),
+            "typed_lossless_batches" => Some(Self::TypedLosslessBatches),
+            _ => None,
+        }
+    }
+
+    /// The spelling [`Self::parse`] accepts. Kept beside it so the two cannot drift.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RawRows => "raw_rows",
+            Self::TypedRows => "typed_rows",
+            Self::TypedLosslessRows => "typed_lossless_rows",
+            Self::TypedBatches => "typed_batches",
+            Self::TypedLosslessBatches => "typed_lossless_batches",
+        }
+    }
+
+    /// `RawRows` profiles the raw-row path, which decodes typed cells per row; the
+    /// undecoded byte scan is selected by the caller through [`Self::is_batch`] being false
+    /// plus its own `visit_raw_rows` call, not by a distinct decode mode.
+    #[must_use]
+    pub const fn decode_mode(self) -> DecodeMode {
+        match self {
+            Self::RawRows | Self::TypedRows | Self::TypedBatches => DecodeMode::Typed,
+            Self::TypedLosslessRows | Self::TypedLosslessBatches => DecodeMode::TypedLossless,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_batch(self) -> bool {
+        matches!(self, Self::TypedBatches | Self::TypedLosslessBatches)
     }
 }
 

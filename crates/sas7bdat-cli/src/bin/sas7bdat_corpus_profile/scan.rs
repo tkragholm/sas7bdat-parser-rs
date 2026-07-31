@@ -3,10 +3,10 @@ use super::{
     FullContentAccumulator, OpenOptions, ProjectedScanShape, ScanCsvContext, ScanProfileResult,
     ScanRankedFile, ScanRunOptions, ScanSummary, apply_scan_stats, build_projection,
     bytes_to_megabytes, compression_name, content_class_from_counts, encoding_class_from_name,
-    io_backend_name, join_named_counts, logical_type_counts_for_scan, profile_dataset_with_sample,
-    projected_scan_shape, projection_name, round_metric, run_scan, size_class_from_page,
-    source_group, structural_companion_csv_path, summarize_catalog, summarize_scan_stats,
-    summary_txt_path, temporal_format_summary_for_scan, top_scan_ranked, width_class_from_shape,
+    join_named_counts, logical_type_counts_for_scan, profile_dataset_with_sample,
+    projected_scan_shape, round_metric, run_scan, size_class_from_page, source_group,
+    structural_companion_csv_path, summarize_catalog, summarize_scan_stats, summary_txt_path,
+    temporal_format_summary_for_scan, top_scan_ranked, width_class_from_shape,
     width_summary_for_scan,
 };
 use csv::Writer;
@@ -25,8 +25,8 @@ pub fn write_scan_profile(
     let context = ScanCsvContext {
         roots: roots.join("|"),
         mode: options.mode.as_str().to_owned(),
-        projection: projection_name(options.projection).to_owned(),
-        io_backend: io_backend_name(options.io_backend).to_owned(),
+        projection: options.projection.as_str().to_owned(),
+        io_backend: options.io_backend.as_str().to_owned(),
         batch_rows: options.batch_rows,
         limit: options
             .limit

@@ -1,7 +1,7 @@
 use super::{
     FixtureCatalog, IoBackendPreference, OutputFormat, ProfileMode, ProjectionPreset,
     ScanRunOptions, collect_fixture_entries, discover_fixture_paths, display_roots,
-    load_failed_paths, parse_io_backend, print_usage, summarize_catalog,
+    load_failed_paths, print_usage, summarize_catalog,
 };
 use sas7bdat_cli::{next_parsed, next_value};
 use std::{env, path::PathBuf};
@@ -139,8 +139,7 @@ fn handle_scan_flag(
         }
         "--scan-io-backend" | "--io-backend" => {
             let value = next_value(args, flag)?;
-            config.scan_io_backend =
-                parse_io_backend(&value).ok_or_else(|| format!("invalid {flag} value"))?;
+            config.scan_io_backend = value.parse().map_err(|_| format!("invalid {flag} value"))?;
             Ok(true)
         }
         "--scan-limit" | "--limit" => {

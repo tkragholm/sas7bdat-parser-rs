@@ -597,7 +597,7 @@ mod tests {
                 io_backend: IoBackendPreference::Mmap,
             },
         )
-        .expect("mmap-preferred dataset open");
+        .expect("mmap dataset open");
 
         assert!(matches!(ds.file.source, FileSource::Mmap(_)));
     }
@@ -616,7 +616,7 @@ mod tests {
                 io_backend: IoBackendPreference::Buffered,
             },
         )
-        .expect("buffered-only dataset open");
+        .expect("buffered dataset open");
 
         assert!(matches!(ds.file.source, FileSource::Path(_)));
     }
@@ -716,7 +716,7 @@ mod tests {
                 io_backend: IoBackendPreference::Mmap,
             },
         )
-        .expect("mmap-preferred breakdown");
+        .expect("mmap breakdown");
 
         assert!(breakdown.used_mmap);
         assert!(breakdown.mmap_ns.is_some());
@@ -740,7 +740,7 @@ mod tests {
                 io_backend: IoBackendPreference::Buffered,
             },
         )
-        .expect("buffered-only breakdown");
+        .expect("buffered breakdown");
 
         assert!(!breakdown.used_mmap);
         assert!(breakdown.mmap_ns.is_none());

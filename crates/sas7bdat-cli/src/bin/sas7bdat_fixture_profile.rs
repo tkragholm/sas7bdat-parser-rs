@@ -1,8 +1,8 @@
 #![allow(clippy::cast_precision_loss, clippy::too_many_lines)]
 
 use sas7bdat::{
-    BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions, ProjectionPreset,
-    ScanStatsSummary, build_projection, summarize_scan_stats,
+    BatchHint, Dataset, DecodeMode, IoBackendPreference, OpenOptions, ProfileMode,
+    ProjectionPreset, ScanStatsSummary, build_projection, summarize_scan_stats,
 };
 use sas7bdat_cli::{exit_code, next_parsed, next_value};
 use serde::Serialize;
@@ -10,39 +10,6 @@ use std::{env, path::PathBuf, process::ExitCode, time::Instant};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProfileMode {
-    RawRows,
-    TypedRows,
-    TypedLosslessRows,
-    TypedBatches,
-    TypedLosslessBatches,
-}
-
-impl ProfileMode {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "raw_rows" => Some(Self::RawRows),
-            "typed_rows" => Some(Self::TypedRows),
-            "typed_lossless_rows" => Some(Self::TypedLosslessRows),
-            "typed_batches" => Some(Self::TypedBatches),
-            "typed_lossless_batches" => Some(Self::TypedLosslessBatches),
-            _ => None,
-        }
-    }
-
-    const fn decode_mode(self) -> DecodeMode {
-        match self {
-            Self::RawRows | Self::TypedRows | Self::TypedBatches => DecodeMode::Typed,
-            Self::TypedLosslessRows | Self::TypedLosslessBatches => DecodeMode::TypedLossless,
-        }
-    }
-
-    const fn is_batch(self) -> bool {
-        matches!(self, Self::TypedBatches | Self::TypedLosslessBatches)
-    }
-}
 
 #[derive(Debug, Serialize)]
 struct ProfileOutput {
@@ -57,16 +24,6 @@ struct ProfileOutput {
     rows_per_second: f64,
     bytes_per_second: f64,
     stats_last: ScanStatsSummary,
-}
-
-const fn mode_name(mode: ProfileMode) -> &'static str {
-    match mode {
-        ProfileMode::RawRows => "raw_rows",
-        ProfileMode::TypedRows => "typed_rows",
-        ProfileMode::TypedLosslessRows => "typed_lossless_rows",
-        ProfileMode::TypedBatches => "typed_batches",
-        ProfileMode::TypedLosslessBatches => "typed_lossless_batches",
-    }
 }
 
 fn main() -> ExitCode {
@@ -108,7 +65,9 @@ fn run() -> std::result::Result<(), String> {
             }
             "--io-backend" => {
                 let value = next_value(&mut args, "--io-backend")?;
-                io_backend = parse_io_backend(&value)
+                io_backend = value
+                    .parse()
+                    .ok()
                     .ok_or_else(|| format!("invalid --io-backend value: {value}"))?;
             }
             "--help" | "-h" => {
@@ -173,14 +132,8 @@ fn run() -> std::result::Result<(), String> {
 
     let output = ProfileOutput {
         fixture: fixture.display().to_string(),
-        mode: mode_name(mode).to_owned(),
-        projection: match projection {
-            ProjectionPreset::Full => "full",
-            ProjectionPreset::Numeric => "numeric",
-            ProjectionPreset::Strings => "strings",
-            ProjectionPreset::Mixed => "mixed",
-        }
-        .to_owned(),
+        mode: mode.as_str().to_owned(),
+        projection: projection.as_str().to_owned(),
         io_backend: io_backend.as_str().to_owned(),
         limit,
         repeat,
@@ -197,12 +150,8 @@ fn run() -> std::result::Result<(), String> {
     Ok(())
 }
 
-fn parse_io_backend(value: &str) -> Option<IoBackendPreference> {
-    value.parse().ok()
-}
-
 fn print_usage() {
     eprintln!(
-        "usage: cargo run -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture PATH --mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches [--projection full|numeric|strings|mixed] [--repeat N] [--limit N] [--batch-rows N] [--io-backend auto|mmap-preferred|buffered-preferred|buffered-only]"
+        "usage: cargo run -p sas7bdat-cli --bin sas7bdat-fixture-profile -- --fixture PATH --mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches [--projection full|numeric|strings|mixed] [--repeat N] [--limit N] [--batch-rows N] [--io-backend auto|mmap|buffered]"
     );
 }

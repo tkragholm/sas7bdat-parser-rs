@@ -81,9 +81,9 @@ pub use error::{
 #[cfg(any(test, feature = "fixture-catalog"))]
 pub use fixture_catalog::{
     FixtureCatalog, FixtureEntry, FixtureProfile, FixtureStatus, LogicalTypeCounts, NamedCount,
-    ProjectionPreset, SampleSummary, TemporalFormatSummary, WidthSummary, build_catalog,
-    build_projection, discover_fixture_paths, profile_dataset_with_sample, profile_fixture,
-    summarize_scan_stats,
+    ProfileMode, ProjectionPreset, SampleSummary, TemporalFormatSummary, WidthSummary,
+    build_catalog, build_projection, discover_fixture_paths, profile_dataset_with_sample,
+    profile_fixture, summarize_scan_stats,
 };
 pub use labels::{LabelSet, ValueKey, ValueLabel, ValueType};
 pub use metadata::{

@@ -312,20 +312,12 @@ fn batch_reader(
 /// Args:
 ///     path: Path to the `.sas7bdat` file.
 ///     `catalog_path`: Optional `.sas7bcat` value-label catalog to hydrate.
-///     `schema_overrides`: Optional ``{column: polars dtype}`` map applied at
-///         schema time (e.g. integer-coded columns to ``pl.Int64``).
-///     categorical: If ``True``, cast every character column to ``Categorical``.
-///         This speeds up downstream group-by/join/sort (~10-15x) but is not a
-///         read or memory win — Polars' ``String`` is already compact — so enable
-///         it only when grouping/joining on the string columns.
-/// Lazily scan a SAS7BDAT file into a Polars `LazyFrame`.
-///
-/// Args:
-///     path: Path to the `.sas7bdat` file.
-///     `catalog_path`: Optional `.sas7bcat` value-label catalog to hydrate.
 ///     `schema_overrides`: Optional ``{column: polars dtype}`` map applied at schema
 ///         time (e.g. integer-coded columns cast to a smaller dtype).
-///     categorical: Cast string columns to ``Categorical`` in the lazy plan.
+///     categorical: If ``True``, cast every character column to ``Categorical`` in
+///         the lazy plan. This speeds up downstream group-by/join/sort (~10-15x) but
+///         is not a read or memory win — Polars' ``String`` is already compact — so
+///         enable it only when grouping/joining on the string columns.
 ///     columns: Read only these columns. **Strongly recommended** — SAS7BDAT is
 ///         wide and row-oriented, so selecting the columns you need is the single
 ///         biggest speed-up (decode one column, not all of them). Equivalent to

@@ -3,7 +3,7 @@ use rayon::prelude::*;
 use sas7bdat::{
     BatchHint, Dataset, DecodeMode, Endianness, FixtureCatalog, FixtureEntry, FixtureProfile,
     FixtureStatus, IoBackendPreference, LogicalType, LogicalTypeCounts, NamedCount, OpenOptions,
-    Projection, ProjectionPreset, SampleSummary, ScanProgress, ScanStatsSummary,
+    ProfileMode, Projection, ProjectionPreset, SampleSummary, ScanProgress, ScanStatsSummary,
     TemporalFormatSummary, WidthSummary, build_projection, discover_fixture_paths,
     profile_dataset_with_sample, profile_fixture, summarize_scan_stats,
 };
@@ -47,49 +47,6 @@ impl OutputFormat {
             "json" => Ok(Self::Json),
             "csv" => Ok(Self::Csv),
             other => Err(format!("unsupported --format value: {other}")),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProfileMode {
-    RawRows,
-    TypedRows,
-    TypedLosslessRows,
-    TypedBatches,
-    TypedLosslessBatches,
-}
-
-impl ProfileMode {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "raw_rows" => Some(Self::RawRows),
-            "typed_rows" => Some(Self::TypedRows),
-            "typed_lossless_rows" => Some(Self::TypedLosslessRows),
-            "typed_batches" => Some(Self::TypedBatches),
-            "typed_lossless_batches" => Some(Self::TypedLosslessBatches),
-            _ => None,
-        }
-    }
-
-    const fn decode_mode(self) -> DecodeMode {
-        match self {
-            Self::RawRows | Self::TypedRows | Self::TypedBatches => DecodeMode::Typed,
-            Self::TypedLosslessRows | Self::TypedLosslessBatches => DecodeMode::TypedLossless,
-        }
-    }
-
-    const fn is_batch(self) -> bool {
-        matches!(self, Self::TypedBatches | Self::TypedLosslessBatches)
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::RawRows => "raw_rows",
-            Self::TypedRows => "typed_rows",
-            Self::TypedLosslessRows => "typed_lossless_rows",
-            Self::TypedBatches => "typed_batches",
-            Self::TypedLosslessBatches => "typed_lossless_batches",
         }
     }
 }
@@ -1409,25 +1366,8 @@ fn content_class_from_counts(
     }
 }
 
-fn parse_io_backend(value: &str) -> Option<IoBackendPreference> {
-    value.parse().ok()
-}
-
-const fn io_backend_name(value: IoBackendPreference) -> &'static str {
-    value.as_str()
-}
-
-const fn projection_name(value: ProjectionPreset) -> &'static str {
-    match value {
-        ProjectionPreset::Full => "full",
-        ProjectionPreset::Numeric => "numeric",
-        ProjectionPreset::Strings => "strings",
-        ProjectionPreset::Mixed => "mixed",
-    }
-}
-
 fn print_usage() {
     eprintln!(
-        "usage: cargo run -p sas7bdat-cli --bin sas7bdat-corpus-profile -- INPUT [INPUT ...] [--failed-from PATH] [--sample-rows N] [--format json|csv] [--summary-only] [--out PATH] [--scan-mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches] [--scan-projection full|numeric|strings|mixed] [--scan-batch-rows N] [--scan-io-backend auto|mmap-preferred|buffered-preferred|buffered-only] [--scan-limit N]"
+        "usage: cargo run -p sas7bdat-cli --bin sas7bdat-corpus-profile -- INPUT [INPUT ...] [--failed-from PATH] [--sample-rows N] [--format json|csv] [--summary-only] [--out PATH] [--scan-mode raw_rows|typed_rows|typed_lossless_rows|typed_batches|typed_lossless_batches] [--scan-projection full|numeric|strings|mixed] [--scan-batch-rows N] [--scan-io-backend auto|mmap|buffered] [--scan-limit N]"
     );
 }

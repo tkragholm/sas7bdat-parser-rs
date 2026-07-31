@@ -58,6 +58,12 @@ earlier are written by hand.
   `collect_batches` errored while `visit_owned_batches` silently decoded every column as
   `Binary` whenever it took a parallel or fused branch.
 
+### Added
+
+- `ProfileMode` and `ProjectionPreset::as_str` in the `fixture-catalog` module, so the two
+  profiling binaries share one definition instead of carrying identical copies. In-repo
+  tooling behind an off-by-default feature; no stability guarantee.
+
 ### Removed
 
 - **Breaking (API and CLI).** `ValidationMode`, `OpenOptionsBuilder::validation`, and the

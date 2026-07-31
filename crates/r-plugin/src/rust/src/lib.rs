@@ -17,7 +17,7 @@ use extendr_api::prelude::*;
 use sas7bdat::dictionary::{dictionary_encode, DictionaryColumn, DictionaryPolicy};
 use sas7bdat::{
     catalog::normalize_format_name, Dataset, LabelSet, LogicalType, OwnedColumnBuffer, Parallelism,
-    ValueKey, ValueType,
+    SasDate, SasDateTime, ValueKey, ValueType,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -36,10 +36,15 @@ enum RealClass {
 impl RealClass {
     /// SAS-epoch -> R-epoch shift applied to the raw SAS value (days for `Date`,
     /// seconds for `DateTime`). `Time` is seconds-since-midnight (no shift).
-    const fn epoch_shift(self) -> f64 {
+    ///
+    /// Taken from the core's constants rather than spelled out here: R shares the Unix
+    /// epoch with Arrow, so this is the same 1960 -> 1970 offset the Arrow and Polars
+    /// conversions apply, and a literal copy would be a second place for it to drift.
+    fn epoch_shift(self) -> f64 {
         match self {
-            RealClass::Date => 3653.0,            // days 1960-01-01 -> 1970-01-01
-            RealClass::DateTime => 315_619_200.0, // seconds 1960 -> 1970
+            RealClass::Date => f64::from(SasDate::DAYS_SAS_TO_UNIX),
+            #[allow(clippy::cast_precision_loss)]
+            RealClass::DateTime => SasDateTime::SECONDS_SAS_TO_UNIX as f64,
             RealClass::Time | RealClass::Plain => 0.0,
         }
     }
