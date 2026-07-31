@@ -43,6 +43,12 @@ jobs:
       - name: Clippy (dev-tools binaries)
         run: cargo clippy -p sas7bdat-cli --all-targets --features dev-tools -- -D warnings
 
+      # `libR-sys` has a build script that locates a local R install and fails without
+      # one, so the R binding cannot even be type-checked on a bare runner.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
       # The R binding is its own crate with its own lockfile, deliberately outside
       # the workspace (see the root Cargo.toml), so none of the passes above touch
       # it. Nothing compiled it in CI and it drifted: its lockfile was still pinning
