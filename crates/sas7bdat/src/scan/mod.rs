@@ -94,7 +94,6 @@ struct ScanStats {
     pub row_bytes_materialized: u64,
     pub decode_batches: u64,
     pub batch_staged_numeric_cells: u64,
-    pub batch_direct_numeric_cells: u64,
     pub batch_direct_raw_bytes_cells: u64,
     pub batch_direct_utf8_single_byte_cells: u64,
     pub batch_direct_utf8_borrowed_cells: u64,
@@ -152,42 +151,6 @@ pub struct ScanProgress {
 
 /// A boxed progress callback registered via [`ScanBuilder::with_progress`].
 pub type ScanProgressObserver = Arc<dyn Fn(ScanProgress) + Send + Sync + 'static>;
-
-/// Push-based sink for raw (undecoded) rows.
-///
-/// Implement this trait to receive each row as its raw byte slice. Useful when
-/// you want to pass rows directly to another parser or write them verbatim.
-/// Use [`ScanBuilder::write_raw_rows`] to drive the scan.
-pub trait RawRowSink {
-    /// # Errors
-    ///
-    /// Returns an error if the sink cannot accept the raw row.
-    fn push(&mut self, row: RawRow<'_>) -> Result<ControlFlow<()>>;
-}
-
-/// Push-based sink for decoded rows.
-///
-/// Implement this trait to receive each row as a [`RowView`]. This is the
-/// push-based alternative to the `visit_rows` callback. Use
-/// [`ScanBuilder::write_rows`] to drive the scan.
-pub trait RowSink {
-    /// # Errors
-    ///
-    /// Returns an error if the sink cannot accept the decoded row.
-    fn push(&mut self, row: RowView<'_>) -> Result<ControlFlow<()>>;
-}
-
-/// Push-based sink for decoded columnar batches.
-///
-/// Implement this trait to receive each batch as a [`ColumnarBatch`]. This is
-/// the push-based alternative to the `visit_batches` callback. Use
-/// [`ScanBuilder::write_batches`] to drive the scan.
-pub trait BatchSink {
-    /// # Errors
-    ///
-    /// Returns an error if the sink cannot accept the decoded batch.
-    fn push(&mut self, batch: ColumnarBatch<'_>) -> Result<ControlFlow<()>>;
-}
 
 #[cfg(test)]
 mod tests;

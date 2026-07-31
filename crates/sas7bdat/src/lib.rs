@@ -92,10 +92,9 @@ pub use metadata::{
 };
 pub use options::{
     BatchHint, ColumnMajorDecode, DecodeMode, DictionaryStaging, IoBackendPreference,
-    MojibakePolicy, OpenOptions, OpenOptionsBuilder, OrderingMode, PageCachePolicy, Parallelism,
-    PrefetchPolicy, RowSelection, StringDecodeOptions, StringDecodeOptionsBuilder,
-    TemporalDecodeOptions, TemporalDecodeOptionsBuilder, TrimMode, Utf8ValidationMode,
-    ValidationMode,
+    MojibakePolicy, OpenOptions, OpenOptionsBuilder, OrderingMode, Parallelism, RowSelection,
+    StringDecodeOptions, StringDecodeOptionsBuilder, TemporalDecodeOptions,
+    TemporalDecodeOptionsBuilder, TrimMode, Utf8ValidationMode, ValidationMode,
 };
 pub use pages::DescriptorBreakdown;
 pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};
@@ -103,6 +102,5 @@ pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
 #[cfg(feature = "arrow")]
 pub use scan::SAS_LOGICAL_TYPE_KEY;
 pub use scan::{
-    BatchSink, OwnedBatchScanBreakdown, RawRowSink, RowSink, ScanBuilder, ScanProgress,
-    ScanProgressObserver, ScanStatsSummary,
+    OwnedBatchScanBreakdown, ScanBuilder, ScanProgress, ScanProgressObserver, ScanStatsSummary,
 };

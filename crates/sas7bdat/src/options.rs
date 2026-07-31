@@ -7,21 +7,6 @@ pub enum IoBackendPreference {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrefetchPolicy {
-    Auto,
-    Off,
-    Sequential,
-    Aggressive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageCachePolicy {
-    Auto,
-    None,
-    Bounded { pages: usize },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationMode {
     Strict,
     Permissive,
@@ -30,8 +15,6 @@ pub enum ValidationMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptions {
     pub(crate) io_backend: IoBackendPreference,
-    pub(crate) prefetch: PrefetchPolicy,
-    pub(crate) page_cache: PageCachePolicy,
     pub(crate) validation: ValidationMode,
 }
 
@@ -39,8 +22,6 @@ impl Default for OpenOptions {
     fn default() -> Self {
         Self {
             io_backend: IoBackendPreference::Auto,
-            prefetch: PrefetchPolicy::Auto,
-            page_cache: PageCachePolicy::Auto,
             validation: ValidationMode::Strict,
         }
     }
@@ -49,8 +30,6 @@ impl Default for OpenOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptionsBuilder {
     io_backend: IoBackendPreference,
-    prefetch: PrefetchPolicy,
-    page_cache: PageCachePolicy,
     validation: ValidationMode,
 }
 
@@ -66,8 +45,6 @@ impl OpenOptionsBuilder {
     pub const fn new() -> Self {
         Self {
             io_backend: IoBackendPreference::Auto,
-            prefetch: PrefetchPolicy::Auto,
-            page_cache: PageCachePolicy::Auto,
             validation: ValidationMode::Strict,
         }
     }
@@ -75,18 +52,6 @@ impl OpenOptionsBuilder {
     #[must_use]
     pub const fn io_backend(mut self, io_backend: IoBackendPreference) -> Self {
         self.io_backend = io_backend;
-        self
-    }
-
-    #[must_use]
-    pub const fn prefetch(mut self, prefetch: PrefetchPolicy) -> Self {
-        self.prefetch = prefetch;
-        self
-    }
-
-    #[must_use]
-    pub const fn page_cache(mut self, page_cache: PageCachePolicy) -> Self {
-        self.page_cache = page_cache;
         self
     }
 
@@ -100,8 +65,6 @@ impl OpenOptionsBuilder {
     pub const fn build(self) -> OpenOptions {
         OpenOptions {
             io_backend: self.io_backend,
-            prefetch: self.prefetch,
-            page_cache: self.page_cache,
             validation: self.validation,
         }
     }

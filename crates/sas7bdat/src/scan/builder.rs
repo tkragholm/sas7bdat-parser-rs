@@ -1,11 +1,11 @@
 use super::plan::ScanPlan;
 use super::raw::{scan_raw_rows_with_plan, scan_row_bytes_with_plan};
 use super::{
-    BatchAccumulator, BatchDecodePlan, BatchHint, BatchSink, ColumnBuffer, ColumnMajorDecode,
-    ColumnarBatch, ControlFlow, Dataset, DecodeMode, Error, FileSource, OrderingMode,
-    OwnedBatchScanBreakdown, OwnedColumnarBatch, OwnedRow, Parallelism, Projection, RawRow,
-    RawRowSink, Result, RowSelection, RowSink, RowView, ScanProgress, ScanProgressObserver,
-    ScanStats, StringDecodeOptions, TemporalDecodeOptions, materialize_planned_cells,
+    BatchAccumulator, BatchDecodePlan, BatchHint, ColumnBuffer, ColumnMajorDecode, ColumnarBatch,
+    ControlFlow, Dataset, DecodeMode, Error, FileSource, OrderingMode, OwnedBatchScanBreakdown,
+    OwnedColumnarBatch, OwnedRow, Parallelism, Projection, RawRow, Result, RowSelection, RowView,
+    ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions, TemporalDecodeOptions,
+    materialize_planned_cells,
 };
 #[cfg(feature = "arrow")]
 use arrow_array::RecordBatch;
@@ -663,27 +663,6 @@ impl<'a> ScanBuilder<'a> {
         }
         Ok(batches)
     }
-
-    /// # Errors
-    ///
-    /// Returns an error if the scan or sink fails.
-    pub fn write_raw_rows(&self, sink: &mut impl RawRowSink) -> Result<crate::ScanStatsSummary> {
-        self.visit_raw_rows(|row| sink.push(row))
-    }
-
-    /// # Errors
-    ///
-    /// Returns an error if the scan or sink fails.
-    pub fn write_rows(&self, sink: &mut impl RowSink) -> Result<crate::ScanStatsSummary> {
-        self.visit_rows(|row| sink.push(row))
-    }
-
-    /// # Errors
-    ///
-    /// Returns an error if the scan or sink fails.
-    pub fn write_batches(&self, sink: &mut impl BatchSink) -> Result<crate::ScanStatsSummary> {
-        self.visit_batches(|batch| sink.push(batch))
-    }
 }
 
 impl ScanBuilder<'_> {
@@ -893,7 +872,6 @@ fn decode_descriptors_into_batches(
 /// Copy the accumulator's per-family cell counters into `stats`.
 const fn store_batch_counters(stats: &mut ScanStats, counters: super::batch::BatchFamilyCounters) {
     stats.batch_staged_numeric_cells = counters.staged_numeric;
-    stats.batch_direct_numeric_cells = counters.direct_numeric;
     stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;
     stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
     stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
@@ -1049,9 +1027,6 @@ pub(super) const fn merge_scan_stats(into: &mut ScanStats, from: &ScanStats) {
     into.batch_staged_numeric_cells = into
         .batch_staged_numeric_cells
         .saturating_add(from.batch_staged_numeric_cells);
-    into.batch_direct_numeric_cells = into
-        .batch_direct_numeric_cells
-        .saturating_add(from.batch_direct_numeric_cells);
     into.batch_direct_raw_bytes_cells = into
         .batch_direct_raw_bytes_cells
         .saturating_add(from.batch_direct_raw_bytes_cells);
@@ -1516,18 +1491,8 @@ impl ScanBuilder<'_> {
             let _ = batcher.flush_borrowed_and_reset(&mut staged_scratch, f)?;
         }
 
-        let counters = batcher.counters();
         stats.decode_batches = decode_batches;
-        stats.batch_staged_numeric_cells = counters.staged_numeric;
-        stats.batch_direct_numeric_cells = counters.direct_numeric;
-        stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;
-        stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
-        stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
-        stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned;
-        stats.batch_direct_utf8_owned_interned_hits = counters.direct_utf8_owned_interned_hits;
-        stats.batch_direct_utf8_owned_seen_once_promotions =
-            counters.direct_utf8_owned_seen_once_promotions;
-        stats.batch_fallback_cells = counters.fallback;
+        store_batch_counters(&mut stats, batcher.counters());
         Ok(stats)
     }
 
@@ -1579,18 +1544,8 @@ impl ScanBuilder<'_> {
             let _ = f(batch)?;
         }
 
-        let counters = batcher.counters();
         stats.decode_batches = decode_batches;
-        stats.batch_staged_numeric_cells = counters.staged_numeric;
-        stats.batch_direct_numeric_cells = counters.direct_numeric;
-        stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;
-        stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
-        stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
-        stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned;
-        stats.batch_direct_utf8_owned_interned_hits = counters.direct_utf8_owned_interned_hits;
-        stats.batch_direct_utf8_owned_seen_once_promotions =
-            counters.direct_utf8_owned_seen_once_promotions;
-        stats.batch_fallback_cells = counters.fallback;
+        store_batch_counters(&mut stats, batcher.counters());
         Ok(stats)
     }
 
@@ -1647,18 +1602,8 @@ impl ScanBuilder<'_> {
             decode_batches = decode_batches.saturating_add(1);
         }
 
-        let counters = batcher.counters();
         stats.decode_batches = decode_batches;
-        stats.batch_staged_numeric_cells = counters.staged_numeric;
-        stats.batch_direct_numeric_cells = counters.direct_numeric;
-        stats.batch_direct_raw_bytes_cells = counters.direct_raw_bytes;
-        stats.batch_direct_utf8_single_byte_cells = counters.direct_utf8_single_byte;
-        stats.batch_direct_utf8_borrowed_cells = counters.direct_utf8_borrowed;
-        stats.batch_direct_utf8_owned_cells = counters.direct_utf8_owned;
-        stats.batch_direct_utf8_owned_interned_hits = counters.direct_utf8_owned_interned_hits;
-        stats.batch_direct_utf8_owned_seen_once_promotions =
-            counters.direct_utf8_owned_seen_once_promotions;
-        stats.batch_fallback_cells = counters.fallback;
+        store_batch_counters(&mut stats, batcher.counters());
 
         Ok(OwnedBatchScanBreakdown {
             total_ns: total_start.elapsed().as_nanos(),

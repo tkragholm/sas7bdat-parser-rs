@@ -13,6 +13,30 @@ Entries from 0.4.0 onward are generated from Conventional Commits with
 [git-cliff](https://git-cliff.org) (`cliff.toml` at the repository root); 0.3.0 and
 earlier are written by hand.
 
+## [Unreleased]
+
+### Removed
+
+- **Breaking (API).** `PrefetchPolicy` and `PageCachePolicy`, along with the
+  `OpenOptionsBuilder::prefetch` and `::page_cache` setters. Both were stored on `OpenOptions`
+  and read by nothing — they never influenced a single read.
+- **Breaking (API).** The `RawRowSink`, `RowSink` and `BatchSink` traits and the
+  `ScanBuilder::write_raw_rows`, `::write_rows` and `::write_batches` methods that drove them.
+  They were one-line wrappers around the corresponding `visit_*` closures, and nothing in the
+  workspace — no crate, test, example or benchmark — ever implemented or called them. Callers
+  wanting a push sink can pass `|row| sink.push(row)` to `visit_rows` directly.
+- The `direct_numeric` batch decode family, which was unreachable. Every numeric decode kernel
+  compiles a `NumericTileMode`, and `compile_batch_column_families` routes any column with a
+  tile mode to `staged_numeric` before the family match runs, so no column could ever land in
+  it. Verified by replacing its selection arm with a panic: the full test suite and a decode of
+  all 387 corpus fixtures never reached it. Removing it also retires the five
+  `OwnedBatchColumnBuilder::append_*_fast` methods it was the only caller of, and drops one
+  branch from the per-row family dispatch. The internal `batch_direct_numeric_cells` scan
+  counter is gone with it; `ScanStatsSummary` is unaffected.
+
+Behaviour is unchanged: converting the corpus with the previous release and with this build
+produces byte-identical Parquet and CSV output across all 363 files.
+
 ## [0.6.0] - 2026-07-30
 
 ### Changed

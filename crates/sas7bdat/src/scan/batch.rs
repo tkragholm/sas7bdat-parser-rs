@@ -1,11 +1,9 @@
 use super::{
-    ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, DateNumericValue,
-    DateTimeNumericValue, DecodedUtf8BatchValue, Endianness, Error, NUMERIC_EXP_MASK,
-    NUMERIC_FRACTION_MASK, NumericTileMode, OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell,
-    Result, RowDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime,
-    ScanBuilder, StringDecodeKernel, TimeNumericValue, TrimMode, TrimmedString, TypedNumericValue,
-    classify_date_numeric_value, classify_datetime_numeric_value, classify_time_numeric_value,
-    classify_typed_numeric_value, decode_numeric_cell, f64_is_i64_representable,
+    ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, DecodedUtf8BatchValue,
+    Endianness, Error, NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, NumericTileMode, OwnedColumnBuffer,
+    OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, SasDate,
+    SasDateTime, SasTime, ScanBuilder, StringDecodeKernel, TrimMode, TrimmedString,
+    TypedNumericValue, classify_typed_numeric_value, f64_is_i64_representable,
     materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
     staged_numeric_raw_bits_from_planned_cell, trim_and_classify_for_mode,
 };
@@ -27,15 +25,9 @@ pub(super) struct BatchDecodePlan {
     pub(super) families: BatchColumnFamilies,
     pub(super) staged_numeric_ops: Vec<StagedNumericOp>,
     pub(super) staged_string_lookup_indices: Vec<usize>,
-    pub(super) direct_numeric_integer: Vec<usize>,
-    pub(super) direct_numeric_floatlike: Vec<usize>,
-    pub(super) direct_numeric_date: Vec<usize>,
-    pub(super) direct_numeric_datetime: Vec<usize>,
-    pub(super) direct_numeric_time: Vec<usize>,
     pub(super) direct_utf8_owned_mode: Option<DirectUtf8OwnedMode>,
     pub(super) flags: BatchPlanFlags,
     pub(super) staged_numeric_cells_per_row: u64,
-    pub(super) direct_numeric_cells_per_row: u64,
     pub(super) direct_raw_bytes_cells_per_row: u64,
     pub(super) direct_utf8_single_byte_cells_per_row: u64,
     pub(super) direct_utf8_borrowed_cells_per_row: u64,
@@ -46,7 +38,6 @@ pub(super) struct BatchDecodePlan {
 #[derive(Debug, Clone, Default)]
 pub(super) struct BatchColumnFamilies {
     pub(super) staged_numeric: Vec<usize>,
-    pub(super) direct_numeric: Vec<usize>,
     pub(super) direct_raw_bytes: Vec<usize>,
     pub(super) direct_utf8_single_byte: Vec<usize>,
     pub(super) direct_utf8_borrowed: Vec<usize>,
@@ -69,13 +60,12 @@ impl BatchPlanFlags {
     const ALL_COLUMNS_STAGED_NUMERIC: u16 = 1 << 1;
     const NEEDS_OWNED_STRING_SCRATCH: u16 = 1 << 2;
     const HAS_STAGED_NUMERIC: u16 = 1 << 3;
-    const HAS_DIRECT_NUMERIC: u16 = 1 << 4;
-    const HAS_DIRECT_RAW_BYTES: u16 = 1 << 5;
-    const HAS_DIRECT_UTF8_SINGLE_BYTE: u16 = 1 << 6;
-    const HAS_DIRECT_UTF8_BORROWED: u16 = 1 << 7;
-    const HAS_DIRECT_UTF8_OWNED: u16 = 1 << 8;
-    const HAS_FALLBACK: u16 = 1 << 9;
-    const HAS_FAST_PATH_STAGED_PLUS_UTF8_OWNED: u16 = 1 << 10;
+    const HAS_DIRECT_RAW_BYTES: u16 = 1 << 4;
+    const HAS_DIRECT_UTF8_SINGLE_BYTE: u16 = 1 << 5;
+    const HAS_DIRECT_UTF8_BORROWED: u16 = 1 << 6;
+    const HAS_DIRECT_UTF8_OWNED: u16 = 1 << 7;
+    const HAS_FALLBACK: u16 = 1 << 8;
+    const HAS_FAST_PATH_STAGED_PLUS_UTF8_OWNED: u16 = 1 << 9;
 
     const fn has(self, bit: u16) -> bool {
         (self.0 & bit) != 0
@@ -391,7 +381,6 @@ pub(super) struct BatchAccumulator {
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct BatchFamilyCounters {
     pub(super) staged_numeric: u64,
-    pub(super) direct_numeric: u64,
     pub(super) direct_raw_bytes: u64,
     pub(super) direct_utf8_single_byte: u64,
     pub(super) direct_utf8_borrowed: u64,
@@ -446,18 +435,9 @@ impl BatchDecodePlan {
             .collect::<Vec<_>>();
         let staged_string_lookup_indices =
             compile_staged_string_lookup_indices(&families, &row_plan);
-        let DirectNumericGroups {
-            integer: direct_numeric_integer,
-            floatlike: direct_numeric_floatlike,
-            date: direct_numeric_date,
-            datetime: direct_numeric_datetime,
-            time: direct_numeric_time,
-        } = compile_direct_numeric_groups(&families, &row_plan);
 
         let staged_numeric_cells_per_row =
             u64::try_from(staged_numeric_ops.len()).unwrap_or(u64::MAX);
-        let direct_numeric_cells_per_row =
-            u64::try_from(families.direct_numeric.len()).unwrap_or(u64::MAX);
         let direct_raw_bytes_cells_per_row =
             u64::try_from(families.direct_raw_bytes.len()).unwrap_or(u64::MAX);
         let direct_utf8_single_byte_cells_per_row =
@@ -475,15 +455,9 @@ impl BatchDecodePlan {
             families,
             staged_numeric_ops,
             staged_string_lookup_indices,
-            direct_numeric_integer,
-            direct_numeric_floatlike,
-            direct_numeric_date,
-            direct_numeric_datetime,
-            direct_numeric_time,
             direct_utf8_owned_mode,
             flags,
             staged_numeric_cells_per_row,
-            direct_numeric_cells_per_row,
             direct_raw_bytes_cells_per_row,
             direct_utf8_single_byte_cells_per_row,
             direct_utf8_borrowed_cells_per_row,
@@ -500,15 +474,6 @@ impl BatchDecodePlan {
     pub(super) const fn needs_owned_string_scratch(&self) -> bool {
         self.flags.has(BatchPlanFlags::NEEDS_OWNED_STRING_SCRATCH)
     }
-}
-
-#[derive(Debug, Default)]
-struct DirectNumericGroups {
-    integer: Vec<usize>,
-    floatlike: Vec<usize>,
-    date: Vec<usize>,
-    datetime: Vec<usize>,
-    time: Vec<usize>,
 }
 
 fn resolve_direct_utf8_owned_mode(
@@ -531,32 +496,8 @@ fn resolve_direct_utf8_owned_mode(
     Ok(Some(mode))
 }
 
-fn compile_direct_numeric_groups(
-    families: &BatchColumnFamilies,
-    row_plan: &RowDecodePlan,
-) -> DirectNumericGroups {
-    let mut groups = DirectNumericGroups::default();
-    for &idx in &families.direct_numeric {
-        let column = &row_plan.columns[idx];
-        match column.kernel {
-            CompiledDecodeKernel::Integer => groups.integer.push(idx),
-            CompiledDecodeKernel::Float
-            | CompiledDecodeKernel::NumericLossless
-            | CompiledDecodeKernel::DateAsNumeric
-            | CompiledDecodeKernel::DateTimeAsNumeric
-            | CompiledDecodeKernel::TimeAsNumeric => groups.floatlike.push(idx),
-            CompiledDecodeKernel::Date => groups.date.push(idx),
-            CompiledDecodeKernel::DateTime => groups.datetime.push(idx),
-            CompiledDecodeKernel::Time => groups.time.push(idx),
-            _ => unreachable!("non-numeric kernel in direct numeric family"),
-        }
-    }
-    groups
-}
-
 fn compile_plan_flags(families: &BatchColumnFamilies, row_plan: &RowDecodePlan) -> BatchPlanFlags {
     let has_staged_numeric = !families.staged_numeric.is_empty();
-    let has_direct_numeric = !families.direct_numeric.is_empty();
     let has_direct_raw_bytes = !families.direct_raw_bytes.is_empty();
     let has_direct_utf8_single_byte = !families.direct_utf8_single_byte.is_empty();
     let has_direct_utf8_borrowed = !families.direct_utf8_borrowed.is_empty();
@@ -571,7 +512,6 @@ fn compile_plan_flags(families: &BatchColumnFamilies, row_plan: &RowDecodePlan) 
         .any(|&idx| matches!(row_plan.columns[idx].kernel, CompiledDecodeKernel::Utf8));
     let has_fast_path_staged_plus_utf8_owned = has_staged_numeric
         && has_direct_utf8_owned
-        && !has_direct_numeric
         && !has_direct_raw_bytes
         && !has_direct_utf8_single_byte
         && !has_direct_utf8_borrowed
@@ -592,7 +532,6 @@ fn compile_plan_flags(families: &BatchColumnFamilies, row_plan: &RowDecodePlan) 
         needs_owned_string_scratch,
     );
     flags.set(BatchPlanFlags::HAS_STAGED_NUMERIC, has_staged_numeric);
-    flags.set(BatchPlanFlags::HAS_DIRECT_NUMERIC, has_direct_numeric);
     flags.set(BatchPlanFlags::HAS_DIRECT_RAW_BYTES, has_direct_raw_bytes);
     flags.set(
         BatchPlanFlags::HAS_DIRECT_UTF8_SINGLE_BYTE,
@@ -874,78 +813,6 @@ impl BatchAccumulator {
         }
         Ok(())
     }
-
-    #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
-    fn push_direct_numeric_family(&mut self, row: &[u8]) -> Result<()> {
-        self.counters.direct_numeric += self.plan.direct_numeric_cells_per_row;
-        for &idx in &self.plan.direct_numeric_integer {
-            let batch_column = &mut self.columns[idx];
-            let column = &self.plan.row_plan.columns[idx];
-            let slice = RowDecodePlan::slice_in_bounds(row, column);
-            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
-            let appended = batch_column.append_integer_fast(number);
-            debug_assert!(appended, "compiled direct numeric batch must match builder");
-            if !appended {
-                return Err(Error::unsupported(
-                    "compiled direct numeric batch plan did not match column builder",
-                ));
-            }
-        }
-        for &idx in &self.plan.direct_numeric_floatlike {
-            let batch_column = &mut self.columns[idx];
-            let column = &self.plan.row_plan.columns[idx];
-            let slice = RowDecodePlan::slice_in_bounds(row, column);
-            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
-            let appended = batch_column.append_f64_fast(number);
-            debug_assert!(appended, "compiled direct numeric batch must match builder");
-            if !appended {
-                return Err(Error::unsupported(
-                    "compiled direct numeric batch plan did not match column builder",
-                ));
-            }
-        }
-        for &idx in &self.plan.direct_numeric_date {
-            let batch_column = &mut self.columns[idx];
-            let column = &self.plan.row_plan.columns[idx];
-            let slice = RowDecodePlan::slice_in_bounds(row, column);
-            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
-            let appended = batch_column.append_date_fast(number);
-            debug_assert!(appended, "compiled direct numeric batch must match builder");
-            if !appended {
-                return Err(Error::unsupported(
-                    "compiled direct numeric batch plan did not match column builder",
-                ));
-            }
-        }
-        for &idx in &self.plan.direct_numeric_datetime {
-            let batch_column = &mut self.columns[idx];
-            let column = &self.plan.row_plan.columns[idx];
-            let slice = RowDecodePlan::slice_in_bounds(row, column);
-            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
-            let appended = batch_column.append_datetime_fast(number);
-            debug_assert!(appended, "compiled direct numeric batch must match builder");
-            if !appended {
-                return Err(Error::unsupported(
-                    "compiled direct numeric batch plan did not match column builder",
-                ));
-            }
-        }
-        for &idx in &self.plan.direct_numeric_time {
-            let batch_column = &mut self.columns[idx];
-            let column = &self.plan.row_plan.columns[idx];
-            let slice = RowDecodePlan::slice_in_bounds(row, column);
-            let number = decode_numeric_cell(slice, self.plan.row_plan.endianness);
-            let appended = batch_column.append_time_fast(number);
-            debug_assert!(appended, "compiled direct numeric batch must match builder");
-            if !appended {
-                return Err(Error::unsupported(
-                    "compiled direct numeric batch plan did not match column builder",
-                ));
-            }
-        }
-        Ok(())
-    }
-
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
     fn push_direct_raw_bytes_family(&mut self, row: &[u8]) -> Result<()> {
         self.counters.direct_raw_bytes += self.plan.direct_raw_bytes_cells_per_row;
@@ -1134,9 +1001,6 @@ impl BatchAccumulator {
 
         if self.plan.flags.has(BatchPlanFlags::HAS_STAGED_NUMERIC) {
             self.push_staged_numeric_family(row)?;
-        }
-        if self.plan.flags.has(BatchPlanFlags::HAS_DIRECT_NUMERIC) {
-            self.push_direct_numeric_family(row)?;
         }
         if self.plan.flags.has(BatchPlanFlags::HAS_DIRECT_RAW_BYTES) {
             self.push_direct_raw_bytes_family(row)?;
@@ -1499,68 +1363,6 @@ impl OwnedBatchColumnBuilder {
         }
     }
 
-    pub(super) fn append_integer_fast(&mut self, number: Option<f64>) -> bool {
-        match self {
-            Self::I32 { values, valid } => match classify_typed_numeric_value(number, true) {
-                TypedNumericValue::Null => {
-                    push_primitive_null(values, valid, 0);
-                    true
-                }
-                TypedNumericValue::Int32(value32) => {
-                    push_primitive_valid(values, valid, value32);
-                    true
-                }
-                TypedNumericValue::Int64(_) | TypedNumericValue::Float64(_) => {
-                    self.widen_integer_to_f64();
-                    self.append_f64_fast(number)
-                }
-            },
-            Self::I64 { values, valid } => match classify_typed_numeric_value(number, false) {
-                TypedNumericValue::Null => {
-                    push_primitive_null(values, valid, 0);
-                    true
-                }
-                TypedNumericValue::Int32(value32) => {
-                    push_primitive_valid(values, valid, i64::from(value32));
-                    true
-                }
-                TypedNumericValue::Int64(value64) => {
-                    push_primitive_valid(values, valid, value64);
-                    true
-                }
-                TypedNumericValue::Float64(_) => {
-                    self.widen_integer_to_f64();
-                    self.append_f64_fast(number)
-                }
-            },
-            Self::F64 { .. } => self.append_f64_fast(number),
-            _ => false,
-        }
-    }
-
-    pub(super) fn append_f64_fast(&mut self, number: Option<f64>) -> bool {
-        match self {
-            Self::F64 { values, valid } => {
-                match number {
-                    None => push_primitive_null(values, valid, 0.0),
-                    Some(value) => push_primitive_valid(values, valid, value),
-                }
-                true
-            }
-            Self::StagedNumeric {
-                raw_bits,
-                mode: NumericTileMode::F64RawBits,
-                has_missing,
-            } => {
-                let raw = number.map_or(SAS_NUMERIC_MISSING_SENTINEL, f64::to_bits);
-                *has_missing |= numeric_bits_is_missing(raw);
-                raw_bits.push(raw);
-                true
-            }
-            _ => false,
-        }
-    }
-
     #[inline]
     pub(super) fn append_staged_numeric_bits_fast(&mut self, raw: u64) -> bool {
         match self {
@@ -1573,87 +1375,6 @@ impl OwnedBatchColumnBuilder {
                 raw_bits.push(raw);
                 true
             }
-            _ => false,
-        }
-    }
-
-    pub(super) fn append_date_fast(&mut self, number: Option<f64>) -> bool {
-        match self {
-            Self::Date { values, valid } => match classify_date_numeric_value(number) {
-                DateNumericValue::Null => {
-                    push_primitive_null(
-                        values,
-                        valid,
-                        SasDate {
-                            days_since_sas_epoch: 0,
-                        },
-                    );
-                    true
-                }
-                DateNumericValue::Date(value) => {
-                    push_primitive_valid(values, valid, value);
-                    true
-                }
-                DateNumericValue::Float64(_) => {
-                    self.widen_temporal_to_f64();
-                    self.append_f64_fast(number)
-                }
-            },
-            Self::F64 { .. } => self.append_f64_fast(number),
-            _ => false,
-        }
-    }
-
-    pub(super) fn append_datetime_fast(&mut self, number: Option<f64>) -> bool {
-        match self {
-            Self::DateTime { values, valid } => match classify_datetime_numeric_value(number) {
-                DateTimeNumericValue::Null => {
-                    push_primitive_null(
-                        values,
-                        valid,
-                        SasDateTime {
-                            seconds_since_sas_epoch: 0,
-                        },
-                    );
-                    true
-                }
-                DateTimeNumericValue::DateTime(value) => {
-                    push_primitive_valid(values, valid, value);
-                    true
-                }
-                DateTimeNumericValue::Float64(_) => {
-                    self.widen_temporal_to_f64();
-                    self.append_f64_fast(number)
-                }
-            },
-            Self::F64 { .. } => self.append_f64_fast(number),
-            _ => false,
-        }
-    }
-
-    pub(super) fn append_time_fast(&mut self, number: Option<f64>) -> bool {
-        match self {
-            Self::Time { values, valid } => match classify_time_numeric_value(number) {
-                TimeNumericValue::Null => {
-                    push_primitive_null(
-                        values,
-                        valid,
-                        SasTime {
-                            seconds_since_midnight: 0,
-                        },
-                    );
-                    true
-                }
-                TimeNumericValue::Time(value) => {
-                    push_primitive_valid(values, valid, value);
-                    true
-                }
-                TimeNumericValue::Float64(_) => {
-                    self.widen_temporal_to_f64();
-                    self.append_f64_fast(number)
-                }
-            },
-            Self::F64 { .. } => self.append_f64_fast(number),
             _ => false,
         }
     }
@@ -2522,34 +2243,21 @@ pub(super) fn compile_batch_column_families(
 ) -> BatchColumnFamilies {
     let mut families = BatchColumnFamilies::default();
     for (idx, (column, kind)) in columns.iter().zip(column_kinds.iter().copied()).enumerate() {
+        // Every numeric kernel compiles a tile mode (`plan::compile_numeric_tile_mode` returns
+        // `None` only for `Utf8` and `RawBytes`), so this claims all of them and the match
+        // below only ever sees string and byte columns. Keep the two in step: a numeric kernel
+        // that stopped compiling a tile would silently land in `fallback`, which is correct but
+        // slow.
         if column.numeric_tile.is_some() {
             families.staged_numeric.push(idx);
             continue;
         }
-
         match (column.kernel, kind) {
             (CompiledDecodeKernel::Utf8, ColumnMaterializationKind::Utf8)
                 if enable_single_byte_utf8 && column.width == 1 =>
             {
                 families.direct_utf8_single_byte.push(idx);
             }
-            (
-                CompiledDecodeKernel::Integer
-                | CompiledDecodeKernel::Float
-                | CompiledDecodeKernel::Date
-                | CompiledDecodeKernel::DateAsNumeric
-                | CompiledDecodeKernel::DateTime
-                | CompiledDecodeKernel::DateTimeAsNumeric
-                | CompiledDecodeKernel::Time
-                | CompiledDecodeKernel::TimeAsNumeric
-                | CompiledDecodeKernel::NumericLossless,
-                ColumnMaterializationKind::I32
-                | ColumnMaterializationKind::I64
-                | ColumnMaterializationKind::F64
-                | ColumnMaterializationKind::Date
-                | ColumnMaterializationKind::DateTime
-                | ColumnMaterializationKind::Time,
-            ) => families.direct_numeric.push(idx),
             (CompiledDecodeKernel::RawBytes, ColumnMaterializationKind::RawBytes) => {
                 families.direct_raw_bytes.push(idx);
             }
