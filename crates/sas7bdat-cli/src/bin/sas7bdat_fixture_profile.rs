@@ -181,13 +181,7 @@ fn run() -> std::result::Result<(), String> {
             ProjectionPreset::Mixed => "mixed",
         }
         .to_owned(),
-        io_backend: match io_backend {
-            IoBackendPreference::Auto => "auto",
-            IoBackendPreference::MmapPreferred => "mmap-preferred",
-            IoBackendPreference::BufferedPreferred => "buffered-preferred",
-            IoBackendPreference::BufferedOnly => "buffered-only",
-        }
-        .to_owned(),
+        io_backend: io_backend.as_str().to_owned(),
         limit,
         repeat,
         elapsed_ns_total: elapsed_total,
@@ -204,13 +198,7 @@ fn run() -> std::result::Result<(), String> {
 }
 
 fn parse_io_backend(value: &str) -> Option<IoBackendPreference> {
-    match value {
-        "auto" => Some(IoBackendPreference::Auto),
-        "mmap-preferred" => Some(IoBackendPreference::MmapPreferred),
-        "buffered-preferred" => Some(IoBackendPreference::BufferedPreferred),
-        "buffered-only" => Some(IoBackendPreference::BufferedOnly),
-        _ => None,
-    }
+    value.parse().ok()
 }
 
 fn print_usage() {

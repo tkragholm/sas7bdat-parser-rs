@@ -148,7 +148,6 @@ where
         decode: DescriptorChunkContext {
             raw_plan: &plan.raw,
             batch_plan: &plan.batch,
-            row_count: builder.ds.metadata.row_count,
             target_rows: plan.batch_row_capacity,
             capacity_hint_rows: plan.capacity_hint_rows.div_ceil(workers).max(1),
             row_len: usize::from(layout.row_len),

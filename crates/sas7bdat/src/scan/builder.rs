@@ -11,7 +11,6 @@ use super::{
 use arrow_array::RecordBatch;
 #[cfg(feature = "arrow")]
 use arrow_schema::SchemaRef;
-use rayon::prelude::{ParallelIterator, ParallelSlice};
 use std::{
     collections::VecDeque,
     sync::{
@@ -602,131 +601,27 @@ impl<'a> ScanBuilder<'a> {
         self.collect_batches_inner(true)
     }
 
+    /// Collect the streamed owned-batch scan into a `Vec`.
+    ///
+    /// Deliberately a thin wrapper over [`Self::visit_owned_batches`] rather than its own
+    /// dispatch tree. The streaming driver already chooses between the fused single-pass scan,
+    /// the parallel mapped and extent-streamed readers, the column-major fill and the row-major
+    /// loop; a second copy of that choice lived here and had drifted from it — the collect side
+    /// never grew the fused or extent-streamed branches, so a path source collected serially in
+    /// two passes while the identical scan streamed in one.
     fn collect_batches_inner(&self, column_major: bool) -> Result<Vec<OwnedColumnarBatch>> {
-        if matches!(self.decode, DecodeMode::Raw) {
-            return Err(Error::unsupported(
-                "collect_batches does not support DecodeMode::Raw",
-            ));
-        }
-
-        let plan = ScanPlan::new(self)?;
-        if let Some(batches) = self.try_collect_batches_parallel(&plan, column_major)? {
-            return Ok(batches);
-        }
-
-        let target_rows_u64 = u64::try_from(plan.batch_row_capacity)
+        // Pre-size from the batch hint alone. `resolve_batch_row_capacity` reads the builder,
+        // so the estimate costs no plan compilation of its own.
+        let target_rows = u64::try_from(super::plan::resolve_batch_row_capacity(self)?)
             .unwrap_or(u64::MAX)
             .max(1);
-        let estimated_batches = self.ds.metadata.row_count.div_ceil(target_rows_u64);
-        let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
-        let mut acc = BatchAccumulator::new(
-            plan.batch.clone(),
-            plan.batch_row_capacity,
-            plan.capacity_hint_rows,
-        )
-        .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
-
-        // The column-major fast path needs an in-memory source, a whole-file scan, and an
-        // all-staged-numeric plan; otherwise (and for any non-fused page) decode stays
-        // row-major and produces identical output.
-        let columnar_file_bytes = column_major_file_bytes(self, column_major)
-            .filter(|_| acc.plan_is_all_columns_staged_numeric());
-
-        if let Some(file_bytes) = columnar_file_bytes {
-            super::raw::RawScanPlan::validate_builder(self)?;
-            let row_len = usize::from(self.ds.layout.row_len);
-            if row_len == 0 {
-                return Ok(Vec::new());
-            }
-            let descriptors = self.ds.descriptors()?;
-            let ctx = ColumnarDecodeCtx {
-                descriptors: descriptors.as_ref(),
-                raw_plan: &plan.raw,
-                window: super::raw::PageWindow::whole_file(file_bytes),
-                row_len,
-                columnar: true,
-            };
-            decode_descriptors_into_batches(&mut acc, &ctx, &descriptors.pages, &mut batches)?;
-        } else {
-            let _stats = scan_row_bytes_with_plan(self, &plan.raw, &mut |row_index, bytes| {
-                acc.push_row(row_index.into(), bytes)?;
-                if acc.is_full() {
-                    batches.push(acc.take_batch()?);
-                    acc.reset_after_flush();
-                }
-                Ok(ControlFlow::Continue(()))
-            })?;
-        }
-
-        if !acc.is_empty() {
-            batches.push(acc.take_batch()?);
-        }
+        let estimated = self.ds.metadata.row_count.div_ceil(target_rows);
+        let mut batches = Vec::with_capacity(usize::try_from(estimated).unwrap_or(0));
+        self.scan_batches_with_column_major(column_major, &mut |batch| {
+            batches.push(batch);
+            Ok(ControlFlow::Continue(()))
+        })?;
         Ok(batches)
-    }
-}
-
-impl ScanBuilder<'_> {
-    fn try_collect_batches_parallel(
-        &self,
-        plan: &ScanPlan,
-        column_major: bool,
-    ) -> Result<Option<Vec<OwnedColumnarBatch>>> {
-        let descriptors = self.ds.descriptors()?;
-        let page_count = descriptors.pages.len();
-        let workers = resolved_parallel_workers(self.parallelism, page_count);
-        if workers <= 1 || page_count <= 1 || self.row_limit.is_some() {
-            return Ok(None);
-        }
-
-        let file_bytes: &[u8] = match &self.ds.file.source {
-            FileSource::Bytes(bytes) => bytes.as_ref(),
-            FileSource::Mmap(mmap) => &mmap[..],
-            FileSource::Path(_) => return Ok(None),
-        };
-
-        let window = super::raw::PageWindow::whole_file(file_bytes);
-        let worker_capacity_hint = plan.capacity_hint_rows.div_ceil(workers).max(1);
-        super::raw::RawScanPlan::validate_builder(self)?;
-        let row_len = usize::from(self.ds.layout.row_len);
-        if row_len == 0 {
-            return Ok(Some(Vec::new()));
-        }
-
-        // The column-major fill ignores row selection, so it only applies to whole-file scans.
-        let columnar = column_major && matches!(self.row_selection, RowSelection::All);
-        // Oversubscribe chunks so rayon's global pool can steal and balance uneven chunks.
-        let chunk_size = balanced_chunk_size(
-            page_count,
-            workers,
-            self.ds.layout.rows_per_page,
-            plan.batch_row_capacity,
-        );
-        let context = DescriptorChunkContext {
-            raw_plan: &plan.raw,
-            batch_plan: &plan.batch,
-            row_count: self.ds.metadata.row_count,
-            target_rows: plan.batch_row_capacity,
-            capacity_hint_rows: worker_capacity_hint,
-            row_len,
-            columnar,
-        };
-        let results = descriptors
-            .pages
-            .par_chunks(chunk_size)
-            .map(|chunk| {
-                collect_batches_for_descriptor_chunk(window, descriptors.as_ref(), chunk, &context)
-            })
-            .collect::<Vec<_>>();
-
-        let mut batches = Vec::new();
-        for result in results {
-            let mut chunk_batches = result?;
-            batches.append(&mut chunk_batches);
-        }
-        if matches!(self.ordering, OrderingMode::Stable) {
-            batches.sort_unstable_by_key(|batch| batch.row_base);
-        }
-        Ok(Some(batches))
     }
 }
 
@@ -851,24 +746,6 @@ where
     Ok(ControlFlow::Continue(()))
 }
 
-/// Collect a run of page descriptors into owned batches (full batches appended to `batches`;
-/// the caller flushes the final partial). Thin wrapper over [`stream_descriptors_into_batches`]
-/// whose `consume` never stops.
-fn decode_descriptors_into_batches(
-    acc: &mut BatchAccumulator,
-    ctx: &ColumnarDecodeCtx<'_>,
-    page_descriptors: &[crate::internal::PageDescriptor],
-    batches: &mut Vec<OwnedColumnarBatch>,
-) -> Result<()> {
-    let mut stats = ScanStats::default();
-    let flow = stream_descriptors_into_batches(acc, ctx, page_descriptors, &mut stats, &mut |b| {
-        batches.push(b);
-        Ok(ControlFlow::Continue(()))
-    })?;
-    debug_assert!(flow.is_continue(), "collect consume never breaks");
-    Ok(())
-}
-
 /// Copy the accumulator's per-family cell counters into `stats`.
 const fn store_batch_counters(stats: &mut ScanStats, counters: super::batch::BatchFamilyCounters) {
     stats.batch_staged_numeric_cells = counters.staged_numeric;
@@ -887,45 +764,10 @@ const fn store_batch_counters(stats: &mut ScanStats, counters: super::batch::Bat
 pub(super) struct DescriptorChunkContext<'a> {
     pub raw_plan: &'a super::raw::RawScanPlan,
     pub batch_plan: &'a BatchDecodePlan,
-    pub row_count: u64,
     pub target_rows: usize,
     pub capacity_hint_rows: usize,
     pub row_len: usize,
     pub columnar: bool,
-}
-
-fn collect_batches_for_descriptor_chunk(
-    window: super::raw::PageWindow<'_>,
-    descriptor_table: &crate::internal::PageDescriptorTable,
-    descriptor_chunk: &[crate::internal::PageDescriptor],
-    context: &DescriptorChunkContext<'_>,
-) -> Result<Vec<OwnedColumnarBatch>> {
-    let target_rows_u64 = u64::try_from(context.target_rows)
-        .unwrap_or(u64::MAX)
-        .max(1);
-    let estimated_batches = context.row_count.div_ceil(target_rows_u64);
-    let mut batches = Vec::with_capacity(usize::try_from(estimated_batches).unwrap_or(0));
-    let mut acc = BatchAccumulator::new(
-        context.batch_plan.clone(),
-        context.target_rows,
-        context.capacity_hint_rows,
-    )
-    .with_materialize_threads(1);
-
-    let ctx = ColumnarDecodeCtx {
-        descriptors: descriptor_table,
-        raw_plan: context.raw_plan,
-        window,
-        row_len: context.row_len,
-        columnar: context.columnar && acc.plan_is_all_columns_staged_numeric(),
-    };
-    decode_descriptors_into_batches(&mut acc, &ctx, descriptor_chunk, &mut batches)?;
-
-    if !acc.is_empty() {
-        batches.push(acc.take_batch()?);
-    }
-
-    Ok(batches)
 }
 
 pub(super) enum StreamedBatchMessage {
@@ -1129,8 +971,23 @@ impl ScanBuilder<'_> {
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
+        self.scan_batches_with_column_major(matches!(self.column_major, ColumnMajorDecode::On), f)
+    }
+
+    /// The owned-batch driver, with the column-major choice passed in rather than read from the
+    /// builder — `collect_batches_columnar` forces it on to benchmark the two fills head-to-head.
+    fn scan_batches_with_column_major<F>(&self, column_major: bool, f: &mut F) -> Result<ScanStats>
+    where
+        F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+    {
+        // Checked here rather than in the row-major fallback alone, so every owned-batch entry
+        // point rejects `Raw` the same way instead of only the scans that reach that branch.
+        if matches!(self.decode, DecodeMode::Raw) {
+            return Err(Error::unsupported(
+                "owned batch scans do not support DecodeMode::Raw; use visit_raw_rows instead",
+            ));
+        }
         let plan = ScanPlan::new(self)?;
-        let column_major = matches!(self.column_major, ColumnMajorDecode::On);
         // One pass where it applies: compiling descriptors and decoding rows from the same
         // reads halves the bytes moved, which is the whole cost on a network share.
         if let Some(stats) = super::fused::try_stream_batches_fused(self, &plan, column_major, f)? {
@@ -1294,7 +1151,6 @@ impl ScanBuilder<'_> {
         let context = DescriptorChunkContext {
             raw_plan: &plan.raw,
             batch_plan: &plan.batch,
-            row_count: self.ds.metadata.row_count,
             target_rows: plan.batch_row_capacity,
             capacity_hint_rows: worker_capacity_hint,
             row_len: usize::from(self.ds.layout.row_len),

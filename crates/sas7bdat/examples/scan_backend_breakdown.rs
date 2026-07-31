@@ -1,16 +1,6 @@
 use sas7bdat::{BatchHint, Dataset, IoBackendPreference, OpenOptions, Projection};
 use std::{env, ops::ControlFlow, path::Path, time::Instant};
 
-fn parse_backend(value: &str) -> Result<IoBackendPreference, String> {
-    match value {
-        "auto" => Ok(IoBackendPreference::Auto),
-        "mmap" | "mmap-preferred" => Ok(IoBackendPreference::MmapPreferred),
-        "buffered" | "buffered-preferred" => Ok(IoBackendPreference::BufferedPreferred),
-        "buffered-only" => Ok(IoBackendPreference::BufferedOnly),
-        other => Err(format!("unsupported backend `{other}`")),
-    }
-}
-
 fn parse_projection(ds: &Dataset, columns: Option<&str>) -> Result<Projection, String> {
     match columns {
         Some(raw) if !raw.is_empty() => ds
@@ -40,7 +30,11 @@ fn main() -> Result<(), String> {
     let path = args.next().ok_or_else(|| {
         "usage: scan_backend_breakdown <fixture> <backend> [columns_csv]".to_owned()
     })?;
-    let backend = parse_backend(&args.next().ok_or_else(|| "missing backend".to_owned())?)?;
+    let backend: IoBackendPreference = args
+        .next()
+        .ok_or_else(|| "missing backend".to_owned())?
+        .parse()
+        .map_err(|err: sas7bdat::Error| err.to_string())?;
     let columns = args.next();
 
     let open_start = Instant::now();
@@ -99,12 +93,7 @@ fn main() -> Result<(), String> {
             "}}"
         ),
         path,
-        match backend {
-            IoBackendPreference::Auto => "auto",
-            IoBackendPreference::MmapPreferred => "mmap-preferred",
-            IoBackendPreference::BufferedPreferred => "buffered-preferred",
-            IoBackendPreference::BufferedOnly => "buffered-only",
-        },
+        backend.as_str(),
         columns.unwrap_or_default(),
         ds.metadata().row_count,
         open_ns,

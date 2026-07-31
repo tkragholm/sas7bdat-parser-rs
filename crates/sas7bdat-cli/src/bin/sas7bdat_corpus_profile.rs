@@ -1410,22 +1410,11 @@ fn content_class_from_counts(
 }
 
 fn parse_io_backend(value: &str) -> Option<IoBackendPreference> {
-    match value {
-        "auto" => Some(IoBackendPreference::Auto),
-        "mmap-preferred" => Some(IoBackendPreference::MmapPreferred),
-        "buffered-preferred" => Some(IoBackendPreference::BufferedPreferred),
-        "buffered-only" => Some(IoBackendPreference::BufferedOnly),
-        _ => None,
-    }
+    value.parse().ok()
 }
 
 const fn io_backend_name(value: IoBackendPreference) -> &'static str {
-    match value {
-        IoBackendPreference::Auto => "auto",
-        IoBackendPreference::MmapPreferred => "mmap-preferred",
-        IoBackendPreference::BufferedPreferred => "buffered-preferred",
-        IoBackendPreference::BufferedOnly => "buffered-only",
-    }
+    value.as_str()
 }
 
 const fn projection_name(value: ProjectionPreset) -> &'static str {

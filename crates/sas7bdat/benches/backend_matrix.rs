@@ -14,7 +14,7 @@ fn bench_string_batches(
     columns: &[&str],
     io_backends: &[IoBackendPreference],
 ) {
-    let Some(reference) = open_dataset(relative, IoBackendPreference::MmapPreferred) else {
+    let Some(reference) = open_dataset(relative, IoBackendPreference::Mmap) else {
         return;
     };
     let row_count = reference.metadata().row_count;
@@ -52,7 +52,7 @@ fn bench_numeric_batches(
     columns: &[&str],
     io_backends: &[IoBackendPreference],
 ) {
-    let Some(reference) = open_dataset(relative, IoBackendPreference::MmapPreferred) else {
+    let Some(reference) = open_dataset(relative, IoBackendPreference::Mmap) else {
         return;
     };
     let row_count = reference.metadata().row_count;
@@ -89,7 +89,7 @@ fn bench_backend_raw_rows(
     relative: &str,
     io_backends: &[IoBackendPreference],
 ) {
-    let Some(reference) = open_dataset(relative, IoBackendPreference::MmapPreferred) else {
+    let Some(reference) = open_dataset(relative, IoBackendPreference::Mmap) else {
         return;
     };
     let row_count = reference.metadata().row_count;
@@ -119,7 +119,7 @@ fn bench_typed_rows(
     columns: &[&str],
     io_backends: &[IoBackendPreference],
 ) {
-    let Some(reference) = open_dataset(relative, IoBackendPreference::MmapPreferred) else {
+    let Some(reference) = open_dataset(relative, IoBackendPreference::Mmap) else {
         return;
     };
     let row_count = reference.metadata().row_count;
@@ -177,10 +177,7 @@ fn bench_projected_batches(
 }
 
 fn backend_matrix(c: &mut Criterion) {
-    let io_backends = [
-        IoBackendPreference::MmapPreferred,
-        IoBackendPreference::BufferedOnly,
-    ];
+    let io_backends = [IoBackendPreference::Mmap, IoBackendPreference::Buffered];
 
     bench_backend_raw_rows(c, "backend_ahs2013n_raw", "ahs2013n.sas7bdat", &io_backends);
     bench_typed_rows(

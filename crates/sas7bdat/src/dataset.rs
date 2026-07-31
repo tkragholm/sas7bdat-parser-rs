@@ -552,12 +552,12 @@ impl Dataset {
 ///
 /// `Auto` maps local storage and declines to map a network share: over SMB every access is a
 /// page fault serviced by a round-trip with no readahead, which turns a large file into
-/// millions of them. `MmapPreferred` still maps a remote file — it is an explicit request.
+/// millions of them. `Mmap` still maps a remote file — it is an explicit request.
 fn should_try_mmap(preference: IoBackendPreference, path: &Path) -> bool {
     match preference {
-        IoBackendPreference::MmapPreferred => true,
+        IoBackendPreference::Mmap => true,
         IoBackendPreference::Auto => !crate::netpath::is_network_path(path),
-        IoBackendPreference::BufferedPreferred | IoBackendPreference::BufferedOnly => false,
+        IoBackendPreference::Buffered => false,
     }
 }
 
@@ -594,7 +594,7 @@ mod tests {
         let ds = Dataset::open_with(
             &path,
             OpenOptions {
-                io_backend: IoBackendPreference::MmapPreferred,
+                io_backend: IoBackendPreference::Mmap,
                 ..OpenOptions::default()
             },
         )
@@ -614,7 +614,7 @@ mod tests {
         let ds = Dataset::open_with(
             &path,
             OpenOptions {
-                io_backend: IoBackendPreference::BufferedOnly,
+                io_backend: IoBackendPreference::Buffered,
                 ..OpenOptions::default()
             },
         )
@@ -715,7 +715,7 @@ mod tests {
         let breakdown = Dataset::open_breakdown(
             tracked_fixture(),
             OpenOptions {
-                io_backend: IoBackendPreference::MmapPreferred,
+                io_backend: IoBackendPreference::Mmap,
                 ..OpenOptions::default()
             },
         )
@@ -740,7 +740,7 @@ mod tests {
         let breakdown = Dataset::open_breakdown(
             tracked_fixture(),
             OpenOptions {
-                io_backend: IoBackendPreference::BufferedOnly,
+                io_backend: IoBackendPreference::Buffered,
                 ..OpenOptions::default()
             },
         )

@@ -1,9 +1,54 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How the reader gets at a file's bytes.
+///
+/// Three variants because `Dataset::open_with` makes exactly one decision from this — whether
+/// to attempt a memory map. An earlier `BufferedPreferred` sat beside `BufferedOnly` and took
+/// the same branch as it, so the pair named a preference the opener could not act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IoBackendPreference {
+    /// Memory-map local files; read network paths sequentially. The default.
+    #[default]
     Auto,
-    MmapPreferred,
-    BufferedPreferred,
-    BufferedOnly,
+    /// Always attempt a memory map, network path or not. Falls back to buffered reads if the
+    /// map itself fails.
+    Mmap,
+    /// Never map; read the file sequentially. The safe choice for network storage, where each
+    /// page fault becomes a round trip.
+    Buffered,
+}
+
+impl IoBackendPreference {
+    /// The canonical lowercase spelling, and the inverse of [`FromStr`].
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Mmap => "mmap",
+            Self::Buffered => "buffered",
+        }
+    }
+}
+
+impl std::fmt::Display for IoBackendPreference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for IoBackendPreference {
+    type Err = crate::error::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        // The hyphenated spellings are the names the profiling tools accepted before the
+        // variants collapsed; kept so existing invocations and scripts keep working.
+        match value.to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "mmap" | "mmap-preferred" => Ok(Self::Mmap),
+            "buffered" | "buffered-only" | "buffered-preferred" => Ok(Self::Buffered),
+            other => Err(crate::error::Error::unsupported(format!(
+                "unknown io backend {other:?}; expected auto, mmap, or buffered"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,11 +128,19 @@ pub enum DecodeMode {
     TypedLossless,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a scan does with bytes that are invalid in the file's declared encoding.
+///
+/// Two variants because there are two behaviours. An earlier `Off` never differed from the
+/// lenient path — every decision site tests for `Strict` and treats everything else as lossy —
+/// so it promised a third behaviour the decoder does not have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Utf8ValidationMode {
-    Auto,
+    /// Replace what will not decode and carry on, optionally repairing mojibake
+    /// (see [`MojibakePolicy`]). The default, and what the `*Lenient` decode kernels implement.
+    #[default]
+    Lenient,
+    /// Fail the scan on the first cell that does not decode cleanly.
     Strict,
-    Off,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,7 +175,7 @@ impl Default for StringDecodeOptions {
     fn default() -> Self {
         Self {
             trim_mode: TrimMode::RTrim,
-            utf8_validation: Utf8ValidationMode::Auto,
+            utf8_validation: Utf8ValidationMode::Lenient,
             mojibake_fix: MojibakePolicy::Auto,
             dictionary_staging: DictionaryStaging::Auto,
         }
@@ -149,7 +202,7 @@ impl StringDecodeOptionsBuilder {
     pub const fn new() -> Self {
         Self {
             trim_mode: TrimMode::RTrim,
-            utf8_validation: Utf8ValidationMode::Auto,
+            utf8_validation: Utf8ValidationMode::Lenient,
             mojibake_fix: MojibakePolicy::Auto,
             dictionary_staging: DictionaryStaging::Auto,
         }

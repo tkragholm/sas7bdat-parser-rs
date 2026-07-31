@@ -40,12 +40,7 @@ pub fn load_dataset(relative: &str) -> Option<Dataset> {
 
 #[must_use]
 pub const fn backend_label(io_backend: IoBackendPreference) -> &'static str {
-    match io_backend {
-        IoBackendPreference::Auto => "auto",
-        IoBackendPreference::MmapPreferred => "mmap_preferred",
-        IoBackendPreference::BufferedPreferred => "buffered_preferred",
-        IoBackendPreference::BufferedOnly => "buffered_only",
-    }
+    io_backend.as_str()
 }
 
 #[must_use]

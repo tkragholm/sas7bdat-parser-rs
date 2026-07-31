@@ -2068,7 +2068,7 @@ mod fused_scan {
 
     #[test]
     fn reads_every_row_without_compiling_a_descriptor_table() {
-        let Some(ds) = open(IoBackendPreference::BufferedOnly) else {
+        let Some(ds) = open(IoBackendPreference::Buffered) else {
             return;
         };
         let builder = ds.scan().with_parallelism(Parallelism::Threads(4));
@@ -2083,7 +2083,7 @@ mod fused_scan {
 
     #[test]
     fn declines_for_mapped_sources() {
-        let Some(ds) = open(IoBackendPreference::MmapPreferred) else {
+        let Some(ds) = open(IoBackendPreference::Mmap) else {
             return;
         };
         let builder = ds.scan().with_parallelism(Parallelism::Threads(4));
@@ -2095,7 +2095,7 @@ mod fused_scan {
 
     #[test]
     fn declines_once_the_descriptor_table_is_cached() {
-        let Some(ds) = open(IoBackendPreference::BufferedOnly) else {
+        let Some(ds) = open(IoBackendPreference::Buffered) else {
             return;
         };
         ds.descriptors().expect("descriptors");
@@ -2108,7 +2108,7 @@ mod fused_scan {
 
     #[test]
     fn declines_for_partial_scans() {
-        let Some(ds) = open(IoBackendPreference::BufferedOnly) else {
+        let Some(ds) = open(IoBackendPreference::Buffered) else {
             return;
         };
         let limited = ds.scan().with_parallelism(Parallelism::Threads(4)).limit(8);
@@ -2143,7 +2143,7 @@ mod fused_scan {
         let ds = Dataset::open_with(
             &path,
             OpenOptions::builder()
-                .io_backend(IoBackendPreference::BufferedOnly)
+                .io_backend(IoBackendPreference::Buffered)
                 .build(),
         )
         .expect("open fixture");
@@ -2170,7 +2170,7 @@ mod fused_scan {
         let ds = Dataset::open_with(
             &path,
             OpenOptions::builder()
-                .io_backend(IoBackendPreference::BufferedOnly)
+                .io_backend(IoBackendPreference::Buffered)
                 .build(),
         )
         .expect("open fixture");
@@ -2189,7 +2189,7 @@ mod fused_scan {
 
     #[test]
     fn declines_without_a_thread_budget() {
-        let Some(ds) = open(IoBackendPreference::BufferedOnly) else {
+        let Some(ds) = open(IoBackendPreference::Buffered) else {
             return;
         };
         let builder = ds.scan().with_parallelism(Parallelism::None);

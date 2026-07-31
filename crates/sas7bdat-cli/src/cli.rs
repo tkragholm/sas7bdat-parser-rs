@@ -315,6 +315,10 @@ pub enum ProgressMode {
 }
 
 /// How the reader gets at the file's bytes.
+///
+/// Mirrors [`IoBackendPreference`] one-for-one. It exists only because `ValueEnum` cannot be
+/// derived for a type from another crate, and deriving it in the core would put clap in the
+/// library's dependency tree — so this stays a wrapper rather than becoming the real enum.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default, ValueEnum)]
 pub enum IoBackend {
     /// Memory-map local files; read network shares sequentially (default).
@@ -332,8 +336,8 @@ impl IoBackend {
     pub const fn preference(self) -> IoBackendPreference {
         match self {
             Self::Auto => IoBackendPreference::Auto,
-            Self::Mmap => IoBackendPreference::MmapPreferred,
-            Self::Buffered => IoBackendPreference::BufferedOnly,
+            Self::Mmap => IoBackendPreference::Mmap,
+            Self::Buffered => IoBackendPreference::Buffered,
         }
     }
 }

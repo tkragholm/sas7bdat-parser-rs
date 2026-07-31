@@ -108,8 +108,8 @@ fn check_fused_matches_two_pass(path: &Path) {
         return;
     }
     // Mapped sources decline the fused path, so this is the two-pass reference.
-    let reference = scan(path, IoBackendPreference::MmapPreferred);
-    let fused = scan(path, IoBackendPreference::BufferedOnly);
+    let reference = scan(path, IoBackendPreference::Mmap);
+    let fused = scan(path, IoBackendPreference::Buffered);
 
     let reference_rows: usize = reference.iter().map(|batch| batch.row_count).sum();
     let fused_rows: usize = fused.iter().map(|batch| batch.row_count).sum();

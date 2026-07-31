@@ -15,6 +15,31 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (API).** `IoBackendPreference` has three variants instead of four:
+  `MmapPreferred` is now `Mmap`, `BufferedOnly` is now `Buffered`, and `BufferedPreferred` is
+  gone — it took the same branch as `BufferedOnly` in the only place the setting is read, so
+  the pair named a preference the opener could not act on. The enum now implements `Display`
+  and `FromStr` (`auto` / `mmap` / `buffered`, with the old hyphenated spellings still
+  accepted), replacing four hand-maintained string tables across the CLI, the profiling
+  binaries, an example and a benchmark.
+- **Breaking (API).** `Utf8ValidationMode` has two variants instead of three: `Auto` is now
+  `Lenient` and `Off` is gone. Every decision site tests for `Strict` and treats everything
+  else as lossy, so `Off` and `Auto` were the same behaviour under two names. The name now
+  matches the `*Lenient` decode kernels it selects.
+- `ScanBuilder::collect_batches` is now a thin wrapper over the streaming owned-batch driver
+  instead of a second, parallel dispatch tree. The two had drifted: the collect side never
+  grew the fused single-pass scan or the extent-streamed parallel reader, so a path-backed
+  dataset (a network share, where `Dataset::open` declines to memory-map) collected serially
+  in two passes while the identical scan streamed in one. Collecting from such a source is now
+  parallel and single-pass — this is the R binding's path. Output is unchanged: all 387
+  decodable corpus fixtures produce the same batch count, row count and cell digest as before.
+- Owned-batch scans now reject `DecodeMode::Raw` at the entry point rather than only in the
+  row-major fallback, so `visit_owned_batches` and `collect_batches` agree. Previously
+  `collect_batches` errored while `visit_owned_batches` silently decoded every column as
+  `Binary` whenever it took a parallel or fused branch.
+
 ### Removed
 
 - **Breaking (API).** `PrefetchPolicy` and `PageCachePolicy`, along with the
