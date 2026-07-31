@@ -12,12 +12,12 @@
 //!   --help / -h           Print this message
 
 use chrono::Utc;
+use clap::{Parser, ValueEnum};
 use rayon::prelude::*;
 use sas7bdat::Dataset;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env,
     fmt::Write as FmtWrite,
     fs,
     path::{Path, PathBuf},
@@ -30,102 +30,54 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
-#[derive(Debug)]
+/// Map a directory tree of SAS7BDAT files: group files that share a schema, and report the
+/// shape of each group.
+#[derive(Parser)]
+#[command(
+    name = "sas7bdat-dir-mapper",
+    version,
+    about = "Survey a directory tree of SAS7BDAT files and group them by schema"
+)]
 struct Config {
+    /// Directory to scan recursively.
+    #[arg(value_name = "ROOT_DIR")]
     root: PathBuf,
+
+    /// Write the report here instead of to stdout.
+    #[arg(long, value_name = "PATH")]
     out: Option<PathBuf>,
+
+    /// Report format.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Both)]
     format: OutputFormat,
+
+    /// Worker threads. Defaults to every core.
+    #[arg(long, value_name = "N")]
     jobs: Option<usize>,
+
+    /// Only report schema groups holding at least this many files.
+    #[arg(long, value_name = "N", default_value_t = 2)]
     min_group_size: usize,
-    relative_paths: bool,
+
+    /// Print absolute paths instead of paths relative to the root.
+    #[arg(long)]
+    no_relative_paths: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl Config {
+    /// Paths are relative to the root unless the caller opted out.
+    const fn relative_paths(&self) -> bool {
+        !self.no_relative_paths
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 enum OutputFormat {
     Json,
+    #[value(name = "md", alias = "markdown")]
     Markdown,
+    #[default]
     Both,
-}
-
-fn parse_args() -> Result<Config, String> {
-    let mut args = env::args_os().skip(1);
-    let mut root: Option<PathBuf> = None;
-    let mut out: Option<PathBuf> = None;
-    let mut format = OutputFormat::Both;
-    let mut jobs: Option<usize> = None;
-    let mut min_group_size = 2usize;
-    let mut relative_paths = true;
-
-    while let Some(arg) = args.next() {
-        let s = arg.to_string_lossy().into_owned();
-        match s.as_str() {
-            "--help" | "-h" => {
-                print_usage();
-                std::process::exit(0);
-            }
-            "--out" => {
-                out = Some(PathBuf::from(args.next().ok_or("--out requires a value")?));
-            }
-            "--format" => {
-                let v = args
-                    .next()
-                    .ok_or("--format requires a value")?
-                    .to_string_lossy()
-                    .into_owned();
-                format = match v.as_str() {
-                    "json" => OutputFormat::Json,
-                    "md" | "markdown" => OutputFormat::Markdown,
-                    "both" => OutputFormat::Both,
-                    other => return Err(format!("unknown --format value: {other}")),
-                };
-            }
-            "--jobs" => {
-                let v = args
-                    .next()
-                    .ok_or("--jobs requires a value")?
-                    .to_string_lossy()
-                    .into_owned();
-                jobs = Some(v.parse::<usize>().map_err(|_| "--jobs must be a number")?);
-            }
-            "--min-group-size" => {
-                let v = args
-                    .next()
-                    .ok_or("--min-group-size requires a value")?
-                    .to_string_lossy()
-                    .into_owned();
-                min_group_size = v
-                    .parse::<usize>()
-                    .map_err(|_| "--min-group-size must be a number")?;
-            }
-            "--no-relative-paths" => {
-                relative_paths = false;
-            }
-            _ if s.starts_with("--") => return Err(format!("unknown argument: {s}")),
-            _ => {
-                if root.is_some() {
-                    return Err("only one root directory supported".to_owned());
-                }
-                root = Some(PathBuf::from(&s));
-            }
-        }
-    }
-
-    let root = root.ok_or_else(|| "usage: sas7bdat-dir-mapper <root_dir> [options]".to_owned())?;
-    Ok(Config {
-        root,
-        out,
-        format,
-        jobs,
-        min_group_size,
-        relative_paths,
-    })
-}
-
-fn print_usage() {
-    eprintln!(
-        "usage: sas7bdat-dir-mapper <root_dir> [--out PATH] [--format json|md|both] \
-         [--jobs N] [--min-group-size N] [--no-relative-paths]"
-    );
 }
 
 // ─── Data model ──────────────────────────────────────────────────────────────
@@ -1109,7 +1061,7 @@ fn run(config: &Config) -> Result<(), String> {
 
     let records: Vec<FileRecord> = paths
         .par_iter()
-        .map(|p| probe_file(p, root, config.relative_paths))
+        .map(|p| probe_file(p, root, config.relative_paths()))
         .collect();
 
     eprintln!("Metadata extraction complete. Grouping...");
@@ -1117,7 +1069,7 @@ fn run(config: &Config) -> Result<(), String> {
     // Group by (dir, base_stem_without_year)
     let mut groups: BTreeMap<String, Vec<FileRecord>> = BTreeMap::new();
     for record in records {
-        let key = group_key(&record, root, config.relative_paths);
+        let key = group_key(&record, root, config.relative_paths());
         groups.entry(key).or_default().push(record);
     }
 
@@ -1248,13 +1200,7 @@ fn run(config: &Config) -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
-    let config = match parse_args() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let config = Config::parse();
     match run(&config) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
