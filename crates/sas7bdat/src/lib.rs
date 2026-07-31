@@ -94,7 +94,7 @@ pub use options::{
     BatchHint, ColumnMajorDecode, DecodeMode, DictionaryStaging, IoBackendPreference,
     MojibakePolicy, OpenOptions, OpenOptionsBuilder, OrderingMode, Parallelism, RowSelection,
     StringDecodeOptions, StringDecodeOptionsBuilder, TemporalDecodeOptions,
-    TemporalDecodeOptionsBuilder, TrimMode, Utf8ValidationMode, ValidationMode,
+    TemporalDecodeOptionsBuilder, TrimMode, Utf8ValidationMode,
 };
 pub use pages::DescriptorBreakdown;
 pub use projection::{ProjectedColumnMeta, Projection, ProjectionBuilder};

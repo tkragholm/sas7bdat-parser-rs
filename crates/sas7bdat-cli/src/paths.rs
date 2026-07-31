@@ -155,9 +155,7 @@ pub fn validate_convert_args(args: &ConvertArgs, discovered_inputs: usize) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{
-        ConvertArgs, ExecutionOptions, OutputOptions, RecursionMode, UiOptions, ValidationOptions,
-    };
+    use crate::cli::{ConvertArgs, ExecutionOptions, OutputOptions, RecursionMode, UiOptions};
     use crate::selection::{RowWindow, row_selection_from_window};
 
     fn args(sink: SinkKind, out_dir: Option<&str>, flatten: bool) -> ConvertArgs {
@@ -184,9 +182,6 @@ mod tests {
                 batch_rows: None,
                 encode_in_flight_bytes: None,
                 fail_fast: false,
-            },
-            validation: ValidationOptions {
-                strict_dates: false,
             },
             io_backend: crate::cli::IoBackend::Auto,
             ui: UiOptions {

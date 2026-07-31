@@ -60,6 +60,20 @@ earlier are written by hand.
 
 ### Removed
 
+- **Breaking (API and CLI).** `ValidationMode`, `OpenOptionsBuilder::validation`, and the
+  CLI's `--strict-dates` flag. The option was stored on `OpenOptions` and read by nothing, so
+  the flag — documented as "reject out-of-range dates/times instead of passing them through" —
+  had no effect whatsoever. Implementing it was considered and rejected: a census of the corpus
+  found 357 of 894 temporal columns widening to `Float64`, every one of them because of
+  *sub-second* values rather than an out-of-range one, and not a single genuinely out-of-range
+  date, datetime or time in 388 files. The check would have had nothing to reject. Widening is
+  also not observable downstream — `column_buffer_to_arrow` and the Polars converter both
+  reconcile a widened `F64` buffer back into the column's declared temporal type with
+  sub-second precision intact — so there is no schema surprise to guard against either.
+- `Utf8Dictionary` and `Utf8Buffer`'s `dictionary` field: ids without a vocabulary. The field
+  was `#[allow(dead_code)]`, documented as "not yet populated", and no scan path ever set it.
+  `dictionary_ids` itself is unaffected and still populated by dictionary staging.
+
 - **Breaking (API).** `PrefetchPolicy` and `PageCachePolicy`, along with the
   `OpenOptionsBuilder::prefetch` and `::page_cache` setters. Both were stored on `OpenOptions`
   and read by nothing — they never influenced a single read.

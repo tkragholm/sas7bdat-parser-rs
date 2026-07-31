@@ -13,7 +13,7 @@ use crate::style::Style;
 use anyhow::{Result, anyhow};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use rayon::prelude::*;
-use sas7bdat::{Dataset, OpenOptions, ScanProgress, ScanProgressObserver, ValidationMode};
+use sas7bdat::{Dataset, OpenOptions, ScanProgress, ScanProgressObserver};
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -327,11 +327,6 @@ fn failures_message(failures: usize) -> String {
 
 fn open_dataset(input: &Path, args: &ConvertArgs) -> Result<Dataset> {
     let open = OpenOptions::builder()
-        .validation(if args.validation.strict_dates {
-            ValidationMode::Strict
-        } else {
-            ValidationMode::Permissive
-        })
         .io_backend(args.io_backend.preference())
         .build();
     friendly::open_with(input, open)
@@ -571,7 +566,6 @@ mod tests {
     use super::{ProgressState, failures_message, file_progress, human_duration};
     use crate::cli::{
         ConvertArgs, ExecutionOptions, OutputOptions, ProgressMode, RecursionMode, UiOptions,
-        ValidationOptions,
     };
     use sas7bdat::ScanProgress;
     use std::path::{Path, PathBuf};
@@ -601,9 +595,6 @@ mod tests {
                 batch_rows: None,
                 encode_in_flight_bytes: None,
                 fail_fast: false,
-            },
-            validation: ValidationOptions {
-                strict_dates: false,
             },
             io_backend: crate::cli::IoBackend::Auto,
             ui: UiOptions {

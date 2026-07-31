@@ -1679,7 +1679,6 @@ impl OwnedBatchColumnBuilder {
                 data,
                 valid: valid.as_deref(),
                 dictionary_ids: dictionary_ids.as_deref(),
-                dictionary: None,
             })),
             Self::RawBytes {
                 offsets,

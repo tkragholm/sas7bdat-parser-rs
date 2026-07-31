@@ -595,7 +595,6 @@ mod tests {
             &path,
             OpenOptions {
                 io_backend: IoBackendPreference::Mmap,
-                ..OpenOptions::default()
             },
         )
         .expect("mmap-preferred dataset open");
@@ -615,7 +614,6 @@ mod tests {
             &path,
             OpenOptions {
                 io_backend: IoBackendPreference::Buffered,
-                ..OpenOptions::default()
             },
         )
         .expect("buffered-only dataset open");
@@ -716,7 +714,6 @@ mod tests {
             tracked_fixture(),
             OpenOptions {
                 io_backend: IoBackendPreference::Mmap,
-                ..OpenOptions::default()
             },
         )
         .expect("mmap-preferred breakdown");
@@ -741,7 +738,6 @@ mod tests {
             tracked_fixture(),
             OpenOptions {
                 io_backend: IoBackendPreference::Buffered,
-                ..OpenOptions::default()
             },
         )
         .expect("buffered-only breakdown");

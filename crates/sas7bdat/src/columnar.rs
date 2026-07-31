@@ -168,17 +168,6 @@ pub struct PrimitiveBuffer<'a, T> {
     pub valid: Option<&'a [u64]>,
 }
 
-/// The string vocabulary for a dictionary-encoded column.
-///
-/// Paired with [`Utf8Buffer::dictionary_ids`] when dictionary staging is active.
-/// Not yet populated in the current scan path — reserved for future dictionary-value exposure
-/// (e.g. Arrow `DictionaryArray` or Polars categoricals).
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
-pub struct Utf8Dictionary<'a> {
-    pub(crate) values: &'a [&'a str],
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Utf8Buffer<'a> {
     pub offsets: &'a [i64],
@@ -189,9 +178,6 @@ pub struct Utf8Buffer<'a> {
     // dictionary staging is active. Exposed for tests and diagnostic tooling.
     #[allow(dead_code)]
     pub(crate) dictionary_ids: Option<&'a [u32]>,
-    // String vocabulary paired with dictionary_ids; not yet populated.
-    #[allow(dead_code)]
-    pub(crate) dictionary: Option<&'a Utf8Dictionary<'a>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -428,7 +414,6 @@ impl OwnedColumnBuffer {
                 data,
                 valid: valid.as_deref(),
                 dictionary_ids: dictionary_ids.as_deref(),
-                dictionary: None,
             }),
             Self::RawBytes {
                 offsets,
@@ -511,7 +496,6 @@ impl ColumnBuffer<'_> {
                 data,
                 valid,
                 dictionary_ids: _,
-                dictionary: _,
             }) => build_utf8_array(offsets, data, valid),
             Self::RawBytes(BytesBuffer {
                 offsets,

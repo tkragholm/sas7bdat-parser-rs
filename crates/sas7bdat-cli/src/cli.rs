@@ -65,9 +65,6 @@ pub struct ConvertArgs {
     pub execution: ExecutionOptions,
 
     #[command(flatten)]
-    pub validation: ValidationOptions,
-
-    #[command(flatten)]
     pub ui: UiOptions,
 
     /// Skip leading N rows.
@@ -280,13 +277,6 @@ pub struct ExecutionOptions {
     /// Stop at the first file that fails (default: convert the rest and report at the end).
     #[arg(long, help_heading = "Execution")]
     pub fail_fast: bool,
-}
-
-#[derive(Args, Clone)]
-pub struct ValidationOptions {
-    /// Reject out-of-range dates/times instead of passing them through.
-    #[arg(long, help_heading = "Execution")]
-    pub strict_dates: bool,
 }
 
 #[derive(Args, Clone)]

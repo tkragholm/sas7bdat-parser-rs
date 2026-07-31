@@ -52,22 +52,14 @@ impl std::str::FromStr for IoBackendPreference {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValidationMode {
-    Strict,
-    Permissive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptions {
     pub(crate) io_backend: IoBackendPreference,
-    pub(crate) validation: ValidationMode,
 }
 
 impl Default for OpenOptions {
     fn default() -> Self {
         Self {
             io_backend: IoBackendPreference::Auto,
-            validation: ValidationMode::Strict,
         }
     }
 }
@@ -75,7 +67,6 @@ impl Default for OpenOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptionsBuilder {
     io_backend: IoBackendPreference,
-    validation: ValidationMode,
 }
 
 impl OpenOptions {
@@ -90,7 +81,6 @@ impl OpenOptionsBuilder {
     pub const fn new() -> Self {
         Self {
             io_backend: IoBackendPreference::Auto,
-            validation: ValidationMode::Strict,
         }
     }
 
@@ -101,16 +91,9 @@ impl OpenOptionsBuilder {
     }
 
     #[must_use]
-    pub const fn validation(mut self, validation: ValidationMode) -> Self {
-        self.validation = validation;
-        self
-    }
-
-    #[must_use]
     pub const fn build(self) -> OpenOptions {
         OpenOptions {
             io_backend: self.io_backend,
-            validation: self.validation,
         }
     }
 }
