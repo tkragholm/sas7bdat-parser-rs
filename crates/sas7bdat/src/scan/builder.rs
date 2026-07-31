@@ -764,6 +764,36 @@ const fn store_batch_counters(stats: &mut ScanStats, counters: super::batch::Bat
     stats.batch_fallback_cells = counters.fallback;
 }
 
+/// A parallel streamed scan, fully decided before any thread starts.
+///
+/// Exists to keep [`ScanBuilder::plan_parallel_stream`] and the `thread::scope` that consumes
+/// it readable apart: one picks chunk sizes, read spans and worker counts from geometry, the
+/// other only spawns and collects.
+struct ParallelStreamPlan<'a> {
+    /// Page descriptors cut into per-chunk slices. A chunk is both the unit of work and the
+    /// batch boundary.
+    chunks: Vec<&'a [crate::internal::PageDescriptor]>,
+    /// One contiguous `(offset, len)` read per chunk. Empty for mapped sources, which decode
+    /// straight out of the existing buffer.
+    spans: Vec<(u64, usize)>,
+    mapped: Option<&'a [u8]>,
+    source_path: Option<&'a std::path::Path>,
+    workers: usize,
+    total_pages: u64,
+    estimated_total_bytes: u64,
+    context: DescriptorChunkContext<'a>,
+}
+
+/// What planning concluded about a candidate parallel scan.
+enum ParallelStreamDecision<'a> {
+    /// This scan is not a fit — too few pages or workers. The caller falls back.
+    NotApplicable,
+    /// The rows are zero bytes wide, so there is nothing to decode. Distinct from
+    /// `NotApplicable`: falling back would just rediscover the same emptiness.
+    NothingToScan,
+    Run(ParallelStreamPlan<'a>),
+}
+
 /// Inputs every chunk decode shares. The descriptor table is passed separately because the
 /// fused scan builds one per extent rather than one for the whole file.
 pub(super) struct DescriptorChunkContext<'a> {
@@ -1065,17 +1095,16 @@ impl ScanBuilder<'_> {
         Ok(stats)
     }
 
-    #[allow(clippy::too_many_lines)]
-    fn try_stream_batches_parallel<F>(
-        &self,
-        plan: &ScanPlan,
+    /// Plan a parallel streamed scan, or `None` when this scan should take another path.
+    ///
+    /// Split from the run so the two can be read separately: everything here is decided before
+    /// a thread exists, and nothing here touches file bytes.
+    fn plan_parallel_stream<'p>(
+        &'p self,
+        plan: &'p ScanPlan,
+        descriptors: &'p crate::internal::PageDescriptorTable,
         column_major: bool,
-        f: &mut F,
-    ) -> Result<Option<ScanStats>>
-    where
-        F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
-    {
-        let descriptors = self.ds.descriptors()?;
+    ) -> Result<ParallelStreamDecision<'p>> {
         // Chunk only the pages the window wants. A bounded scan is parallel now that the bound
         // is an absolute row range rather than a per-worker emitted-row count, so this is what
         // keeps it from also reading the rest of the file. Worker count follows the windowed
@@ -1084,7 +1113,7 @@ impl ScanBuilder<'_> {
         let page_count = window_pages.len();
         let workers = resolved_parallel_workers(self.parallelism, page_count);
         if workers <= 1 || page_count <= 1 {
-            return Ok(None);
+            return Ok(ParallelStreamDecision::NotApplicable);
         }
 
         // Mapped and in-memory sources decode straight out of one contiguous buffer. A path
@@ -1100,10 +1129,10 @@ impl ScanBuilder<'_> {
             _ => None,
         };
 
-        let worker_capacity_hint = plan.capacity_hint_rows.div_ceil(workers).max(1);
         super::raw::RawScanPlan::validate_builder(self)?;
-        if usize::from(self.ds.layout.row_len) == 0 {
-            return Ok(Some(ScanStats::default()));
+        let row_len = usize::from(self.ds.layout.row_len);
+        if row_len == 0 {
+            return Ok(ParallelStreamDecision::NothingToScan);
         }
 
         // Extent-sized chunks for streamed sources: the chunk IS the unit of I/O there, so it
@@ -1125,7 +1154,6 @@ impl ScanBuilder<'_> {
         };
         let chunks: Vec<&[crate::internal::PageDescriptor]> =
             descriptors.pages[window_pages].chunks(chunk_size).collect();
-        let chunk_count = chunks.len();
         // Byte span per chunk, precomputed so the reader threads do no descriptor work: each
         // is one contiguous read covering that chunk's pages. Empty for mapped sources.
         let spans: Vec<(u64, usize)> = if mapped.is_some() {
@@ -1144,6 +1172,64 @@ impl ScanBuilder<'_> {
                 })
                 .collect::<Result<Vec<_>>>()?
         };
+
+        Ok(ParallelStreamDecision::Run(ParallelStreamPlan {
+            chunks,
+            spans,
+            mapped,
+            source_path,
+            workers,
+            total_pages: u64::try_from(page_count).unwrap_or(u64::MAX),
+            estimated_total_bytes: u64::try_from(page_count)
+                .unwrap_or(u64::MAX)
+                .saturating_mul(u64::try_from(plan.raw.page_size()).unwrap_or(0)),
+            context: DescriptorChunkContext {
+                raw_plan: &plan.raw,
+                batch_plan: &plan.batch,
+                target_rows: plan.batch_row_capacity,
+                capacity_hint_rows: plan.capacity_hint_rows.div_ceil(workers).max(1),
+                row_len,
+                // The column-major fill ignores row selection, so it only applies to whole-file
+                // scans; each worker additionally requires an all-staged-numeric plan.
+                columnar: column_major && self.row_window().is_whole_file(),
+            },
+        }))
+    }
+
+    /// Run a planned parallel stream: spawn the workers, collect batches in order, join.
+    ///
+    /// Still long, and deliberately not split further. What remains is one `thread::scope`
+    /// whose pieces all borrow the same scope-local channels, stop flag and counters; lifting
+    /// either spawn branch out would mean a helper taking a dozen `&'scope` parameters, which
+    /// reads worse than the loop it replaced. The planning that *could* be separated already is.
+    #[allow(clippy::too_many_lines)]
+    fn try_stream_batches_parallel<F>(
+        &self,
+        plan: &ScanPlan,
+        column_major: bool,
+        f: &mut F,
+    ) -> Result<Option<ScanStats>>
+    where
+        F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+    {
+        let descriptors = self.ds.descriptors()?;
+        let stream = match self.plan_parallel_stream(plan, descriptors.as_ref(), column_major)? {
+            ParallelStreamDecision::NotApplicable => return Ok(None),
+            ParallelStreamDecision::NothingToScan => return Ok(Some(ScanStats::default())),
+            ParallelStreamDecision::Run(stream) => stream,
+        };
+
+        let ParallelStreamPlan {
+            chunks,
+            spans,
+            mapped,
+            source_path,
+            workers,
+            total_pages,
+            estimated_total_bytes,
+            context,
+        } = stream;
+        let chunk_count = chunks.len();
         let spans = &spans;
         // Declared outside `thread::scope` so the shared references satisfy the `'scope` bound.
         let next_chunk_idx = AtomicUsize::new(0);
@@ -1153,20 +1239,8 @@ impl ScanBuilder<'_> {
         let progress = ProgressReport {
             observer: self.progress.as_ref(),
             counters,
-            total_pages: u64::try_from(page_count).unwrap_or(u64::MAX),
-            estimated_total_bytes: u64::try_from(page_count)
-                .unwrap_or(u64::MAX)
-                .saturating_mul(u64::try_from(plan.raw.page_size()).unwrap_or(0)),
-        };
-        let context = DescriptorChunkContext {
-            raw_plan: &plan.raw,
-            batch_plan: &plan.batch,
-            target_rows: plan.batch_row_capacity,
-            capacity_hint_rows: worker_capacity_hint,
-            row_len: usize::from(self.ds.layout.row_len),
-            // The column-major fill ignores row selection, so it only applies to whole-file
-            // scans; each worker additionally requires an all-staged-numeric plan.
-            columnar: column_major && self.row_window().is_whole_file(),
+            total_pages,
+            estimated_total_bytes,
         };
 
         let total_stats = std::thread::scope(|scope| -> Result<ScanStats> {
