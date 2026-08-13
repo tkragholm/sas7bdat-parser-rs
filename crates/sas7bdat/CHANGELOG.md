@@ -15,7 +15,64 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-13
+
+Published as 0.7.0, not 0.5.0 or 0.6.0: those two versions were developed, tagged and
+documented below but never pushed to crates.io, so the registry goes 0.4.0 -> 0.7.0 while
+this file records every step. Their entries are kept as written — nothing about them is
+retracted, they simply reached users as part of this release rather than their own.
+
+### Fixed
+
+- **Breaking (behaviour). SAS format names are matched exactly instead of by substring.**
+  `infer_logical_type` classified a numeric column as temporal when its format *name
+  contained* `DATE`, `YY`, `MON`, `WEEK`, `YEAR` or `TIME`, or ended in `DA`/`DT`/`TM`.
+  Those tests cannot tell a built-in format from a user-defined one, so survey variables
+  were silently read as dates: a column formatted `FMONTH` holding the values 1-12 came
+  back as dates in January 1960, and `PSATIME`, `_TOTINDA`, `DRNKSODA`, `STDWEEK`,
+  `YEAR_F`, `DRETIME`, `MONTHLYINCPR` and `YEARLYINCPR` failed the same way — 17 columns
+  across six real government survey files in the fixture corpus.
+
+  Formats are now looked up in exact, sorted tables grouped by the **scale of the stored
+  value** rather than by what the format prints. That distinction fixes a second defect:
+  `DATEAMPM` formats a *datetime* but was classified `Date`, scaling its seconds as if
+  they were days.
+
+  The old tests also *under*-matched. `DAY`, `DOWNAME`, `JULDAY`, `JULIAN`, `QTRR`,
+  `WORDDATX`, `HOUR`, `MMSS`, `MDYAMPM`, `E8601DN`, `B8601DN`, `E8601DZ`, `B8601DZ` and
+  `E8601LZ` were all read as plain numbers; 176 columns in the corpus gain a correct
+  temporal type. A built-in that is still missing from the tables degrades to `Float` — a
+  visibly wrong type rather than silently wrong values.
+
+- **Variable labels are trimmed the way SAS pads them.** Labels went through the same
+  trim as column and format names, which are identifiers where surrounding space is noise.
+  A label is different: SAS writes it at its declared width, so the trailing run is padding,
+  but a *leading* space is inside the text the author typed. Labels are now trimmed at the
+  end only, and only of ASCII padding (`0x20`, NUL) — a trailing non-breaking space is
+  content, and `str::trim` would have eaten it because U+00A0 carries the Unicode
+  `White_Space` property.
+
+  All three rules matter: trimming both ends left 411 corpus labels differing from `haven`,
+  trimming neither left 3, and trimming Unicode whitespace at the end left 1. Trimming
+  trailing ASCII padding leaves 0 of 1,529. A label that is nothing but padding is still
+  reported as absent.
+
 ### Changed
+
+- **`BatchHint::Auto` sizes batches by bytes, not just rows.** `Auto` resolved to
+  `rows_per_page` with no upper bound and no knowledge of row width, so batch size tracked
+  page geometry rather than memory cost: on a 4,041-column file a 4,096-row batch
+  materializes ~200 MB, and the parallel scan holds `workers * 2` batches queued plus one
+  per worker in flight. Peak RSS therefore scaled with core count — measured at 0.30 GB
+  (1 worker), 1.72 (2), 3.65 (4) and 4.81 (8) on that file, while throughput stopped
+  improving past 8 workers. Wrong direction for a many-core host.
+
+  `Auto` now also caps a batch at 32 MiB of decoded data. On the same file peak RSS falls
+  to 0.07/0.39/0.72/0.98 GB for 1/2/4/8 workers — 4.5× lower at 8 — and the scan gets
+  *faster* (0.74 s → 0.57 s), because more, smaller batches give the work stealer finer
+  granularity. Narrow tables are untouched: their rows are small enough that the row rule
+  still binds, and all 388 corpus fixtures produce byte-identical output. An explicit
+  `BatchHint::Rows`/`Bytes` is unaffected.
 
 - **Bounded scans are now parallel and stop early.** `RowSelection` and
   `ScanBuilder::limit` were enforced by two separate mechanisms with opposite costs: the
@@ -320,7 +377,13 @@ Released before this changelog was kept; see the git history. 0.2.0 was a
 different implementation with a `dataset`/`parser`/`cell` module layout and a bundled
 `sas7` binary.
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.6.0...HEAD
+<!-- Crate releases are tagged `sas7bdat-v*`. The bare `v*` tags belong to the Python
+     packages (see the note at the top of this file) and are not this crate's versions;
+     `v0.7.0` in particular was a wheel release in July, unrelated to 0.7.0 here.
+     `sas7bdat-v0.5.0` was never created, so 0.5.0 has no release to link to. -->
+
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.7.0...HEAD
+[0.7.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.7.0
 [0.6.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.6.0
-[0.5.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.5.0
+[0.4.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.4.0
 [0.3.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.3.0
