@@ -41,30 +41,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  publish:
-    name: publish
+  # Resolves what is being released and whether there is anything left to do. Kept
+  # separate from `publish` so "already released" can skip the rest of the workflow
+  # in one place rather than as a condition repeated on every step below.
+  check:
+    name: check
     runs-on: ubuntu-latest
-    # The environment is a review gate, not a credential store: with Trusted
-    # Publishing there is no token to keep. Add required reviewers to it under
-    # Settings > Environments if the upload should need a second pair of eyes.
-    environment: crates-io
-    permissions:
-      # Lets the job ask GitHub for the OIDC token crates.io trades for a
-      # short-lived publishing token. Without it the auth step cannot run.
-      id-token: write
-      contents: read
+    outputs:
+      crate: ${{ steps.target.outputs.crate }}
+      version: ${{ steps.target.outputs.version }}
+      published: ${{ steps.published.outputs.published }}
     steps:
       - uses: actions/checkout@v6
-
-      - name: Show toolchain
-        run: rustup show && cargo --version
-
-      - uses: Swatinem/rust-cache@v2
 
       # The tag is the only thing a human types, so it is the only thing that can
       # disagree with the manifest. A tag is `<crate>-v<version>`; splitting on the
       # last `-v` is what keeps `sas7bdat-convert-v0.1.0` from parsing as the crate
       # `sas7bdat` at version `convert-v0.1.0`.
+      #
+      # This mismatch stays a hard failure. Unlike an already-published version it
+      # cannot be a benign repeat — it means the tag and the manifest disagree about
+      # what is being released, and guessing which one is right is not this
+      # workflow's call to make.
       - name: Resolve crate and version
         id: target
         run: |
@@ -86,15 +84,23 @@ jobs:
           echo "version=$manifest" >> "$GITHUB_OUTPUT"
           echo "Releasing $crate $manifest"
 
-      # crates.io refuses a duplicate version, but only once the upload is attempted
-      # — after the whole suite below has run. Checking first fails in seconds with a
-      # clear message instead of minutes with an opaque one.
+      # A version already on crates.io ends the workflow successfully rather than
+      # failing it. The case this is built around is a new crate's *first* release:
+      # Trusted Publishing has to be configured per crate and a crate must exist to
+      # have settings, so the first upload is always by hand — and the tag that
+      # records it would otherwise land as a permanent red run.
+      #
+      # What this gives up: a genuinely mistaken re-tag now passes quietly instead of
+      # loudly. It cannot publish anything wrong either way — crates.io rejects a
+      # duplicate version regardless — so the cost is a missing signal, not a missing
+      # safeguard.
       #
       # Queried against the sparse index rather than the REST API: the index is a
       # plain static file, has no bot filtering in front of it, and is the same
       # source cargo itself resolves from. Its directory layout depends on the name
       # length, hence the cases.
-      - name: Version must not already be published
+      - name: Is this version already published?
+        id: published
         env:
           CRATE: ${{ steps.target.outputs.crate }}
           VERSION: ${{ steps.target.outputs.version }}
@@ -111,10 +117,34 @@ jobs:
           # A crate with no releases yet is a 404, which is not an error here.
           index="$(curl -sS --max-time 30 "$url" || true)"
           if printf '%s' "$index" | grep -qF "\"vers\":\"$VERSION\""; then
-            echo "$CRATE $VERSION is already on crates.io — bump the version or delete the tag"
-            exit 1
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$CRATE $VERSION is already on crates.io — nothing to publish"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "$CRATE $VERSION is not yet published"
           fi
-          echo "$CRATE $VERSION is not yet published"
+
+  publish:
+    name: publish
+    needs: check
+    if: needs.check.outputs.published != 'true'
+    runs-on: ubuntu-latest
+    # The environment is a review gate, not a credential store: with Trusted
+    # Publishing there is no token to keep. Add required reviewers to it under
+    # Settings > Environments if the upload should need a second pair of eyes.
+    environment: crates-io
+    permissions:
+      # Lets the job ask GitHub for the OIDC token crates.io trades for a
+      # short-lived publishing token. Without it the auth step cannot run.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Show toolchain
+        run: rustup show && cargo --version
+
+      - uses: Swatinem/rust-cache@v2
 
       # ci.yml already runs these on every push to main, but a tag can point at any
       # commit. Re-running them here means the artifact that reaches crates.io was
@@ -132,12 +162,12 @@ jobs:
       # ensures it resolves against the committed lockfile rather than whatever the
       # registry happens to offer today.
       - name: Package and verify
-        run: cargo publish --dry-run --locked -p ${{ steps.target.outputs.crate }}
+        run: cargo publish --dry-run --locked -p ${{ needs.check.outputs.crate }}
 
       - name: Upload the packaged crate as a build artifact
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ steps.target.outputs.crate }}-crate
+          name: ${{ needs.check.outputs.crate }}-crate
           path: target/package/*.crate
           if-no-files-found: error
 
@@ -158,16 +188,20 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.dry_run == false }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo publish --locked -p ${{ steps.target.outputs.crate }}
+        run: cargo publish --locked -p ${{ needs.check.outputs.crate }}
 
       # Draft, not published: release notes want a human to read them before they go
       # out, and the crate is already live by this point regardless.
+      #
+      # Note this is skipped along with the rest of the job when the version was
+      # published by hand — a first release gets its GitHub release written by hand
+      # too, or not at all.
       - name: Draft a GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-          CRATE: ${{ steps.target.outputs.crate }}
-          VERSION: ${{ steps.target.outputs.version }}
+          CRATE: ${{ needs.check.outputs.crate }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           notes="Crate: https://crates.io/crates/$CRATE/$VERSION"
           changelog="crates/$CRATE/CHANGELOG.md"
