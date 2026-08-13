@@ -1,0 +1,60 @@
+# Windows build. Everything here mirrors `Makevars` except the target triple, and
+# that one difference is the whole reason this file exists.
+#
+# R on Windows links with Rtools' mingw-w64 toolchain, which expects the GNU ABI.
+# Cargo's default target on a Windows host is `x86_64-pc-windows-msvc`, so without
+# an explicit `--target` the archive is MSVC-ABI and the link fails on CRT
+# intrinsics the GNU runtime has no definition for:
+#
+#     ld.exe: libfastsas.a(std...): undefined reference to `__chkstk'
+#     collect2.exe: error: ld returned 1 exit status
+#
+# Naming the target also moves the output: cargo writes to
+# `target/<triple>/release` rather than `target/release`, so LIBDIR follows it.
+
+# R-universe sets CARGO_BUILD_TARGET when it cross-builds — Windows arm64 gets
+# `aarch64-pc-windows-gnullvm` — so deferring to it keeps LIBDIR pointing at
+# whatever cargo actually wrote. Failing that, pick the ABI the way rextendr's own
+# `tools/config.R` does: a clang-based Rtools wants gnullvm, a gcc-based one gnu.
+ifneq (,$(findstring clang,$(R_COMPILED_BY)))
+  DEFAULT_TARGET = x86_64-pc-windows-gnullvm
+else
+  DEFAULT_TARGET = x86_64-pc-windows-gnu
+endif
+TARGET = $(if $(CARGO_BUILD_TARGET),$(CARGO_BUILD_TARGET),$(DEFAULT_TARGET))
+
+TARGET_DIR = $(CURDIR)/rust/target
+LIBDIR = $(TARGET_DIR)/$(TARGET)/release
+STATLIB = $(LIBDIR)/libfastsas.a
+
+# When rustc drives a link it passes these itself; here R drives it, so the system
+# libraries Rust's windows-gnu std depends on have to be named explicitly.
+PKG_LIBS = -L$(LIBDIR) -lfastsas -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll
+
+CARGO_BUILD_ARGS = --lib --release --target=$(TARGET) --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
+
+# Rust's windows-gnu std asks the linker for `-lgcc_eh`, which Rtools' static.posix
+# mingw does not ship under that name. An empty archive satisfies the reference
+# without contributing anything — the same stub rextendr's template creates.
+LIBGCC_MOCK = $(TARGET_DIR)/libgcc_mock
+
+$(SHLIB): $(STATLIB)
+
+# See `Makevars` for why cargo runs from `rust/` (rustup finds the nightly pin by
+# walking up from the working directory) and why this is forced rather than a bare
+# rule (make would otherwise link a stale archive on an in-place install).
+$(STATLIB): FORCE
+	mkdir -p "$(LIBGCC_MOCK)"
+	touch "$(LIBGCC_MOCK)/libgcc_eh.a"
+	cd rust && rustup target add $(TARGET) || true
+	cd rust && export LIBRARY_PATH="$(LIBRARY_PATH);$(LIBGCC_MOCK)" && cargo build $(CARGO_BUILD_ARGS)
+
+C_clean:
+	rm -Rf $(LIBDIR)/build
+
+clean:
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
+
+FORCE:
+
+.PHONY: C_clean clean FORCE
