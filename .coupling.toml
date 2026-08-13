@@ -1,0 +1,7 @@
+[analysis]
+exclude_tests = true
+exclude = [
+  "crates/sas7bdat/src/test_utils.rs",
+  "crates/sas7bdat/src/scan/tests.rs",
+  "crates/sas7bdat/src/fixture_catalog.rs",
+]
