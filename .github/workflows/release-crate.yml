@@ -1,0 +1,130 @@
+# Publish the `sas7bdat` library crate to crates.io.
+#
+# Triggered by a `sas7bdat-v*` tag, which is this crate's own tag namespace. The
+# bare `v*` tags belong to the Python packages (`sas7bdat-polars`, `sas7bdat-cli`)
+# and are matched by wheels.yml — the two must not overlap, which is why the
+# filter here is anchored on the `sas7bdat-v` prefix rather than on `v*`.
+#
+# Publishing is irreversible: crates.io has no unpublish, only `cargo yank`, which
+# hides a version without removing it. Everything below is arranged around that —
+# the version is cross-checked against the tag, the whole test suite has to pass,
+# and a dry run has to succeed before the real upload is attempted.
+name: release-crate
+
+on:
+  push:
+    tags: ['sas7bdat-v*']
+  # Lets you exercise everything except the upload against any ref.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Verify only; do not upload to crates.io'
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-crate-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: publish sas7bdat
+    runs-on: ubuntu-latest
+    # Gate the upload behind a GitHub Environment so it can carry required
+    # reviewers and hold the token. Create it under Settings > Environments and
+    # add CARGO_REGISTRY_TOKEN there; without it the final step cannot run.
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Show toolchain
+        run: rustup show && cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The tag is the only thing a human types, so it is the only thing that can
+      # disagree with the manifest. Catching that here is the difference between a
+      # mislabelled release and an unpublishable mistake.
+      - name: Tag and Cargo.toml must agree
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          manifest="$(cargo metadata --format-version 1 --no-deps \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="sas7bdat"))')"
+          tagged="${GITHUB_REF_NAME#sas7bdat-v}"
+          echo "manifest=$manifest  tag=$tagged"
+          test "$manifest" = "$tagged"
+
+      # crates.io refuses a duplicate version, but only once the upload is attempted
+      # — after the whole test suite below has run. Checking first fails in seconds
+      # with a clear message instead of minutes with an opaque one.
+      #
+      # Queried against the sparse index rather than the REST API: the index is a
+      # plain static file, has no bot filtering in front of it, and is the same
+      # source cargo itself resolves from. The path layout is name-length-dependent
+      # (`sa/s7/sas7bdat` for an 8-character name); it is written out rather than
+      # computed because this workflow only ever asks about one crate.
+      - name: Version must not already be published
+        run: |
+          version="$(cargo metadata --format-version 1 --no-deps \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="sas7bdat"))')"
+          index="$(curl -sS --fail-with-body --max-time 30 https://index.crates.io/sa/s7/sas7bdat)"
+          # One compact JSON object per line; the version field is exactly
+          # `"vers":"x.y.z"`, so a fixed-string match on that is unambiguous —
+          # it cannot collide with a version substring elsewhere in the line.
+          if printf '%s' "$index" | grep -qF "\"vers\":\"$version\""; then
+            echo "sas7bdat $version is already on crates.io — bump the version or delete the tag"
+            exit 1
+          fi
+          echo "sas7bdat $version is not yet published"
+
+      # ci.yml already runs these on every push to main, but a tag can point at any
+      # commit. Re-running them here means the artifact that reaches crates.io was
+      # tested, rather than something that merely shares a branch with a green run.
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # Packages and compiles the exact archive that would be uploaded. `--locked`
+      # ensures it resolves against the committed lockfile rather than whatever
+      # the registry happens to offer today.
+      - name: Package and verify
+        run: cargo publish --dry-run --locked -p sas7bdat
+
+      - name: Upload the packaged crate as a build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: sas7bdat-crate
+          path: target/package/*.crate
+          if-no-files-found: error
+
+      # The only irreversible step, and the only one that needs the token.
+      # Skipped for workflow_dispatch unless dry_run is explicitly unticked.
+      - name: Publish to crates.io
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.dry_run == false }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked -p sas7bdat
+
+      # Draft, not published: the release notes want a human to read them before
+      # they go out, and the crate is already live by this point regardless.
+      - name: Draft a GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#sas7bdat-v}"
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "sas7bdat $version" \
+            --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/crates/sas7bdat/CHANGELOG.md) for the full entry.
+
+            Crate: https://crates.io/crates/sas7bdat/$version" \
+            target/package/*.crate

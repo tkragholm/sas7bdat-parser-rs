@@ -5,12 +5,21 @@ PKG_LIBS = -L$(LIBDIR) -lfastsas
 
 CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
 
-# Cargo is invoked from this directory on purpose. `rust/Cargo.toml` names
-# `sas7bdat` by version so a tarball can resolve it from crates.io, and
-# `.cargo/config.toml` here redirects that to the working tree when the package
-# is built inside the repository. Cargo finds that config by walking up from the
-# working directory, not from `--manifest-path`, so running cargo from anywhere
-# above this directory would silently skip the redirect.
+# Cargo is invoked from `rust/`, not from here, and both tools that read the
+# surrounding directories are why.
+#
+# rustup picks the toolchain from the *working directory* upward, and the core
+# needs nightly (`#![feature(portable_simd)]`). `rust/rust-toolchain.toml` supplies
+# it. Running cargo from this directory would look past that file and fall through
+# to whatever the host defaults to — inside the repo that happens to be the root
+# pin, so it appears to work, but a tarball has no root pin and the build fails
+# with E0554. The file sits in `rust/` rather than here because `R CMD check`
+# warns about unrecognised file names directly under `src/`.
+#
+# Cargo resolves `.cargo/config.toml` the same way, by walking up, so the
+# `[patch.crates-io]` redirect in `../.cargo/config.toml` is still found from
+# `rust/` — an ancestor. That patch is what points `sas7bdat` at this checkout;
+# `.Rbuildignore` strips it, so a tarball resolves the published crate instead.
 
 $(SHLIB): $(STATLIB)
 
@@ -23,7 +32,7 @@ $(SHLIB): $(STATLIB)
 # ran `make clean`. Cargo already does its own up-to-date check, and a no-op
 # `cargo build` costs milliseconds, so deferring to it is both correct and cheap.
 $(STATLIB): FORCE
-	cargo build $(CARGO_BUILD_ARGS)
+	cd rust && cargo build $(CARGO_BUILD_ARGS)
 
 C_clean:
 	rm -Rf $(LIBDIR)/build
