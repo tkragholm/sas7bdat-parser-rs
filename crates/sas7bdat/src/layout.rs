@@ -131,7 +131,7 @@ impl TextStore {
         self.bytes.get(start..end)
     }
 
-    fn resolve(&self, text_ref: TextRef) -> Option<String> {
+    fn decode(&self, text_ref: TextRef) -> Option<std::borrow::Cow<'_, str>> {
         if text_ref.length == 0 {
             return None;
         }
@@ -140,14 +140,46 @@ impl TextStore {
         let start = usize::from(text_ref.offset);
         let bytes = blob.get(start..end)?;
         let (decoded, had_errors) = self.encoding.decode_without_bom_handling(bytes);
-        let decoded = if had_errors {
+        Some(if had_errors {
             String::from_utf8_lossy(bytes)
         } else {
             decoded
-        };
+        })
+    }
+
+    /// Resolve an *identifier*: a column name, a format name, the compression marker.
+    /// These are compared literally downstream, so surrounding padding is noise.
+    fn resolve(&self, text_ref: TextRef) -> Option<String> {
+        let decoded = self.decode(text_ref)?;
         // Trim the borrowed `&str` and allocate once, instead of materializing
         // the decoded string and then re-allocating the trimmed copy.
         let trimmed = decoded.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    }
+
+    /// Resolve a *label*: trailing ASCII padding removed, everything else kept.
+    ///
+    /// Two asymmetries here, and both are the file format's rather than a preference.
+    ///
+    /// Only the *end* is trimmed. SAS writes a label out at its declared width, so
+    /// trailing spaces are padding, while a leading space sits inside the text the
+    /// author typed and is content. Trimming both ends made 411 labels in the fixture
+    /// corpus differ from `haven`, every one of them by leading spaces.
+    ///
+    /// Only *ASCII* padding is trimmed, not Unicode whitespace. A BRFSS label ends with
+    /// a non-breaking space — byte `0xA0` in its Windows-1252 source — which `str::trim`
+    /// strips because U+00A0 carries the `White_Space` property. SAS pads with `0x20`,
+    /// so a non-breaking space got there by being typed, and `ReadStat` keeps it.
+    ///
+    /// A label that is nothing but padding is reported as absent.
+    fn resolve_label(&self, text_ref: TextRef) -> Option<String> {
+        const PADDING: [char; 2] = [' ', '\0'];
+        let decoded = self.decode(text_ref)?;
+        let trimmed = decoded.trim_end_matches(PADDING);
         if trimmed.is_empty() {
             None
         } else {
@@ -370,7 +402,7 @@ pub fn parse_layout<R: Read + Seek>(
     metadata.row_count = row_info.total_rows;
     metadata.row_len = row_info.row_length;
     metadata.compression = compression;
-    metadata.file_label = state.text_store.resolve(row_info.label_ref);
+    metadata.file_label = state.text_store.resolve_label(row_info.label_ref);
 
     let columns = state
         .columns
@@ -381,7 +413,7 @@ pub fn parse_layout<R: Read + Seek>(
                 .resolve(column.name_ref)
                 .unwrap_or_else(|| format!("COL{}", column.index + 1));
             let format = state.text_store.resolve(column.format_ref);
-            let label = state.text_store.resolve(column.label_ref);
+            let label = state.text_store.resolve_label(column.label_ref);
             let logical_type = infer_logical_type(column.type_code, format.as_deref());
 
             // SAS stores a numeric as a truncated IEEE-754 double, so its width is
@@ -729,6 +761,73 @@ const fn subheader_entries(len: usize, uses_u64: bool, chunk_width: usize) -> us
     len.saturating_sub(base) / chunk_width
 }
 
+// ── SAS built-in temporal formats ────────────────────────────────────────────
+//
+// Grouped by the SCALE OF THE STORED VALUE, not by what the format prints. That
+// distinction is the whole point: `DTDATE` prints a date but its value is a
+// datetime, so reading it as a date would be wrong by a factor of 86,400.
+//
+// Membership is exact. These lists used to be substring tests — `contains("MON")`,
+// `ends_with("DA")` and friends — which quietly swept up *user-defined* format
+// names that merely looked temporal. A survey variable formatted `FMONTH` (values
+// 1-12) came back as a `Date` in January 1960; `PSATIME`, `_TOTINDA`, `DRNKSODA`,
+// `STDWEEK`, `YEAR_F`, `DRETIME`, `MONTHLYINCPR` and `YEARLYINCPR` failed the same
+// way across six real government survey files in the fixture corpus.
+//
+// Exact matching is safe in the other direction too: SAS reserves the built-in
+// format namespace, so a user-defined format cannot legitimately be called `DATE`.
+// A built-in missing from these lists degrades to `Float` — a visibly wrong *type*
+// rather than silently wrong *values*, which is the failure worth having.
+//
+// Widths and decimals are not part of the stored name (the corpus confirms it: the
+// only names carrying digits are the ISO-8601 families, where the digits are part
+// of the name), so nothing is stripped before the lookup. Stripping trailing digits
+// would reintroduce the bug — it would fold the user-defined `YEAR_F`-style names
+// back onto their built-in prefixes.
+//
+// Each list is sorted so the lookup can binary-search; `formats_are_sorted_and_disjoint`
+// enforces both the ordering and the absence of overlap.
+
+/// Value is a **date**: whole days since 1960-01-01.
+static DATE_FORMATS: &[&str] = &[
+    "B8601DA", "DATE", "DAY", "DDMMYY", "DDMMYYB", "DDMMYYC", "DDMMYYD", "DDMMYYN", "DDMMYYP",
+    "DDMMYYS", "DOWNAME", "E8601DA", "IS8601DA", "JULDAY", "JULIAN", "MINGUO", "MMDDYY", "MMDDYYB",
+    "MMDDYYC", "MMDDYYD", "MMDDYYN", "MMDDYYP", "MMDDYYS", "MMYY", "MMYYC", "MMYYD", "MMYYN",
+    "MMYYP", "MMYYS", "MONNAME", "MONTH", "MONYY", "NENGO", "PDJULG", "PDJULI", "QTR", "QTRR",
+    "WEEKDATE", "WEEKDATX", "WEEKDAY", "WEEKU", "WEEKV", "WEEKW", "WORDDATE", "WORDDATX", "YEAR",
+    "YYMM", "YYMMC", "YYMMD", "YYMMDD", "YYMMDDB", "YYMMDDC", "YYMMDDD", "YYMMDDN", "YYMMDDP",
+    "YYMMDDS", "YYMMN", "YYMMP", "YYMMS", "YYMON", "YYQ", "YYQC", "YYQD", "YYQN", "YYQP", "YYQR",
+    "YYQRC", "YYQRD", "YYQRN", "YYQRP", "YYQRS", "YYQS",
+];
+
+/// Value is a **datetime**: seconds since 1960-01-01T00:00:00.
+static DATETIME_FORMATS: &[&str] = &[
+    "B8601DN", "B8601DT", "B8601DZ", "DATEAMPM", "DATETIME", "DTDATE", "DTMONYY", "DTWKDATX",
+    "DTYEAR", "DTYYQC", "E8601DN", "E8601DT", "E8601DZ", "IS8601DT", "IS8601DZ", "MDYAMPM",
+];
+
+/// Value is a **time**: seconds since midnight.
+static TIME_FORMATS: &[&str] = &[
+    "B8601LZ", "B8601TM", "B8601TZ", "E8601LZ", "E8601TM", "E8601TZ", "HHMM", "HOUR", "IS8601TM",
+    "IS8601TZ", "MMSS", "TIME", "TIMEAMPM",
+];
+
+/// Formats deliberately left out, so the next reader does not "helpfully" add them:
+/// `TOD` and `QTRR`-style variants whose documented input is a *datetime* rather
+/// than the unit their name suggests are only safe to add alongside a fixture that
+/// pins the scale. Absent from these lists they read as `Float`, which is honest.
+fn classify_numeric_format(name: &str) -> LogicalType {
+    if DATETIME_FORMATS.binary_search(&name).is_ok() {
+        LogicalType::DateTime
+    } else if DATE_FORMATS.binary_search(&name).is_ok() {
+        LogicalType::Date
+    } else if TIME_FORMATS.binary_search(&name).is_ok() {
+        LogicalType::Time
+    } else {
+        LogicalType::Float
+    }
+}
+
 fn infer_logical_type(type_code: u8, format_name: Option<&str>) -> LogicalType {
     match type_code {
         0x02 => LogicalType::String,
@@ -737,33 +836,7 @@ fn infer_logical_type(type_code: u8, format_name: Option<&str>) -> LogicalType {
                 return LogicalType::Float;
             };
             let cleaned = format_name.trim().trim_matches('.').to_ascii_uppercase();
-            if cleaned.contains("DATETIME")
-                || cleaned.starts_with("DT")
-                || cleaned.ends_with("DT")
-                || cleaned.starts_with("E8601DT")
-                || cleaned.starts_with("B8601DT")
-            {
-                LogicalType::DateTime
-            } else if cleaned.contains("TIME")
-                || cleaned.ends_with("TM")
-                || cleaned.starts_with("E8601TM")
-                || cleaned.starts_with("HHMM")
-            {
-                LogicalType::Time
-            } else if cleaned.contains("DATE")
-                || cleaned.contains("YY")
-                || cleaned.contains("MON")
-                || cleaned.contains("WEEK")
-                || cleaned.contains("YEAR")
-                || cleaned.contains("MINGUO")
-                || cleaned.ends_with("DA")
-                || cleaned.starts_with("E8601DA")
-                || cleaned.starts_with("B8601DA")
-            {
-                LogicalType::Date
-            } else {
-                LogicalType::Float
-            }
+            classify_numeric_format(&cleaned)
         }
         _ => LogicalType::Bytes,
     }
@@ -777,4 +850,173 @@ fn get_range<'a>(bytes: &'a [u8], start: usize, end: usize, what: &str) -> Resul
 
 fn metadata_error(message: impl Into<String>) -> Error {
     Error::metadata_corruption(message)
+}
+
+#[cfg(test)]
+mod format_classification_tests {
+    use super::{
+        DATE_FORMATS, DATETIME_FORMATS, TIME_FORMATS, classify_numeric_format, infer_logical_type,
+    };
+    use crate::metadata::LogicalType;
+
+    #[test]
+    fn formats_are_sorted_and_disjoint() {
+        for (label, list) in [
+            ("DATE_FORMATS", DATE_FORMATS),
+            ("DATETIME_FORMATS", DATETIME_FORMATS),
+            ("TIME_FORMATS", TIME_FORMATS),
+        ] {
+            assert!(
+                list.windows(2).all(|w| w[0] < w[1]),
+                "{label} must be sorted and free of duplicates for binary_search"
+            );
+        }
+        for name in DATE_FORMATS {
+            assert!(
+                DATETIME_FORMATS.binary_search(name).is_err(),
+                "{name} in two lists"
+            );
+            assert!(
+                TIME_FORMATS.binary_search(name).is_err(),
+                "{name} in two lists"
+            );
+        }
+        for name in DATETIME_FORMATS {
+            assert!(
+                TIME_FORMATS.binary_search(name).is_err(),
+                "{name} in two lists"
+            );
+        }
+    }
+
+    #[test]
+    fn built_in_formats_keep_their_scale() {
+        assert_eq!(classify_numeric_format("DATE"), LogicalType::Date);
+        assert_eq!(classify_numeric_format("MMDDYY"), LogicalType::Date);
+        assert_eq!(classify_numeric_format("WEEKDATX"), LogicalType::Date);
+        assert_eq!(classify_numeric_format("DATETIME"), LogicalType::DateTime);
+        assert_eq!(classify_numeric_format("TIME"), LogicalType::Time);
+        assert_eq!(classify_numeric_format("HHMM"), LogicalType::Time);
+        assert_eq!(classify_numeric_format("E8601TM"), LogicalType::Time);
+        assert_eq!(classify_numeric_format("E8601DA"), LogicalType::Date);
+        assert_eq!(classify_numeric_format("E8601DT"), LogicalType::DateTime);
+    }
+
+    #[test]
+    fn formats_that_print_a_date_but_store_a_datetime_are_datetimes() {
+        // The scale of the stored value decides, not what the format prints.
+        // `DATEAMPM` was previously classified `Date` purely because its name
+        // contains "DATE", which scaled its seconds as if they were days.
+        for name in [
+            "DATEAMPM", "DTDATE", "DTMONYY", "DTWKDATX", "DTYEAR", "E8601DN",
+        ] {
+            assert_eq!(
+                classify_numeric_format(name),
+                LogicalType::DateTime,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_defined_formats_that_merely_look_temporal_stay_numeric() {
+        // Every one of these appears on a numeric survey variable in the fixture
+        // corpus and used to be read as a date or a time.
+        for name in [
+            "FMONTH",       // contains "MON"
+            "_TOTINDA",     // ends with "DA"
+            "DRNKSODA",     // ends with "DA"
+            "PSATIME",      // contains "TIME"
+            "DRETIME",      // contains "TIME"
+            "STDWEEK",      // contains "WEEK"
+            "YEAR_F",       // contains "YEAR"
+            "MONTHLYINCPR", // contains "MON"
+            "YEARLYINCPR",  // contains "YEAR"
+        ] {
+            assert_eq!(classify_numeric_format(name), LogicalType::Float, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_format_name_is_normalised_before_lookup() {
+        assert_eq!(
+            infer_logical_type(0x01, Some(" datetime. ")),
+            LogicalType::DateTime,
+            "case, padding and the trailing dot must not defeat the lookup"
+        );
+        assert_eq!(infer_logical_type(0x01, None), LogicalType::Float);
+        assert_eq!(infer_logical_type(0x02, Some("DATE")), LogicalType::String);
+    }
+
+    #[test]
+    fn a_width_suffix_is_not_stripped() {
+        // Stripping trailing digits would fold `YEAR2`-shaped user formats back
+        // onto their built-in prefixes, which is the bug this table replaced.
+        assert_eq!(classify_numeric_format("YEAR2"), LogicalType::Float);
+        assert_eq!(classify_numeric_format("MMDDYY10"), LogicalType::Float);
+    }
+}
+
+#[cfg(test)]
+mod text_store_tests {
+    use super::{TextRef, TextStore};
+    use encoding_rs::UTF_8;
+
+    fn store_of(text: &str) -> (TextStore, TextRef) {
+        let mut store = TextStore::new(UTF_8);
+        store.push_blob(text.as_bytes());
+        let length = u16::try_from(text.len()).expect("fixture fits a text ref");
+        (
+            store,
+            TextRef {
+                index: 0,
+                offset: 0,
+                length,
+            },
+        )
+    }
+
+    #[test]
+    fn identifiers_are_trimmed_at_both_ends() {
+        let (store, text_ref) = store_of("  DATE9.  ");
+        assert_eq!(store.resolve(text_ref).as_deref(), Some("DATE9."));
+    }
+
+    #[test]
+    fn labels_keep_leading_space_and_drop_trailing_padding() {
+        // SAS writes the label at its declared width, so the trailing run is padding;
+        // the leading space is inside what the author typed. `haven` draws the same line.
+        let (store, text_ref) = store_of("  Private residence?   ");
+        assert_eq!(
+            store.resolve_label(text_ref).as_deref(),
+            Some("  Private residence?")
+        );
+    }
+
+    #[test]
+    fn labels_keep_a_trailing_non_breaking_space() {
+        // U+00A0 has the Unicode `White_Space` property, so `str::trim_end` would eat it.
+        // SAS pads with `0x20`; a non-breaking space is there because someone typed it,
+        // and `ReadStat` keeps it. A real BRFSS label ends exactly this way.
+        let (store, text_ref) = store_of("regular soda?\u{a0}  ");
+        assert_eq!(
+            store.resolve_label(text_ref).as_deref(),
+            Some("regular soda?\u{a0}")
+        );
+    }
+
+    #[test]
+    fn an_all_padding_label_is_absent() {
+        let (store, text_ref) = store_of("     ");
+        assert_eq!(store.resolve_label(text_ref), None);
+        assert_eq!(store.resolve(text_ref), None);
+    }
+
+    #[test]
+    fn a_zero_length_ref_resolves_to_nothing() {
+        let (store, mut text_ref) = store_of("anything");
+        text_ref.length = 0;
+        assert_eq!(store.resolve_label(text_ref), None);
+        assert_eq!(store.resolve(text_ref), None);
+    }
 }
