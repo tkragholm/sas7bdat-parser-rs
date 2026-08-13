@@ -83,14 +83,12 @@ dev-tools = [
 
 [dependencies]
 anyhow = { workspace = true }
-arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 clap_complete = "4"
 csv = { workspace = true }
 terminal_size = "0.4"
-glob = { workspace = true }
 indicatif = { workspace = true }
 mimalloc = { workspace = true }
 parquet = { workspace = true }
