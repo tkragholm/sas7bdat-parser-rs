@@ -1,6 +1,6 @@
 Package: fastsasconvert
 Title: Convert SAS7BDAT Files to Parquet Without Loading Them
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R:
     person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre"))
 Description: Converts .sas7bdat files to Parquet, CSV or TSV, one file or a

@@ -1,6 +1,6 @@
 Package: fastsas
 Title: Fast SAS7BDAT Reader Backed by Rust
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R:
     person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre"))
 Description: High-performance reader for SAS7BDAT files. The parsing core is
