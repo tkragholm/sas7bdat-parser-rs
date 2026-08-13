@@ -449,6 +449,54 @@ pub struct InspectCli {
     pub args: InspectArgs,
 }
 
+// ── clap enums -> library enums ──────────────────────────────────────────────
+//
+// `sas7bdat-convert` deliberately carries no clap dependency, so its equivalents
+// are plain enums. These conversions are the single boundary between the two, and
+// being exhaustive `match`es they fail to compile if either side gains a variant.
+
+impl From<SinkKind> for sas7bdat_convert::SinkKind {
+    fn from(value: SinkKind) -> Self {
+        match value {
+            SinkKind::Parquet => Self::Parquet,
+            SinkKind::Csv => Self::Csv,
+            SinkKind::Tsv => Self::Tsv,
+        }
+    }
+}
+
+impl From<RecursionMode> for sas7bdat_convert::RecursionMode {
+    fn from(value: RecursionMode) -> Self {
+        match value {
+            RecursionMode::Recursive => Self::Recursive,
+            RecursionMode::Never => Self::Never,
+        }
+    }
+}
+
+impl From<CompressionCodec> for sas7bdat_convert::CompressionCodec {
+    fn from(value: CompressionCodec) -> Self {
+        match value {
+            CompressionCodec::Zstd => Self::Zstd,
+            CompressionCodec::Lz4 => Self::Lz4,
+            CompressionCodec::Snappy => Self::Snappy,
+            CompressionCodec::None => Self::None,
+        }
+    }
+}
+
+impl ConvertArgs {
+    /// The output layout this invocation asks for, as the conversion library sees it.
+    #[must_use]
+    pub fn output_layout(&self) -> sas7bdat_convert::OutputLayout {
+        sas7bdat_convert::OutputLayout {
+            out_dir: self.output.out_dir.clone(),
+            flatten: self.output.flatten,
+            sink: self.output.effective_sink().into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Cli, CompressionCodec, ConvertCli, InspectCli, OutputOptions, SinkKind};

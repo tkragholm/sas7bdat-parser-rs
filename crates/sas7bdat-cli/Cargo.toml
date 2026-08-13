@@ -102,6 +102,7 @@ tracing-indicatif = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 walkdir = { workspace = true }
 sas7bdat = { path = "../sas7bdat", features = ["arrow"] }
+sas7bdat-convert = { path = "../sas7bdat-convert" }
 
 [lints]
 workspace = true

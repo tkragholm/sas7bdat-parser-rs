@@ -5,9 +5,10 @@ use crate::cli::HeadArgs;
 use crate::friendly;
 use crate::selection::{ColumnSelection, projection_from_selection, resolve_column_indices};
 use crate::style::{Style, terminal_width};
-use crate::values::{format_cell, thousands};
+use crate::values::thousands;
 use anyhow::Result;
 use sas7bdat::{Dataset, LogicalType, Projection, RowSelection};
+use sas7bdat_convert::values::format_cell;
 use std::fmt::Write as _;
 use std::ops::ControlFlow;
 

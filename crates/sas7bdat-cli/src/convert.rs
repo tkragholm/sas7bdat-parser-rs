@@ -4,7 +4,7 @@ use crate::export::{
     DelimitedWriteOptions, ScanOptions, WriteOptions, write_csv_or_tsv, write_parquet,
 };
 use crate::friendly;
-use crate::paths::{compute_output_path, discover_inputs, validate_convert_args};
+use crate::paths::{compute_output_path, discover_inputs};
 use crate::selection::{
     ColumnSelection, RowWindow, projection_from_selection, resolve_column_indices,
     row_selection_from_window,
@@ -30,11 +30,30 @@ struct ConvertOutcome {
     input_bytes: u64,
 }
 
+/// Reject argument combinations the library cannot express.
+///
+/// These are clap-level invariants -- `--out` names one destination, `--delimiter`
+/// means nothing to Parquet -- so they stayed with the argument type rather than
+/// moving into `sas7bdat-convert` with the path logic.
+fn validate_convert_args(args: &ConvertArgs, discovered_inputs: usize) -> Result<()> {
+    if discovered_inputs == 0 {
+        anyhow::bail!("no .sas7bdat inputs were found");
+    }
+    if args.output.out.is_some() && discovered_inputs != 1 {
+        anyhow::bail!("--out can only be used with a single input");
+    }
+    if matches!(args.output.effective_sink(), SinkKind::Parquet) && args.output.delimiter.is_some()
+    {
+        anyhow::bail!("--delimiter only applies to CSV/TSV output");
+    }
+    Ok(())
+}
+
 /// # Errors
 ///
 /// Returns an error if input discovery, catalog loading, conversion, or writing fails.
 pub fn run_convert(args: &ConvertArgs) -> Result<()> {
-    let files = discover_inputs(&args.inputs, args.recursive)?;
+    let files = discover_inputs(&args.inputs, args.recursive.into())?;
     validate_convert_args(args, files.len())?;
     let catalog = if let Some(path) = &args.catalog {
         Some(Catalog::load(path)?)
@@ -183,7 +202,7 @@ fn convert_one(
     progress: Option<&ProgressState>,
 ) -> Result<ConvertOutcome> {
     let output = args.output.out.as_ref().map_or_else(
-        || compute_output_path(root, input, args),
+        || compute_output_path(root, input, &args.output_layout()),
         std::clone::Clone::clone,
     );
     if output.exists() && !args.output.overwrite {
@@ -386,7 +405,7 @@ fn write_output(
                     scan,
                     catalog,
                     embed_metadata: args.output.parquet_metadata,
-                    compression: crate::export::resolve_compression(args.output.compression),
+                    compression: crate::export::resolve_compression(args.output.compression.into()),
                 },
             )
         }

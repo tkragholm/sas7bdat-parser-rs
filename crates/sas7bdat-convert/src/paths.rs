@@ -1,4 +1,4 @@
-use crate::cli::{ConvertArgs, RecursionMode, SinkKind};
+use crate::{OutputLayout, RecursionMode};
 use anyhow::{Result, bail};
 use glob::glob;
 use std::ffi::OsStr;
@@ -60,12 +60,12 @@ pub fn discover_inputs(
 }
 
 #[must_use]
-pub fn compute_output_path(root: &Path, input: &Path, args: &ConvertArgs) -> PathBuf {
-    let extension = sink_extension(args.output.effective_sink());
-    args.output.out_dir.as_ref().map_or_else(
+pub fn compute_output_path(root: &Path, input: &Path, layout: &OutputLayout) -> PathBuf {
+    let extension = layout.sink.extension();
+    layout.out_dir.as_ref().map_or_else(
         || input.with_extension(extension),
         |dir| {
-            if args.output.flatten {
+            if layout.flatten {
                 let file_name = input.file_name().unwrap_or_else(|| OsStr::new("output"));
                 return dir.join(PathBuf::from(file_name).with_extension(extension));
             }
@@ -127,95 +127,50 @@ fn add_path(
     Ok(())
 }
 
-const fn sink_extension(sink: SinkKind) -> &'static str {
-    match sink {
-        SinkKind::Parquet => "parquet",
-        SinkKind::Csv => "csv",
-        SinkKind::Tsv => "tsv",
-    }
-}
-
-/// # Errors
-///
-/// Returns an error if the resolved inputs are invalid for the requested output mode.
-pub fn validate_convert_args(args: &ConvertArgs, discovered_inputs: usize) -> Result<()> {
-    if discovered_inputs == 0 {
-        bail!("no .sas7bdat inputs were found");
-    }
-    if args.output.out.is_some() && discovered_inputs != 1 {
-        bail!("--out can only be used with a single input");
-    }
-    if matches!(args.output.effective_sink(), SinkKind::Parquet) && args.output.delimiter.is_some()
-    {
-        bail!("--delimiter only applies to CSV/TSV output");
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{ConvertArgs, ExecutionOptions, OutputOptions, RecursionMode, UiOptions};
+    use crate::SinkKind;
     use crate::selection::{RowWindow, row_selection_from_window};
 
-    fn args(sink: SinkKind, out_dir: Option<&str>, flatten: bool) -> ConvertArgs {
-        ConvertArgs {
-            inputs: vec![PathBuf::from("input.sas7bdat")],
-            recursive: RecursionMode::Recursive,
-            output: OutputOptions {
-                out_dir: out_dir.map(PathBuf::from),
-                out: None,
-                sink: Some(sink),
-                compression: crate::cli::CompressionCodec::Zstd,
-                delimiter: None,
-                no_header: false,
-                flatten,
-                overwrite: false,
-                tmp_dir: None,
-                parquet_row_group_size: None,
-                parquet_target_bytes: None,
-                parquet_metadata: false,
-            },
-            execution: ExecutionOptions {
-                jobs: None,
-                parse_threads: None,
-                batch_rows: None,
-                encode_in_flight_bytes: None,
-                fail_fast: false,
-            },
-            io_backend: crate::cli::IoBackend::Auto,
-            ui: UiOptions {
-                quiet: false,
-                progress: crate::cli::ProgressMode::Auto,
-            },
-            skip: None,
-            max_rows: None,
-            columns: None,
-            column_indices: None,
-            catalog: None,
+    fn layout(sink: SinkKind, out_dir: Option<&str>, flatten: bool) -> OutputLayout {
+        OutputLayout {
+            out_dir: out_dir.map(PathBuf::from),
+            flatten,
+            sink,
         }
     }
 
     #[test]
     fn compute_output_path_flattens_when_requested() {
-        let args = args(SinkKind::Parquet, Some("/tmp/out"), true);
         let output = compute_output_path(
             Path::new("/data"),
             Path::new("/data/nested/example.sas7bdat"),
-            &args,
+            &layout(SinkKind::Parquet, Some("/tmp/out"), true),
         );
         assert_eq!(output, PathBuf::from("/tmp/out/example.parquet"));
     }
 
     #[test]
     fn compute_output_path_preserves_relative_tree() {
-        let args = args(SinkKind::Csv, Some("/tmp/out"), false);
+        // The mirrored tree is the whole point of an --out-dir conversion: the path
+        // below the discovery root is preserved, only the extension changes.
         let output = compute_output_path(
             Path::new("/data"),
             Path::new("/data/nested/example.sas7bdat"),
-            &args,
+            &layout(SinkKind::Csv, Some("/tmp/out"), false),
         );
         assert_eq!(output, PathBuf::from("/tmp/out/nested/example.csv"));
+    }
+
+    #[test]
+    fn compute_output_path_writes_beside_the_input_without_an_out_dir() {
+        let output = compute_output_path(
+            Path::new("/data"),
+            Path::new("/data/nested/example.sas7bdat"),
+            &layout(SinkKind::Parquet, None, false),
+        );
+        assert_eq!(output, PathBuf::from("/data/nested/example.parquet"));
     }
 
     #[test]
@@ -231,15 +186,14 @@ mod tests {
 
     #[test]
     fn discover_inputs_supports_globs() {
-        let temp_dir = std::env::temp_dir().join("sas7bdat-cli-glob-test");
+        let temp_dir = std::env::temp_dir().join("sas7bdat-convert-glob-test");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).expect("temp dir");
         let path = temp_dir.join("example.sas7bdat");
         std::fs::write(&path, b"test").expect("fixture file");
 
         let pattern = temp_dir.join("*.sas7bdat");
-        let inputs = vec![pattern];
-        let files = discover_inputs(&inputs, RecursionMode::Recursive).expect("glob discovery");
+        let files = discover_inputs(&[pattern], RecursionMode::Recursive).expect("glob discovery");
         assert!(files.iter().any(|(_, input)| input == &path));
 
         let _ = std::fs::remove_dir_all(&temp_dir);

@@ -1,5 +1,5 @@
+use crate::CompressionCodec;
 use crate::catalog::{Catalog, LabelSet};
-use crate::cli::CompressionCodec;
 use crate::sas_metadata::{DatasetMetaJson, PARQUET_METADATA_KEY};
 use anyhow::Result;
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
@@ -707,8 +707,8 @@ mod tests {
     }
 
     use super::{apply_column_encodings, attach_value_labels, resolve_compression};
+    use crate::CompressionCodec;
     use crate::catalog::{LabelSet, ValueKey, ValueLabel, ValueType};
-    use crate::cli::CompressionCodec;
     use arrow_schema::{DataType, Field, Fields, Schema, TimeUnit};
     use parquet::basic::{Compression, Encoding};
     use parquet::file::properties::WriterProperties;

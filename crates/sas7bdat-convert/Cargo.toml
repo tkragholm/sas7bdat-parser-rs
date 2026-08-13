@@ -1,0 +1,27 @@
+[package]
+name = "sas7bdat-convert"
+version = "0.1.0"
+edition = "2024"
+description = "Convert SAS7BDAT files to Parquet, CSV or TSV, one file or a directory tree"
+license = "MIT"
+repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
+categories = ["command-line-utilities", "encoding", "science"]
+keywords = ["sas7bdat", "sas", "parquet", "arrow", "convert"]
+readme = "README.md"
+
+[dependencies]
+anyhow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+chrono = { workspace = true }
+csv = { workspace = true }
+glob = { workspace = true }
+parquet = { workspace = true }
+rayon = { workspace = true }
+sas7bdat = { path = "../sas7bdat", version = "0.7", features = ["arrow"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
