@@ -123,6 +123,77 @@ jobs:
       - name: Feature combinations
         run: cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
 
+  # The only job that compiles and links the R bindings on Windows, which is a
+  # different build from every other job here rather than the same one repeated.
+  #
+  # `Makevars` is read on Unix and `Makevars.win` on Windows, so the Windows link
+  # line is never exercised elsewhere — and neither is the ABI it depends on. R on
+  # Windows links with Rtools' mingw-w64, while cargo's default target on a Windows
+  # host is MSVC; that mismatch shipped undetected until R-universe tried to build
+  # the packages and every Windows binary failed on `undefined reference to
+  # `__chkstk''. The Linux job could not have caught it, and R-universe is a poor
+  # place to find out: it is a ten-minute round trip on someone else's schedule.
+  #
+  # Installing is most of the value, since that is where a link error surfaces, but
+  # the suites run too — a static library can link and still be wrong about, say,
+  # how it hands strings back — and they cost seconds next to the compile.
+  #
+  # One gap worth naming: this installs from the working tree, so `src/.cargo`
+  # redirects the crates to this checkout. R-universe installs from a tarball, where
+  # `.Rbuildignore` strips that redirect and the published crates are used instead.
+  # A green run here means the packaging is sound; it does not prove the last
+  # published core builds on Windows.
+  r-windows:
+    name: R packages (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Brings Rtools with it, which is what supplies mingw-w64 and make.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      # Reads each DESCRIPTION and installs its Suggests as binaries — the reader's
+      # suite compares against haven, and both use testthat.
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: crates/r-plugin
+          extra-packages: any::testthat
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: crates/r-convert-plugin
+          extra-packages: any::testthat
+
+      # Installs the pinned nightly up front so a toolchain download is not folded
+      # into the first R CMD INSTALL, where its output would be buried. The GNU
+      # target itself is added by Makevars.win — deliberately left to it, so that
+      # line is covered by this job rather than worked around by it.
+      - name: Show toolchain
+        run: rustup show && cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/r-plugin/src/rust
+            crates/r-convert-plugin/src/rust
+
+      - name: Install and test
+        shell: bash
+        run: |
+          for pkg in r-plugin:fastsas r-convert-plugin:fastsasconvert; do
+            dir="crates/${pkg%%:*}"
+            name="${pkg##*:}"
+            echo "::group::install $name"
+            R CMD INSTALL "$dir"
+            echo "::endgroup::"
+            echo "::group::test $name"
+            ( cd "$dir/tests" && Rscript testthat.R )
+            echo "::endgroup::"
+          done
+
   # Coverage of the published library only. The plugins are exercised through their
   # Python/R test suites, and the CLI has no integration tests to measure.
   #
