@@ -277,3 +277,27 @@ impl OwnedCellValue {
         }
     }
 }
+
+// The `CellValue` conversions for the temporal newtypes live here, with the enum
+// they build, rather than in `metadata` beside the newtypes. Both types are local
+// so either module may host them, but putting them in `metadata` meant the module
+// that *describes* a dataset had to import the module that *reads* one — the only
+// edge in that direction, and enough to make `metadata` and `row` mutually
+// dependent for three trivial constructors.
+impl From<SasDate> for CellValue<'_> {
+    fn from(value: SasDate) -> Self {
+        Self::Date(value)
+    }
+}
+
+impl From<SasDateTime> for CellValue<'_> {
+    fn from(value: SasDateTime) -> Self {
+        Self::DateTime(value)
+    }
+}
+
+impl From<SasTime> for CellValue<'_> {
+    fn from(value: SasTime) -> Self {
+        Self::Time(value)
+    }
+}

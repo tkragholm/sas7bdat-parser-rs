@@ -1,4 +1,4 @@
-use crate::{labels::LabelSet, row::CellValue};
+use crate::labels::LabelSet;
 use std::{collections::HashMap, time::SystemTime};
 
 pub type Timestamp = SystemTime;
@@ -154,24 +154,6 @@ impl ColumnMeta {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
-    }
-}
-
-impl From<SasDate> for CellValue<'_> {
-    fn from(value: SasDate) -> Self {
-        Self::Date(value)
-    }
-}
-
-impl From<SasDateTime> for CellValue<'_> {
-    fn from(value: SasDateTime) -> Self {
-        Self::DateTime(value)
-    }
-}
-
-impl From<SasTime> for CellValue<'_> {
-    fn from(value: SasTime) -> Self {
-        Self::Time(value)
     }
 }
 
