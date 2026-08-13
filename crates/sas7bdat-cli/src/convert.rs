@@ -1,33 +1,45 @@
 use crate::catalog::Catalog;
 use crate::cli::{ConvertArgs, ProgressMode, SinkKind};
-use crate::export::{
-    DelimitedWriteOptions, ScanOptions, WriteOptions, write_csv_or_tsv, write_parquet,
-};
 use crate::friendly;
-use crate::paths::{compute_output_path, discover_inputs};
-use crate::selection::{
-    ColumnSelection, RowWindow, projection_from_selection, resolve_column_indices,
-    row_selection_from_window,
-};
+use crate::paths::discover_inputs;
 use crate::style::Style;
 use anyhow::{Result, anyhow};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use rayon::prelude::*;
-use sas7bdat::{Dataset, OpenOptions, ScanProgress, ScanProgressObserver};
+use sas7bdat::{ScanProgress, ScanProgressObserver};
+use sas7bdat_convert::{ConvertObserver, ConvertOptions, ConvertOutcome, NoObserver};
+use std::collections::HashMap;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-/// What one successful conversion produced, for the aggregate summary.
-#[derive(Clone, Copy)]
-struct ConvertOutcome {
-    rows: u64,
-    bytes: u64,
-    /// Size of the source `.sas7bdat`, which is what throughput is measured against.
-    input_bytes: u64,
+impl ConvertArgs {
+    /// This invocation as the conversion library sees it.
+    fn convert_options(&self) -> ConvertOptions {
+        ConvertOptions {
+            layout: self.output_layout(),
+            overwrite: self.output.overwrite,
+            tmp_dir: self.output.tmp_dir.clone(),
+            io_backend: self.io_backend.preference(),
+            parse_threads: self.execution.parse_threads,
+            batch_rows: self.execution.batch_rows,
+            encode_in_flight_bytes: self.execution.encode_in_flight_bytes,
+            compression: self.output.compression.into(),
+            parquet_row_group_rows: self.output.parquet_row_group_size,
+            parquet_target_bytes: self.output.parquet_target_bytes,
+            parquet_metadata: self.output.parquet_metadata,
+            delimiter: self.output.delimiter.map(|c| c as u8),
+            no_header: self.output.no_header,
+            skip: self.skip,
+            max_rows: self.max_rows,
+            columns: self.columns.clone(),
+            column_indices: self.column_indices.clone(),
+        }
+    }
 }
 
 /// Reject argument combinations the library cannot express.
@@ -60,6 +72,7 @@ pub fn run_convert(args: &ConvertArgs) -> Result<()> {
     } else {
         None
     };
+    let options = args.convert_options();
     let progress = ProgressState::new(args, files.len());
     // Per-file success lines only when there's no progress bar to corrupt.
     let print_each = !args.ui.quiet && progress.is_none();
@@ -70,6 +83,7 @@ pub fn run_convert(args: &ConvertArgs) -> Result<()> {
             root,
             input,
             args,
+            &options,
             catalog.as_ref(),
             print_each,
             progress.as_ref(),
@@ -141,7 +155,7 @@ fn report(
             Ok(outcome) => {
                 ok += 1;
                 rows += outcome.rows;
-                bytes += outcome.bytes;
+                bytes += outcome.output_bytes;
                 input_bytes += outcome.input_bytes;
             }
             Err(err) => failures.push((path, err.to_string())),
@@ -197,81 +211,38 @@ fn convert_one(
     root: &Path,
     input: &Path,
     args: &ConvertArgs,
+    options: &ConvertOptions,
     catalog: Option<&Catalog>,
     print_each: bool,
     progress: Option<&ProgressState>,
 ) -> Result<ConvertOutcome> {
-    let output = args.output.out.as_ref().map_or_else(
-        || compute_output_path(root, input, &args.output_layout()),
-        std::clone::Clone::clone,
-    );
-    if output.exists() && !args.output.overwrite {
-        return Err(anyhow!(
-            "output already exists (use --overwrite): {}",
-            output.display()
-        ));
-    }
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    // Existence and directory checks stay here: they produce plain-language messages
+    // that the library has no business inventing, and they cost a `stat`.
+    friendly::guard_convert_input(input)?;
 
-    let staged = staging_path(&output, args.output.tmp_dir.as_deref())?;
-    let dataset = open_dataset(input, args)?;
-    let columns = ColumnSelection {
-        names: args.columns.as_deref(),
-        indices: args.column_indices.as_deref(),
-    };
-    // Validate the column selection up front for a clear did-you-mean error.
-    resolve_column_indices(&dataset, columns)?;
-    let projection = projection_from_selection(&dataset, columns)?;
-    let written_cols = projection
-        .as_ref()
-        .map_or_else(|| dataset.columns().len(), |proj| proj.columns().len());
-    let selection = row_selection_from_window(
-        RowWindow::new(args.skip, args.max_rows),
-        dataset.metadata().row_count,
-    );
-    let (file_bar, observer) = file_progress(progress, input);
-    let scan = ScanOptions {
-        selection,
-        projection: projection.as_ref(),
-        parse_threads: args.execution.parse_threads,
-        progress: observer.as_ref(),
-    };
-
-    let started = Instant::now();
-    let rows = write_output(&dataset, &staged, args, scan, catalog);
-    if let (Some(progress), Some(bar)) = (progress, file_bar) {
-        progress.remove_file_bar(&bar);
-    }
-    let rows = match rows {
-        Ok(rows) => rows,
-        Err(err) => {
-            let _ = fs::remove_file(&staged);
-            return Err(err);
-        }
-    };
-    publish(&staged, &output)?;
-    let elapsed = started.elapsed();
-    let bytes = fs::metadata(&output).map_or(0, |meta| meta.len());
-    let input_bytes = fs::metadata(input).map_or(0, |meta| meta.len());
+    let observer: &dyn ConvertObserver = progress.map_or(&NoObserver, |state| state);
+    let outcome = sas7bdat_convert::convert_file(
+        root,
+        input,
+        args.output.out.as_deref(),
+        options,
+        catalog,
+        observer,
+    )
+    .map_err(|err| friendly::explain_convert_failure(input, err))?;
 
     if print_each {
         print_success(
             input,
-            &output,
-            rows,
-            written_cols,
-            input_bytes,
-            bytes,
-            elapsed,
+            &outcome.output,
+            outcome.rows,
+            outcome.columns,
+            outcome.input_bytes,
+            outcome.output_bytes,
+            outcome.elapsed,
         );
     }
-    Ok(ConvertOutcome {
-        rows,
-        bytes,
-        input_bytes,
-    })
+    Ok(outcome)
 }
 
 /// Sustained throughput over the *source* bytes, which is the figure to compare runs by.
@@ -344,13 +315,6 @@ fn failures_message(failures: usize) -> String {
     format!("{failures} file{plural} failed to convert")
 }
 
-fn open_dataset(input: &Path, args: &ConvertArgs) -> Result<Dataset> {
-    let open = OpenOptions::builder()
-        .io_backend(args.io_backend.preference())
-        .build();
-    friendly::open_with(input, open)
-}
-
 fn finish_progress(progress: Option<&ProgressState>) {
     if let Some(progress) = progress {
         progress.finish();
@@ -368,129 +332,26 @@ fn should_show_progress(args: &ConvertArgs) -> bool {
     }
 }
 
-/// Run the conversion into `staged`, choosing the writer from the requested format.
-fn write_output(
-    dataset: &Dataset,
-    staged: &Path,
-    args: &ConvertArgs,
-    scan: ScanOptions<'_>,
-    catalog: Option<&Catalog>,
-) -> Result<u64> {
-    match args.output.effective_sink() {
-        SinkKind::Parquet => {
-            let row_group_rows = match (
-                args.output.parquet_row_group_size,
-                args.output.parquet_target_bytes,
-            ) {
-                (Some(rows), _) => Some(rows),
-                (None, Some(bytes)) => {
-                    let row_len = usize::try_from(dataset.metadata().row_len)
-                        .unwrap_or(0)
-                        .max(1);
-                    Some((bytes / row_len).max(1))
-                }
-                (None, None) => None,
-            };
-            write_parquet(
-                dataset,
-                staged,
-                WriteOptions {
-                    row_group_rows,
-                    // Not tied to the row group size: the writer accumulates scan batches into
-                    // row groups, so a large row group no longer means large scan batches —
-                    // which would otherwise stretch the read extents to match. `--batch-rows`
-                    // sets it independently for anyone who wants the larger batches back.
-                    batch_rows: args.execution.batch_rows,
-                    encode_in_flight_bytes: args.execution.encode_in_flight_bytes,
-                    scan,
-                    catalog,
-                    embed_metadata: args.output.parquet_metadata,
-                    compression: crate::export::resolve_compression(args.output.compression.into()),
-                },
-            )
-        }
-        SinkKind::Csv => {
-            let delimiter = args.output.delimiter.unwrap_or(',') as u8;
-            write_csv_or_tsv(
-                dataset,
-                staged,
-                DelimitedWriteOptions {
-                    delimiter,
-                    headers: !args.output.no_header,
-                    scan,
-                },
-            )
-        }
-        SinkKind::Tsv => {
-            let delimiter = args.output.delimiter.unwrap_or('\t') as u8;
-            write_csv_or_tsv(
-                dataset,
-                staged,
-                DelimitedWriteOptions {
-                    delimiter,
-                    headers: !args.output.no_header,
-                    scan,
-                },
-            )
-        }
+impl ConvertObserver for ProgressState {
+    fn file_started(&self, input: &Path) -> Option<ScanProgressObserver> {
+        let bar = self.file_bar(input)?;
+        // The bar is kept alive by the closure; `file_finished` clears it from the
+        // multi-progress once the file is done.
+        let position = bar.clone();
+        self.track_bar(input, bar);
+        Some(Arc::new(move |snapshot: ScanProgress| {
+            position.set_position(snapshot.raw_bytes_read);
+        }))
     }
-}
 
-/// Where a conversion writes before it has something worth keeping.
-///
-/// The name carries the process id and a counter, so two inputs whose file names collide can
-/// still stage into the same directory.
-fn staging_path(output: &Path, tmp_dir: Option<&Path>) -> Result<PathBuf> {
-    static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
-    let mut name = output.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(
-        ".{}-{}.part",
-        std::process::id(),
-        SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    match tmp_dir {
-        Some(dir) => {
-            fs::create_dir_all(dir)?;
-            Ok(dir.join(name))
+    fn file_finished(&self, input: &Path, result: &Result<ConvertOutcome>) {
+        if let Some(bar) = self.take_bar(input) {
+            self.remove_file_bar(&bar);
         }
-        None => Ok(output.with_file_name(name)),
+        if result.is_err() {
+            self.record_failure();
+        }
     }
-}
-
-/// Move a finished output into place.
-///
-/// A rename when the two sit on one volume, which is atomic and free. A copy when they do not,
-/// which is what `--tmp-dir` asks for: the write lands on a local disk and only the finished
-/// file crosses the network.
-fn publish(staged: &Path, output: &Path) -> Result<()> {
-    // Rename refuses to clobber on Windows, and an existing output here has already been
-    // cleared by the --overwrite check.
-    if output.exists() {
-        fs::remove_file(output)?;
-    }
-    if fs::rename(staged, output).is_ok() {
-        return Ok(());
-    }
-    fs::copy(staged, output)?;
-    fs::remove_file(staged)?;
-    Ok(())
-}
-
-/// A per-file bar and the scan observer that drives it, if progress is being shown.
-///
-/// Bytes rather than rows: on a network share the read rate is the number worth watching, and
-/// it is what tells you whether a long conversion is progressing or stalled.
-fn file_progress(
-    progress: Option<&ProgressState>,
-    input: &Path,
-) -> (Option<ProgressBar>, Option<ScanProgressObserver>) {
-    let bar = progress.and_then(|progress| progress.file_bar(input));
-    let observer = bar.as_ref().map(|bar| {
-        let bar = bar.clone();
-        Arc::new(move |snapshot: ScanProgress| bar.set_position(snapshot.raw_bytes_read))
-            as ScanProgressObserver
-    });
-    (bar, observer)
 }
 
 /// Files converted at once above which per-file bars become noise rather than information.
@@ -501,6 +362,21 @@ struct ProgressState {
     overall: ProgressBar,
     failed: AtomicUsize,
     per_file_bars: usize,
+    /// Bars in flight, keyed by input. The observer trait starts and finishes a file in
+    /// two separate calls, so the bar has to outlive the first one.
+    bars: Mutex<HashMap<PathBuf, ProgressBar>>,
+}
+
+impl ProgressState {
+    fn track_bar(&self, input: &Path, bar: ProgressBar) {
+        if let Ok(mut bars) = self.bars.lock() {
+            bars.insert(input.to_path_buf(), bar);
+        }
+    }
+
+    fn take_bar(&self, input: &Path) -> Option<ProgressBar> {
+        self.bars.lock().ok()?.remove(input)
+    }
 }
 
 impl ProgressState {
@@ -527,6 +403,7 @@ impl ProgressState {
             overall,
             failed: AtomicUsize::new(0),
             per_file_bars: usize::from(args.execution.jobs.unwrap_or(1) <= MAX_FILE_BARS),
+            bars: Mutex::new(HashMap::new()),
         })
     }
 
@@ -582,11 +459,12 @@ impl ProgressState {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProgressState, failures_message, file_progress, human_duration};
+    use super::{ProgressState, failures_message, human_duration};
     use crate::cli::{
         ConvertArgs, ExecutionOptions, OutputOptions, ProgressMode, RecursionMode, UiOptions,
     };
     use sas7bdat::ScanProgress;
+    use sas7bdat_convert::ConvertObserver;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
@@ -629,19 +507,22 @@ mod tests {
     }
 
     /// A multi-minute conversion of one file has to show movement, which means the scan's byte
-    /// counter has to reach the bar.
+    /// counter has to reach the bar. The observer now arrives through the trait, so this also
+    /// covers `ProgressState` satisfying the contract `convert_tree` calls it through.
     #[test]
     fn the_file_bar_follows_bytes_read() {
         let state = ProgressState::new(&args(None), 1).expect("progress enabled");
-        let (bar, observer) = file_progress(Some(&state), Path::new("Cargo.toml"));
-        let bar = bar.expect("a per-file bar");
-        let observer = observer.expect("an observer");
+        let input = Path::new("Cargo.toml");
+        let observer = state.file_started(input).expect("an observer");
 
         observer(ScanProgress {
             raw_bytes_read: 4096,
             ..ScanProgress::default()
         });
 
+        let bar = state
+            .take_bar(input)
+            .expect("the bar is tracked until the file finishes");
         assert_eq!(bar.position(), 4096);
         state.remove_file_bar(&bar);
     }
@@ -649,54 +530,33 @@ mod tests {
     #[test]
     fn per_file_bars_stop_once_many_files_run_at_once() {
         let state = ProgressState::new(&args(Some(64)), 64).expect("progress enabled");
-        let (bar, observer) = file_progress(Some(&state), Path::new("Cargo.toml"));
-        assert!(bar.is_none(), "64 concurrent bars would be noise");
-        assert!(observer.is_none());
-    }
-
-    /// The default keeps the temporary beside the destination, so the move into place is a
-    /// rename on one volume rather than a copy across two.
-    #[test]
-    fn staging_defaults_to_the_destination_directory() {
-        let out = Path::new("/data/out/table.parquet");
-        let staged = super::staging_path(out, None).expect("staging path");
-        assert_eq!(staged.parent(), out.parent());
-        assert_ne!(staged, out);
-        assert!(staged.to_string_lossy().ends_with(".part"));
-    }
-
-    /// Two inputs can share a file name without sharing a temporary.
-    #[test]
-    fn staging_names_do_not_collide() {
-        let dir = std::env::temp_dir();
-        let first = super::staging_path(Path::new("/a/table.parquet"), Some(&dir)).expect("first");
-        let second =
-            super::staging_path(Path::new("/b/table.parquet"), Some(&dir)).expect("second");
-        assert_eq!(first.parent(), Some(dir.as_path()));
-        assert_ne!(first, second);
+        assert!(
+            state.file_started(Path::new("Cargo.toml")).is_none(),
+            "64 concurrent bars would be noise"
+        );
     }
 
     #[test]
-    fn publishing_moves_the_file_into_place() {
-        let dir = std::env::temp_dir().join(format!("sas7bdat-publish-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        let staged = dir.join("staged.part");
-        let out = dir.join("final.parquet");
-        std::fs::write(&staged, b"payload").expect("write");
-        std::fs::write(&out, b"stale").expect("write");
-
-        super::publish(&staged, &out).expect("publish");
-
-        assert_eq!(std::fs::read(&out).expect("read"), b"payload");
-        assert!(!staged.exists(), "the temporary is gone");
-        let _ = std::fs::remove_dir_all(&dir);
+    fn finishing_a_file_releases_its_bar() {
+        // The bar must not outlive the file: `convert_tree` calls `file_started` and
+        // `file_finished` separately, so a leak here would accumulate one bar per input.
+        let state = ProgressState::new(&args(None), 1).expect("progress enabled");
+        let input = Path::new("Cargo.toml");
+        let _ = state.file_started(input).expect("an observer");
+        state.file_finished(input, &Ok(outcome()));
+        assert!(state.take_bar(input).is_none(), "the bar was released");
     }
 
-    #[test]
-    fn no_progress_state_means_no_observer() {
-        let (bar, observer) = file_progress(None, Path::new("Cargo.toml"));
-        assert!(bar.is_none());
-        assert!(observer.is_none());
+    fn outcome() -> sas7bdat_convert::ConvertOutcome {
+        sas7bdat_convert::ConvertOutcome {
+            input: PathBuf::from("in.sas7bdat"),
+            output: PathBuf::from("out.parquet"),
+            rows: 1,
+            columns: 1,
+            input_bytes: 1,
+            output_bytes: 1,
+            elapsed: Duration::from_millis(1),
+        }
     }
 
     #[test]

@@ -41,3 +41,29 @@ fn not_a_sas_file(path: &Path, err: &sas7bdat::Error) -> anyhow::Error {
         path.display()
     )
 }
+
+/// Reject a convert input before the library touches it.
+///
+/// Only the checks that produce a plain-language message a parser could not phrase:
+/// a missing path and a directory. Everything else is the conversion's to report.
+///
+/// # Errors
+///
+/// Returns an error if the path does not exist or is a directory.
+pub fn guard_convert_input(path: &Path) -> Result<()> {
+    guard_exists(path)
+}
+
+/// Re-word a conversion failure that turned out to be an unreadable input.
+///
+/// `sas7bdat-convert` returns the parser's own error, which is precise but assumes the
+/// reader knows the format. When the failure came from the parser at all, say the
+/// plain thing instead; anything else (a full disk, a permission error) is passed
+/// through untouched because its own message is already the useful one.
+#[must_use]
+pub fn explain_convert_failure(path: &Path, err: anyhow::Error) -> anyhow::Error {
+    match err.downcast_ref::<sas7bdat::Error>() {
+        Some(sas_err) => not_a_sas_file(path, sas_err),
+        None => err,
+    }
+}

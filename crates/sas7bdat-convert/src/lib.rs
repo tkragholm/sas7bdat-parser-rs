@@ -16,12 +16,17 @@
 #![forbid(unsafe_code)]
 
 pub mod catalog;
+pub mod driver;
 pub mod export;
 pub mod parquet_pipeline;
 pub mod paths;
 pub mod sas_metadata;
 pub mod selection;
 pub mod values;
+
+pub use driver::{
+    ConvertObserver, ConvertOptions, ConvertOutcome, NoObserver, convert_file, convert_tree,
+};
 
 use std::path::PathBuf;
 
