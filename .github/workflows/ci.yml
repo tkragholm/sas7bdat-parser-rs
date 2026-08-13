@@ -56,11 +56,43 @@ jobs:
       # after the core reached 0.6.0. `--locked` is the point of this step as much
       # as clippy is — it fails on exactly that staleness instead of papering over
       # it by silently re-resolving.
+      #
+      # `working-directory` is load-bearing, not tidiness. The binding depends on
+      # `sas7bdat` by *version* so that a package built with `R CMD build` can
+      # resolve it from crates.io, and `src/.cargo/config.toml` redirects that back
+      # to this checkout. Cargo discovers config by walking up from the working
+      # directory — not from `--manifest-path` — so running this from the repo root
+      # would miss the redirect and try to resolve the unpublished version from the
+      # registry. `Makevars` invokes cargo from the same directory for the same reason.
       - name: Clippy (R binding, outside the workspace)
+        working-directory: crates/r-plugin/src
         run: >
           cargo clippy --locked
-          --manifest-path crates/r-plugin/src/rust/Cargo.toml
+          --manifest-path rust/Cargo.toml
           --all-targets -- -D warnings
+
+      # The R sources are hand-maintained — NAMESPACE, the extendr wrappers and
+      # man/ are all written rather than generated — so nothing else notices when
+      # they drift apart. This caught `read_sas()` shipping with no man page at all.
+      #
+      # `--no-install` is what makes the step runnable here: a full check has to
+      # compile the package, and the Rust crate's relative path dependency on the
+      # workspace core does not survive being copied into a build directory. What
+      # is left still checks the documentation, NAMESPACE, DESCRIPTION and Rd
+      # syntax, which is the part that silently rots.
+      #
+      # `R CMD check` exits 0 on WARNING, so the exit code alone is not a gate —
+      # the status line is. Requiring exactly `Status: OK` also fails on NOTEs,
+      # which is the point: this is a ratchet, and it currently passes clean.
+      - name: R package check (docs, NAMESPACE, metadata)
+        run: |
+          R CMD build crates/r-plugin
+          status=0
+          _R_CHECK_CRAN_INCOMING_=false _R_CHECK_FORCE_SUGGESTS_=false \
+            R CMD check --no-manual --no-install fastsas_*.tar.gz || status=$?
+          tail -n 30 fastsas.Rcheck/00check.log
+          test "$status" -eq 0
+          grep -qx 'Status: OK' fastsas.Rcheck/00check.log
 
       - name: Test
         run: cargo test --workspace
