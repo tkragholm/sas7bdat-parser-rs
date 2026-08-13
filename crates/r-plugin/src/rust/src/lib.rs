@@ -20,8 +20,9 @@
 use extendr_api::prelude::*;
 use sas7bdat::dictionary::{dictionary_encode, DictionaryColumn, DictionaryPolicy};
 use sas7bdat::{
-    catalog::normalize_format_name, Dataset, LabelSet, LogicalType, OwnedColumnBuffer, Parallelism,
-    SasDate, SasDateTime, TemporalDecodeOptions, ValueKey, ValueType,
+    catalog::normalize_format_name, Dataset, IoBackendPreference, LabelSet, LogicalType,
+    OpenOptions, OwnedColumnBuffer, Parallelism, SasDate, SasDateTime, TemporalDecodeOptions,
+    ValueKey, ValueType,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -449,8 +450,20 @@ fn read_impl(
     path: &str,
     catalog: Option<&str>,
     categorical: bool,
+    io_backend: &str,
+    threads: Option<usize>,
 ) -> std::result::Result<Robj, String> {
-    let mut ds = Dataset::open(path).map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
+    // `Auto` memory-maps local files and reads network shares sequentially, which is the
+    // right default — but it can only tell the two apart on Windows, and even there a DFS
+    // namespace or an unusual redirector can fool the probe. Overriding it is the whole
+    // point of exposing this: mapping a file on a share turns every access into a
+    // round-trip with no readahead.
+    let backend: IoBackendPreference = io_backend
+        .parse()
+        .map_err(|e| format!("sas7bdat: io_backend: {e}"))?;
+    let options = OpenOptions::builder().io_backend(backend).build();
+    let mut ds =
+        Dataset::open_with(path, options).map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
 
     if let Some(cat_path) = resolve_catalog(path, catalog) {
         match ds.attach_catalog(&cat_path) {
@@ -492,7 +505,13 @@ fn read_impl(
     // where `haven` gives `tagged_na`. Keeping the raw `F64` preserves the payload
     // and also keeps sub-second values exact instead of truncating them to whole
     // units and falling back to `F64` anyway.
-    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    // Decode threads only. Read concurrency is capped separately by the core (four
+    // in-flight reads), so raising this does not multiply requests against a share; what it
+    // does scale is the memory held by in-flight batches.
+    let parallelism = threads.map_or_else(
+        || Parallelism::Threads(std::thread::available_parallelism().map_or(1, |n| n.get())),
+        Parallelism::Threads,
+    );
     let temporal = TemporalDecodeOptions::builder()
         .decode_dates(false)
         .decode_datetimes(false)
@@ -544,7 +563,7 @@ fn read_impl(
         (0..metas.len()).map(|_| HashMap::new()).collect();
 
     ds.scan()
-        .with_parallelism(Parallelism::Threads(workers))
+        .with_parallelism(parallelism)
         .with_temporal_options(temporal)
         .visit_owned_batches(|mut batch| {
             let base = usize::try_from(batch.row_base.0).unwrap_or(0);
@@ -618,8 +637,19 @@ fn read_impl(
 /// `catalog` is an optional path to a `.sas7bcat` value-label catalog; when
 /// absent a same-stem `.sas7bcat` sibling is attached if present.
 #[extendr]
-fn read_sas7bdat(path: &str, catalog: Option<String>, categorical: bool) -> Robj {
-    match read_impl(path, catalog.as_deref(), categorical) {
+fn read_sas7bdat(
+    path: &str,
+    catalog: Option<String>,
+    categorical: bool,
+    io_backend: &str,
+    threads: Option<i32>,
+) -> Robj {
+    let threads = match threads {
+        None => None,
+        Some(n) if n >= 1 => Some(n as usize),
+        Some(n) => throw_r_error(format!("sas7bdat: threads must be >= 1, got {n}")),
+    };
+    match read_impl(path, catalog.as_deref(), categorical, io_backend, threads) {
         Ok(df) => df,
         Err(e) => throw_r_error(e),
     }

@@ -5,9 +5,21 @@
 \alias{read_sas}
 \title{Read a SAS7BDAT file}
 \usage{
-read_sas7bdat(path, catalog = NULL, categorical = FALSE)
+read_sas7bdat(
+  path,
+  catalog = NULL,
+  categorical = FALSE,
+  io_backend = c("auto", "mmap", "buffered"),
+  threads = NULL
+)
 
-read_sas(path, catalog = NULL, categorical = FALSE)
+read_sas(
+  path,
+  catalog = NULL,
+  categorical = FALSE,
+  io_backend = c("auto", "mmap", "buffered"),
+  threads = NULL
+)
 }
 \arguments{
 \item{path}{Path to a \code{.sas7bdat} file.}
@@ -21,6 +33,16 @@ are returned as \code{factor} instead of \code{character}. This is faster to
 build and uses less memory on low-cardinality columns, and speeds up
 downstream grouping/joining. Default \code{FALSE} (haven-style
 \code{character}).}
+
+\item{io_backend}{How to read the file: \code{"auto"} (default) memory-maps
+local files and reads network shares sequentially, \code{"mmap"} always
+memory-maps, \code{"buffered"} always reads sequentially. See the "Network
+drives" section.}
+
+\item{threads}{Decode threads. \code{NULL} (default) uses every logical core.
+Set a smaller number to leave the machine room for other work, or to bound
+memory: in-flight batches scale with this. Read concurrency is capped
+separately by the reader and is not affected.}
 }
 \value{
 A tibble (or a base \code{data.frame} if the \pkg{tibble} package is not
@@ -52,6 +74,18 @@ function under a name nothing else claims; prefer it in scripts, or qualify the
 call as \code{fastsas::read_sas()}.
 }
 
+\section{Network drives}{
+
+\code{"auto"} decides by asking the operating system whether the path is
+remote, which it can only do on Windows — a UNC path, or a mapped drive that
+reports as remote. Elsewhere every path looks local and is memory-mapped.
+
+That distinction matters because memory-mapping a file on a share turns each
+access into a network round-trip with no readahead. If a read from a share is
+unexpectedly slow, or you are on Linux or macOS with a mounted share, pass
+\code{io_backend = "buffered"}.
+}
+
 \section{Text encoding}{
 
 Files that declare a single-byte Western encoding are decoded as Windows-1252
@@ -67,5 +101,11 @@ those bytes.
 df <- read_sas7bdat("path/to/file.sas7bdat")
 df <- read_sas7bdat("data.sas7bdat", catalog = "formats.sas7bcat")
 df <- read_sas7bdat("survey.sas7bdat", categorical = TRUE)
+
+# Reading from a network share on a platform where "auto" cannot detect one:
+df <- read_sas7bdat("//server/share/data.sas7bdat", io_backend = "buffered")
+
+# Leave half the machine free:
+df <- read_sas7bdat("big.sas7bdat", threads = 8)
 }
 }

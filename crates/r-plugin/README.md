@@ -48,6 +48,27 @@ formats are supported via a `.sas7bcat` catalog: pass `catalog = "..."` (or drop
 a same-stem `.sas7bcat` next to the data file) and labelled columns are returned
 as `haven_labelled` vectors.
 
+### Network drives (`io_backend`)
+
+`io_backend = "auto"` (the default) memory-maps local files and reads network
+shares sequentially. It can only tell the two apart on Windows, where a UNC path
+is remote by construction and a mapped drive is resolved through the OS;
+everywhere else every path looks local and is memory-mapped.
+
+That matters because mapping a file on a share turns each access into a network
+round-trip with no readahead. Override it when `auto` cannot tell:
+
+```r
+df <- read_sas7bdat("//server/share/data.sas7bdat", io_backend = "buffered")
+```
+
+The sequential path itself is tuned for SMB — 4 MB reads, at most four in flight
+regardless of how many decode threads are running.
+
+`threads` bounds decode concurrency (default: every logical core). Lowering it
+leaves the machine room for other work and bounds the memory held by in-flight
+batches; it does not change read concurrency, which the reader caps separately.
+
 ### Categorical columns (`categorical = TRUE`)
 
 SAS character columns are usually low-cardinality category codes. Pass

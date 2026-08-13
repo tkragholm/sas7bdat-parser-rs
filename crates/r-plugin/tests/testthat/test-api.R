@@ -56,3 +56,33 @@ test_that("variable labels keep the whitespace haven keeps", {
     expect_identical(attr(df[[nm]], "label"), attr(ref[[nm]], "label"), info = nm)
   }
 })
+
+test_that("io_backend selects a reader and rejects unknown names", {
+  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+  skip_if(f == "", "bundled fixture not installed")
+
+  # All three must produce identical output -- the backend changes how bytes are
+  # fetched, never what they decode to.
+  auto <- read_sas7bdat(f)
+  for (backend in c("auto", "mmap", "buffered")) {
+    expect_identical(read_sas7bdat(f, io_backend = backend), auto, info = backend)
+  }
+
+  expect_error(read_sas7bdat(f, io_backend = "nfs"), "arg")
+  expect_error(read_sas7bdat(f, io_backend = 1), "arg")
+})
+
+test_that("threads bounds decode concurrency without changing results", {
+  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+  skip_if(f == "", "bundled fixture not installed")
+
+  expect_identical(read_sas7bdat(f, threads = 1), read_sas7bdat(f))
+  expect_identical(read_sas7bdat(f, threads = 4), read_sas7bdat(f))
+
+  # Values R would otherwise coerce into something meaningless.
+  expect_error(read_sas7bdat(f, threads = 0), "`threads`")
+  expect_error(read_sas7bdat(f, threads = -1), "`threads`")
+  expect_error(read_sas7bdat(f, threads = 2.5), "`threads`")
+  expect_error(read_sas7bdat(f, threads = NA), "`threads`")
+  expect_error(read_sas7bdat(f, threads = c(1, 2)), "`threads`")
+})
