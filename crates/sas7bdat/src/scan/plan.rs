@@ -47,6 +47,48 @@ impl ScanPlan {
 
 const AUTO_BATCH_ROWS_MIN: usize = 4096;
 
+/// Ceiling on the decoded size of one [`BatchHint::Auto`] batch.
+///
+/// `Auto` used to be `rows_per_page` alone: batch size tracked the file's page geometry
+/// and knew nothing about how wide a row is. On the 4,041-column AHS fixture that makes a
+/// 4,096-row batch materialize ~200 MB, and the parallel scan multiplies that number —
+/// it keeps `workers * 2` batches queued plus one in flight per worker. Measured on that
+/// file (buffered I/O, so no mmap pages in the figure), peak RSS went 0.30 GB at one
+/// worker, 1.72 at two, 3.65 at four and 4.81 at eight, while throughput stopped
+/// improving after eight. So the old sizing spent gigabytes to buy nothing, and it spent
+/// more of them the more cores the host had — the wrong way round for a 96-core server.
+///
+/// Sizing by bytes bounds that product no matter how wide the table or how many cores are
+/// free, and it splits wide files into more, smaller batches, which also gives the work
+/// stealer finer granularity. Narrow tables are unaffected: their rows are small enough
+/// that the row-count rule stays the binding constraint.
+const AUTO_BATCH_TARGET_BYTES: usize = 32 << 20;
+
+/// Bytes one decoded row occupies once materialized into owned column buffers.
+///
+/// A string column keeps its bytes plus one offset slot per row; everything else widens to
+/// a fixed 8-byte cell whatever its 3..=8 bytes on disk. Deliberately an estimate — it is
+/// used to size a batch, not to allocate one — but a close one: it predicts ~48 KB/row for
+/// the AHS fixture against a measured ~200 MB per 4,096-row batch.
+fn estimated_decoded_row_bytes(builder: &ScanBuilder<'_>) -> usize {
+    let columns = builder.ds.columns();
+    let cost = |column: &ColumnMeta| match column.logical_type {
+        LogicalType::String | LogicalType::Bytes => usize::try_from(column.physical_width)
+            .unwrap_or(0)
+            .saturating_add(size_of::<u32>()),
+        _ => size_of::<f64>(),
+    };
+    match builder.projection {
+        Some(projection) => projection
+            .columns()
+            .iter()
+            .filter_map(|projected| columns.get(projected.index))
+            .map(cost)
+            .sum(),
+        None => columns.iter().map(cost).sum(),
+    }
+}
+
 /// Ceilings on the batch pre-allocation hint.
 ///
 /// The hint is advisory. It pre-sizes the batch column buffers and every one of them
@@ -274,7 +316,12 @@ pub(super) fn resolve_batch_row_capacity(builder: &ScanBuilder<'_>) -> Result<us
         BatchHint::Auto => {
             let rows_per_page = usize::try_from(builder.ds.layout.rows_per_page)
                 .map_err(|_| Error::unsupported("rows per page exceeds platform usize"))?;
-            Ok(rows_per_page.max(AUTO_BATCH_ROWS_MIN).max(1))
+            let rows = rows_per_page.max(AUTO_BATCH_ROWS_MIN).max(1);
+            // Whichever bound binds first. On a narrow table the byte ceiling permits far
+            // more rows than the row rule asks for, so `Auto` is unchanged there; on a wide
+            // one the byte ceiling takes over. Never below one row.
+            let by_bytes = AUTO_BATCH_TARGET_BYTES / estimated_decoded_row_bytes(builder).max(1);
+            Ok(rows.min(by_bytes.max(1)))
         }
     }
 }
@@ -348,5 +395,93 @@ const fn arrow_data_type(kind: ColumnMaterializationKind) -> DataType {
         ColumnMaterializationKind::Time => DataType::Duration(TimeUnit::Nanosecond),
         ColumnMaterializationKind::Utf8 => DataType::Utf8,
         ColumnMaterializationKind::RawBytes => DataType::Binary,
+    }
+}
+
+#[cfg(test)]
+mod batch_sizing_tests {
+    use super::{
+        AUTO_BATCH_ROWS_MIN, AUTO_BATCH_TARGET_BYTES, estimated_decoded_row_bytes,
+        resolve_batch_row_capacity,
+    };
+    use crate::test_utils::MockDatasetBuilder;
+    use crate::{BatchHint, Dataset, LogicalType};
+    use std::sync::Arc;
+
+    fn dataset(numeric_columns: usize, string_columns: usize, string_width: u32) -> Dataset {
+        let mut builder = MockDatasetBuilder::new(Arc::from(vec![0u8; 4096].as_slice()));
+        let mut offset = 0u32;
+        for i in 0..numeric_columns {
+            builder = builder.with_column(&format!("n{i}"), LogicalType::Float, 8, offset);
+            offset += 8;
+        }
+        for i in 0..string_columns {
+            builder =
+                builder.with_column(&format!("s{i}"), LogicalType::String, string_width, offset);
+            offset += string_width;
+        }
+        builder
+            .with_row_len(offset as usize)
+            .with_rows_per_page(4096)
+            .build()
+    }
+
+    #[test]
+    fn a_narrow_table_is_sized_by_rows_exactly_as_before() {
+        let ds = dataset(8, 2, 16);
+        let rows = resolve_batch_row_capacity(&ds.scan()).expect("capacity");
+        assert_eq!(
+            rows, AUTO_BATCH_ROWS_MIN,
+            "the byte ceiling must not bind on a table whose rows are small"
+        );
+    }
+
+    #[test]
+    fn a_wide_table_is_sized_so_one_batch_fits_the_byte_ceiling() {
+        let ds = dataset(2000, 0, 0);
+        let scan = ds.scan();
+        let rows = resolve_batch_row_capacity(&scan).expect("capacity");
+        let per_row = estimated_decoded_row_bytes(&scan);
+        assert!(
+            rows < AUTO_BATCH_ROWS_MIN,
+            "the byte ceiling should bind here"
+        );
+        assert!(rows >= 1, "never below a single row");
+        assert!(
+            rows * per_row <= AUTO_BATCH_TARGET_BYTES,
+            "a batch of {rows} x {per_row} B exceeds the {AUTO_BATCH_TARGET_BYTES} B ceiling"
+        );
+    }
+
+    #[test]
+    fn an_explicit_row_hint_still_wins() {
+        // The ceiling is a property of `Auto`. A caller who names a row count has
+        // said what they want and must keep getting it.
+        let ds = dataset(2000, 0, 0);
+        let rows = resolve_batch_row_capacity(&ds.scan().with_batch_hint(BatchHint::Rows(50_000)))
+            .expect("capacity");
+        assert_eq!(rows, 50_000);
+    }
+
+    #[test]
+    fn strings_cost_their_width_and_numerics_a_fixed_cell() {
+        let ds = dataset(3, 2, 20);
+        // 3 numerics at 8 B, 2 strings at 20 B of payload plus a 4 B offset slot.
+        assert_eq!(
+            estimated_decoded_row_bytes(&ds.scan()),
+            3 * 8 + 2 * (20 + 4)
+        );
+    }
+
+    #[test]
+    fn a_projection_only_counts_the_columns_it_keeps() {
+        let ds = dataset(4, 0, 0);
+        let projection = ds
+            .projection()
+            .columns(["n0", "n1"])
+            .build()
+            .expect("projection");
+        let scan = ds.scan().with_projection(&projection);
+        assert_eq!(estimated_decoded_row_bytes(&scan), 2 * 8);
     }
 }
