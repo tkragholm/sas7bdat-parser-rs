@@ -2,11 +2,15 @@
 //!
 //! Strategy (see ../../../../docs/r-bindings/design-direct-fill.md): the row
 //! count is known from metadata up front, so every column's R vector is
-//! allocated at its final length and the decoded batches are written *in place*
-//! — one write per cell, no intermediate Rust buffer or second copy. The core
-//! decodes batches across all cores; the batches are delivered to this callback
-//! serially on the main thread (so R object writes, including string interning,
-//! are sound), and each batch is placed by its global `row_base`.
+//! allocated at its final length and each decoded batch is written straight into
+//! its slice — one write per cell, no staging buffer between the two.
+//!
+//! The core decodes batches across all cores and delivers them to one visitor on
+//! this thread, which is what makes the R object writes (string interning
+//! included) sound. Nothing accumulates: each batch is placed by its global
+//! `row_base` and dropped. The one exception is `categorical`, where building an
+//! R factor needs a dictionary over the whole column, so those columns' buffers
+//! are moved aside as batches go by.
 //!
 //! `haven`-parity: SAS numerics -> double, character -> UTF-8 character, dates ->
 //! `Date`, datetimes -> `POSIXct` (UTC), times -> `hms`. SAS special missings
@@ -17,7 +21,7 @@ use extendr_api::prelude::*;
 use sas7bdat::dictionary::{dictionary_encode, DictionaryColumn, DictionaryPolicy};
 use sas7bdat::{
     catalog::normalize_format_name, Dataset, LabelSet, LogicalType, OwnedColumnBuffer, Parallelism,
-    SasDate, SasDateTime, ValueKey, ValueType,
+    SasDate, SasDateTime, TemporalDecodeOptions, ValueKey, ValueType,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -88,17 +92,68 @@ fn haven_tagged_na(tag: u8) -> f64 {
     f64::from_bits(R_NA_REAL_BITS | (u64::from(tag) << 32))
 }
 
+/// Indicator byte -> haven tag character; `0` means "plain `.`, no tag".
+///
+/// SAS spells a special missing as a NaN whose byte 5 (bits 47:40) says which of
+/// `.`, `._` or `.A`-`.Z` it is. Two spellings of that byte occur in the wild:
+///
+/// * **Ordinal** — `0xFF - n` over the sequence `_ . A .. Z`: `0xFF` is `._`,
+///   `0xFE` is `.`, and `0xFD..=0xE4` are `.A..=.Z`.
+/// * **Complement** — the one's complement of the character's ASCII code: `.` is
+///   `0xD1`, `_` is `0xA0`, and `.A..=.Z` are `0xBE..=0xA5`.
+///
+/// Only the ordinal spelling used to be decoded, so every complement-spelled tag
+/// silently became a plain `NA`. A census of the fixture corpus found 6.3M such
+/// cells across nine files — PIAAC's `.V`/`.N`/`.D`/`.R` scheme among them.
+///
+/// One table decodes both because the ranges cannot collide: the complement
+/// family tops out at `0xD1`, below the ordinal family's `0xE4` floor. The
+/// `const` builder asserts that, so an overlap would fail the build rather than
+/// silently resolve one way.
+const MISSING_TAG: [u8; 256] = build_missing_tag_table();
+
+const fn build_missing_tag_table() -> [u8; 256] {
+    let mut table = [0u8; 256];
+
+    // Ordinal spelling. `0xFE` (plain `.`) is left 0 deliberately.
+    table[0xFF] = b'_';
+    let mut i = 0usize;
+    while i < 26 {
+        assert!(table[0xFD - i] == 0, "special-missing spellings overlap");
+        table[0xFD - i] = b'a' + i as u8;
+        i += 1;
+    }
+
+    // Complement spelling. `!'.'` == `0xD1` (plain `.`) is left 0 deliberately.
+    assert!(table[0xFF - b'_' as usize] == 0, "special-missing spellings overlap");
+    table[0xFF - b'_' as usize] = b'_';
+    let mut c = 0u8;
+    while c < 26 {
+        let slot = 0xFF - (b'A' + c) as usize;
+        assert!(table[slot] == 0, "special-missing spellings overlap");
+        table[slot] = b'a' + c;
+        c += 1;
+    }
+
+    table
+}
+
 /// Recover a SAS special-missing tag from a preserved missing cell's raw bits.
-/// SAS encodes them as a NaN `0xFFFF_TT_00..`; byte 5 is the indicator
-/// (`0xFF` -> `_`, `0xFD..=0xE4` -> `a..z`). Verified byte-exact vs `haven::na_tag`.
+///
+/// Only ever called for cells the parser already flagged missing, so the NaN test
+/// here is a sanity check rather than the thing that decides missingness. It is a
+/// generic "exponent all ones, mantissa non-zero" test: the previous code demanded
+/// the exact top-16 pattern `0xFFFF`, which rejected the quiet-NaN spelling
+/// (`0x7FF8_FF..`) that some writers use.
 fn sas_special_missing_tag(bits: u64) -> Option<u8> {
-    if (bits >> 48) != 0xFFFF {
+    const EXPONENT: u64 = 0x7FF0_0000_0000_0000;
+    const MANTISSA: u64 = 0x000F_FFFF_FFFF_FFFF;
+    if bits & EXPONENT != EXPONENT || bits & MANTISSA == 0 {
         return None;
     }
-    match ((bits >> 40) & 0xFF) as u8 {
-        0xFF => Some(b'_'),
-        b @ 0xE4..=0xFD => Some(b'a' + (0xFD - b)),
-        _ => None,
+    match MISSING_TAG[((bits >> 40) & 0xFF) as usize] {
+        0 => None,
+        tag => Some(tag),
     }
 }
 
@@ -126,9 +181,16 @@ fn is_valid(valid: Option<&[u64]>, i: usize) -> bool {
 }
 
 /// Fill `dst` (one batch's row range of a numeric/temporal column) from `buffer`.
-/// Present cells get the epoch-shifted value; missing cells get plain `NA`, or —
-/// for plain numeric columns — the recovered haven `tagged_na`.
-fn fill_real_slice(dst: &mut [f64], class: RealClass, plain: bool, buffer: &OwnedColumnBuffer) {
+/// Present cells get the epoch-shifted value; missing cells get the recovered
+/// haven `tagged_na`, or plain `NA` when there is no tag to recover.
+///
+/// Tag recovery is not restricted to non-temporal columns: `haven` tags a missing
+/// datetime just as it tags a missing number, and gating this on "plain numeric"
+/// dropped the tag from every temporal column that carries one. It is still
+/// limited to the `F64` arm below, which is not a policy choice — the typed
+/// `Date`/`DateTime`/`Time` buffers have already discarded the NaN payload the tag
+/// lives in, so there is nothing left to recover by the time they get here.
+fn fill_real_slice(dst: &mut [f64], class: RealClass, buffer: &OwnedColumnBuffer) {
     let shift = class.epoch_shift();
     let na = f64::from_bits(R_NA_REAL_BITS);
 
@@ -147,11 +209,8 @@ fn fill_real_slice(dst: &mut [f64], class: RealClass, plain: bool, buffer: &Owne
             for (i, &v) in values.iter().enumerate() {
                 dst[i] = if is_valid(valid, i) {
                     v - shift
-                } else if plain {
-                    // Plain numerics preserve SAS special-missing tags.
-                    sas_special_missing_tag(v.to_bits()).map_or(na, haven_tagged_na)
                 } else {
-                    na
+                    sas_special_missing_tag(v.to_bits()).map_or(na, haven_tagged_na)
                 };
             }
         }
@@ -218,6 +277,17 @@ unsafe fn fill_text_sexp(
         } else {
             libR_sys::SET_STRING_ELT(sexp, idx, libR_sys::R_NaString);
         }
+    }
+}
+
+/// Rows in a string buffer. Offsets are one longer than the cell count, so an
+/// empty buffer (no offsets at all) is zero rows rather than an underflow.
+fn buffer_rows(buffer: &OwnedColumnBuffer) -> usize {
+    match buffer {
+        OwnedColumnBuffer::Utf8 { offsets, .. } | OwnedColumnBuffer::RawBytes { offsets, .. } => {
+            offsets.as_slice().len().saturating_sub(1)
+        }
+        _ => 0,
     }
 }
 
@@ -411,72 +481,132 @@ fn read_impl(
     let nrow = usize::try_from(ds.metadata().row_count).unwrap_or(0);
 
     // Decode all batches across cores, then fill each column's R vector in place.
+    //
+    // Temporal decoding is turned OFF on purpose, which is not a loss of fidelity
+    // here — it is the opposite. The R column type comes from `logical_type`, and
+    // the epoch shift is applied during the fill (see `RealClass::epoch_shift`),
+    // so this binding never needed the core's typed `Date`/`DateTime`/`Time`
+    // buffers. What those buffers *do* cost is the SAS special-missing tag: they
+    // convert the raw double to an integer count up front, discarding the NaN
+    // payload the tag lives in, so a missing datetime reached R as a plain `NA`
+    // where `haven` gives `tagged_na`. Keeping the raw `F64` preserves the payload
+    // and also keeps sub-second values exact instead of truncating them to whole
+    // units and falling back to `F64` anyway.
     let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let batches = ds
-        .scan()
+    let temporal = TemporalDecodeOptions::builder()
+        .decode_dates(false)
+        .decode_datetimes(false)
+        .decode_times(false)
+        .build();
+    // Every column's R vector is allocated at its final length up front, and each
+    // batch is written straight into its slice and then dropped. Nothing
+    // accumulates: peak memory is the finished R object plus the scan's own
+    // bounded in-flight window, not the whole decoded file on top of both. On the
+    // 2.15 GB / 4,041-column AHS fixture that is ~0.9 GB less and ~19% faster than
+    // collecting first, the speed coming from touching each batch's bytes while
+    // they are still cache-warm from decoding.
+    //
+    // (Collecting first *was* the right call while `BatchHint::Auto` produced
+    // ~200 MB batches, because the scan's in-flight window dwarfed everything the
+    // fill did. Now that a batch is capped at 32 MiB, the accumulated `Vec` is
+    // what dominates, and streaming wins.)
+    // `categorical` builds an R factor, which needs a dictionary over the *whole*
+    // column — a per-batch dictionary cannot number levels consistently. Those
+    // columns are the one thing that cannot stream, so their buffers are moved
+    // aside as batches go by (moved, not copied) and everything else still streams.
+    let wants_factor: Vec<bool> = metas
+        .iter()
+        .map(|meta| {
+            categorical && matches!(meta.class, ColClass::Text) && meta.value_labels.is_none()
+        })
+        .collect();
+    let mut held: Vec<Vec<OwnedColumnBuffer>> = (0..metas.len()).map(|_| Vec::new()).collect();
+
+    // A factor column gets an INTSXP of codes, not a STRSXP, so allocating one
+    // here would be a whole extra vector's worth of allocate-and-discard per
+    // column — 1.4 GB of it on the AHS fixture's 2,573 factor columns.
+    let mut cols: Vec<Option<Robj>> = Vec::with_capacity(metas.len());
+    for (ci, meta) in metas.iter().enumerate() {
+        cols.push(if wants_factor[ci] {
+            None
+        } else {
+            Some(match meta.class {
+                ColClass::Text => Strings::new(nrow).into(),
+                ColClass::Real(_) => Doubles::new(nrow).into(),
+            })
+        });
+    }
+
+    // One CHARSXP cache per string column, alive across batches. A wide SAS file
+    // has millions of string cells over few distinct values, so this caps
+    // `Rf_mkCharLenCE` at each column's cardinality.
+    let mut caches: Vec<HashMap<Box<[u8]>, libR_sys::SEXP>> =
+        (0..metas.len()).map(|_| HashMap::new()).collect();
+
+    ds.scan()
         .with_parallelism(Parallelism::Threads(workers))
-        .collect_batches()
+        .with_temporal_options(temporal)
+        .visit_owned_batches(|mut batch| {
+            let base = usize::try_from(batch.row_base.0).unwrap_or(0);
+            let row_count = batch.row_count;
+            for (ci, buffer) in std::mem::take(&mut batch.columns).into_iter().enumerate() {
+                let Some(meta) = metas.get(ci) else { continue };
+                if wants_factor[ci] {
+                    held[ci].push(buffer);
+                    continue;
+                }
+                let col = cols[ci].as_mut().expect("allocated above");
+                match meta.class {
+                    ColClass::Text => {
+                        // SAFETY: `col` owns the STRSXP and keeps it alive; every
+                        // write is on this (main) thread — the visitor is called
+                        // serially — and `base + i` is always < nrow because the
+                        // scan cannot emit more rows than the header declared.
+                        let sexp = unsafe { col.get() };
+                        unsafe { fill_text_sexp(sexp, base, &buffer, &mut caches[ci]) };
+                    }
+                    ColClass::Real(class) => {
+                        let slice = col.as_real_slice_mut().expect("REALSXP slice");
+                        let end = (base + row_count).min(slice.len());
+                        if base < end {
+                            fill_real_slice(&mut slice[base..end], class, &buffer);
+                        }
+                    }
+                }
+            }
+            Ok(std::ops::ControlFlow::Continue(()))
+        })
         .map_err(|e| format!("sas7bdat: scan `{path}`: {e}"))?;
 
-    let mut cols: Vec<Option<Robj>> = (0..metas.len()).map(|_| None).collect();
-
-    // String columns FIRST: interning each value allocates a CHARSXP, which can
-    // trigger R's GC — and GC cost scales with the number of live SEXPs. Filling
-    // strings before allocating the (potentially thousands of) numeric vectors
-    // keeps those GCs cheap. Numeric fill allocates nothing, so it triggers no GC.
     for (ci, meta) in metas.iter().enumerate() {
-        if !matches!(meta.class, ColClass::Text) {
-            continue;
-        }
-        // `categorical` -> R factor, but only for plain (non-value-labelled)
-        // string columns. The HLL gate vetoes high-cardinality columns, which
-        // fall through to the `character` path below.
-        if categorical && meta.value_labels.is_none() {
-            let bufs: Vec<&OwnedColumnBuffer> =
-                batches.iter().filter_map(|b| b.columns.get(ci)).collect();
+        if wants_factor[ci] {
+            // The HLL gate can still veto a genuinely high-cardinality column, in
+            // which case it falls back to the `character` fill from the same
+            // buffers rather than re-reading the file.
+            let bufs: Vec<&OwnedColumnBuffer> = held[ci].iter().collect();
             if let Some(dict) = dictionary_encode(&bufs, &DictionaryPolicy::default()) {
                 let mut col = factor_from_dict(dict, nrow);
                 if let Some(label) = &meta.var_label {
                     col.set_attrib("label", label.as_str()).unwrap();
                 }
                 cols[ci] = Some(col);
+                held[ci].clear();
                 continue;
             }
-        }
-        let robj: Robj = Strings::new(nrow).into();
-        // SAFETY: `robj` owns the STRSXP and keeps it alive; all writes are on
-        // this (main) thread; every index written is < nrow.
-        let sexp = unsafe { robj.get() };
-        let mut dict: HashMap<Box<[u8]>, libR_sys::SEXP> = HashMap::new();
-        for batch in &batches {
-            if let Some(buffer) = batch.columns.get(ci) {
-                let base = usize::try_from(batch.row_base.0).unwrap_or(0);
-                unsafe { fill_text_sexp(sexp, base, buffer, &mut dict) };
+            // Vetoed: fall back to `character`, filled from the buffers already
+            // held rather than by re-reading the file.
+            let col: Robj = Strings::new(nrow).into();
+            let sexp = unsafe { col.get() };
+            let mut base = 0usize;
+            for buffer in &held[ci] {
+                unsafe { fill_text_sexp(sexp, base, buffer, &mut caches[ci]) };
+                base += buffer_rows(buffer);
             }
+            held[ci].clear();
+            cols[ci] = Some(col);
         }
-        cols[ci] = Some(finalize_column(robj, meta));
-    }
-
-    // Numeric / temporal columns: allocate the REALSXP and fill it column-major
-    // (each vector written sequentially across all batches).
-    for (ci, meta) in metas.iter().enumerate() {
-        if let ColClass::Real(class) = meta.class {
-            let mut robj: Robj = Doubles::new(nrow).into();
-            let plain = matches!(class, RealClass::Plain);
-            {
-                let slice = robj.as_real_slice_mut().expect("REALSXP slice");
-                for batch in &batches {
-                    if let Some(buffer) = batch.columns.get(ci) {
-                        let base = usize::try_from(batch.row_base.0).unwrap_or(0);
-                        let end = (base + batch.row_count).min(slice.len());
-                        if base < end {
-                            fill_real_slice(&mut slice[base..end], class, plain, buffer);
-                        }
-                    }
-                }
-            }
-            cols[ci] = Some(finalize_column(robj, meta));
-        }
+        let col = cols[ci].take().expect("allocated above");
+        cols[ci] = Some(finalize_column(col, meta));
     }
 
     let cols: Vec<Robj> = cols.into_iter().map(|c| c.unwrap_or_else(|| ().into())).collect();
@@ -498,4 +628,84 @@ fn read_sas7bdat(path: &str, catalog: Option<String>, categorical: bool) -> Robj
 extendr_module! {
     mod fastsas;
     fn read_sas7bdat;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{haven_tagged_na, sas_special_missing_tag, MISSING_TAG};
+
+    /// Build the raw bits SAS writes for a missing cell with indicator byte `b`,
+    /// in the signalling form (`0xFFFF_bb_00..`) both spellings use in practice.
+    const fn missing_bits(indicator: u8) -> u64 {
+        0xFFFF_0000_0000_0000 | ((indicator as u64) << 40)
+    }
+
+    #[test]
+    fn the_ordinal_spelling_decodes() {
+        assert_eq!(sas_special_missing_tag(missing_bits(0xFF)), Some(b'_'));
+        assert_eq!(sas_special_missing_tag(missing_bits(0xFD)), Some(b'a'));
+        assert_eq!(sas_special_missing_tag(missing_bits(0xFC)), Some(b'b'));
+        assert_eq!(sas_special_missing_tag(missing_bits(0xE4)), Some(b'z'));
+        // Plain `.` carries no tag.
+        assert_eq!(sas_special_missing_tag(missing_bits(0xFE)), None);
+    }
+
+    #[test]
+    fn the_complement_spelling_decodes() {
+        // These are the bytes observed in the corpus, with the tags `haven` gives.
+        for (byte, tag) in [
+            (0xA9u8, b'v'),
+            (0xAA, b'u'),
+            (0xAD, b'r'),
+            (0xB1, b'n'),
+            (0xB2, b'm'),
+            (0xBB, b'd'),
+            (0xBD, b'b'),
+            (0xBE, b'a'),
+            (0xA5, b'z'),
+            (0xA0, b'_'),
+        ] {
+            assert_eq!(sas_special_missing_tag(missing_bits(byte)), Some(tag), "byte {byte:#04x}");
+        }
+        // `!'.'` is a plain missing, not a tag — it is the single most common
+        // indicator in the corpus, so mis-decoding it would be very loud.
+        assert_eq!(sas_special_missing_tag(missing_bits(0xD1)), None);
+    }
+
+    #[test]
+    fn the_two_spellings_never_collide() {
+        let ordinal = (0xE4u8..=0xFF).collect::<Vec<_>>();
+        let complement: Vec<u8> = (b'A'..=b'Z').chain(*b"_.").map(|c| 0xFF - c).collect();
+        for b in &complement {
+            assert!(!ordinal.contains(b), "byte {b:#04x} is claimed by both spellings");
+        }
+        // And every byte outside both families stays untagged.
+        for b in 0..=u8::MAX {
+            if !ordinal.contains(&b) && !complement.contains(&b) {
+                assert_eq!(MISSING_TAG[b as usize], 0, "byte {b:#04x} should be untagged");
+            }
+        }
+    }
+
+    #[test]
+    fn the_quiet_nan_spelling_is_accepted() {
+        // `many_columns.sas7bdat` writes `._` as a quiet NaN rather than the
+        // signalling form; the old top-16 == 0xFFFF gate dropped it.
+        assert_eq!(sas_special_missing_tag(0x7FF8_FF00_0000_0000), Some(b'_'));
+    }
+
+    #[test]
+    fn non_nan_bits_are_never_tagged() {
+        assert_eq!(sas_special_missing_tag(0f64.to_bits()), None);
+        assert_eq!(sas_special_missing_tag(1.5f64.to_bits()), None);
+        assert_eq!(sas_special_missing_tag(f64::INFINITY.to_bits()), None);
+        assert_eq!(sas_special_missing_tag(f64::NEG_INFINITY.to_bits()), None);
+    }
+
+    #[test]
+    fn tagged_na_matches_havens_bit_layout() {
+        // haven::tagged_na("a") is NA_real_ with the tag char in bits 32-39.
+        assert_eq!(haven_tagged_na(b'a').to_bits(), 0x7FF0_0061_0000_07A2);
+        assert_eq!(haven_tagged_na(b'_').to_bits(), 0x7FF0_005F_0000_07A2);
+    }
 }
