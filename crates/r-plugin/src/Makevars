@@ -5,9 +5,24 @@ PKG_LIBS = -L$(LIBDIR) -lfastsas
 
 CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
 
+# Cargo is invoked from this directory on purpose. `rust/Cargo.toml` names
+# `sas7bdat` by version so a tarball can resolve it from crates.io, and
+# `.cargo/config.toml` here redirects that to the working tree when the package
+# is built inside the repository. Cargo finds that config by walking up from the
+# working directory, not from `--manifest-path`, so running cargo from anywhere
+# above this directory would silently skip the redirect.
+
 $(SHLIB): $(STATLIB)
 
-$(STATLIB):
+# FORCE, not a bare rule. Without it make treats an existing `libfastsas.a` as up
+# to date — it has no prerequisites, so nothing tells make the Rust sources
+# changed — and silently links the stale archive. That is invisible for a staged
+# or tarball install (which always starts from an empty target dir) but wrong for
+# the in-place `R CMD INSTALL --no-staged-install crates/r-plugin` this repo uses
+# for local development: every edit under src/rust would be ignored until someone
+# ran `make clean`. Cargo already does its own up-to-date check, and a no-op
+# `cargo build` costs milliseconds, so deferring to it is both correct and cheap.
+$(STATLIB): FORCE
 	cargo build $(CARGO_BUILD_ARGS)
 
 C_clean:
@@ -16,4 +31,6 @@ C_clean:
 clean:
 	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
 
-.PHONY: C_clean clean
+FORCE:
+
+.PHONY: C_clean clean FORCE

@@ -1,0 +1,17 @@
+# Build the binding against the core in this checkout rather than the published
+# crate, without the manifest having to name a path.
+#
+# `src/rust/Cargo.toml` depends on `sas7bdat` by version, which is what lets a
+# built tarball resolve it from crates.io and makes `R CMD build`/`R CMD check`
+# work at all. In the repository that is the wrong crate to compile against —
+# development happens ahead of the last release — so this redirects it back to
+# the working tree.
+#
+# `.Rbuildignore` strips `^src/\.cargo$`, so the redirect never reaches a tarball
+# and a package built from one resolves the real published crate.
+#
+# Cargo finds this by walking up from the working directory, so anything invoking
+# cargo for this crate must run from `src/` or below — which is where `Makevars`
+# runs it. See the CI step for the same reason.
+[patch.crates-io]
+sas7bdat = { path = "../../sas7bdat" }

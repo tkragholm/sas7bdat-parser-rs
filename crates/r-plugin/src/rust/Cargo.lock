@@ -280,7 +280,7 @@ checksum = "6e1dd4122fc1595e8162618945476892eefca7b88c52820e74af6262213cae8f"
 
 [[package]]
 name = "sas7bdat"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "ahash",
  "bstr",

@@ -15,10 +15,11 @@ extendr-api = "0.7"
 # Used for the hot string path (raw SET_STRING_ELT / Rf_mkCharLenCE), bypassing
 # extendr's per-call thread-guard + bounds-check overhead.
 libR-sys = "0.7.1"
-# Path dependency on the workspace core. For a distributable package this is
-# vendored or published to crates.io (see docs/r-bindings/design-direct-fill.md);
-# for local dev the relative path resolves against the repo.
-sas7bdat = { path = "../../../sas7bdat", features = ["dictionary"] }
+# Depended on by version, not by path, so that a package built with `R CMD build`
+# — which copies these sources out of the workspace — can still resolve it. The
+# repository redirects it back to the working tree via `src/.cargo/config.toml`;
+# `.Rbuildignore` strips that file, so a tarball gets the published crate.
+sas7bdat = { version = "0.7", features = ["dictionary"] }
 
 # Detach from the parent cargo workspace: an R package's Rust crate builds
 # standalone (and is copied in isolation by R CMD INSTALL).
