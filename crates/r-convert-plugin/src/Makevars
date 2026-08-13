@@ -1,0 +1,40 @@
+TARGET_DIR = $(CURDIR)/rust/target
+LIBDIR = $(TARGET_DIR)/release
+STATLIB = $(LIBDIR)/libfastsasconvert.a
+PKG_LIBS = -L$(LIBDIR) -lfastsasconvert
+
+CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
+
+# Cargo is invoked from `rust/`, not from here, and both tools that read the
+# surrounding directories are why.
+#
+# rustup picks the toolchain from the *working directory* upward, and the core
+# needs nightly (`#![feature(portable_simd)]`). `rust/rust-toolchain.toml` supplies
+# it. Running cargo from this directory would look past that file and fall through
+# to whatever the host defaults to — inside the repo that happens to be the root
+# pin, so it appears to work, but a tarball has no root pin and the build fails
+# with E0554. The file sits in `rust/` rather than here because `R CMD check`
+# warns about unrecognised file names directly under `src/`.
+#
+# Cargo resolves `.cargo/config.toml` the same way, by walking up, so the
+# `[patch.crates-io]` redirect in `../.cargo/config.toml` is still found from
+# `rust/` — an ancestor. That patch is what points the crates at this checkout;
+# `.Rbuildignore` strips it, so a tarball resolves the published crates instead.
+
+$(SHLIB): $(STATLIB)
+
+# FORCE, not a bare rule. Without it make treats an existing archive as up to date
+# — it has no prerequisites, so nothing tells make the Rust sources changed — and
+# silently links the stale one. Cargo already does its own up-to-date check.
+$(STATLIB): FORCE
+	cd rust && cargo build $(CARGO_BUILD_ARGS)
+
+C_clean:
+	rm -Rf $(LIBDIR)/build
+
+clean:
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
+
+FORCE:
+
+.PHONY: C_clean clean FORCE

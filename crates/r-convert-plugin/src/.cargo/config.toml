@@ -1,0 +1,14 @@
+# Build against the crates in this checkout rather than the published ones,
+# without the manifest having to name a path.
+#
+# `rust/Cargo.toml` depends on `sas7bdat-convert` by version, which is what lets a
+# built tarball resolve it from crates.io and makes `R CMD build`/`R CMD check`
+# work at all. In the repository that is the wrong crate to compile against —
+# development runs ahead of the last release — so this redirects both it and the
+# core back to the working tree.
+#
+# `.Rbuildignore` strips `^src/\.cargo$`, so the redirect never reaches a tarball
+# and a package built from one resolves the real published crates.
+[patch.crates-io]
+sas7bdat = { path = "../../sas7bdat" }
+sas7bdat-convert = { path = "../../sas7bdat-convert" }

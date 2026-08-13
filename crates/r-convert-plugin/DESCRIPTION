@@ -1,0 +1,19 @@
+Package: fastsasconvert
+Title: Convert SAS7BDAT Files to Parquet Without Loading Them
+Version: 0.0.0.9000
+Authors@R:
+    person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre"))
+Description: Converts .sas7bdat files to Parquet, CSV or TSV, one file or a
+    directory tree at a time, mirroring the input tree into an output root.
+    Conversion happens entirely in Rust: the data never enters the R session, so
+    files far larger than available memory can be converted. Companion to the
+    'fastsas' package, which reads SAS files into R.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Language: en-US
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+SystemRequirements: Cargo (Rust's package manager), rustc
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

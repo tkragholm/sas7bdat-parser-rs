@@ -1,0 +1,26 @@
+# Shipped inside the R package on purpose — it is not a duplicate of the
+# repository's root pin by accident.
+#
+# The `sas7bdat` core uses `#![feature(portable_simd)]`, so it only compiles on
+# nightly. Inside the repository the root `rust-toolchain.toml` supplies that, but
+# `R CMD build` copies this package out of the workspace and the root pin does not
+# come with it — a tarball install then fails with:
+#
+#     error[E0554]: `#![feature]` may not be used on the stable release channel
+#
+# rustup resolves this by walking up from the working directory, and `Makevars`
+# runs cargo from `src/rust/`, so this file is found both in place and from a
+# tarball. It lives here rather than in `src/` because `R CMD check` warns about
+# unrecognised file names directly under `src/`.
+#
+# The channel is pinned to an exact nightly rather than floating `nightly`: a
+# moving target would let an unrelated compiler change break installs of a
+# published package. Keep it in step with the root `rust-toolchain.toml` when that
+# is bumped — nothing enforces the two match, and they should.
+#
+# Note for any future CRAN submission: CRAN asks that packages build with a stable
+# cargo two to four years old, which this cannot satisfy while the core requires
+# nightly. That is a core-side change (feature-gating `portable_simd`), not a
+# packaging one.
+[toolchain]
+channel = "nightly-2026-07-27"

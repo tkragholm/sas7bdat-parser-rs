@@ -1,0 +1,32 @@
+[package]
+name = "fastsasconvert"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+name = "fastsasconvert"
+
+[dependencies]
+extendr-api = "0.7"
+# Same version extendr-api 0.7 depends on, so `SEXP` is the identical type. Used
+# for the interrupt flags, which extendr does not wrap.
+libR-sys = "0.7.1"
+# Depended on by version, not by path, so that a package built with `R CMD build`
+# — which copies these sources out of the workspace — can still resolve them. The
+# repository redirects them back to the working tree via `src/.cargo/config.toml`;
+# `.Rbuildignore` strips that file, so a tarball gets the published crates.
+sas7bdat = { version = "0.7" }
+sas7bdat-convert = { version = "0.1" }
+
+# Detach from the parent cargo workspace: an R package's Rust crate builds
+# standalone (and is copied in isolation by R CMD INSTALL).
+[workspace]
+
+[profile.release]
+# R catches Rust panics and converts them to R errors, which requires unwinding.
+# Do NOT set panic = "abort" here.
+opt-level = 3
+lto = "thin"
