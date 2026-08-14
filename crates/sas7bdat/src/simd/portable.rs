@@ -153,13 +153,13 @@ pub fn is_ascii_wide(slice: &[u8]) -> bool {
     type U8x64 = Simd<u8, 64>;
 
     let (chunks, remainder) = slice.as_chunks::<64>();
-    let high_bits = U8x64::splat(0x80);
+    // One reduction for the whole slice instead of one per chunk — see the note on
+    // the same kernel in `super::fearless`.
+    let mut acc = U8x64::splat(0);
     for chunk in chunks {
-        if (U8x64::from_array(*chunk) & high_bits).reduce_or() != 0 {
-            return false;
-        }
+        acc |= U8x64::from_array(*chunk);
     }
-    remainder.is_ascii()
+    (acc & U8x64::splat(0x80)).reduce_or() == 0 && remainder.is_ascii()
 }
 
 // ---------------------------------------------------------------- column entry points

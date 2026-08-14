@@ -18,7 +18,7 @@
 #![allow(clippy::inline_always)]
 
 use super::{NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, scalar};
-use fearless_simd::{Level, Select, Simd, SimdBase, SimdFloat, SimdMask, dispatch};
+use fearless_simd::{Level, Select, Simd, SimdBase, SimdFloat, SimdInto, SimdMask, dispatch};
 use fearless_simd::{f64x4, f64x8, i64x8, mask64x8, u8x64, u64x4, u64x8};
 
 #[inline(always)]
@@ -174,17 +174,20 @@ pub fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
 #[inline(always)]
 fn is_ascii_impl<S: Simd>(simd: S, slice: &[u8]) -> bool {
     let (chunks, remainder) = slice.as_chunks::<64>();
+    // OR the chunks together and test the high bits once, rather than reducing and
+    // branching per chunk. The branch only pays when a non-ASCII byte appears early,
+    // which for SAS character data is the rare case; the accumulate costs one
+    // instruction per chunk and removes a mask reduction plus a branch from each.
+    // `simd_into` on the fixed-size array is a plain transmute; `from_slice` carries
+    // a length check that cannot be elided inside the loop.
+    let mut acc = u8x64::splat(simd, 0);
+    for chunk in chunks {
+        let v: u8x64<S> = (*chunk).simd_into(simd);
+        acc |= v;
+    }
     let high_bits = u8x64::splat(simd, 0x80);
     let zeros = u8x64::splat(simd, 0);
-    for chunk in chunks {
-        if !(u8x64::from_slice(simd, chunk) & high_bits)
-            .simd_eq(zeros)
-            .all_true()
-        {
-            return false;
-        }
-    }
-    remainder.is_ascii()
+    (acc & high_bits).simd_eq(zeros).all_true() && remainder.is_ascii()
 }
 
 pub fn is_ascii_wide(slice: &[u8]) -> bool {

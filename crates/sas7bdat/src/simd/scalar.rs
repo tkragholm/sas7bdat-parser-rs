@@ -213,14 +213,14 @@ pub fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
 #[inline]
 pub fn is_ascii_wide(slice: &[u8]) -> bool {
     let (chunks, remainder) = slice.as_chunks::<8>();
+    // Branchless accumulate, then one test: this is what lets LLVM widen the loop.
+    // `*chunk` is already [u8; 8], so this drops the try_into/expect the slice-based
+    // version needed.
+    let mut acc = 0u64;
     for chunk in chunks {
-        // `*chunk` is already [u8; 8], so this drops the try_into/expect the
-        // slice-based version needed.
-        if u64::from_ne_bytes(*chunk) & ASCII_HIGH_BITS_8 != 0 {
-            return false;
-        }
+        acc |= u64::from_ne_bytes(*chunk);
     }
-    remainder.is_ascii()
+    (acc & ASCII_HIGH_BITS_8) == 0 && remainder.is_ascii()
 }
 
 // ---------------------------------------------------------------- column entry points
