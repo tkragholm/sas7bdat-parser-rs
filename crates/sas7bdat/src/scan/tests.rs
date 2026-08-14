@@ -59,7 +59,11 @@ fn raw_scan_visits_rows_from_fused_pages() {
 #[test]
 fn trim_and_classify_ascii_fast_path_handles_all_space_width_12() {
     let trimmed = trim_and_classify_ascii(b"            ");
-    assert!(trimmed.bytes.is_empty());
+    assert!(
+        trimmed.bytes.is_empty(),
+        "expected no bytes, got {:?}",
+        trimmed.bytes
+    );
     assert!(trimmed.is_ascii);
 }
 
@@ -800,14 +804,26 @@ fn batch_decode_plan_compiles_mixed_projected_families() {
     let plan = make_batch_plan(&builder);
 
     assert_eq!(plan.families.staged_numeric, vec![0, 2]);
-    assert!(plan.families.direct_utf8_borrowed.is_empty());
+    assert!(
+        plan.families.direct_utf8_borrowed.is_empty(),
+        "expected no direct_utf8_borrowed, got {:?}",
+        plan.families.direct_utf8_borrowed
+    );
     assert_eq!(plan.families.direct_utf8_owned, vec![1]);
     assert_eq!(
         plan.direct_utf8_owned_mode,
         Some(DirectUtf8OwnedMode::Utf8Lenient)
     );
-    assert!(plan.families.direct_raw_bytes.is_empty());
-    assert!(plan.families.fallback.is_empty());
+    assert!(
+        plan.families.direct_raw_bytes.is_empty(),
+        "expected no direct_raw_bytes, got {:?}",
+        plan.families.direct_raw_bytes
+    );
+    assert!(
+        plan.families.fallback.is_empty(),
+        "expected no fallback, got {:?}",
+        plan.families.fallback
+    );
     assert!(!plan.all_columns_staged_numeric());
     assert!(!plan.needs_owned_string_scratch());
 }
@@ -825,10 +841,22 @@ fn batch_decode_plan_compiles_lossless_raw_bytes_family() {
 
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert_eq!(plan.families.direct_raw_bytes, vec![1]);
-    assert!(plan.families.direct_utf8_borrowed.is_empty());
-    assert!(plan.families.direct_utf8_owned.is_empty());
+    assert!(
+        plan.families.direct_utf8_borrowed.is_empty(),
+        "expected no direct_utf8_borrowed, got {:?}",
+        plan.families.direct_utf8_borrowed
+    );
+    assert!(
+        plan.families.direct_utf8_owned.is_empty(),
+        "expected no direct_utf8_owned, got {:?}",
+        plan.families.direct_utf8_owned
+    );
     assert!(plan.direct_utf8_owned_mode.is_none());
-    assert!(plan.families.fallback.is_empty());
+    assert!(
+        plan.families.fallback.is_empty(),
+        "expected no fallback, got {:?}",
+        plan.families.fallback
+    );
     assert!(!plan.all_columns_staged_numeric());
     assert!(!plan.needs_owned_string_scratch());
 }
@@ -851,9 +879,17 @@ fn batch_decode_plan_compiles_strict_utf8_borrowed_family() {
 
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert_eq!(plan.families.direct_utf8_borrowed, vec![1]);
-    assert!(plan.families.direct_utf8_owned.is_empty());
+    assert!(
+        plan.families.direct_utf8_owned.is_empty(),
+        "expected no direct_utf8_owned, got {:?}",
+        plan.families.direct_utf8_owned
+    );
     assert!(plan.direct_utf8_owned_mode.is_none());
-    assert!(plan.families.fallback.is_empty());
+    assert!(
+        plan.families.fallback.is_empty(),
+        "expected no fallback, got {:?}",
+        plan.families.fallback
+    );
     assert!(!plan.needs_owned_string_scratch());
 }
 
@@ -881,14 +917,26 @@ fn batch_decode_plan_does_not_compile_single_byte_utf8_family_for_uncompressed_s
     let plan = make_batch_plan(&ScanBuilder::new(&ds).with_batch_hint(crate::BatchHint::Rows(1)));
 
     assert_eq!(plan.families.staged_numeric, vec![0]);
-    assert!(plan.families.direct_utf8_single_byte.is_empty());
-    assert!(plan.families.direct_utf8_borrowed.is_empty());
+    assert!(
+        plan.families.direct_utf8_single_byte.is_empty(),
+        "expected no direct_utf8_single_byte, got {:?}",
+        plan.families.direct_utf8_single_byte
+    );
+    assert!(
+        plan.families.direct_utf8_borrowed.is_empty(),
+        "expected no direct_utf8_borrowed, got {:?}",
+        plan.families.direct_utf8_borrowed
+    );
     assert_eq!(plan.families.direct_utf8_owned, vec![1]);
     assert_eq!(
         plan.direct_utf8_owned_mode,
         Some(DirectUtf8OwnedMode::EncodedLenient)
     );
-    assert!(plan.families.fallback.is_empty());
+    assert!(
+        plan.families.fallback.is_empty(),
+        "expected no fallback, got {:?}",
+        plan.families.fallback
+    );
 }
 
 #[test]
@@ -899,9 +947,21 @@ fn batch_decode_plan_compiles_single_byte_utf8_family_for_compressed_scan() {
 
     assert_eq!(plan.families.staged_numeric, vec![0]);
     assert_eq!(plan.families.direct_utf8_single_byte, vec![1]);
-    assert!(plan.families.direct_utf8_borrowed.is_empty());
-    assert!(plan.families.direct_utf8_owned.is_empty());
-    assert!(plan.families.fallback.is_empty());
+    assert!(
+        plan.families.direct_utf8_borrowed.is_empty(),
+        "expected no direct_utf8_borrowed, got {:?}",
+        plan.families.direct_utf8_borrowed
+    );
+    assert!(
+        plan.families.direct_utf8_owned.is_empty(),
+        "expected no direct_utf8_owned, got {:?}",
+        plan.families.direct_utf8_owned
+    );
+    assert!(
+        plan.families.fallback.is_empty(),
+        "expected no fallback, got {:?}",
+        plan.families.fallback
+    );
 }
 
 fn make_ascii_test_dataset() -> crate::dataset::Dataset {

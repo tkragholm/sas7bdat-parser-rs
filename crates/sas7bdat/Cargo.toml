@@ -17,6 +17,11 @@ arrow-schema = { workspace = true, optional = true }
 bstr = { workspace = true }
 bytemuck = { workspace = true }
 encoding_rs = { workspace = true }
+# Stable-Rust SIMD with runtime dispatch (feature = "simd"). Unlike `std::simd`,
+# which lowers to whatever target features were enabled at compile time, this
+# detects AVX2/AVX-512 at runtime — which is the only way a portable binary
+# (crates.io, a wheel, an R tarball) gets above SSE2 on x86-64.
+fearless_simd = { version = "0.7", optional = true }
 hotpath = { workspace = true, optional = true }
 memchr = { workspace = true }
 memmap2 = { workspace = true }
@@ -65,7 +70,17 @@ harness = false
 required-features = ["internal-bench"]
 
 [features]
-default = []
+default = ["simd"]
+# SIMD backend selection. The kernels in `src/simd` have three implementations and
+# exactly one is live; see that module for the precedence rule and for which
+# kernels each backend actually wins on.
+#
+#   (neither)      scalar, stable, MSRV-friendly. The correctness oracle, and the
+#                  only configuration that can target CRAN's Rust 1.81.
+#   simd           fearless_simd — stable (needs 1.89), runtime-dispatched.
+#   nightly-simd   std::simd — requires a nightly toolchain. Overrides `simd`.
+simd = ["dep:fearless_simd"]
+nightly-simd = []
 arrow = ["dep:arrow-array", "dep:arrow-schema"]
 hotpath-profile = ["dep:hotpath"]
 # Exposes `test_utils` (synthetic dataset builders) for the `wide_table` benchmark.

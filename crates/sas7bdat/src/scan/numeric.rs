@@ -1,8 +1,12 @@
 use super::{
     Endianness, NumericTileMode, OwnedColumnBuffer, PlannedCell, Result, SasDate, SasDateTime,
-    SasTime, Simd, SimdPartialEq, unexpected_batch_cell,
+    SasTime, unexpected_batch_cell,
 };
-use std::simd::{Select, StdFloat, cmp::SimdPartialOrd, num::SimdFloat};
+pub(super) use crate::simd::{NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, classify_missing_raw_bits};
+use crate::simd::{
+    chunk_to_i32, chunk_to_i32_masked, chunk_to_i64, chunk_to_i64_masked,
+    first_non_integral_in_range_index, valid_bit, validity_byte,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum TypedNumericValue {
@@ -153,12 +157,6 @@ pub(super) fn materialize_staged_numeric_column(
     }
 }
 
-/// Returns whether bit `index` in a bit-packed validity word slice is set (1 = valid, 0 = null).
-#[inline]
-const fn valid_bit(validity: &[u64], index: usize) -> bool {
-    (validity[index / 64] >> (index % 64)) & 1 == 1
-}
-
 pub(super) fn materialize_staged_f64_column(
     raw_bits: &[u64],
     valid: Option<Vec<u64>>,
@@ -172,298 +170,114 @@ pub(super) fn materialize_staged_f64_column(
     OwnedColumnBuffer::F64 { values, valid }
 }
 
-/// Expand 8 packed validity bits into a per-lane SIMD null mask.
-/// Returns a mask where lane `i` is `true` (null) when bit `i` of `valid_byte` is 0.
-#[inline(always)]
-fn expand_validity_byte(valid_byte: u8) -> <Simd<u64, 8> as SimdPartialEq>::Mask {
-    type U64x8 = Simd<u64, 8>;
-    let shifts = U64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
-    let spread = U64x8::splat(u64::from(valid_byte)) >> shifts;
-    (spread & U64x8::splat(1)).simd_eq(U64x8::splat(0))
+/// Materialize a staged numeric column as `i64`-backed values, falling back to
+/// `f64` when any present cell is not a finite integer in range.
+///
+/// The four typed materializers below differ only in the range they demand, the
+/// width they convert to, and the wrapper struct — so they all route through this
+/// one, which owns the chunking and validity handling.
+macro_rules! materialize_or_f64 {
+    (
+        $name:ident,
+        min = $min:expr,
+        max = $max:expr,
+        convert = $convert:ident,
+        convert_masked = $convert_masked:ident,
+        scalar_ty = $scalar_ty:ty,
+        wrap = $wrap:expr,
+        buffer = $buffer:ident $(,)?
+    ) => {
+        pub(super) fn $name(raw_bits: &[u64], valid: Option<Vec<u64>>) -> OwnedColumnBuffer {
+            if first_non_integral_in_range_index(raw_bits, valid.as_deref(), $min, $max).is_some() {
+                return materialize_staged_f64_column(raw_bits, valid);
+            }
+
+            let wrap: fn($scalar_ty) -> _ = $wrap;
+            let mut values = Vec::with_capacity(raw_bits.len());
+            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
+
+            match valid.as_deref() {
+                None => {
+                    for raw_chunk in raw_chunks {
+                        values.extend($convert(raw_chunk).map(wrap));
+                    }
+                    for &bits in remainder {
+                        #[allow(clippy::cast_possible_truncation)]
+                        values.push(wrap(f64::from_bits(bits) as $scalar_ty));
+                    }
+                }
+                Some(validity) => {
+                    for (chunk_index, raw_chunk) in raw_chunks.iter().enumerate() {
+                        let valid_byte = validity_byte(validity, chunk_index);
+                        values.extend($convert_masked(raw_chunk, valid_byte).map(wrap));
+                    }
+                    let processed = raw_bits.len() - remainder.len();
+                    for (offset, &bits) in remainder.iter().enumerate() {
+                        let index = processed + offset;
+                        #[allow(clippy::cast_possible_truncation)]
+                        values.push(wrap(if valid_bit(validity, index) {
+                            f64::from_bits(bits) as $scalar_ty
+                        } else {
+                            0
+                        }));
+                    }
+                }
+            }
+
+            OwnedColumnBuffer::$buffer { values, valid }
+        }
+    };
 }
 
-pub(super) fn materialize_staged_i64_or_f64_column(
-    raw_bits: &[u64],
-    valid: Option<Vec<u64>>,
-) -> OwnedColumnBuffer {
-    type F64x8 = Simd<f64, 8>;
-    type I64x8 = Simd<i64, 8>;
-    type U64x8 = Simd<u64, 8>;
+materialize_or_f64!(
+    materialize_staged_i64_or_f64_column,
+    min = I64_MIN_F64,
+    max = I64_MAX_F64,
+    convert = chunk_to_i64,
+    convert_masked = chunk_to_i64_masked,
+    scalar_ty = i64,
+    wrap = |x| x,
+    buffer = I64,
+);
 
-    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
-        .is_some()
-    {
-        return materialize_staged_f64_column(raw_bits, valid);
-    }
+materialize_or_f64!(
+    materialize_staged_date_or_f64_column,
+    min = I32_MIN_F64,
+    max = I32_MAX_F64,
+    convert = chunk_to_i32,
+    convert_masked = chunk_to_i32_masked,
+    scalar_ty = i32,
+    wrap = |x| SasDate {
+        days_since_sas_epoch: x
+    },
+    buffer = Date,
+);
 
-    let mut values = Vec::with_capacity(raw_bits.len());
-    match valid.as_deref() {
-        None => {
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-            for raw_chunk in raw_chunks {
-                #[allow(clippy::cast_possible_truncation)]
-                let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
-                        .cast();
-                values.extend(converted.to_array());
-            }
-            for &bits in remainder {
-                #[allow(clippy::cast_possible_truncation)]
-                values.push(f64::from_bits(bits) as i64);
-            }
-        }
-        Some(validity) => {
-            let zeros = I64x8::splat(0);
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-            for (chunk_idx, raw_chunk) in raw_chunks.iter().enumerate() {
-                let bit_base = chunk_idx * 8;
-                #[allow(clippy::cast_possible_truncation)]
-                let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
-                #[allow(clippy::cast_possible_truncation)]
-                let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
-                        .cast();
-                values.extend(
-                    expand_validity_byte(valid_byte)
-                        .select(zeros, converted)
-                        .to_array(),
-                );
-            }
-            let processed = raw_bits.len() - remainder.len();
-            for (offset, &bits) in remainder.iter().enumerate() {
-                let idx = processed + offset;
-                #[allow(clippy::cast_possible_truncation)]
-                values.push(if valid_bit(validity, idx) {
-                    f64::from_bits(bits) as i64
-                } else {
-                    0
-                });
-            }
-        }
-    }
-    OwnedColumnBuffer::I64 { values, valid }
-}
+materialize_or_f64!(
+    materialize_staged_datetime_or_f64_column,
+    min = I64_MIN_F64,
+    max = I64_MAX_F64,
+    convert = chunk_to_i64,
+    convert_masked = chunk_to_i64_masked,
+    scalar_ty = i64,
+    wrap = |x| SasDateTime {
+        seconds_since_sas_epoch: x
+    },
+    buffer = DateTime,
+);
 
-pub(super) fn materialize_staged_date_or_f64_column(
-    raw_bits: &[u64],
-    valid: Option<Vec<u64>>,
-) -> OwnedColumnBuffer {
-    // Converts via i64 to keep a single Mask<i64, 8> type across all typed materializers.
-    // Values are verified in-range for i32 by first_non_integral_in_range_index_simd.
-    type F64x8 = Simd<f64, 8>;
-    type I64x8 = Simd<i64, 8>;
-    type U64x8 = Simd<u64, 8>;
-
-    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I32_MIN_F64, I32_MAX_F64)
-        .is_some()
-    {
-        return materialize_staged_f64_column(raw_bits, valid);
-    }
-
-    let mut values = Vec::with_capacity(raw_bits.len());
-    match valid.as_deref() {
-        None => {
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-            for raw_chunk in raw_chunks {
-                #[allow(clippy::cast_possible_truncation)]
-                let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
-                        .cast();
-                values.extend(converted.to_array().map(|x| SasDate {
-                    #[allow(clippy::cast_possible_truncation)]
-                    days_since_sas_epoch: x as i32,
-                }));
-            }
-            for &bits in remainder {
-                #[allow(clippy::cast_possible_truncation)]
-                values.push(SasDate {
-                    days_since_sas_epoch: f64::from_bits(bits) as i32,
-                });
-            }
-        }
-        Some(validity) => {
-            let zeros = I64x8::splat(0);
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-            for (chunk_idx, raw_chunk) in raw_chunks.iter().enumerate() {
-                let bit_base = chunk_idx * 8;
-                #[allow(clippy::cast_possible_truncation)]
-                let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
-                #[allow(clippy::cast_possible_truncation)]
-                let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
-                        .cast();
-                values.extend(
-                    expand_validity_byte(valid_byte)
-                        .select(zeros, converted)
-                        .to_array()
-                        .map(|x| SasDate {
-                            #[allow(clippy::cast_possible_truncation)]
-                            days_since_sas_epoch: x as i32,
-                        }),
-                );
-            }
-            let processed = raw_bits.len() - remainder.len();
-            for (offset, &bits) in remainder.iter().enumerate() {
-                let idx = processed + offset;
-                values.push(if valid_bit(validity, idx) {
-                    #[allow(clippy::cast_possible_truncation)]
-                    SasDate {
-                        days_since_sas_epoch: f64::from_bits(bits) as i32,
-                    }
-                } else {
-                    SasDate {
-                        days_since_sas_epoch: 0,
-                    }
-                });
-            }
-        }
-    }
-    OwnedColumnBuffer::Date { values, valid }
-}
-
-pub(super) fn materialize_staged_datetime_or_f64_column(
-    raw_bits: &[u64],
-    valid: Option<Vec<u64>>,
-) -> OwnedColumnBuffer {
-    type F64x8 = Simd<f64, 8>;
-    type I64x8 = Simd<i64, 8>;
-    type U64x8 = Simd<u64, 8>;
-
-    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I64_MIN_F64, I64_MAX_F64)
-        .is_some()
-    {
-        return materialize_staged_f64_column(raw_bits, valid);
-    }
-
-    let mut values = Vec::with_capacity(raw_bits.len());
-    match valid.as_deref() {
-        None => {
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-            for raw_chunk in raw_chunks {
-                #[allow(clippy::cast_possible_truncation)]
-                let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
-                        .cast();
-                values.extend(converted.to_array().map(|x| SasDateTime {
-                    seconds_since_sas_epoch: x,
-                }));
-            }
-            for &bits in remainder {
-                #[allow(clippy::cast_possible_truncation)]
-                values.push(SasDateTime {
-                    seconds_since_sas_epoch: f64::from_bits(bits) as i64,
-                });
-            }
-        }
-        Some(validity) => {
-            let zeros = I64x8::splat(0);
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-            for (chunk_idx, raw_chunk) in raw_chunks.iter().enumerate() {
-                let bit_base = chunk_idx * 8;
-                #[allow(clippy::cast_possible_truncation)]
-                let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
-                #[allow(clippy::cast_possible_truncation)]
-                let converted: I64x8 =
-                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
-                        .cast();
-                values.extend(
-                    expand_validity_byte(valid_byte)
-                        .select(zeros, converted)
-                        .to_array()
-                        .map(|x| SasDateTime {
-                            seconds_since_sas_epoch: x,
-                        }),
-                );
-            }
-            let processed = raw_bits.len() - remainder.len();
-            for (offset, &bits) in remainder.iter().enumerate() {
-                let idx = processed + offset;
-                values.push(if valid_bit(validity, idx) {
-                    #[allow(clippy::cast_possible_truncation)]
-                    SasDateTime {
-                        seconds_since_sas_epoch: f64::from_bits(bits) as i64,
-                    }
-                } else {
-                    SasDateTime {
-                        seconds_since_sas_epoch: 0,
-                    }
-                });
-            }
-        }
-    }
-    OwnedColumnBuffer::DateTime { values, valid }
-}
-
-pub(super) fn materialize_staged_time_or_f64_column(
-    raw_bits: &[u64],
-    valid: Option<Vec<u64>>,
-) -> OwnedColumnBuffer {
-    type F64x8 = Simd<f64, 8>;
-    type I32x8 = Simd<i32, 8>;
-    type U64x8 = Simd<u64, 8>;
-
-    if first_non_integral_in_range_index_simd(raw_bits, valid.as_deref(), I32_MIN_F64, I32_MAX_F64)
-        .is_some()
-    {
-        return materialize_staged_f64_column(raw_bits, valid);
-    }
-
-    let mut values = Vec::with_capacity(raw_bits.len());
-    match valid.as_deref() {
-        None => {
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-            for raw_chunk in raw_chunks {
-                let converted: I32x8 =
-                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
-                        .cast();
-                values.extend(converted.to_array().map(|x| SasTime {
-                    seconds_since_midnight: x,
-                }));
-            }
-            for &bits in remainder {
-                #[allow(clippy::cast_possible_truncation)]
-                values.push(SasTime {
-                    seconds_since_midnight: f64::from_bits(bits) as i32,
-                });
-            }
-        }
-        Some(validity) => {
-            let zeros = I32x8::splat(0);
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-            for (chunk_idx, raw_chunk) in raw_chunks.iter().enumerate() {
-                let bit_base = chunk_idx * 8;
-                #[allow(clippy::cast_possible_truncation)]
-                let valid_byte = (validity[bit_base / 64] >> (bit_base % 64)) as u8;
-                let converted: I32x8 =
-                    F64x8::from_array(U64x8::from_array(*raw_chunk).to_array().map(f64::from_bits))
-                        .cast();
-                values.extend(
-                    expand_validity_byte(valid_byte)
-                        .select(zeros, converted)
-                        .to_array()
-                        .map(|x| SasTime {
-                            seconds_since_midnight: x,
-                        }),
-                );
-            }
-            let processed = raw_bits.len() - remainder.len();
-            for (offset, &bits) in remainder.iter().enumerate() {
-                let idx = processed + offset;
-                values.push(if valid_bit(validity, idx) {
-                    #[allow(clippy::cast_possible_truncation)]
-                    SasTime {
-                        seconds_since_midnight: f64::from_bits(bits) as i32,
-                    }
-                } else {
-                    SasTime {
-                        seconds_since_midnight: 0,
-                    }
-                });
-            }
-        }
-    }
-    OwnedColumnBuffer::Time { values, valid }
-}
+materialize_or_f64!(
+    materialize_staged_time_or_f64_column,
+    min = I32_MIN_F64,
+    max = I32_MAX_F64,
+    convert = chunk_to_i32,
+    convert_masked = chunk_to_i32_masked,
+    scalar_ty = i32,
+    wrap = |x| SasTime {
+        seconds_since_midnight: x
+    },
+    buffer = Time,
+);
 
 #[allow(clippy::cast_precision_loss)]
 const I64_MIN_F64: f64 = i64::MIN as f64;
@@ -476,7 +290,7 @@ const I32_MAX_F64: f64 = i32::MAX as f64;
 
 /// Whether a valid f64 cell would be accepted by the i64 materializer.
 ///
-/// Mirrors the acceptance criteria of [`first_non_integral_in_range_index_simd`]
+/// Mirrors the acceptance criteria of [`first_non_integral_in_range_index`]
 /// with the i64 bounds, so a scalar scan with this predicate locates exactly the
 /// value that forced [`materialize_staged_i64_or_f64_column`] to fall back to F64.
 pub(super) fn f64_is_i64_representable(value: f64) -> bool {
@@ -486,152 +300,6 @@ pub(super) fn f64_is_i64_representable(value: f64) -> bool {
     {
         value.is_finite() && value.trunc() == value && (I64_MIN_F64..=I64_MAX_F64).contains(&value)
     }
-}
-
-/// Efficiently find the index of the first value that cannot be represented as
-/// an integer within the specified range [min, max].
-///
-/// This is used to decide whether a SAS numeric column (stored as floats) can
-/// be "downgraded" to a more efficient Arrow/Polars integer type without loss
-/// of precision.
-///
-/// Logic:
-/// 1. Finite: Exponent bits are not all ones (ignores Infinity/NaN).
-/// 2. Integral: floor(x) == x.
-/// 3. In Range: min <= x <= max.
-fn first_non_integral_in_range_index_simd(
-    raw_bits: &[u64],
-    valid: Option<&[u64]>,
-    min: f64,
-    max: f64,
-) -> Option<usize> {
-    type U64x4 = Simd<u64, 4>;
-    type F64x4 = Simd<f64, 4>;
-
-    let exp_mask = U64x4::splat(NUMERIC_EXP_MASK);
-    let min_lanes = F64x4::splat(min);
-    let max_lanes = F64x4::splat(max);
-    let (chunks, remainder) = raw_bits.as_chunks::<4>();
-
-    for (chunk_index, chunk) in chunks.iter().enumerate() {
-        let bits = U64x4::from_array(*chunk);
-        let numbers = F64x4::from_array(bits.to_array().map(f64::from_bits));
-        let finite = (bits & exp_mask).simd_ne(exp_mask);
-        let integral = numbers.floor().simd_eq(numbers);
-        let in_range = numbers.simd_ge(min_lanes) & numbers.simd_le(max_lanes);
-        let eligible_bitmask =
-            u8::try_from((finite & integral & in_range).to_bitmask()).expect("4-lane bitmask");
-        // Extract 4 validity bits from the packed word for this chunk's rows.
-        let required_bitmask = valid.map_or(0b1111u8, |validity| {
-            let bit_base = chunk_index * 4;
-            #[allow(clippy::cast_possible_truncation)]
-            let b = ((validity[bit_base / 64] >> (bit_base % 64)) & 0xF) as u8;
-            b
-        });
-        let failing = required_bitmask & !eligible_bitmask;
-        if failing != 0 {
-            return Some((chunk_index * 4) + failing.trailing_zeros() as usize);
-        }
-    }
-
-    let processed = raw_bits.len() - remainder.len();
-    for (offset, &bits) in remainder.iter().enumerate() {
-        let index = processed + offset;
-        if valid.is_some_and(|validity| !valid_bit(validity, index)) {
-            continue;
-        }
-        let number = f64::from_bits(bits);
-        if !number.is_finite()
-            || number < min
-            || number > max
-            || number.floor().to_bits() != number.to_bits()
-        {
-            return Some(index);
-        }
-    }
-    None
-}
-
-/// Classify missing values in `raw_bits` and return a bit-packed validity vector.
-///
-/// Each `u64` word in the result covers 64 rows: bit `i % 64` of word `i / 64` is 1 if
-/// row `i` is valid (not a SAS missing sentinel), 0 if null.
-///
-/// Returns `None` when all rows are valid (no SAS missing values found).
-pub(super) fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
-    type U64x8 = Simd<u64, 8>;
-
-    let exp_mask = U64x8::splat(NUMERIC_EXP_MASK);
-    let fraction_mask = U64x8::splat(NUMERIC_FRACTION_MASK);
-    let zeros = U64x8::splat(0);
-    let mut valid: Option<Vec<u64>> = None;
-    let mut processed_words = 0usize;
-
-    // Process in groups of 64 rows, each producing one u64 validity word.
-    let (chunks64, remainder) = raw_bits.as_chunks::<64>();
-    for chunk64 in chunks64 {
-        let mut valid_word = 0u64;
-        let mut any_missing = false;
-        // The outer chunk is exactly 64 wide, so this inner split has no remainder.
-        let (sub_chunks, _) = chunk64.as_chunks::<8>();
-        for (i, sub_chunk) in sub_chunks.iter().enumerate() {
-            let lanes = U64x8::from_array(*sub_chunk);
-            let missing_mask = ((lanes & exp_mask).simd_eq(exp_mask)
-                & (lanes & fraction_mask).simd_ne(zeros))
-            .to_bitmask();
-            // valid_byte: bit j = 1 if lane j is NOT missing
-            let valid_byte = (!missing_mask) & 0xFF;
-            valid_word |= valid_byte << (i * 8);
-            if missing_mask != 0 {
-                any_missing = true;
-            }
-        }
-
-        if any_missing {
-            let valid_vec = valid.get_or_insert_with(|| vec![u64::MAX; processed_words]);
-            valid_vec.push(valid_word);
-        } else if let Some(valid_vec) = &mut valid {
-            valid_vec.push(u64::MAX);
-        }
-        processed_words += 1;
-    }
-
-    // Remainder: fewer than 64 rows, producing one partial validity word.
-    if !remainder.is_empty() {
-        let mut valid_word = 0u64;
-        let mut any_missing = false;
-        let mut bit_offset = 0usize;
-        let (sub_chunks8, tail) = remainder.as_chunks::<8>();
-        for sub_chunk in sub_chunks8 {
-            let lanes = U64x8::from_array(*sub_chunk);
-            let missing_mask = ((lanes & exp_mask).simd_eq(exp_mask)
-                & (lanes & fraction_mask).simd_ne(zeros))
-            .to_bitmask();
-            let valid_byte = (!missing_mask) & 0xFF;
-            valid_word |= valid_byte << bit_offset;
-            if missing_mask != 0 {
-                any_missing = true;
-            }
-            bit_offset += 8;
-        }
-        for &bits in tail {
-            if numeric_bits_is_missing(bits) {
-                any_missing = true;
-            } else {
-                valid_word |= 1u64 << bit_offset;
-            }
-            bit_offset += 1;
-        }
-
-        if any_missing {
-            let valid_vec = valid.get_or_insert_with(|| vec![u64::MAX; processed_words]);
-            valid_vec.push(valid_word);
-        } else if let Some(valid_vec) = &mut valid {
-            valid_vec.push(valid_word);
-        }
-    }
-
-    valid
 }
 
 pub(super) fn staged_numeric_raw_bits_from_planned_cell(cell: PlannedCell<'_>) -> Result<u64> {
@@ -667,8 +335,6 @@ pub(super) fn numeric_bits_scalar_8(slice: &[u8], endianness: Endianness) -> u64
     }
 }
 
-pub(super) const NUMERIC_EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
-pub(super) const NUMERIC_FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
 pub(super) const SAS_NUMERIC_MISSING_SENTINEL: u64 = 0x7FF0_0000_0000_0001;
 
 #[inline]

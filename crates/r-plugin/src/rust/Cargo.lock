@@ -281,6 +281,8 @@ checksum = "6e1dd4122fc1595e8162618945476892eefca7b88c52820e74af6262213cae8f"
 [[package]]
 name = "sas7bdat"
 version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8d4571601692bb2adad9bd8bc6a5fa1e75db54a631174dc576d7e158513f9b9"
 dependencies = [
  "ahash",
  "bstr",

@@ -1,3 +1,12 @@
+# Stable, since the `simd` backend (fearless_simd) replaced `std::simd` as the
+# default — see crates/sas7bdat/src/simd. Only the opt-in `nightly-simd` feature
+# still needs a nightly toolchain, and the jobs that use it select one explicitly
+# via RUSTUP_TOOLCHAIN rather than through this file.
+#
+# Pinned to an exact version rather than floating on `stable`, for the same reason
+# the nightly it replaced was pinned to a date: a new release's clippy lints should
+# turn CI red when someone chooses to bump this, not on the Thursday Rust ships.
+# fearless_simd requires >= 1.89.
 [toolchain]
-channel = "nightly-2026-07-27"
+channel = "1.97.1"
 components = ["rustfmt", "clippy"]

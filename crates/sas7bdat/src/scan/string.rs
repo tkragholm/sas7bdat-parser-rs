@@ -1,21 +1,12 @@
-use super::{Encoding, MojibakePolicy, Simd, SimdPartialEq, SimdUint, TrimMode, TrimmedString};
+use super::{Encoding, MojibakePolicy, TrimMode, TrimmedString};
+use crate::simd::scalar::{
+    is_ascii_wide as is_ascii_word,
+    trim_trailing_space_or_nul_wide as trim_trailing_space_or_nul_word,
+};
+use crate::simd::{is_ascii_wide, trim_trailing_space_or_nul_wide};
 
 const SPACES_HEAD_12: u64 = u64::from_ne_bytes([b' '; 8]);
 const SPACES_TAIL_12: u32 = u32::from_ne_bytes([b' '; 4]);
-const ASCII_HIGH_BITS_8: u64 = 0x8080_8080_8080_8080;
-
-#[inline]
-pub(super) fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
-    let mut end = slice.len();
-    while end > 0 {
-        let byte = slice[end - 1];
-        if byte != b' ' && byte != 0 {
-            break;
-        }
-        end -= 1;
-    }
-    &slice[..end]
-}
 
 #[inline]
 pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
@@ -34,10 +25,10 @@ pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
         };
     }
 
-    let trimmed = trim_trailing_space_or_nul_simd(slice);
+    let trimmed = trim_trailing_space_or_nul_wide(slice);
     TrimmedString {
         bytes: trimmed,
-        is_ascii: is_ascii_simd(trimmed),
+        is_ascii: is_ascii_wide(trimmed),
     }
 }
 
@@ -49,7 +40,7 @@ pub(super) fn trim_and_classify_for_mode(slice: &[u8], mode: TrimMode) -> Trimme
             is_ascii: if slice.len() < 64 {
                 is_ascii_word(slice)
             } else {
-                is_ascii_simd(slice)
+                is_ascii_wide(slice)
             },
         },
         TrimMode::RTrim => trim_and_classify_ascii(slice),
@@ -68,7 +59,7 @@ pub(super) fn trim_and_classify_for_mode(slice: &[u8], mode: TrimMode) -> Trimme
                 is_ascii: if trimmed.len() < 64 {
                     is_ascii_word(trimmed)
                 } else {
-                    is_ascii_simd(trimmed)
+                    is_ascii_wide(trimmed)
                 },
             }
         }
@@ -90,103 +81,6 @@ fn is_all_space_or_nul_12(slice: &[u8]) -> bool {
     let tail = u32::from_ne_bytes(slice[8..12].try_into().expect("fixed-width tail"));
 
     (head == 0 && tail == 0) || (head == SPACES_HEAD_12 && tail == SPACES_TAIL_12)
-}
-
-#[inline]
-fn all_space_or_nul_8(chunk: &[u8]) -> bool {
-    debug_assert_eq!(chunk.len(), 8);
-    let word = u64::from_ne_bytes(chunk.try_into().expect("8-byte chunk"));
-    (word & !SPACES_HEAD_12) == 0
-}
-
-#[inline]
-fn trim_trailing_space_or_nul_word(slice: &[u8]) -> &[u8] {
-    let mut end = slice.len();
-    while end >= 8 {
-        let start = end - 8;
-        let chunk = &slice[start..end];
-        if all_space_or_nul_8(chunk) {
-            end = start;
-            continue;
-        }
-
-        let mut i = end;
-        while i > start {
-            let byte = slice[i - 1];
-            if byte != b' ' && byte != 0 {
-                return &slice[..i];
-            }
-            i -= 1;
-        }
-        end = start;
-    }
-    trim_trailing_space_or_nul(&slice[..end])
-}
-
-#[inline(always)]
-pub(super) fn trim_trailing_space_or_nul_simd(slice: &[u8]) -> &[u8] {
-    type U8x64 = Simd<u8, 64>;
-
-    let mut end = slice.len();
-    let spaces = U8x64::splat(b' ');
-    let nuls = U8x64::splat(0);
-
-    while end >= 64 {
-        let start = end - 64;
-        let chunk = U8x64::from_slice(&slice[start..end]);
-
-        // Find bytes that are either ASCII space (0x20) or NUL (0x00).
-        // SAS often pads strings with spaces, but corrupted or partial
-        // records may contain NULs.
-        let trim_mask = chunk.simd_eq(spaces) | chunk.simd_eq(nuls);
-        let bitmask = trim_mask.to_bitmask();
-
-        if bitmask == u64::MAX {
-            // Entire 64-byte chunk is trim-able; skip it.
-            end = start;
-            continue;
-        }
-
-        // `bitmask` has bit i set if lane i is a space/nul.
-        // We want the index of the rightmost bit that is NOT set (the last content byte).
-        // 1. Invert the mask: !bitmask has bits set for content bytes.
-        // 2. leading_zeros() finds the index of the first '1' from the left.
-        // 3. Since bitmask maps lane 0 to the LSB, the "rightmost" byte in the slice
-        //    is the "most significant" bit in the mask.
-        let last_content = 63 - (!bitmask).leading_zeros() as usize;
-        return &slice[..=(start + last_content)];
-    }
-
-    trim_trailing_space_or_nul_word(&slice[..end])
-}
-
-#[inline(always)]
-pub(super) fn is_ascii_simd(slice: &[u8]) -> bool {
-    type U8x64 = Simd<u8, 64>;
-
-    let (chunks, remainder) = slice.as_chunks::<64>();
-    let high_bits = U8x64::splat(0x80);
-    for chunk in chunks {
-        let lanes = U8x64::from_array(*chunk);
-        if (lanes & high_bits).reduce_or() != 0 {
-            return false;
-        }
-    }
-    remainder.is_ascii()
-}
-
-#[inline]
-fn is_ascii_word(slice: &[u8]) -> bool {
-    let (chunks, remainder) = slice.as_chunks::<8>();
-    for chunk in chunks {
-        // `*chunk` is already [u8; 8], so this drops the try_into/expect the
-        // slice-based version needed.
-        let word = u64::from_ne_bytes(*chunk);
-        if (word & ASCII_HIGH_BITS_8) != 0 {
-            return false;
-        }
-    }
-    remainder.is_ascii()
 }
 
 pub(super) fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> String {

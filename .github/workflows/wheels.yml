@@ -51,8 +51,10 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: '2_28'
-          # Must match rust-toolchain.toml — the core crate needs nightly for portable SIMD.
-          rust-toolchain: nightly-2026-07-27
+          # Must match rust-toolchain.toml. The default SIMD backend is
+          # fearless_simd, which builds on stable; only the opt-in `nightly-simd`
+          # feature needs a nightly, and wheels do not enable it.
+          rust-toolchain: 1.97.1
           args: --profile dist --manifest-path crates/polars-plugin/Cargo.toml --out dist -i python3.12
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - uses: actions/upload-artifact@v6
@@ -65,7 +67,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: '2_28'
-          rust-toolchain: nightly-2026-07-27
+          rust-toolchain: 1.97.1
           args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - uses: actions/upload-artifact@v6
@@ -85,7 +87,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x64
-          rust-toolchain: nightly-2026-07-27
+          rust-toolchain: 1.97.1
           args: --profile dist --manifest-path crates/polars-plugin/Cargo.toml --out dist
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - uses: actions/upload-artifact@v6
@@ -96,7 +98,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x64
-          rust-toolchain: nightly-2026-07-27
+          rust-toolchain: 1.97.1
           args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - uses: actions/upload-artifact@v6
@@ -122,7 +124,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          rust-toolchain: nightly-2026-07-27
+          rust-toolchain: 1.97.1
           args: --profile dist --manifest-path crates/polars-plugin/Cargo.toml --out dist
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - uses: actions/upload-artifact@v6
@@ -133,7 +135,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          rust-toolchain: nightly-2026-07-27
+          rust-toolchain: 1.97.1
           args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - uses: actions/upload-artifact@v6

@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The pinned nightly (rust-toolchain.toml) auto-installs on the first cargo
+      # The pinned stable (rust-toolchain.toml) auto-installs on the first cargo
       # invocation, together with its rustfmt/clippy components.
       - name: Show toolchain
         run: rustup show && cargo --version
@@ -105,6 +105,15 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # The scalar SIMD backend. `--no-default-features` drops fearless_simd, which
+      # is the configuration a CRAN build would ship and the one the differential
+      # tests in src/simd/tests.rs measure the other backends against. Cheap here
+      # because it shares this job's toolchain and cache.
+      - name: Clippy + test (scalar SIMD backend)
+        run: |
+          cargo clippy -p sas7bdat --all-targets --no-default-features -- -D warnings
+          cargo test -p sas7bdat --no-default-features
+
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack,cargo-machete
@@ -120,8 +129,13 @@ jobs:
       # combination would otherwise only surface at release time. Use
       # `--feature-powerset` locally for the exhaustive version; it is ~16 builds per
       # crate and too slow to gate every PR.
+      # `nightly-simd` is excluded because it gates `#![feature(portable_simd)]` and
+      # cannot compile on the pinned stable at all. The `nightly-simd` job below is
+      # what covers it.
       - name: Feature combinations
-        run: cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
+        run: >
+          cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
+          --exclude-features nightly-simd
 
   # The only job that compiles and links the R bindings on Windows, which is a
   # different build from every other job here rather than the same one repeated.
@@ -167,10 +181,10 @@ jobs:
           working-directory: crates/r-convert-plugin
           extra-packages: any::testthat
 
-      # Installs the pinned nightly up front so a toolchain download is not folded
-      # into the first R CMD INSTALL, where its output would be buried. The GNU
-      # target itself is added by Makevars.win — deliberately left to it, so that
-      # line is covered by this job rather than worked around by it.
+      # Installs the pinned toolchain up front so a download is not folded into the
+      # first R CMD INSTALL, where its output would be buried. The GNU target itself
+      # is added by Makevars.win — deliberately left to it, so that line is covered
+      # by this job rather than worked around by it.
       - name: Show toolchain
         run: rustup show && cargo --version
 
@@ -193,6 +207,42 @@ jobs:
             ( cd "$dir/tests" && Rscript testthat.R )
             echo "::endgroup::"
           done
+
+  # The only job that needs a nightly toolchain, and the only one that compiles the
+  # `nightly-simd` backend.
+  #
+  # `RUSTUP_TOOLCHAIN` rather than `cargo +nightly`: it overrides rust-toolchain.toml
+  # for every tool in the job, including the ones that shell out to cargo themselves.
+  #
+  # Pinned to a date for the same reason the stable channel is pinned to a version:
+  # a floating `nightly` turns this job red whenever clippy grows a lint, on Rust's
+  # schedule rather than ours. This is the nightly the whole repository was pinned
+  # to before the stable switch, so it is known to lint clean.
+  #
+  # The default features are left on deliberately. `nightly-simd` is documented to
+  # override `simd` (see crates/sas7bdat/src/simd/mod.rs), so building with both
+  # enabled is what checks that precedence rule still resolves to one backend rather
+  # than failing to compile — which is also what `--all-features` would hit.
+  nightly-simd:
+    name: nightly std::simd backend
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2026-07-27
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install nightly
+        run: rustup toolchain install nightly-2026-07-27 --profile minimal --component clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly-simd
+      - name: Show toolchain
+        run: rustup show && cargo --version
+      - name: Clippy
+        run: cargo clippy -p sas7bdat --all-targets --features nightly-simd -- -D warnings
+      # Runs the differential tests in src/simd/tests.rs with `portable` as the live
+      # backend, so std::simd is held against the scalar reference on every kernel.
+      - name: Test
+        run: cargo test -p sas7bdat --features nightly-simd
 
   # Coverage of the published library only. The plugins are exercised through their
   # Python/R test suites, and the CLI has no integration tests to measure.
@@ -231,9 +281,19 @@ jobs:
   fuzz-regressions:
     name: fuzz regressions
     runs-on: ubuntu-latest
+    # AddressSanitizer is nightly-only, so this job needs one regardless of what
+    # rust-toolchain.toml pins. It used to inherit a nightly from that file; now
+    # that the pin is stable, it has to ask for one. cargo-fuzz shells out to cargo
+    # internally, so this has to be the environment variable rather than `+nightly`.
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2026-07-27
     steps:
       - uses: actions/checkout@v6
+      - name: Install nightly
+        run: rustup toolchain install nightly-2026-07-27 --profile minimal
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz-nightly
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz

@@ -34,7 +34,9 @@
 //! `fixture-catalog` (corpus profiling used by the benchmark harness and the
 //! `sas7bdat-cli` dev-tools binaries).
 
-#![feature(portable_simd)]
+// Only the `nightly-simd` backend needs a nightly toolchain; the default `simd`
+// backend and the scalar fallback both build on stable. See `src/simd`.
+#![cfg_attr(feature = "nightly-simd", feature(portable_simd))]
 
 pub mod catalog;
 mod columnar;
@@ -60,6 +62,7 @@ mod probe;
 mod projection;
 mod row;
 mod scan;
+mod simd;
 
 // Exposed publicly only for in-crate tests and the `internal-bench` benchmarks (which
 // synthesize datasets via `MockDatasetBuilder`). Absent from normal builds.

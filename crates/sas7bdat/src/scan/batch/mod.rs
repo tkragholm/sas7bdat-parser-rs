@@ -1,18 +1,17 @@
 use super::{
     ColumnMaterializationKind, CompiledColumnPlan, CompiledDecodeKernel, Endianness, Error,
-    NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, NumericTileMode, OwnedColumnBuffer,
-    OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan, SAS_NUMERIC_MISSING_SENTINEL, SasDate,
-    SasDateTime, SasTime, ScanBuilder, StringDecodeKernel, TrimMode, TrimmedString,
-    TypedNumericValue, classify_typed_numeric_value, f64_is_i64_representable,
-    materialize_staged_numeric_column, numeric_bits, numeric_bits_is_missing,
-    staged_numeric_raw_bits_from_planned_cell,
+    NumericTileMode, OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
+    SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
+    TrimMode, TrimmedString, TypedNumericValue, classify_typed_numeric_value,
+    f64_is_i64_representable, materialize_staged_numeric_column, numeric_bits,
+    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
 };
 use crate::columnar::{ColumnBuffer, ColumnarBatch, TrustedOffsets};
 use crate::define_owned_column_enum;
+use crate::simd::any_missing_x8;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::ops::ControlFlow;
-use std::simd::{Simd, cmp::SimdPartialEq};
 
 mod dict;
 mod families;
@@ -1428,10 +1427,6 @@ fn gather_staged_8byte_le(
     raw_bits: &mut Vec<u64>,
 ) -> bool {
     const LANES: usize = 8;
-    type U64xN = Simd<u64, LANES>;
-    let exp = U64xN::splat(NUMERIC_EXP_MASK);
-    let frac = U64xN::splat(NUMERIC_FRACTION_MASK);
-    let zero = U64xN::splat(0);
 
     let mut missing = false;
     let mut i = 0;
@@ -1441,9 +1436,7 @@ fn gather_staged_8byte_le(
             let off = base + l * stride;
             *slot = u64::from_le_bytes(page[off..off + 8].try_into().expect("8-byte field"));
         }
-        let v = U64xN::from_array(lane);
-        let is_missing = (v & exp).simd_eq(exp) & (v & frac).simd_ne(zero);
-        missing |= is_missing.any();
+        missing |= any_missing_x8(&lane);
         raw_bits.extend_from_slice(&lane);
         base += LANES * stride;
         i += LANES;
