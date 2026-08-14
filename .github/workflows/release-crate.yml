@@ -137,7 +137,12 @@ jobs:
       # Lets the job ask GitHub for the OIDC token crates.io trades for a
       # short-lived publishing token. Without it the auth step cannot run.
       id-token: write
-      contents: read
+      # `write`, not `read`: the last step drafts a GitHub release, which the API
+      # refuses with `403 Resource not accessible by integration` under `read`. That
+      # failed *after* 0.8.0 had already gone to crates.io — the upload is the
+      # irreversible part and it had succeeded, so the red run was only a missing
+      # draft, but it made a successful publish look like a failed one.
+      contents: write
     steps:
       - uses: actions/checkout@v6
 
