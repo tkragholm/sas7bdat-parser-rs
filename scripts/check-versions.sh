@@ -64,6 +64,24 @@ check crates/r-convert-plugin/src/rust/Cargo.toml sas7bdat-convert sas7bdat-conv
 # what a published sas7bdat-convert resolves, so it drifts the same way.
 check crates/sas7bdat-convert/Cargo.toml          sas7bdat         sas7bdat
 
+# The Python packages state their version twice: in Cargo.toml, which maturin builds
+# from, and in pyproject.toml, which is what actually lands on PyPI. Nothing forces
+# them to agree, and a mismatch means the wheel is built from one version and labelled
+# with the other. `wheels.yml`'s tag check reads Cargo.toml, so a drifted pyproject
+# would sail past it too.
+echo
+echo "Python package versions, Cargo.toml vs pyproject.toml:"
+for dir in polars-plugin sas7bdat-cli; do
+  cargo_v="$(awk -F'"' '/^version = /{print $2; exit}' "crates/$dir/Cargo.toml")"
+  py_v="$(awk -F'"' '/^version = /{print $2; exit}' "crates/$dir/pyproject.toml")"
+  if [ "$cargo_v" != "$py_v" ]; then
+    echo "  ✗  crates/$dir: Cargo.toml is $cargo_v but pyproject.toml is $py_v" >&2
+    status=1
+  else
+    printf '  ok %-46s %s\n' "crates/$dir" "$cargo_v"
+  fi
+done
+
 if [ $status -ne 0 ]; then
   cat >&2 <<'MSG'
 
