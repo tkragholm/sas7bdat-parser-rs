@@ -32,21 +32,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alloc-no-stdlib"
-version = "2.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc7bb162ec39d46ab1ca8c77bf72e890535becd1751bb45f64c597edb4c8c6b3"
-
-[[package]]
-name = "alloc-stdlib"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e76a019e91224d279006ff972f1e984179a6e9feb050adba6ce8274aef23195"
-dependencies = [
- "alloc-no-stdlib",
-]
-
-[[package]]
 name = "alloca"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -390,27 +375,6 @@ name = "boxcar"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
-
-[[package]]
-name = "brotli"
-version = "8.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc91aac060a7a1e25823bdccbfb6af1875b88f17c6daac97894eed8207166b3"
-dependencies = [
- "alloc-no-stdlib",
- "alloc-stdlib",
- "brotli-decompressor",
-]
-
-[[package]]
-name = "brotli-decompressor"
-version = "5.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a32acac15fe1967bc3986b2a6347dffc965602354ea6f450ad07e8bfd253583"
-dependencies = [
- "alloc-no-stdlib",
- "alloc-stdlib",
-]
 
 [[package]]
 name = "bstr"
@@ -1078,7 +1042,6 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
- "zlib-rs",
 ]
 
 [[package]]
@@ -2112,10 +2075,8 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "base64",
- "brotli",
  "bytes",
  "chrono",
- "flate2",
  "half",
  "hashbrown 0.17.1",
  "lz4_flex",
@@ -4902,12 +4863,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "zlib-rs"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "977347db8caa080403f6b6b7c1cda9479a8e869316f7e13a59b19076a40f94e3"
 
 [[package]]
 name = "zmij"

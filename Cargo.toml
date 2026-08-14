@@ -35,7 +35,18 @@ memchr = "2.8"
 memmap2 = "0.9"
 mimalloc = { version = "0.1.49", default-features = false, features = ["secure"] }
 num-traits = "0.2"
-parquet = { version = "59", features = ["arrow"] }
+# Only the codecs `CompressionCodec` can actually select. parquet's defaults also
+# pull in brotli and flate2-zlib-rs, and nothing here can ever ask for either: the
+# crate only *writes* Parquet, and the one place it reads is a test reading files
+# this crate just wrote. `simdutf8` is kept — it is already in the tree via
+# sas7bdat, so it costs nothing and speeds up parquet's UTF-8 validation.
+parquet = { version = "59", default-features = false, features = [
+    "arrow",
+    "snap",
+    "lz4",
+    "zstd",
+    "simdutf8",
+] }
 polars = "0.54"
 polars-arrow = "0.54"
 polars-plan = { version = "0.54", features = ["serde"] }
