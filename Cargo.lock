@@ -377,17 +377,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
 
 [[package]]
-name = "bstr"
-version = "1.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cee35f73844aa3014bb606320a6c1f010249dbdf43342fe54b5a4f6a8ed4b79"
-dependencies = [
- "memchr",
- "regex-automata",
- "serde_core",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3373,7 +3362,6 @@ dependencies = [
  "ahash",
  "arrow-array",
  "arrow-schema",
- "bstr",
  "bytemuck",
  "cardinality-estimator",
  "criterion",
@@ -3389,7 +3377,6 @@ dependencies = [
  "serde",
  "serde_json",
  "simdutf8",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

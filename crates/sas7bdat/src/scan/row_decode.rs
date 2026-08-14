@@ -10,7 +10,6 @@ use super::{
     numeric_bits, resolve_encoding, trim_and_classify_for_mode,
 };
 use crate::internal::ProjectionPlan;
-use bstr::ByteSlice;
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 
 #[derive(Debug, Clone)]
@@ -269,7 +268,7 @@ impl RowDecodePlan {
             DecodedUtf8BatchValue::Borrowed(slice)
         } else {
             *scratch = maybe_fix_mojibake(
-                slice.to_str_lossy().into_owned(),
+                String::from_utf8_lossy(slice).into_owned(),
                 self.string_options.mojibake_fix,
             );
             DecodedUtf8BatchValue::Scratch
@@ -358,7 +357,7 @@ impl RowDecodePlan {
             StringDecodeKernel::Utf8Lenient => simd_from_utf8(slice).map_or_else(
                 |_| {
                     owned_strings.push(maybe_fix_mojibake(
-                        slice.to_str_lossy().into_owned(),
+                        String::from_utf8_lossy(slice).into_owned(),
                         self.string_options.mojibake_fix,
                     ));
                     Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
@@ -519,7 +518,7 @@ impl RowDecodePlan {
                     }))
                 }
                 Err(_) => Ok(crate::row::OwnedCellValue::String(maybe_fix_mojibake(
-                    slice.to_str_lossy().into_owned(),
+                    String::from_utf8_lossy(slice).into_owned(),
                     self.string_options.mojibake_fix,
                 ))),
             };

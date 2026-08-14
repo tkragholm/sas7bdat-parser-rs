@@ -21,7 +21,6 @@ anyhow = "1"
 arrow-array = "59"
 arrow-schema = "59"
 bytemuck = { version = "1.4", features = ["derive"] }
-bstr = "1"
 criterion = "0.8"
 clap = { version = "4", features = ["derive"] }
 csv = "1"

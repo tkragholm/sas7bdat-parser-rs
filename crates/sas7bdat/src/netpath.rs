@@ -9,6 +9,35 @@
 
 use std::path::Path;
 
+// The one Win32 entry point this crate needs, declared directly.
+//
+// `windows-sys` supplies this, but it is 18 MB of generated bindings — by a wide
+// margin the largest crate in the tree — for a single call. That is most of a
+// vendored dependency bundle, which matters for a CRAN submission and is wasted
+// download and build time everywhere else.
+//
+// `kernel32` is already linked by `std` on every Windows target, so naming it here
+// is belt-and-braces rather than load-bearing.
+//
+// Note the `unsafe extern` form is required by edition 2024 and needs rustc >= 1.82.
+// If the crate is ever moved back to edition 2021 for a lower MSRV, this becomes a
+// plain `extern "system"` block.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    /// <https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getdrivetypew>
+    ///
+    /// Takes a NUL-terminated UTF-16 root path and returns a `DRIVE_*` constant. It
+    /// has no failure mode: an unusable path answers `DRIVE_UNKNOWN` (0) or
+    /// `DRIVE_NO_ROOT_DIR` (1), neither of which is `DRIVE_REMOTE`.
+    fn GetDriveTypeW(lp_root_path_name: *const u16) -> u32;
+}
+
+/// `DRIVE_REMOTE` from `winbase.h` — the drive is a network share.
+#[cfg(windows)]
+const DRIVE_REMOTE: u32 = 4;
+
 /// True when `path` is known to live on a network share.
 ///
 /// Conservative: an inconclusive probe answers `false`, so the caller keeps the local-storage
@@ -17,8 +46,6 @@ use std::path::Path;
 #[must_use]
 pub(crate) fn is_network_path(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
-    use windows_sys::Win32::System::WindowsProgramming::DRIVE_REMOTE;
 
     // A UNC path (\\server\share, or \\?\UNC\server\share) is remote by construction and
     // needs no syscall.
