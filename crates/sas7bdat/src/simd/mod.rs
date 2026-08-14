@@ -27,18 +27,34 @@
 //! `fearless_simd` detects AVX2/AVX-512 at runtime instead, so a portable build gets
 //! the wide path without the caller setting anything.
 //!
-//! # Why `scalar` is not merely a fallback
+//! # Kernel rankings do not survive a change of architecture
 //!
-//! Measured on aarch64/NEON at baseline, plain stable Rust is *faster* than
-//! `std::simd` on [`missing_bitmask_x8`] — by about a third — because NEON has no
-//! `movemask` and `to_bitmask()` lowers to a multi-instruction emulation that LLVM's
-//! autovectoriser routes around. The narrow-string kernels are within noise across
-//! all three. SIMD's clear wins are the ≥64-byte string kernels (2–3×) and, for
-//! `fearless_simd`, [`first_non_integral_in_range_index`].
+//! On aarch64/NEON at baseline, plain stable Rust is *faster* than `std::simd` on
+//! [`missing_bitmask_x8`] — by about a third — because NEON has no `movemask` and
+//! `to_bitmask()` lowers to a multi-instruction emulation that LLVM's autovectoriser
+//! routes around.
 //!
-//! These rankings are aarch64-only so far and the x86-64 numbers are expected to
-//! differ — on AVX-512 `to_bitmask` is a native `kmov`. Until that is measured, every
-//! kernel keeps all three implementations rather than hard-coding a winner.
+//! On x86-64 that reverses: scalar is the *slowest* of the three there
+//! (9.1 GiB/s, against 22.7 for `fearless` and 10.9 for `portable`, measured at
+//! baseline on a Zen 3 EPYC). Take no ranking here as architecture-independent.
+//!
+//! What does hold across both: the narrow-string kernels are best left to `scalar`,
+//! which is why [`crate::scan::string`] gates on `< 64` rather than calling a
+//! backend; and the ≥64-byte string kernels are a clear vector win.
+//!
+//! # Known: `dispatch!` is paid per call
+//!
+//! [`missing_bitmask_x8`] and [`chunk_to_i64_masked`] are invoked once per 8 rows, so
+//! the `fearless` backend pays a runtime dispatch per chunk — 6.8 GiB/s against
+//! `scalar`'s 55.9 on `chunk_to_i64_masked`. The coarse kernels dispatch once per
+//! array or per row and show no such penalty, and `fearless` leads them.
+//!
+//! The fix is to hoist dispatch out of the per-chunk loops: give the backend a coarse
+//! entry point that dispatches once and iterates inside, instead of
+//! [`classify_missing_raw_bits`] calling a dispatched per-chunk kernel. Not yet done.
+//!
+//! Run `scripts/simd-matrix.sh`, or the `simd-matrix` workflow, to re-measure. AVX-512
+//! is still unmeasured — GitHub's runners are Zen 3.
 
 // These are internal kernels, `pub` only so the `simd_backends` benchmark can
 // reach them under `internal-bench` — the module itself is private otherwise.
