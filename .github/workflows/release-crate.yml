@@ -164,11 +164,17 @@ jobs:
       - name: Package and verify
         run: cargo publish --dry-run --locked -p ${{ needs.check.outputs.crate }}
 
+      # `**` matters: cargo used to leave the archive in `target/package/`, and now
+      # writes it to `target/package/tmp-crate/`. A glob pinned to the old location
+      # silently matched nothing, and because this step runs before the upload — so
+      # that the artifact survives a failed publish — `if-no-files-found: error`
+      # turned that into a failed release rather than a missing attachment. Keep the
+      # recursive glob so it works either way.
       - name: Upload the packaged crate as a build artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ needs.check.outputs.crate }}-crate
-          path: target/package/*.crate
+          path: target/package/**/*.crate
           if-no-files-found: error
 
       # Trusted Publishing: GitHub vouches for this workflow over OIDC and crates.io
@@ -210,8 +216,11 @@ jobs:
 
           $notes"
           fi
+          # Same reason as the artifact step: locate the archive rather than
+          # assuming which directory cargo left it in.
+          archive="$(find target/package -name '*.crate' -print -quit)"
           gh release create "$GITHUB_REF_NAME" \
             --draft \
             --title "$CRATE $VERSION" \
             --notes "$notes" \
-            target/package/*.crate
+            "$archive"
