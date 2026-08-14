@@ -40,38 +40,43 @@
 //! differ — on AVX-512 `to_bitmask` is a native `kmov`. Until that is measured, every
 //! kernel keeps all three implementations rather than hard-coding a winner.
 
-pub(crate) mod scalar;
+// These are internal kernels, `pub` only so the `simd_backends` benchmark can
+// reach them under `internal-bench` — the module itself is private otherwise.
+// `#[must_use]` is API hygiene for a real public surface; this is not one.
+#![allow(clippy::must_use_candidate)]
+
+pub mod scalar;
 
 #[cfg(all(feature = "simd", not(feature = "nightly-simd")))]
-pub(crate) mod fearless;
+pub mod fearless;
 
 #[cfg(feature = "nightly-simd")]
-pub(crate) mod portable;
+pub mod portable;
 
 #[cfg(feature = "nightly-simd")]
-pub(crate) use portable as backend;
+pub use portable as backend;
 
 #[cfg(all(feature = "simd", not(feature = "nightly-simd")))]
-pub(crate) use fearless as backend;
+pub use fearless as backend;
 
 #[cfg(not(any(feature = "simd", feature = "nightly-simd")))]
-pub(crate) use scalar as backend;
+pub use scalar as backend;
 
-pub(crate) use backend::{
+pub use backend::{
     any_missing_x8, chunk_to_i32, chunk_to_i32_masked, chunk_to_i64, chunk_to_i64_masked,
     first_non_integral_in_range_index, is_ascii_wide, missing_bitmask_x8,
     trim_trailing_space_or_nul_wide,
 };
 
 /// IEEE-754 double exponent field: all ones means Inf or NaN.
-pub(crate) const NUMERIC_EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
+pub const NUMERIC_EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
 /// IEEE-754 double fraction field: non-zero alongside a full exponent means NaN,
 /// which is how SAS encodes its missing values (`.`, `.A`–`.Z`, `._`).
-pub(crate) const NUMERIC_FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
+pub const NUMERIC_FRACTION_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
 
 /// Bit `i` of a packed validity vector: 1 when row `i` is present.
 #[inline]
-pub(crate) const fn valid_bit(validity: &[u64], index: usize) -> bool {
+pub const fn valid_bit(validity: &[u64], index: usize) -> bool {
     (validity[index / 64] >> (index % 64)) & 1 == 1
 }
 
@@ -79,7 +84,7 @@ pub(crate) const fn valid_bit(validity: &[u64], index: usize) -> bool {
 /// lane `i` is present.
 #[inline]
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn validity_byte(validity: &[u64], chunk_index: usize) -> u8 {
+pub fn validity_byte(validity: &[u64], chunk_index: usize) -> u8 {
     let bit_base = chunk_index * 8;
     (validity[bit_base / 64] >> (bit_base % 64)) as u8
 }
@@ -88,7 +93,7 @@ pub(crate) fn validity_byte(validity: &[u64], chunk_index: usize) -> u8 {
 ///
 /// The scalar reference for every backend's vectorized form of the same test.
 #[inline]
-pub(crate) const fn bits_is_missing(bits: u64) -> bool {
+pub const fn bits_is_missing(bits: u64) -> bool {
     (bits & NUMERIC_EXP_MASK) == NUMERIC_EXP_MASK && (bits & NUMERIC_FRACTION_MASK) != 0
 }
 
@@ -98,7 +103,7 @@ pub(crate) const fn bits_is_missing(bits: u64) -> bool {
 ///
 /// Only the 8-lane test inside is backend-specific, so this outer structure is
 /// shared rather than written three times.
-pub(crate) fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
+pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
     let mut valid: Option<Vec<u64>> = None;
     let mut processed_words = 0usize;
 

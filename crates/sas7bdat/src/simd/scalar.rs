@@ -13,6 +13,7 @@
 
 // Compiled in every configuration as the differential oracle, so when a vector
 // backend is live some of these have no caller outside the tests.
+#![allow(clippy::must_use_candidate)]
 #![allow(dead_code)]
 // `&` and `|` on bools rather than `&&`/`||` is the point of this module: the
 // short-circuiting operators introduce branches, and a branch inside the loop
@@ -32,7 +33,7 @@ const ASCII_HIGH_BITS_8: u64 = 0x8080_8080_8080_8080;
 
 /// Bit `i` set when lane `i` holds a SAS missing sentinel.
 #[inline(always)]
-pub(crate) fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
+pub fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
     let mut mask = 0u8;
     for (i, &bits) in chunk.iter().enumerate() {
         let is_missing =
@@ -43,13 +44,13 @@ pub(crate) fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
 }
 
 #[inline(always)]
-pub(crate) fn any_missing_x8(chunk: &[u64; 8]) -> bool {
+pub fn any_missing_x8(chunk: &[u64; 8]) -> bool {
     missing_bitmask_x8(chunk) != 0
 }
 
 /// Index of the first cell that is not a finite integer inside `[min, max]`,
 /// skipping cells marked null by `valid`.
-pub(crate) fn first_non_integral_in_range_index(
+pub fn first_non_integral_in_range_index(
     raw_bits: &[u64],
     valid: Option<&[u64]>,
     min: f64,
@@ -118,14 +119,14 @@ pub(super) fn scan_remainder(
 /// finite integer in range, via [`first_non_integral_in_range_index`].
 #[inline(always)]
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn chunk_to_i64(chunk: &[u64; 8]) -> [i64; 8] {
+pub fn chunk_to_i64(chunk: &[u64; 8]) -> [i64; 8] {
     chunk.map(|bits| f64::from_bits(bits) as i64)
 }
 
 /// As [`chunk_to_i64`], but lanes marked null in `valid_byte` become 0.
 #[inline(always)]
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn chunk_to_i64_masked(chunk: &[u64; 8], valid_byte: u8) -> [i64; 8] {
+pub fn chunk_to_i64_masked(chunk: &[u64; 8], valid_byte: u8) -> [i64; 8] {
     let mut out = [0i64; 8];
     for (i, slot) in out.iter_mut().enumerate() {
         if (valid_byte >> i) & 1 == 1 {
@@ -137,13 +138,13 @@ pub(crate) fn chunk_to_i64_masked(chunk: &[u64; 8], valid_byte: u8) -> [i64; 8] 
 
 #[inline(always)]
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn chunk_to_i32(chunk: &[u64; 8]) -> [i32; 8] {
+pub fn chunk_to_i32(chunk: &[u64; 8]) -> [i32; 8] {
     chunk.map(|bits| f64::from_bits(bits) as i32)
 }
 
 #[inline(always)]
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn chunk_to_i32_masked(chunk: &[u64; 8], valid_byte: u8) -> [i32; 8] {
+pub fn chunk_to_i32_masked(chunk: &[u64; 8], valid_byte: u8) -> [i32; 8] {
     let mut out = [0i32; 8];
     for (i, slot) in out.iter_mut().enumerate() {
         if (valid_byte >> i) & 1 == 1 {
@@ -157,7 +158,7 @@ const SPACES_8: u64 = u64::from_ne_bytes([b' '; 8]);
 
 /// Byte-at-a-time trim. The tail of every other trim kernel.
 #[inline]
-pub(crate) fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
+pub fn trim_trailing_space_or_nul(slice: &[u8]) -> &[u8] {
     let mut end = slice.len();
     while end > 0 {
         let byte = slice[end - 1];
@@ -185,7 +186,7 @@ fn all_space_or_nul_8(chunk: &[u8]) -> bool {
 /// bytes, and below that they measured no better than this. The width gate lives
 /// in [`crate::scan::string`].
 #[inline]
-pub(crate) fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
+pub fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
     let mut end = slice.len();
     while end >= 8 {
         let start = end - 8;
@@ -210,7 +211,7 @@ pub(crate) fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
 }
 
 #[inline]
-pub(crate) fn is_ascii_wide(slice: &[u8]) -> bool {
+pub fn is_ascii_wide(slice: &[u8]) -> bool {
     let (chunks, remainder) = slice.as_chunks::<8>();
     for chunk in chunks {
         // `*chunk` is already [u8; 8], so this drops the try_into/expect the

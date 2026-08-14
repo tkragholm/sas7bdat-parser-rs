@@ -40,7 +40,12 @@ csv = { workspace = true }
 serde_json = { workspace = true }
 # Self dev-dependency: turns `fixture-catalog` on for tests, benches and examples
 # without exposing it to consumers, so `cargo bench` needs no extra flags.
-sas7bdat = { path = ".", features = ["fixture-catalog"] }
+#
+# `default-features = false` is load-bearing. Cargo unions features, so without it
+# this edge re-enables `simd` no matter what the command line says, and
+# `cargo bench --no-default-features` silently measures the wrong backend. The
+# normal `cargo bench` still gets the defaults via the primary package selection.
+sas7bdat = { path = ".", default-features = false, features = ["fixture-catalog"] }
 
 [[example]]
 name = "bench_dict"
@@ -60,6 +65,14 @@ harness = false
 
 [[bench]]
 name = "wide_table"
+harness = false
+required-features = ["internal-bench"]
+
+# Times the live SIMD backend's kernels. `internal-bench` is what makes `simd`
+# public; only one vector backend compiles at a time, so this is run once per
+# configuration and compared across runs. See scripts/simd-matrix.sh.
+[[bench]]
+name = "simd_backends"
 harness = false
 required-features = ["internal-bench"]
 

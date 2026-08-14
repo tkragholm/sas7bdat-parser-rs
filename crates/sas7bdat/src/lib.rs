@@ -62,6 +62,12 @@ mod probe;
 mod projection;
 mod row;
 mod scan;
+// Public only under `internal-bench`, so the `simd_backends` benchmark can time the
+// kernels of whichever backend is live. Private in every shipped configuration —
+// this is an implementation detail, not API.
+#[cfg(feature = "internal-bench")]
+pub mod simd;
+#[cfg(not(feature = "internal-bench"))]
 mod simd;
 
 // Exposed publicly only for in-crate tests and the `internal-bench` benchmarks (which

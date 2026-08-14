@@ -1,0 +1,102 @@
+# Measures the three SIMD backends on x86-64, which no other job and no dev machine
+# here covers — development is on aarch64, where there is only one instruction set
+# and runtime dispatch buys nothing by construction.
+#
+# The question is whether the `nightly-simd` backend still earns its keep. On x86-64
+# `std::simd` has no runtime dispatch: it lowers to whatever target features were
+# enabled at compile time, so a portable build runs 512-bit logical vectors as SSE2.
+# `fearless_simd` detects AVX2/AVX-512 at runtime. Sweeping `-C target-cpu` shows how
+# much of that gap the compile-time flag closes, and therefore whether shipping a
+# nightly-only backend is worth the toolchain cost.
+#
+# Manual only. It is a measurement, not a gate, and it takes tens of minutes.
+name: simd-matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_cpus:
+        description: 'Space-separated -C target-cpu levels (v4 is skipped if unsupported)'
+        default: 'baseline x86-64-v3 x86-64-v4'
+      measurement_time:
+        description: 'Criterion seconds per benchmark'
+        default: '3'
+
+concurrency:
+  group: simd-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  matrix:
+    name: SIMD matrix (x86-64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Which machine this ran on decides how to read the numbers — an AVX-512 part
+      # and an AVX2-only part give completely different answers, so record it.
+      - name: Identify the CPU
+        id: cpu
+        run: |
+          model=$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)
+          echo "model: $model"
+          flags=$(awk '/^flags/{print; exit}' /proc/cpuinfo)
+          for f in sse2 sse4_2 avx avx2 avx512f avx512bw avx512vl; do
+            case " $flags " in *" $f "*) echo "  $f: yes" ;; *) echo "  $f: no" ;; esac
+          done
+          case " $flags " in
+            *" avx512f "*) echo "avx512=yes" >> "$GITHUB_OUTPUT" ;;
+            *)             echo "avx512=no"  >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "model=$model" >> "$GITHUB_OUTPUT"
+
+      # The pinned nightly is needed for the `portable` leg only.
+      - name: Install the nightly used by the portable backend
+        run: rustup toolchain install nightly-2026-07-27 --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: simd-matrix
+
+      # `x86-64-v4` implies AVX-512. On a runner without it every binary built that
+      # way dies with SIGILL, which would read as a benchmark failure rather than an
+      # unsupported target, so drop it up front and say so.
+      - name: Run the sweep
+        env:
+          MEASUREMENT_TIME: ${{ inputs.measurement_time }}
+        run: |
+          requested="${{ inputs.target_cpus }}"
+          cpus=""
+          for c in $requested; do
+            if [ "$c" = "x86-64-v4" ] && [ "${{ steps.cpu.outputs.avx512 }}" != "yes" ]; then
+              echo "::warning::skipping x86-64-v4 — this runner has no AVX-512, so those binaries would SIGILL"
+              continue
+            fi
+            cpus="$cpus $c"
+          done
+          echo "sweeping:$cpus"
+          # shellcheck disable=SC2086
+          ./scripts/simd-matrix.sh $cpus | tee matrix.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## SIMD backend matrix"
+            echo
+            echo "Runner: \`${{ steps.cpu.outputs.model }}\` — AVX-512: ${{ steps.cpu.outputs.avx512 }}"
+            echo
+            echo '```'
+            cat matrix.txt 2>/dev/null || echo "(no results)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: simd-matrix
+          path: matrix.txt
+          if-no-files-found: warn

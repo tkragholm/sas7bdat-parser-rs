@@ -11,6 +11,7 @@
 
 // `#[inline(always)]` on the per-chunk kernels: they are called from a hot loop
 // and a real call there would stop the caller vectorizing across chunks.
+#![allow(clippy::must_use_candidate)]
 #![allow(clippy::inline_always)]
 
 use super::{NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, scalar};
@@ -30,7 +31,7 @@ fn missing_bitmask_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> u8 {
 }
 
 #[inline]
-pub(crate) fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
+pub fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
     dispatch!(Level::new(), simd => missing_bitmask_impl(simd, chunk))
 }
 
@@ -45,7 +46,7 @@ fn any_missing_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> bool {
 }
 
 #[inline]
-pub(crate) fn any_missing_x8(chunk: &[u64; 8]) -> bool {
+pub fn any_missing_x8(chunk: &[u64; 8]) -> bool {
     dispatch!(Level::new(), simd => any_missing_impl(simd, chunk))
 }
 
@@ -78,7 +79,7 @@ fn first_non_integral_impl<S: Simd>(
     scalar::scan_remainder(raw_bits, remainder, valid, min, max)
 }
 
-pub(crate) fn first_non_integral_in_range_index(
+pub fn first_non_integral_in_range_index(
     raw_bits: &[u64],
     valid: Option<&[u64]>,
     min: f64,
@@ -98,7 +99,7 @@ fn to_i64_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> [i64; 8] {
 }
 
 #[inline]
-pub(crate) fn chunk_to_i64(chunk: &[u64; 8]) -> [i64; 8] {
+pub fn chunk_to_i64(chunk: &[u64; 8]) -> [i64; 8] {
     dispatch!(Level::new(), simd => to_i64_impl(simd, chunk))
 }
 
@@ -113,7 +114,7 @@ fn to_i64_masked_impl<S: Simd>(simd: S, chunk: &[u64; 8], valid_byte: u8) -> [i6
 }
 
 #[inline]
-pub(crate) fn chunk_to_i64_masked(chunk: &[u64; 8], valid_byte: u8) -> [i64; 8] {
+pub fn chunk_to_i64_masked(chunk: &[u64; 8], valid_byte: u8) -> [i64; 8] {
     dispatch!(Level::new(), simd => to_i64_masked_impl(simd, chunk, valid_byte))
 }
 
@@ -125,7 +126,7 @@ fn to_i32_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> [i32; 8] {
 }
 
 #[inline]
-pub(crate) fn chunk_to_i32(chunk: &[u64; 8]) -> [i32; 8] {
+pub fn chunk_to_i32(chunk: &[u64; 8]) -> [i32; 8] {
     dispatch!(Level::new(), simd => to_i32_impl(simd, chunk))
 }
 
@@ -137,7 +138,7 @@ fn to_i32_masked_impl<S: Simd>(simd: S, chunk: &[u64; 8], valid_byte: u8) -> [i3
 }
 
 #[inline]
-pub(crate) fn chunk_to_i32_masked(chunk: &[u64; 8], valid_byte: u8) -> [i32; 8] {
+pub fn chunk_to_i32_masked(chunk: &[u64; 8], valid_byte: u8) -> [i32; 8] {
     dispatch!(Level::new(), simd => to_i32_masked_impl(simd, chunk, valid_byte))
 }
 
@@ -162,7 +163,7 @@ fn trim_impl<S: Simd>(simd: S, slice: &[u8]) -> usize {
     scalar::trim_trailing_space_or_nul_wide(&slice[..end]).len()
 }
 
-pub(crate) fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
+pub fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
     let end = dispatch!(Level::new(), simd => trim_impl(simd, slice));
     &slice[..end]
 }
@@ -183,6 +184,6 @@ fn is_ascii_impl<S: Simd>(simd: S, slice: &[u8]) -> bool {
     remainder.is_ascii()
 }
 
-pub(crate) fn is_ascii_wide(slice: &[u8]) -> bool {
+pub fn is_ascii_wide(slice: &[u8]) -> bool {
     dispatch!(Level::new(), simd => is_ascii_impl(simd, slice))
 }

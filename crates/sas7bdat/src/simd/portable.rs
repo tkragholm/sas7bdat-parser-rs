@@ -8,6 +8,7 @@
 
 // `#[inline(always)]` on the per-chunk kernels: they are called from a hot loop
 // and a real call there would stop the caller vectorizing across chunks.
+#![allow(clippy::must_use_candidate)]
 #![allow(clippy::inline_always)]
 
 use super::{NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, scalar};
@@ -17,7 +18,7 @@ use std::simd::{Mask, Select, Simd, StdFloat};
 
 #[inline(always)]
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
+pub fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
     type U64x8 = Simd<u64, 8>;
     let lanes = U64x8::from_array(*chunk);
     let exp = U64x8::splat(NUMERIC_EXP_MASK);
@@ -27,7 +28,7 @@ pub(crate) fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
 }
 
 #[inline(always)]
-pub(crate) fn any_missing_x8(chunk: &[u64; 8]) -> bool {
+pub fn any_missing_x8(chunk: &[u64; 8]) -> bool {
     type U64x8 = Simd<u64, 8>;
     let lanes = U64x8::from_array(*chunk);
     let exp = U64x8::splat(NUMERIC_EXP_MASK);
@@ -36,7 +37,7 @@ pub(crate) fn any_missing_x8(chunk: &[u64; 8]) -> bool {
     ((lanes & exp).simd_eq(exp) & (lanes & frac).simd_ne(zeros)).any()
 }
 
-pub(crate) fn first_non_integral_in_range_index(
+pub fn first_non_integral_in_range_index(
     raw_bits: &[u64],
     valid: Option<&[u64]>,
     min: f64,
@@ -85,12 +86,12 @@ fn to_i64(chunk: &[u64; 8]) -> Simd<i64, 8> {
 }
 
 #[inline(always)]
-pub(crate) fn chunk_to_i64(chunk: &[u64; 8]) -> [i64; 8] {
+pub fn chunk_to_i64(chunk: &[u64; 8]) -> [i64; 8] {
     to_i64(chunk).to_array()
 }
 
 #[inline(always)]
-pub(crate) fn chunk_to_i64_masked(chunk: &[u64; 8], valid_byte: u8) -> [i64; 8] {
+pub fn chunk_to_i64_masked(chunk: &[u64; 8], valid_byte: u8) -> [i64; 8] {
     null_mask(valid_byte)
         .select(Simd::<i64, 8>::splat(0), to_i64(chunk))
         .to_array()
@@ -105,12 +106,12 @@ fn to_i32(chunk: &[u64; 8]) -> Simd<i32, 8> {
 }
 
 #[inline(always)]
-pub(crate) fn chunk_to_i32(chunk: &[u64; 8]) -> [i32; 8] {
+pub fn chunk_to_i32(chunk: &[u64; 8]) -> [i32; 8] {
     to_i32(chunk).to_array()
 }
 
 #[inline(always)]
-pub(crate) fn chunk_to_i32_masked(chunk: &[u64; 8], valid_byte: u8) -> [i32; 8] {
+pub fn chunk_to_i32_masked(chunk: &[u64; 8], valid_byte: u8) -> [i32; 8] {
     // The null mask is over `i64` lanes; cast it to `i32` lanes to select on the
     // narrower vector without changing which lanes are set.
     null_mask(valid_byte)
@@ -120,7 +121,7 @@ pub(crate) fn chunk_to_i32_masked(chunk: &[u64; 8], valid_byte: u8) -> [i32; 8] 
 }
 
 #[inline(always)]
-pub(crate) fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
+pub fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
     type U8x64 = Simd<u8, 64>;
 
     let mut end = slice.len();
@@ -145,7 +146,7 @@ pub(crate) fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
 }
 
 #[inline(always)]
-pub(crate) fn is_ascii_wide(slice: &[u8]) -> bool {
+pub fn is_ascii_wide(slice: &[u8]) -> bool {
     type U8x64 = Simd<u8, 64>;
 
     let (chunks, remainder) = slice.as_chunks::<64>();
