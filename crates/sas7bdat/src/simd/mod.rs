@@ -4,9 +4,14 @@
 //!
 //! | backend    | feature        | needs        | notes                                    |
 //! |------------|----------------|--------------|------------------------------------------|
-//! | [`scalar`] | *(none)*       | stable, 1.81 | Always compiled. The correctness oracle. |
+//! | [`scalar`] | *(none)*       | stable, 1.88 | Always compiled. The correctness oracle. |
 //! | [`fearless`] | `simd`       | stable, 1.89 | Runtime-dispatched. The default.         |
 //! | [`portable`] | `nightly-simd` | nightly    | `std::simd`. Overrides `simd`.           |
+//!
+//! The scalar figure is the crate's own floor (`slice::as_chunks`, stable in 1.88),
+//! not something the backend chooses; leaving `simd` off only avoids
+//! `fearless_simd`'s 1.89. One version between them, so a low MSRV is a weak reason
+//! to pick `scalar` — see below for the real ones.
 //!
 //! `nightly-simd` wins when both are on, so `--all-features` resolves to a single
 //! coherent backend rather than failing to compile.

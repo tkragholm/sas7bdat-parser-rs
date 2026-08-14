@@ -69,8 +69,8 @@ default = ["simd"]
 # exactly one is live; see that module for the precedence rule and for which
 # kernels each backend actually wins on.
 #
-#   (neither)      scalar, stable, MSRV-friendly. The correctness oracle, and the
-#                  only configuration that can target CRAN's Rust 1.81.
+#   (neither)      scalar, stable, std-only. The correctness oracle, and the path
+#                  for anyone on a toolchain older than fearless_simd's 1.89.
 #   simd           fearless_simd — stable (needs 1.89), runtime-dispatched.
 #   nightly-simd   std::simd — requires a nightly toolchain. Overrides `simd`.
 simd = ["dep:fearless_simd"]

@@ -1,8 +1,9 @@
 //! Stable-Rust kernels with no explicit vector types.
 //!
-//! Always compiled, for three reasons: it is the only backend that builds on
-//! CRAN's Rust 1.81, it is the oracle the differential tests hold the other two
-//! against, and on some kernels it is simply the fastest of the three.
+//! Always compiled, for three reasons: it is the oracle the differential tests
+//! hold the other two against, it keeps a path that needs no dependency beyond
+//! std for anyone stuck on an older toolchain, and on some kernels it is simply
+//! the fastest of the three.
 //!
 //! Written to be *autovectorizable* rather than scalar for its own sake — the
 //! loops are over fixed-size arrays with no early exits, so LLVM can widen them.
