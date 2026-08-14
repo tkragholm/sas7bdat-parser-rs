@@ -42,19 +42,40 @@
 //! which is why [`crate::scan::string`] gates on `< 64` rather than calling a
 //! backend; and the ≥64-byte string kernels are a clear vector win.
 //!
-//! # Known: `dispatch!` is paid per call
+//! # Why the column entry points exist
 //!
-//! [`missing_bitmask_x8`] and [`chunk_to_i64_masked`] are invoked once per 8 rows, so
-//! the `fearless` backend pays a runtime dispatch per chunk — 6.8 GiB/s against
-//! `scalar`'s 55.9 on `chunk_to_i64_masked`. The coarse kernels dispatch once per
-//! array or per row and show no such penalty, and `fearless` leads them.
+//! `dispatch!` selects a `#[target_feature]` implementation, and such a function
+//! cannot be inlined into a caller that lacks the feature. Driving a column through
+//! the per-chunk kernels therefore costs one real call per 8 rows. It measured at
+//! 6.8 GiB/s against `scalar`'s 55.9 before the column entry points existed.
 //!
-//! The fix is to hoist dispatch out of the per-chunk loops: give the backend a coarse
-//! entry point that dispatches once and iterates inside, instead of
-//! [`classify_missing_raw_bits`] calling a dispatched per-chunk kernel. Not yet done.
+//! So call [`classify_missing_raw_bits`], [`convert_column_i64`],
+//! [`convert_column_i32`] and [`gather_missing`] from the scan pipeline, never the
+//! per-chunk kernels. Their loops live once in the `*_with` helpers, generic over the
+//! per-chunk kernel and `#[inline(always)]`, so a dispatching backend gets the whole
+//! body instantiated inside the implementation it selected.
 //!
-//! Run `scripts/simd-matrix.sh`, or the `simd-matrix` workflow, to re-measure. AVX-512
-//! is still unmeasured — GitHub's runners are Zen 3.
+//! # What the x86-64 sweep says
+//!
+//! Measured on an AVX-512 EPYC, GiB/s, `portable` = `std::simd`:
+//!
+//! | kernel                 | baseline (SSE2)      | x86-64-v3 (AVX2)     | x86-64-v4 (AVX-512)  |
+//! |------------------------|----------------------|----------------------|----------------------|
+//! |                        | scal / fear / port   | scal / fear / port   | scal / fear / port   |
+//! | `classify_missing`     | 10.0 / **59.3** / 12.5 | 16.4 / **58.9** / 54.4 | 33.7 / 59.0 / **60.3** |
+//! | `convert_column_i64`   |  8.8 / **28.8** /  8.0 |  8.7 / **26.1** /  8.4 |  8.2 / **22.0** /  9.3 |
+//! | `is_ascii/width_256`   | 23.7 / 62.5 / **71.3** | 23.4 / 58.2 / **89.1** | 23.9 / 64.6 / **72.6** |
+//! | `is_ascii/width_16`    | **10.9** / 4.6 / 7.8 | **10.9** / 5.5 / 7.8 | **10.9** / 5.4 / 7.8 |
+//!
+//! `fearless` is nearly flat across the three levels — it picks at runtime, so it
+//! does not care what the build enabled. `portable` swings by 4x, because it lowers
+//! to whatever `-C target-cpu` allowed. That is the whole argument for the default:
+//! a crate consumed from crates.io, a wheel, or an R tarball is built at baseline.
+//!
+//! Where `portable` still wins is the wide string kernels once `target-cpu` is set,
+//! which is the case for this repository's own CLI and server builds.
+//!
+//! Re-measure with `scripts/simd-matrix.sh` or the `simd-matrix` workflow.
 
 // These are internal kernels, `pub` only so the `simd_backends` benchmark can
 // reach them under `internal-bench` — the module itself is private otherwise.
