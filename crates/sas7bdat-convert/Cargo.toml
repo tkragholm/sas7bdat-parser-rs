@@ -1,6 +1,6 @@
 [package]
 name = "sas7bdat-convert"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Convert SAS7BDAT files to Parquet, CSV or TSV, one file or a directory tree"
 license = "MIT"
@@ -18,7 +18,7 @@ csv = { workspace = true }
 glob = { workspace = true }
 parquet = { workspace = true }
 rayon = { workspace = true }
-sas7bdat = { path = "../sas7bdat", version = "0.7", features = ["arrow"] }
+sas7bdat = { path = "../sas7bdat", version = "0.8", features = ["arrow"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 walkdir = { workspace = true }

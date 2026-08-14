@@ -15,6 +15,59 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-14
+
+### Changed
+
+- **The crate builds on stable Rust.** 0.7.0 and earlier carried an unconditional
+  `#![feature(portable_simd)]` and could only be compiled by a nightly toolchain. The
+  vectorized kernels now sit behind a backend selected by feature, and the default
+  backend uses [`fearless_simd`](https://crates.io/crates/fearless_simd), which is
+  stable (needs rustc >= 1.89). Consumers no longer need `rust-toolchain.toml` or a
+  nightly in CI.
+
+  This is why the runtime dispatch matters rather than only the stable support:
+  `std::simd` lowers to whatever target features were enabled at compile time, so a
+  portable build on x86-64 executes 512-bit logical vectors as SSE2. `fearless_simd`
+  detects AVX2/AVX-512 at runtime. Measured at baseline on a Zen 3 EPYC, the numeric
+  null scan runs 4.8x faster than the `std::simd` build and the column converter 3.6x
+  faster, without the caller setting `-C target-cpu`.
+
+- **Two dependencies removed.** `bstr` (which pulled `regex-automata`) is replaced by
+  `String::from_utf8_lossy` — verified equivalent across 17,068,288 byte sequences,
+  every 1-, 2- and 3-byte sequence exhaustively, since these are the invalid-UTF-8
+  paths where U+FFFD placement is user-visible. `windows-sys`, 18 MB of generated
+  bindings for a single `GetDriveTypeW` call, is replaced by a direct
+  `extern "system"` declaration. Vendored and xz-compressed, the dependency bundle
+  drops from 5.6 MB to 2.4 MB.
+
+### Added
+
+- **`simd`** (default) — `fearless_simd`, runtime-dispatched, stable rustc >= 1.89.
+- **`nightly-simd`** — the previous `std::simd` kernels; requires a nightly toolchain
+  and overrides `simd` when both are enabled.
+- With neither enabled, a scalar backend that needs nothing beyond `std`. It is also
+  the oracle the other two are differentially tested against on every kernel.
+
+### Performance
+
+- **Dispatch is taken once per column rather than once per 8 rows.** A `dispatch!`
+  arm is a `#[target_feature]` function, which cannot be inlined into a caller that
+  lacks the feature, so driving a column through the per-chunk kernels cost a real
+  call every 8 rows — 6.8 GiB/s against the scalar path's 55.9 on the masked
+  converter. The scan pipeline now enters through column-level functions whose loops
+  are instantiated inside the selected implementation.
+
+- **`is_ascii` accumulates instead of reducing per chunk.** The early exit almost
+  never fires on SAS character data, so the per-chunk reduction and branch were pure
+  overhead. Removing them took the scalar path from 24.6 to 72.6 GiB/s on 256-byte
+  columns; the branch was what stopped LLVM widening the loop.
+
+### Notes
+
+Entries above are curated rather than generated: `git-cliff` groups by commit type
+across the whole repository, and this file covers the library crate alone.
+
 ## [0.7.0] - 2026-08-13
 
 Published as 0.7.0, not 0.5.0 or 0.6.0: those two versions were developed, tagged and
