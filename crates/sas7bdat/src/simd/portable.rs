@@ -153,13 +153,19 @@ pub fn is_ascii_wide(slice: &[u8]) -> bool {
     type U8x64 = Simd<u8, 64>;
 
     let (chunks, remainder) = slice.as_chunks::<64>();
-    // One reduction for the whole slice instead of one per chunk — see the note on
-    // the same kernel in `super::fearless`.
-    let mut acc = U8x64::splat(0);
+    let high_bits = U8x64::splat(0x80);
+    // Deliberately per-chunk, unlike `scalar` and `fearless`, which accumulate and
+    // reduce once. `reduce_or` here lowers to a single `vptest`-style test, cheap
+    // enough that the loop pipelines around it; forcing the accumulate instead
+    // measured *slower* (89 -> 65 GiB/s at x86-64-v3). The other two backends have no
+    // equally cheap horizontal test, so accumulating is the win for them. Same
+    // output either way — `string_kernels_match_scalar` holds all three to `std`.
     for chunk in chunks {
-        acc |= U8x64::from_array(*chunk);
+        if (U8x64::from_array(*chunk) & high_bits).reduce_or() != 0 {
+            return false;
+        }
     }
-    (acc & U8x64::splat(0x80)).reduce_or() == 0 && remainder.is_ascii()
+    remainder.is_ascii()
 }
 
 // ---------------------------------------------------------------- column entry points
