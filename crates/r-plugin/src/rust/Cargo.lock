@@ -153,6 +153,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fearless_simd"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4beca3cb2444e3304ac30843cc091f44ed58932353cd492ce740067bfce6b12"
+
+[[package]]
 name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -281,14 +287,13 @@ checksum = "6e1dd4122fc1595e8162618945476892eefca7b88c52820e74af6262213cae8f"
 [[package]]
 name = "sas7bdat"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8d4571601692bb2adad9bd8bc6a5fa1e75db54a631174dc576d7e158513f9b9"
 dependencies = [
  "ahash",
  "bstr",
  "bytemuck",
  "cardinality-estimator",
  "encoding_rs",
+ "fearless_simd",
  "lasso2",
  "memchr",
  "memmap2",
