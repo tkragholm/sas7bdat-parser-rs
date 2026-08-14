@@ -31,6 +31,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Cheap, and it catches a failure that is otherwise silent: a `[patch]` whose
+      # version no longer satisfies the requirement is dropped with a warning, not an
+      # error, and the binding quietly builds against the last published core.
+      - name: Version coupling
+        run: ./scripts/check-versions.sh
+
       - name: Format
         run: cargo fmt --all --check
 

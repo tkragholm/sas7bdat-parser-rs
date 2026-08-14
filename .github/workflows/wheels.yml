@@ -32,6 +32,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # `release-crate.yml` hard-fails when a tag and its manifest disagree; this
+  # workflow had no equivalent. `uv publish --check-url` makes a tag that bumps only
+  # one package a no-op for the other, which is the right behaviour — but it also
+  # means a tag whose version matches *neither* package publishes nothing and still
+  # reports success. That is a silent no-op, so check it up front.
+  check-tag:
+    name: check tag
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v6
+      - name: Tag must match a package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          polars=$(awk -F'"' '/^version = /{print $2; exit}' crates/polars-plugin/Cargo.toml)
+          cli=$(awk -F'"' '/^version = /{print $2; exit}' crates/sas7bdat-cli/Cargo.toml)
+          echo "tag $tag | sas7bdat-polars $polars | sas7bdat-cli $cli"
+          if [ "$tag" != "$polars" ] && [ "$tag" != "$cli" ]; then
+            echo "::error::tag v$tag matches neither package; nothing would publish and the run would still be green"
+            exit 1
+          fi
+
   linux:
     name: linux-${{ matrix.target }}
     runs-on: ubuntu-22.04
