@@ -269,3 +269,130 @@ fn classify_missing_matches_a_naive_reference() {
         }
     }
 }
+
+// ---------------------------------------------------------- column entry points
+//
+// These wrap the per-chunk kernels in a loop and, for a dispatching backend, in a
+// single `dispatch!`. They also own the sub-8 tail, which `convert_column_with`
+// handles by padding to a full chunk and masking rather than by a scalar loop — a
+// different shape from the kernels above, so it needs its own coverage.
+
+/// Values the converters are contracted to accept: finite integers in i32 range.
+fn convertible() -> Vec<u64> {
+    let mut rng = Lcg(0x00C0_1234);
+    let mut v: Vec<u64> = vec![
+        0.0_f64.to_bits(),
+        (-0.0_f64).to_bits(),
+        1.0_f64.to_bits(),
+        (-1.0_f64).to_bits(),
+        f64::from(i32::MAX).to_bits(),
+        f64::from(i32::MIN).to_bits(),
+    ];
+    for _ in 0..300 {
+        #[allow(clippy::cast_possible_truncation)]
+        let n = (rng.next() >> 40) as i32;
+        v.push(f64::from(n).to_bits());
+    }
+    v
+}
+
+/// Validity vector nulling every `step`-th row.
+fn validity(len: usize, step: usize) -> Vec<u64> {
+    let mut v = vec![0u64; len.div_ceil(64).max(1)];
+    for i in 0..len {
+        if !i.is_multiple_of(step) {
+            v[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+    v
+}
+
+#[test]
+fn convert_column_matches_a_naive_reference() {
+    let values = convertible();
+
+    // Every length up to 40 covers the sub-8 tail at every offset, plus lengths
+    // that straddle a validity word.
+    for len in (0..40).chain([63, 64, 65, 127, 128, 200]) {
+        let slice = &values[..len.min(values.len())];
+        for valid in [None, Some(validity(slice.len(), 3))] {
+            let v = valid.as_deref();
+
+            let mut got_i64 = Vec::new();
+            super::convert_column_i64(slice, v, &mut got_i64, |x| x);
+            let mut got_i32 = Vec::new();
+            super::convert_column_i32(slice, v, &mut got_i32, |x| x);
+
+            let mut want_i64 = Vec::new();
+            let mut want_i32 = Vec::new();
+            for (i, &bits) in slice.iter().enumerate() {
+                let present = v.is_none_or(|vv| super::valid_bit(vv, i));
+                #[allow(clippy::cast_possible_truncation)]
+                if present {
+                    want_i64.push(f64::from_bits(bits) as i64);
+                    want_i32.push(f64::from_bits(bits) as i32);
+                } else {
+                    want_i64.push(0);
+                    want_i32.push(0);
+                }
+            }
+
+            assert_eq!(
+                got_i64,
+                want_i64,
+                "i64, len {len}, validity {}",
+                v.is_some()
+            );
+            assert_eq!(
+                got_i32,
+                want_i32,
+                "i32, len {len}, validity {}",
+                v.is_some()
+            );
+        }
+    }
+}
+
+#[test]
+fn convert_column_applies_the_wrapper_and_appends() {
+    let values = convertible();
+    let mut out = vec![-1i64];
+    super::convert_column_i64(&values[..10], None, &mut out, |x| x * 2);
+    assert_eq!(out.len(), 11, "must append, not replace");
+    assert_eq!(out[0], -1);
+    #[allow(clippy::cast_possible_truncation)]
+    for (i, &bits) in values[..10].iter().enumerate() {
+        assert_eq!(out[i + 1], (f64::from_bits(bits) as i64) * 2);
+    }
+}
+
+#[test]
+fn gather_missing_matches_a_naive_reference() {
+    let values = convertible();
+    // Interleave the missing sentinel so both branches of the test are exercised.
+    let mut cells: Vec<u64> = values.clone();
+    for (i, c) in cells.iter_mut().enumerate() {
+        if i.is_multiple_of(7) {
+            *c = 0x7FF0_0000_0000_0001;
+        }
+    }
+
+    for stride in [8usize, 16, 24] {
+        // Lay the cells out `stride` bytes apart, as a SAS row would.
+        let mut page = vec![0u8; cells.len() * stride + 8];
+        for (i, &c) in cells.iter().enumerate() {
+            page[i * stride..i * stride + 8].copy_from_slice(&c.to_le_bytes());
+        }
+
+        for len in (0..24).chain([100, cells.len()]) {
+            let mut got = Vec::new();
+            let got_missing = super::gather_missing(&page, 0, stride, len, &mut got);
+
+            let want: Vec<u64> = cells[..len].to_vec();
+            let want_missing = want.iter().copied().any(super::bits_is_missing);
+
+            assert_eq!(got, want, "stride {stride}, len {len}");
+            assert_eq!(got_missing, want_missing, "stride {stride}, len {len}");
+        }
+    }
+}

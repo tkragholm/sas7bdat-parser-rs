@@ -8,7 +8,7 @@ use super::{
 };
 use crate::columnar::{ColumnBuffer, ColumnarBatch, TrustedOffsets};
 use crate::define_owned_column_enum;
-use crate::simd::any_missing_x8;
+use crate::simd::gather_missing;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use simdutf8::basic::from_utf8 as simd_from_utf8;
 use std::ops::ControlFlow;
@@ -1412,43 +1412,19 @@ pub(super) fn push_variable_null(
 /// Narrow rows collapse to a single large tile (the whole batch), matching the untiled path.
 const CONTIGUOUS_TILE_BYTES: usize = 512 * 1024;
 
-/// Strided gather of `len` full-width (8-byte) little-endian numerics into `raw_bits`, with the
-/// missing-value test and the store vectorized: assemble `LANES` strided loads into a vector,
-/// SIMD-test the SAS-missing pattern across all lanes at once, and bulk-append. The strided
-/// loads themselves stay scalar (portable SIMD has no byte-offset gather, and the dominant
-/// targets lack a hardware gather), but this removes the per-cell branch + per-element push.
-/// Returns whether any lane was a SAS missing sentinel.
+/// Strided gather of `len` full-width (8-byte) little-endian numerics into
+/// `raw_bits`, with the SAS-missing test vectorized. The loop itself lives in
+/// [`crate::simd`] so a runtime-dispatching backend selects its implementation once
+/// for the whole run rather than once per 8 rows.
 #[inline]
 fn gather_staged_8byte_le(
     page: &[u8],
-    mut base: usize,
+    base: usize,
     stride: usize,
     len: usize,
     raw_bits: &mut Vec<u64>,
 ) -> bool {
-    const LANES: usize = 8;
-
-    let mut missing = false;
-    let mut i = 0;
-    while i + LANES <= len {
-        let mut lane = [0u64; LANES];
-        for (l, slot) in lane.iter_mut().enumerate() {
-            let off = base + l * stride;
-            *slot = u64::from_le_bytes(page[off..off + 8].try_into().expect("8-byte field"));
-        }
-        missing |= any_missing_x8(&lane);
-        raw_bits.extend_from_slice(&lane);
-        base += LANES * stride;
-        i += LANES;
-    }
-    while i < len {
-        let raw = u64::from_le_bytes(page[base..base + 8].try_into().expect("8-byte field"));
-        missing |= numeric_bits_is_missing(raw);
-        raw_bits.push(raw);
-        base += stride;
-        i += 1;
-    }
-    missing
+    gather_missing(page, base, stride, len, raw_bits)
 }
 
 /// Rows per transpose tile for a given fixed row stride, so

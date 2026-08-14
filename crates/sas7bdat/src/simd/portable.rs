@@ -9,6 +9,9 @@
 // `#[inline(always)]` on the per-chunk kernels: they are called from a hot loop
 // and a real call there would stop the caller vectorizing across chunks.
 #![allow(clippy::must_use_candidate)]
+// The per-chunk kernels stay compiled for the differential tests and the
+// `simd_backends` benchmark; production uses the column entry points instead.
+#![allow(dead_code)]
 #![allow(clippy::inline_always)]
 
 use super::{NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, scalar};
@@ -157,4 +160,42 @@ pub fn is_ascii_wide(slice: &[u8]) -> bool {
         }
     }
     remainder.is_ascii()
+}
+
+// ---------------------------------------------------------------- column entry points
+
+/// See [`super::classify_missing_with`].
+pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
+    super::classify_missing_with(raw_bits, missing_bitmask_x8)
+}
+
+/// See [`super::convert_column_with`].
+pub fn convert_column_i64<T>(
+    raw_bits: &[u64],
+    valid: Option<&[u64]>,
+    out: &mut Vec<T>,
+    wrap: impl Fn(i64) -> T,
+) {
+    super::convert_column_with(raw_bits, valid, out, wrap, chunk_to_i64_masked);
+}
+
+/// See [`super::convert_column_with`].
+pub fn convert_column_i32<T>(
+    raw_bits: &[u64],
+    valid: Option<&[u64]>,
+    out: &mut Vec<T>,
+    wrap: impl Fn(i32) -> T,
+) {
+    super::convert_column_with(raw_bits, valid, out, wrap, chunk_to_i32_masked);
+}
+
+/// See [`super::gather_missing_with`].
+pub fn gather_missing(
+    page: &[u8],
+    base: usize,
+    stride: usize,
+    len: usize,
+    raw_bits: &mut Vec<u64>,
+) -> bool {
+    super::gather_missing_with(page, base, stride, len, raw_bits, any_missing_x8)
 }

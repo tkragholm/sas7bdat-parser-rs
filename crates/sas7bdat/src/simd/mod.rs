@@ -60,6 +60,11 @@
 // reach them under `internal-bench` — the module itself is private otherwise.
 // `#[must_use]` is API hygiene for a real public surface; this is not one.
 #![allow(clippy::must_use_candidate)]
+// `#[inline(always)]` on the shared column loops is the mechanism, not a hint:
+// it is what gets their bodies instantiated *inside* a backend's selected
+// `#[target_feature]` implementation. Without it the loop stays outside and
+// calls back in once per chunk, which is the cost these exist to remove.
+#![allow(clippy::inline_always)]
 
 pub mod scalar;
 
@@ -78,10 +83,25 @@ pub use fearless as backend;
 #[cfg(not(any(feature = "simd", feature = "nightly-simd")))]
 pub use scalar as backend;
 
+// The per-chunk kernels. Production goes through the column entry points below
+// instead, so most of these have no caller outside `tests` and the `simd_backends`
+// benchmark — which is where they earn their keep, since they are the unit the
+// differential tests compare backend against backend.
+#[allow(unused_imports)]
 pub use backend::{
     any_missing_x8, chunk_to_i32, chunk_to_i32_masked, chunk_to_i64, chunk_to_i64_masked,
     first_non_integral_in_range_index, is_ascii_wide, missing_bitmask_x8,
     trim_trailing_space_or_nul_wide,
+};
+
+// The column-level entry points. These exist so a runtime-dispatching backend can
+// dispatch *once* and run the whole loop inside the selected implementation. The
+// per-chunk kernels above are still the unit of work, but going through them one
+// call at a time costs a cross-`#[target_feature]` call per 8 rows, which no
+// optimiser can remove — measured at 6.8 GiB/s against scalar's 55.9 before this
+// existed. Call these, not the per-chunk kernels, from the scan pipeline.
+pub use backend::{
+    classify_missing_raw_bits, convert_column_i32, convert_column_i64, gather_missing,
 };
 
 /// IEEE-754 double exponent field: all ones means Inf or NaN.
@@ -117,9 +137,14 @@ pub const fn bits_is_missing(bits: u64) -> bool {
 /// `i` is present. `None` when every row is present, which lets a column with no
 /// missing values skip allocating a validity vector at all.
 ///
-/// Only the 8-lane test inside is backend-specific, so this outer structure is
-/// shared rather than written three times.
-pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
+/// Generic over the per-chunk test so the loop is written once and each backend
+/// decides where its dispatch sits — `#[inline(always)]` so a dispatching backend
+/// gets this whole body instantiated *inside* its selected implementation.
+#[inline(always)]
+pub fn classify_missing_with<F>(raw_bits: &[u64], mut missing_bitmask: F) -> Option<Vec<u64>>
+where
+    F: FnMut(&[u64; 8]) -> u8,
+{
     let mut valid: Option<Vec<u64>> = None;
     let mut processed_words = 0usize;
 
@@ -131,7 +156,7 @@ pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
         // The outer chunk is exactly 64 wide, so this inner split has no remainder.
         let (sub_chunks, _) = chunk64.as_chunks::<8>();
         for (i, sub_chunk) in sub_chunks.iter().enumerate() {
-            let missing = missing_bitmask_x8(sub_chunk);
+            let missing = missing_bitmask(sub_chunk);
             valid_word |= u64::from(!missing) << (i * 8);
             any_missing |= missing != 0;
         }
@@ -153,7 +178,7 @@ pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
         let mut bit_offset = 0usize;
         let (sub_chunks8, tail) = remainder.as_chunks::<8>();
         for sub_chunk in sub_chunks8 {
-            let missing = missing_bitmask_x8(sub_chunk);
+            let missing = missing_bitmask(sub_chunk);
             valid_word |= u64::from(!missing) << bit_offset;
             any_missing |= missing != 0;
             bit_offset += 8;
@@ -177,6 +202,99 @@ pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
     }
 
     valid
+}
+
+/// Convert a staged numeric column, appending each value through `wrap`.
+///
+/// `convert` takes a chunk and the 8 validity bits covering it, and returns the
+/// converted lanes with null lanes zeroed; an all-ones byte means "all present", so
+/// one closure serves both the validity and no-validity paths.
+///
+/// Callers guarantee every present lane is a finite integer in range, via
+/// [`first_non_integral_in_range_index`].
+#[inline(always)]
+pub fn convert_column_with<N, T, F>(
+    raw_bits: &[u64],
+    valid: Option<&[u64]>,
+    out: &mut Vec<T>,
+    wrap: impl Fn(N) -> T,
+    mut convert: F,
+) where
+    N: Copy,
+    F: FnMut(&[u64; 8], u8) -> [N; 8],
+{
+    let (chunks, remainder) = raw_bits.as_chunks::<8>();
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        let valid_byte = valid.map_or(0xFF, |v| validity_byte(v, chunk_index));
+        out.extend(convert(chunk, valid_byte).map(&wrap));
+    }
+
+    // The sub-8 tail, one lane at a time. Routed through the same `convert` so the
+    // conversion semantics cannot drift between the body and the tail.
+    if !remainder.is_empty() {
+        let processed = raw_bits.len() - remainder.len();
+        let mut padded = [0u64; 8];
+        padded[..remainder.len()].copy_from_slice(remainder);
+        let mut valid_byte = 0u8;
+        for offset in 0..remainder.len() {
+            let present = valid.is_none_or(|v| valid_bit(v, processed + offset));
+            if present {
+                valid_byte |= 1 << offset;
+            }
+        }
+        let converted = convert(&padded, valid_byte);
+        for value in converted.iter().take(remainder.len()) {
+            out.push(wrap(*value));
+        }
+    }
+}
+
+/// Strided gather of `len` full-width little-endian numerics, with the SAS-missing
+/// test vectorized across each group of 8. Returns whether any lane was missing.
+///
+/// The strided loads themselves stay scalar — portable SIMD has no byte-offset
+/// gather and the dominant targets lack a hardware one — but this removes the
+/// per-cell branch and per-element push. The loop lives here so a dispatching
+/// backend wraps the whole thing rather than one group at a time.
+///
+/// # Panics
+///
+/// If `page` is too short for `len` cells at `stride` from `base`. The caller is the
+/// batch decoder, which derives all three from the page's own row layout.
+#[inline(always)]
+pub fn gather_missing_with<F>(
+    page: &[u8],
+    mut base: usize,
+    stride: usize,
+    len: usize,
+    raw_bits: &mut Vec<u64>,
+    mut any_missing: F,
+) -> bool
+where
+    F: FnMut(&[u64; 8]) -> bool,
+{
+    const LANES: usize = 8;
+    let mut missing = false;
+    let mut i = 0;
+    while i + LANES <= len {
+        let mut lane = [0u64; LANES];
+        for (l, slot) in lane.iter_mut().enumerate() {
+            let off = base + l * stride;
+            *slot = u64::from_le_bytes(page[off..off + 8].try_into().expect("8-byte field"));
+        }
+        missing |= any_missing(&lane);
+        raw_bits.extend_from_slice(&lane);
+        base += LANES * stride;
+        i += LANES;
+    }
+    while i < len {
+        let raw = u64::from_le_bytes(page[base..base + 8].try_into().expect("8-byte field"));
+        missing |= bits_is_missing(raw);
+        raw_bits.push(raw);
+        base += stride;
+        i += 1;
+    }
+    missing
 }
 
 #[cfg(test)]

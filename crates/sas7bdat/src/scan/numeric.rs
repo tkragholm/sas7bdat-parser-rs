@@ -3,10 +3,7 @@ use super::{
     SasTime, unexpected_batch_cell,
 };
 pub(super) use crate::simd::{NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, classify_missing_raw_bits};
-use crate::simd::{
-    chunk_to_i32, chunk_to_i32_masked, chunk_to_i64, chunk_to_i64_masked,
-    first_non_integral_in_range_index, valid_bit, validity_byte,
-};
+use crate::simd::{convert_column_i32, convert_column_i64, first_non_integral_in_range_index};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum TypedNumericValue {
@@ -182,7 +179,6 @@ macro_rules! materialize_or_f64 {
         min = $min:expr,
         max = $max:expr,
         convert = $convert:ident,
-        convert_masked = $convert_masked:ident,
         scalar_ty = $scalar_ty:ty,
         wrap = $wrap:expr,
         buffer = $buffer:ident $(,)?
@@ -194,36 +190,9 @@ macro_rules! materialize_or_f64 {
 
             let wrap: fn($scalar_ty) -> _ = $wrap;
             let mut values = Vec::with_capacity(raw_bits.len());
-            let (raw_chunks, remainder) = raw_bits.as_chunks::<8>();
-
-            match valid.as_deref() {
-                None => {
-                    for raw_chunk in raw_chunks {
-                        values.extend($convert(raw_chunk).map(wrap));
-                    }
-                    for &bits in remainder {
-                        #[allow(clippy::cast_possible_truncation)]
-                        values.push(wrap(f64::from_bits(bits) as $scalar_ty));
-                    }
-                }
-                Some(validity) => {
-                    for (chunk_index, raw_chunk) in raw_chunks.iter().enumerate() {
-                        let valid_byte = validity_byte(validity, chunk_index);
-                        values.extend($convert_masked(raw_chunk, valid_byte).map(wrap));
-                    }
-                    let processed = raw_bits.len() - remainder.len();
-                    for (offset, &bits) in remainder.iter().enumerate() {
-                        let index = processed + offset;
-                        #[allow(clippy::cast_possible_truncation)]
-                        values.push(wrap(if valid_bit(validity, index) {
-                            f64::from_bits(bits) as $scalar_ty
-                        } else {
-                            0
-                        }));
-                    }
-                }
-            }
-
+            // One call for the whole column: a dispatching backend selects its
+            // implementation once here rather than once per 8 rows.
+            $convert(raw_bits, valid.as_deref(), &mut values, wrap);
             OwnedColumnBuffer::$buffer { values, valid }
         }
     };
@@ -233,8 +202,7 @@ materialize_or_f64!(
     materialize_staged_i64_or_f64_column,
     min = I64_MIN_F64,
     max = I64_MAX_F64,
-    convert = chunk_to_i64,
-    convert_masked = chunk_to_i64_masked,
+    convert = convert_column_i64,
     scalar_ty = i64,
     wrap = |x| x,
     buffer = I64,
@@ -244,8 +212,7 @@ materialize_or_f64!(
     materialize_staged_date_or_f64_column,
     min = I32_MIN_F64,
     max = I32_MAX_F64,
-    convert = chunk_to_i32,
-    convert_masked = chunk_to_i32_masked,
+    convert = convert_column_i32,
     scalar_ty = i32,
     wrap = |x| SasDate {
         days_since_sas_epoch: x
@@ -257,8 +224,7 @@ materialize_or_f64!(
     materialize_staged_datetime_or_f64_column,
     min = I64_MIN_F64,
     max = I64_MAX_F64,
-    convert = chunk_to_i64,
-    convert_masked = chunk_to_i64_masked,
+    convert = convert_column_i64,
     scalar_ty = i64,
     wrap = |x| SasDateTime {
         seconds_since_sas_epoch: x
@@ -270,8 +236,7 @@ materialize_or_f64!(
     materialize_staged_time_or_f64_column,
     min = I32_MIN_F64,
     max = I32_MAX_F64,
-    convert = chunk_to_i32,
-    convert_masked = chunk_to_i32_masked,
+    convert = convert_column_i32,
     scalar_ty = i32,
     wrap = |x| SasTime {
         seconds_since_midnight: x

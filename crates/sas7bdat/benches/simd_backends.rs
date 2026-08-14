@@ -21,6 +21,9 @@ use std::hint::black_box;
 
 const ROWS: usize = 1 << 20;
 
+/// Row stride for the gather benchmark: this column plus two other 8-byte columns.
+const STRIDE: usize = 24;
+
 /// Which backend this binary was built with, for the report header.
 // Single token, no spaces: it is the first path segment of every criterion
 // benchmark id, and scripts/simd-matrix.sh splits on it.
@@ -111,19 +114,36 @@ fn numeric(c: &mut Criterion) {
     });
     g.finish();
 
-    // The masked converter, which is where `select` and the validity expansion live.
-    let (chunks, _) = data.as_chunks::<8>();
-    let mut g = c.benchmark_group(format!("{BACKEND}/chunk_to_i64_masked"));
-    g.throughput(Throughput::Bytes((chunks.len() * 64) as u64));
+    // The column-level converter, which is what the materializers call. Measured
+    // per column rather than per chunk on purpose: a dispatching backend selects
+    // once here, and going through the per-chunk kernel instead used to cost a
+    // cross-`#[target_feature]` call per 8 rows.
+    let valid: Vec<u64> = (0..data.len().div_ceil(64)).map(|i| !(i as u64)).collect();
+    let mut g = c.benchmark_group(format!("{BACKEND}/convert_column_i64"));
+    g.throughput(Throughput::Bytes((data.len() * 8) as u64));
     g.bench_function("kernel", |b| {
         b.iter(|| {
-            let mut acc = 0i64;
-            for (i, chunk) in black_box(chunks).iter().enumerate() {
-                #[allow(clippy::cast_possible_truncation)]
-                let valid_byte = (i as u8) | 0b1000_0001;
-                acc = acc.wrapping_add(simd::chunk_to_i64_masked(chunk, valid_byte)[0]);
-            }
-            black_box(acc)
+            let mut out: Vec<i64> = Vec::with_capacity(data.len());
+            simd::convert_column_i64(black_box(&data), Some(&valid), &mut out, |x| x);
+            black_box(out)
+        });
+    });
+    g.finish();
+
+    // The strided gather, the dominant numeric decode path. A stride of 24 is a row
+    // with two other 8-byte columns beside this one.
+    let stride = STRIDE;
+    let mut page = vec![0u8; data.len() * stride + 8];
+    for (i, &bits) in data.iter().enumerate() {
+        page[i * stride..i * stride + 8].copy_from_slice(&bits.to_le_bytes());
+    }
+    let mut g = c.benchmark_group(format!("{BACKEND}/gather_missing"));
+    g.throughput(Throughput::Bytes((data.len() * 8) as u64));
+    g.bench_function("kernel", |b| {
+        b.iter(|| {
+            let mut out: Vec<u64> = Vec::with_capacity(data.len());
+            let missing = simd::gather_missing(black_box(&page), 0, stride, data.len(), &mut out);
+            black_box((out, missing))
         });
     });
     g.finish();

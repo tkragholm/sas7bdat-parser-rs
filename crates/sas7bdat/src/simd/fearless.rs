@@ -12,6 +12,9 @@
 // `#[inline(always)]` on the per-chunk kernels: they are called from a hot loop
 // and a real call there would stop the caller vectorizing across chunks.
 #![allow(clippy::must_use_candidate)]
+// The per-chunk kernels stay compiled for the differential tests and the
+// `simd_backends` benchmark; production uses the column entry points instead.
+#![allow(dead_code)]
 #![allow(clippy::inline_always)]
 
 use super::{NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, scalar};
@@ -186,4 +189,63 @@ fn is_ascii_impl<S: Simd>(simd: S, slice: &[u8]) -> bool {
 
 pub fn is_ascii_wide(slice: &[u8]) -> bool {
     dispatch!(Level::new(), simd => is_ascii_impl(simd, slice))
+}
+
+// ---------------------------------------------------------------- column entry points
+//
+// The reason this module is shaped the way it is. `dispatch!` selects a
+// `#[target_feature]` implementation, and such a function cannot be inlined into a
+// caller that lacks the feature — so routing a column through the per-chunk kernels
+// above costs one real call per 8 rows. Measured on a Zen 3 EPYC at baseline,
+// `chunk_to_i64_masked` ran at 6.8 GiB/s that way against scalar's 55.9.
+//
+// Dispatching once and instantiating the whole loop inside the selected
+// implementation removes that entirely: the shared loops in the parent module are
+// `#[inline(always)]` and generic over the per-chunk kernel, so the closures below
+// fold into the target-feature body.
+
+/// See [`super::classify_missing_with`].
+pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
+    dispatch!(Level::new(), simd =>
+        super::classify_missing_with(raw_bits, |chunk| missing_bitmask_impl(simd, chunk)))
+}
+
+/// See [`super::convert_column_with`].
+pub fn convert_column_i64<T>(
+    raw_bits: &[u64],
+    valid: Option<&[u64]>,
+    out: &mut Vec<T>,
+    wrap: impl Fn(i64) -> T,
+) {
+    dispatch!(Level::new(), simd =>
+    super::convert_column_with(raw_bits, valid, out, wrap, |chunk, valid_byte| {
+        to_i64_masked_impl(simd, chunk, valid_byte)
+    }));
+}
+
+/// See [`super::convert_column_with`].
+pub fn convert_column_i32<T>(
+    raw_bits: &[u64],
+    valid: Option<&[u64]>,
+    out: &mut Vec<T>,
+    wrap: impl Fn(i32) -> T,
+) {
+    dispatch!(Level::new(), simd =>
+    super::convert_column_with(raw_bits, valid, out, wrap, |chunk, valid_byte| {
+        to_i32_masked_impl(simd, chunk, valid_byte)
+    }));
+}
+
+/// See [`super::gather_missing_with`].
+pub fn gather_missing(
+    page: &[u8],
+    base: usize,
+    stride: usize,
+    len: usize,
+    raw_bits: &mut Vec<u64>,
+) -> bool {
+    dispatch!(Level::new(), simd =>
+    super::gather_missing_with(page, base, stride, len, raw_bits, |lane| {
+        any_missing_impl(simd, lane)
+    }))
 }
