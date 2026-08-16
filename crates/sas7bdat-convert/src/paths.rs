@@ -231,8 +231,8 @@ mod tests {
             "recursive discovery should find every .sas7bdat at any depth, sorted"
         );
 
-        let shallow =
-            discover_inputs(&[root.to_path_buf()], RecursionMode::Never).expect("shallow discovery");
+        let shallow = discover_inputs(&[root.to_path_buf()], RecursionMode::Never)
+            .expect("shallow discovery");
         let shallow_names: Vec<_> = shallow
             .iter()
             .filter_map(|(_, p)| p.file_name().and_then(|n| n.to_str()))
