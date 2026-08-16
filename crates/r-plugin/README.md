@@ -1,7 +1,7 @@
 # fastsas
 
 Fast SAS7BDAT reader for R, backed by the Rust `sas7bdat` core in this
-workspace and exposed via [extendr](https://extendr.github.io/).
+workspace and exposed via [extendr](https://extendr.rs/).
 
 ```r
 library(fastsas)
