@@ -5,3 +5,4 @@
 ^src/rust/vendor$
 ^src/rust/\.cargo$
 ^cran-comments\.md$
+^src/Makevars$

@@ -1,0 +1,93 @@
+#!/bin/sh
+# Generates src/Makevars from src/Makevars.in.
+#
+# Two things have to be decided at configure time rather than written into a static
+# Makevars, and both are the reason this script exists.
+#
+# 1. Whether cargo and rustc are usable. Without this the failure is a wall of make
+#    output ending in "cargo: not found", which does not tell a user what to install.
+#
+# 2. Which link-time strip flags the platform's linker accepts. This package's
+#    installed size sits near the 5 MB that `R CMD check` NOTEs, and discarding local
+#    symbols is what keeps it under. The flags are not portable: `--gc-sections` is
+#    GNU ld and is rejected by Apple's ld64, which spells the same idea `-dead_strip`.
+#    Rather than guess from `uname`, each candidate is offered to the actual linker
+#    and kept only if it links cleanly.
+#
+# Nothing here is required for correctness — if every probe fails, the package builds
+# with no strip flags at all and is merely larger.
+
+set -u
+
+: "${R_HOME:=$(R RHOME)}"
+R="${R_HOME}/bin/R"
+
+# ---------------------------------------------------------------- cargo and rustc
+# Checked on PATH first, then in the default rustup location: a non-interactive
+# `R CMD INSTALL` often runs without the shell profile that puts ~/.cargo/bin on PATH.
+CARGO_HOME_BIN="${CARGO_HOME:-${HOME}/.cargo}/bin"
+if ! command -v cargo >/dev/null 2>&1 && [ -x "${CARGO_HOME_BIN}/cargo" ]; then
+  PATH="${CARGO_HOME_BIN}:${PATH}"
+  export PATH
+fi
+
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+  cat >&2 <<'MSG'
+--------------------------------------------------------------------------------
+Configuration failed: cargo and rustc are required to build this package.
+
+This package is implemented in Rust. Install a Rust toolchain from
+
+    https://www.rust-lang.org/tools/install
+
+or, on Debian/Ubuntu, `apt install cargo rustc`; on Fedora, `dnf install cargo`;
+on macOS with Homebrew, `brew install rust`.
+
+If Rust is already installed via rustup, ensure ~/.cargo/bin is on PATH, or set
+CARGO_HOME to its location.
+
+rustc 1.89.0 or newer is required.
+--------------------------------------------------------------------------------
+MSG
+  exit 1
+fi
+
+echo "* using $(rustc --version)"
+echo "* using $(cargo --version)"
+
+# ------------------------------------------------------------------ linker probes
+CC=$("${R}" CMD config CC)
+CFLAGS=$("${R}" CMD config CFLAGS)
+SHLIB_LDFLAGS=$("${R}" CMD config SHLIB_LDFLAGS)
+
+tmpdir=$(mktemp -d 2>/dev/null || echo ./conftest.$$)
+mkdir -p "$tmpdir"
+trap 'rm -rf "$tmpdir"' EXIT INT TERM
+
+cat > "$tmpdir/conftest.c" <<'EOF'
+int conftest_symbol(void) { return 0; }
+EOF
+
+if ! $CC $CFLAGS -fPIC -c "$tmpdir/conftest.c" -o "$tmpdir/conftest.o" >/dev/null 2>&1; then
+  echo "* could not compile a test object; skipping linker probes"
+  STRIP_FLAGS=""
+else
+  STRIP_FLAGS=""
+  # A linker that does not know a flag may only warn about it, so a clean exit is
+  # not enough — anything on stderr counts as a rejection.
+  for flag in -Wl,-x -Wl,-S -Wl,--gc-sections -Wl,-dead_strip; do
+    # shellcheck disable=SC2086
+    if $CC $SHLIB_LDFLAGS -o "$tmpdir/conftest.so" "$tmpdir/conftest.o" \
+         $STRIP_FLAGS "$flag" 2>"$tmpdir/err" && [ ! -s "$tmpdir/err" ]; then
+      STRIP_FLAGS="${STRIP_FLAGS} ${flag}"
+      echo "* linker accepts ${flag}"
+    else
+      echo "* linker rejects ${flag}"
+    fi
+  done
+fi
+
+# ------------------------------------------------------------------------ generate
+sed -e "s|@STRIP_FLAGS@|${STRIP_FLAGS}|" src/Makevars.in > src/Makevars
+echo "* wrote src/Makevars"
+exit 0

@@ -367,11 +367,12 @@ jobs:
             grep -q 'checking for GNU extensions in Makefiles \.\.\. OK' "$log" \
               || { echo "::error::$name: a vendored Makefile came back"; exit 1; }
 
+            # Reported, not asserted. `checking installed package size ... OK`
+            # above is the authoritative bound and already covers this; a second
+            # hard-coded byte ceiling would sit a few KB from the real figure on
+            # Linux and flip on unrelated changes.
             so=$(find "${name}.Rcheck/${name}/libs" -name '*.so')
-            bytes=$(stat -c%s "$so")
-            echo "$name: $so is $bytes bytes"
-            test "$bytes" -lt 5000000 \
-              || { echo "::error::$name: shared object exceeded 5 MB"; exit 1; }
+            echo "$name: $so is $(stat -c%s "$so") bytes"
             echo "::endgroup::"
           done
 

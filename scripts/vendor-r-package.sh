@@ -84,7 +84,23 @@ echo "  $(grep -c '^  Licence:' "$repo/crates/$pkg/inst/AUTHORS") crates listed"
 
 echo "==> packing"
 # `Cargo.lock` rides along so the offline build resolves exactly what was verified.
-tar cf - vendor Cargo.lock | xz -9e -T0 > "$crate_dir/vendor.tar.xz"
+#
+# COPYFILE_DISABLE is load-bearing on macOS. Every file here carries a
+# `com.apple.provenance` xattr, and macOS's bsdtar stores xattrs as AppleDouble
+# members — which its *own* `tar tf` then hides, because it merges them back on read.
+# So the archive looks clean on the machine that made it, and unpacks on Linux with a
+# `._`-prefixed junk file beside every real one: 4195 of them, last measured. That is
+# not cosmetic. `zstd-sys`'s build script compiles every `.c` it finds in the zstd
+# source tree, finds `._debug.c`, and dies on `stray '\5' in program`. A release cut
+# from a Mac would fail on every CRAN build machine and pass every local test.
+COPYFILE_DISABLE=1 tar cf - vendor Cargo.lock | xz -9e -T0 > "$crate_dir/vendor.tar.xz"
+
+# Verified by reading the raw member names out of the stream rather than with
+# `tar tf`, which is exactly the tool that cannot see them.
+if xz -dc "$crate_dir/vendor.tar.xz" | grep -qa '/\._'; then
+  echo "  ERROR: the archive contains AppleDouble members; it would break on Linux" >&2
+  exit 1
+fi
 
 size=$(wc -c < "$crate_dir/vendor.tar.xz")
 printf '==> wrote %s (%.2f MB)\n' "crates/$pkg/src/rust/vendor.tar.xz" "$(echo "$size" | awk '{print $1/1000000}')"

@@ -50,3 +50,29 @@ codegen-units = 1
 # a `staticlib` has no link step, so it is silently a no-op: measured 5,208,872 ->
 # 5,208,504 bytes, i.e. nothing. The strip has to happen where R does the linking —
 # see `-Wl,-x -Wl,-S` in `../Makevars`.
+
+# Sized rather than speed-optimised, because none of these runs per row and the
+# installed size sits near the 5 MB that `R CMD check` NOTEs. Worth 78 KB on x86-64
+# Linux, which is the platform where the margin is thinnest.
+#
+# `csv` is deliberately absent: CSV/TSV is one of the output formats this package
+# offers, so its writer is a throughput path whenever someone converts to it — and
+# measuring it in showed a 4 KB difference, so excluding it costs nothing anyway.
+# `chrono`, `arrow-select` and everything under `parquet`, `arrow-array`, `zstd-sys`
+# and `sas7bdat` stay at 3 for the same reason: they run per value or per batch.
+[profile.release.package.arrow-ipc]
+opt-level = "z"      # Arrow IPC schema, serialised once per file
+[profile.release.package.flatbuffers]
+opt-level = "z"      # ditto, it is arrow-ipc's encoding
+[profile.release.package.num-bigint]
+opt-level = "z"      # parquet decimals; SAS numerics are f64, so never reached
+[profile.release.package.num-complex]
+opt-level = "z"
+[profile.release.package.serde_json]
+opt-level = "z"      # label sets and column metadata, once per file
+[profile.release.package.glob]
+opt-level = "z"      # input discovery, once per run
+[profile.release.package.base64]
+opt-level = "z"
+[profile.release.package.twox-hash]
+opt-level = "z"      # parquet bloom filters, which this never writes

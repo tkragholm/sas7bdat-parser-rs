@@ -1,0 +1,3 @@
+#!/bin/sh
+# Removes what `configure` generated, so a source tree can be rebuilt from scratch.
+rm -f src/Makevars

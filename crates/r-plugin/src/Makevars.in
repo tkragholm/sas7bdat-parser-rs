@@ -1,28 +1,23 @@
 TARGET_DIR = $(CURDIR)/rust/target
 LIBDIR = $(TARGET_DIR)/release
-STATLIB = $(LIBDIR)/libfastsasconvert.a
-
-# `-Wl,-x -Wl,-S` discards local symbols and debug info at link time, which is where
-# this package's installed size actually comes down: 5.21 MB -> 4.15 MB, under the
-# 5 MB that `R CMD check` NOTEs. It has to happen here rather than in cargo's profile
-# — `-Cstrip` runs at link time and a `staticlib` never links, so setting `strip` in
-# `rust/Cargo.toml` is silently a no-op (measured: 368 bytes).
+STATLIB = $(LIBDIR)/libfastsas.a
+# This file is a template. `../configure` substitutes @STRIP_FLAGS@ with whichever
+# strip flags the platform's linker accepts, and writes `Makevars`. Edit this file,
+# never that one.
 #
-# Both flags are understood by ld64, GNU ld and lld. The exported entry points are
-# unaffected — they are global, and only locals are discarded; `R_init_fastsasconvert`
-# and the extendr metadata symbol were verified present afterwards. If a future
-# platform's linker rejects them, dropping the two flags costs size and nothing else.
-PKG_LIBS = -L$(LIBDIR) -lfastsasconvert -Wl,-x -Wl,-S
+# The strip has to happen here rather than in cargo's profile: `-Cstrip` runs at link
+# time and a `staticlib` never links, so setting `strip` in `rust/Cargo.toml` is
+# silently a no-op. Only local symbols are discarded, so `R_init_fastsas` and the
+# extendr metadata symbol are unaffected.
+PKG_LIBS = -L$(LIBDIR) -lfastsas @STRIP_FLAGS@
 
 CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
 
 # Cargo is invoked from `rust/` rather than from here so that it finds
-# `../.cargo/config.toml` by walking up. That file's `[patch.crates-io]` redirect is
-# what points `sas7bdat`/`sas7bdat-convert` at this checkout instead of at the
-# published crates; `.Rbuildignore` strips it, so a tarball resolves the real
-# published versions. Running cargo from `src/` would find it too, but `rust/` is
-# also where the vendored dependencies land (below), so everything cargo reads stays
-# in one place.
+# `../.cargo/config.toml` by walking up. That file's `[patch.crates-io]` redirect
+# points `sas7bdat` at this checkout; `.Rbuildignore` strips it, so a tarball
+# resolves the published crate instead. `rust/` is also where the vendored
+# dependencies land, so everything cargo reads stays in one place.
 #
 # There is deliberately no `rust-toolchain.toml` in this package. It used to pin an
 # exact nightly, because the core needed `#![feature(portable_simd)]`; since the core
@@ -33,15 +28,20 @@ CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --t
 
 $(SHLIB): $(STATLIB)
 
-# FORCE, not a bare rule. Without it make treats an existing archive as up to date
-# — it has no prerequisites, so nothing tells make the Rust sources changed — and
-# silently links the stale one. Cargo already does its own up-to-date check.
+# FORCE, not a bare rule. Without it make treats an existing `libfastsas.a` as up
+# to date — it has no prerequisites, so nothing tells make the Rust sources
+# changed — and silently links the stale archive. That is invisible for a staged
+# or tarball install (which always starts from an empty target dir) but wrong for
+# the in-place `R CMD INSTALL --no-staged-install crates/r-plugin` this repo uses
+# for local development: every edit under src/rust would be ignored until someone
+# ran `make clean`. Cargo already does its own up-to-date check, and a no-op
+# `cargo build` costs milliseconds, so deferring to it is both correct and cheap.
 #
 # The vendor step is what makes an offline build possible. CRAN builds with no
 # network, so a released tarball carries every dependency's source in
 # `rust/vendor.tar.xz` (see `scripts/vendor-r-package.sh`). When that file is present
-# it is unpacked and cargo is told to resolve from it and never reach the network;
-# when it is absent — any build from the repository — cargo resolves normally.
+# it is unpacked and cargo resolves from it without reaching the network; when it is
+# absent — any build from the repository — cargo resolves normally.
 $(STATLIB): FORCE
 	# `R CMD check` fails "checking Rust compilation" with "No rustc version
 	# reported prior to compilation" unless the toolchain identifies itself in the
