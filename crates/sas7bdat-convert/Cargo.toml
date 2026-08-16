@@ -1,6 +1,6 @@
 [package]
 name = "sas7bdat-convert"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Convert SAS7BDAT files to Parquet, CSV or TSV, one file or a directory tree"
 license = "MIT"
