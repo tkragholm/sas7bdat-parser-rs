@@ -45,6 +45,19 @@ $(SHLIB): $(STATLIB)
 # `rust/vendor.tar.xz` (see `scripts/vendor-r-package.sh`). When that file is present
 # it is unpacked and cargo is told to resolve from it and never reach the network;
 # when it is absent — any build from the repository — cargo resolves normally.
+#
+# The two restrictions below apply only on the vendored path, which is exactly the
+# path a released tarball takes, and they are both CRAN requirements:
+#
+#   CARGO_HOME  cargo writes its registry cache and git checkouts to ~/.cargo by
+#               default. CRAN forbids writing anywhere outside the build directory,
+#               so it is redirected under `target/`, which `clean` already removes.
+#   --jobs 2    cargo ignores make's `-j` and spawns one job per logical CPU, which
+#               oversubscribes a shared build machine. CRAN asks for at most two.
+#
+# Neither is applied when building from the repository, where there is no tarball:
+# a fresh CARGO_HOME would re-download the whole registry on every install, and
+# capping a developer's cores at two is a cost with nothing to buy.
 $(STATLIB): FORCE
 	# `R CMD check` fails "checking Rust compilation" with "No rustc version
 	# reported prior to compilation" unless the toolchain identifies itself in the
@@ -56,8 +69,13 @@ $(STATLIB): FORCE
 	  printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > rust/.cargo/config.toml; \
 	fi
 	cd rust && \
-	  if [ -d vendor ]; then OFFLINE=--offline; else OFFLINE=; fi && \
-	  cargo build $(CARGO_BUILD_ARGS) $$OFFLINE
+	  if [ -d vendor ]; then \
+	    CARGO_HOME="$(TARGET_DIR)/cargo-home" && export CARGO_HOME && \
+	    mkdir -p "$$CARGO_HOME" && \
+	    cargo build $(CARGO_BUILD_ARGS) --offline --jobs 2; \
+	  else \
+	    cargo build $(CARGO_BUILD_ARGS); \
+	  fi
 
 C_clean:
 	rm -Rf $(LIBDIR)/build
