@@ -1,25 +1,27 @@
 TARGET_DIR = $(CURDIR)/rust/target
 LIBDIR = $(TARGET_DIR)/release
 STATLIB = $(LIBDIR)/libfastsas.a
-PKG_LIBS = -L$(LIBDIR) -lfastsas
+# `-Wl,-x -Wl,-S` discard local symbols and debug info at link time. This is where
+# the installed size comes down, and it has to happen here: cargo applies `-Cstrip`
+# at link time and a `staticlib` never links, so setting `strip` in `rust/Cargo.toml`
+# is silently a no-op. Only local symbols are discarded, so `R_init_fastsas` and the
+# extendr metadata symbol are unaffected.
+PKG_LIBS = -L$(LIBDIR) -lfastsas -Wl,-x -Wl,-S
 
 CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
 
-# Cargo is invoked from `rust/`, not from here, and both tools that read the
-# surrounding directories are why.
+# Cargo is invoked from `rust/` rather than from here so that it finds
+# `../.cargo/config.toml` by walking up. That file's `[patch.crates-io]` redirect
+# points `sas7bdat` at this checkout; `.Rbuildignore` strips it, so a tarball
+# resolves the published crate instead. `rust/` is also where the vendored
+# dependencies land, so everything cargo reads stays in one place.
 #
-# rustup picks the toolchain from the *working directory* upward, and the core
-# needs nightly (`#![feature(portable_simd)]`). `rust/rust-toolchain.toml` supplies
-# it. Running cargo from this directory would look past that file and fall through
-# to whatever the host defaults to — inside the repo that happens to be the root
-# pin, so it appears to work, but a tarball has no root pin and the build fails
-# with E0554. The file sits in `rust/` rather than here because `R CMD check`
-# warns about unrecognised file names directly under `src/`.
-#
-# Cargo resolves `.cargo/config.toml` the same way, by walking up, so the
-# `[patch.crates-io]` redirect in `../.cargo/config.toml` is still found from
-# `rust/` — an ancestor. That patch is what points `sas7bdat` at this checkout;
-# `.Rbuildignore` strips it, so a tarball resolves the published crate instead.
+# There is deliberately no `rust-toolchain.toml` in this package. It used to pin an
+# exact nightly, because the core needed `#![feature(portable_simd)]`; since the core
+# moved to `fearless_simd` it builds on stable, and the pin became both unnecessary
+# and actively harmful — rustup would try to *download* the pinned toolchain, which a
+# CRAN build machine cannot do. With no pin, a tarball uses whatever rustc is
+# installed, and inside the repository the root pin still applies.
 
 $(SHLIB): $(STATLIB)
 
@@ -31,14 +33,31 @@ $(SHLIB): $(STATLIB)
 # for local development: every edit under src/rust would be ignored until someone
 # ran `make clean`. Cargo already does its own up-to-date check, and a no-op
 # `cargo build` costs milliseconds, so deferring to it is both correct and cheap.
+#
+# The vendor step is what makes an offline build possible. CRAN builds with no
+# network, so a released tarball carries every dependency's source in
+# `rust/vendor.tar.xz` (see `scripts/vendor-r-package.sh`). When that file is present
+# it is unpacked and cargo resolves from it without reaching the network; when it is
+# absent — any build from the repository — cargo resolves normally.
 $(STATLIB): FORCE
-	cd rust && cargo build $(CARGO_BUILD_ARGS)
+	# `R CMD check` fails "checking Rust compilation" with "No rustc version
+	# reported prior to compilation" unless the toolchain identifies itself in the
+	# install log. CRAN wants this on record for every Rust package.
+	rustc --version && cargo --version
+	if [ -f rust/vendor.tar.xz ]; then \
+	  tar -xf rust/vendor.tar.xz -C rust && \
+	  mkdir -p rust/.cargo && \
+	  printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > rust/.cargo/config.toml; \
+	fi
+	cd rust && \
+	  if [ -d vendor ]; then OFFLINE=--offline; else OFFLINE=; fi && \
+	  cargo build $(CARGO_BUILD_ARGS) $$OFFLINE
 
 C_clean:
 	rm -Rf $(LIBDIR)/build
 
 clean:
-	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target rust/vendor rust/.cargo
 
 FORCE:
 

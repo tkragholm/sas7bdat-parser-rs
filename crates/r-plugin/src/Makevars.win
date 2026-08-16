@@ -29,7 +29,10 @@ STATLIB = $(LIBDIR)/libfastsas.a
 
 # When rustc drives a link it passes these itself; here R drives it, so the system
 # libraries Rust's windows-gnu std depends on have to be named explicitly.
-PKG_LIBS = -L$(LIBDIR) -lfastsas -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll
+#
+# `-Wl,-x -Wl,-S` discard local symbols and debug info; see `Makevars` for why the
+# strip has to happen at link time rather than in cargo's profile.
+PKG_LIBS = -L$(LIBDIR) -lfastsas -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll -Wl,-x -Wl,-S
 
 CARGO_BUILD_ARGS = --lib --release --target=$(TARGET) --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
 
@@ -40,20 +43,37 @@ LIBGCC_MOCK = $(TARGET_DIR)/libgcc_mock
 
 $(SHLIB): $(STATLIB)
 
-# See `Makevars` for why cargo runs from `rust/` (rustup finds the nightly pin by
-# walking up from the working directory) and why this is forced rather than a bare
-# rule (make would otherwise link a stale archive on an in-place install).
+# See `Makevars` for why cargo runs from `rust/` (it walks up to `../.cargo`), why
+# this is forced rather than a bare rule (make would otherwise link a stale archive
+# on an in-place install), and what the vendor step below is for.
+#
+# `rustup target add` is best-effort and reaches the network when the target is not
+# already installed. That is fine here and on R-universe, but a CRAN build machine
+# has no network: it must already carry the windows-gnu target, and the `|| true`
+# only keeps a missing rustup from failing the build outright.
 $(STATLIB): FORCE
+	# `R CMD check` fails "checking Rust compilation" with "No rustc version
+	# reported prior to compilation" unless the toolchain identifies itself in the
+	# install log. CRAN wants this on record for every Rust package.
+	rustc --version && cargo --version
 	mkdir -p "$(LIBGCC_MOCK)"
 	touch "$(LIBGCC_MOCK)/libgcc_eh.a"
 	cd rust && rustup target add $(TARGET) || true
-	cd rust && export LIBRARY_PATH="$(LIBRARY_PATH);$(LIBGCC_MOCK)" && cargo build $(CARGO_BUILD_ARGS)
+	if [ -f rust/vendor.tar.xz ]; then \
+	  tar -xf rust/vendor.tar.xz -C rust && \
+	  mkdir -p rust/.cargo && \
+	  printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > rust/.cargo/config.toml; \
+	fi
+	cd rust && \
+	  export LIBRARY_PATH="$(LIBRARY_PATH);$(LIBGCC_MOCK)" && \
+	  if [ -d vendor ]; then OFFLINE=--offline; else OFFLINE=; fi && \
+	  cargo build $(CARGO_BUILD_ARGS) $$OFFLINE
 
 C_clean:
 	rm -Rf $(LIBDIR)/build
 
 clean:
-	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target rust/vendor rust/.cargo
 
 FORCE:
 

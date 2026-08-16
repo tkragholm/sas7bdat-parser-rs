@@ -29,4 +29,24 @@ sas7bdat-convert = { version = "0.2" }
 # R catches Rust panics and converts them to R errors, which requires unwinding.
 # Do NOT set panic = "abort" here.
 opt-level = 3
-lto = "thin"
+# Sized for CRAN, which NOTEs an installed package over 5 MB. Measured on the linked
+# `.so` (arm64), against `lto = "thin"` with the default 16 codegen units:
+#
+#     thin, cgu=16    8.15 MB      stripped 5.76 MB
+#     fat,  cgu=1     5.21 MB      stripped 4.15 MB
+#
+# Thin LTO leaves whole codegen units alive because the linker pulls in every symbol
+# of any archive member it needs one symbol from; `arrow-select` alone contributed
+# 887 KiB that way, most of it never called. Fat LTO with one codegen unit lets that
+# be internalised and dropped.
+#
+# Throughput is unaffected: eight alternating runs over a 540 MB five-file corpus put
+# the medians 0.8% apart (fat marginally ahead), inside the run-to-run noise. The
+# cost is build time, roughly 27 s -> 64 s.
+lto = "fat"
+codegen-units = 1
+
+# Note there is deliberately no `strip` here. Cargo applies `-Cstrip` at link time and
+# a `staticlib` has no link step, so it is silently a no-op: measured 5,208,872 ->
+# 5,208,504 bytes, i.e. nothing. The strip has to happen where R does the linking —
+# see `-Wl,-x -Wl,-S` in `../Makevars`.

@@ -2,3 +2,5 @@
 ^\.Rproj\.user$
 ^src/rust/target$
 ^src/\.cargo$
+^src/rust/vendor$
+^src/rust/\.cargo$

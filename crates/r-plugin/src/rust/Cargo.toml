@@ -29,4 +29,12 @@ sas7bdat = { version = "0.8", features = ["dictionary"] }
 # R catches Rust panics and converts them to R errors, which requires unwinding.
 # Do NOT set panic = "abort" here.
 opt-level = 3
-lto = "thin"
+# Sized for CRAN's 5 MB installed-size NOTE, and measured throughput-neutral. See the
+# sibling `fastsasconvert` manifest for the numbers behind both claims — this package
+# links a subset of the same crates, so the same reasoning applies.
+#
+# There is deliberately no `strip` here: cargo applies `-Cstrip` at link time and a
+# `staticlib` never links, so it is a silent no-op. Stripping happens via
+# `-Wl,-x -Wl,-S` in `../Makevars`, where R does the link.
+lto = "fat"
+codegen-units = 1
