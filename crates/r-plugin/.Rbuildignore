@@ -4,3 +4,4 @@
 ^src/\.cargo$
 ^src/rust/vendor$
 ^src/rust/\.cargo$
+^cran-comments\.md$

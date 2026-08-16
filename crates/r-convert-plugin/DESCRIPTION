@@ -9,11 +9,15 @@ Description: Converts .sas7bdat files to Parquet, CSV or TSV, one file or a
     files far larger than available memory can be converted. Companion to the
     'fastsas' package, which reads SAS files into R.
 License: MIT + file LICENSE
+URL: https://github.com/tkragholm/sas7bdat-parser-rs
+BugReports: https://github.com/tkragholm/sas7bdat-parser-rs/issues
 Encoding: UTF-8
+Copyright: See inst/AUTHORS for the copyright holders of the Rust
+    crates bundled in src/rust/vendor.tar.xz.
 Language: en-US
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.1
-SystemRequirements: Cargo (Rust's package manager), rustc
+SystemRequirements: Cargo (Rust's package manager), rustc >= 1.89
 Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3

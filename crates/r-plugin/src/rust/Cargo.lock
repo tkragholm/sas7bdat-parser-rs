@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "fastsas"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "extendr-api",
  "libR-sys",

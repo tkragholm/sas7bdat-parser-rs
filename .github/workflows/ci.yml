@@ -284,6 +284,106 @@ jobs:
           name: coverage-lcov
           path: lcov.info
 
+  # The CRAN path, which no other job walks. `test-lint` checks the R packages with
+  # `--no-install`, so it never compiles them; `r-windows` installs but does not
+  # check. Neither builds the vendored bundle a submission actually ships.
+  #
+  # Three things are only verified here:
+  #
+  #   * `-Wl,-x -Wl,-S` in PKG_LIBS behaves under GNU ld. It was measured on ld64,
+  #     and a linker that rejected either flag would fail the install outright.
+  #   * the offline vendored build works — the prune could drop a file some crate
+  #     reads, and `vendor-r-package.sh` only test-builds for the host it runs on.
+  #   * installed size stays under the 5 MB that `R CMD check` NOTEs. That is the
+  #     whole point of the fat-LTO profile, and it would regress silently.
+  #
+  # Not gated on `Status: OK`: both packages carry a known `_abort` WARNING from
+  # Rust's std that cannot be removed while extendr needs unwinding, and it is
+  # answered in each package's cran-comments.md. The assertions below are on the
+  # specific properties that must not regress, and the full log is uploaded.
+  r-cran:
+    name: R packages (CRAN checks, Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: crates/r-plugin
+          extra-packages: any::testthat
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: crates/r-convert-plugin
+          extra-packages: any::testthat
+
+      - name: Show toolchain
+        run: rustup show && cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/r-plugin/src/rust
+            crates/r-convert-plugin/src/rust
+
+      # Needs the network, exactly as a maintainer cutting a release does. Everything
+      # after it runs offline.
+      - name: Vendor dependencies
+        run: |
+          ./scripts/vendor-r-package.sh r-plugin
+          ./scripts/vendor-r-package.sh r-convert-plugin
+
+      # `inst/AUTHORS` is generated from the vendored tree and committed. If the
+      # dependency graph moved without it being regenerated, the shipped copyright
+      # listing describes the wrong set of crates.
+      - name: inst/AUTHORS is current
+        run: |
+          if ! git diff --quiet -- crates/*/inst/AUTHORS; then
+            echo "::error::inst/AUTHORS is stale — run scripts/vendor-r-package.sh and commit"
+            git diff -- crates/*/inst/AUTHORS
+            exit 1
+          fi
+
+      - name: Build and check
+        run: |
+          for pkg in r-plugin:fastsas r-convert-plugin:fastsasconvert; do
+            dir="crates/${pkg%%:*}"
+            name="${pkg##*:}"
+            echo "::group::$name"
+            R CMD build "$dir"
+            _R_CHECK_CRAN_INCOMING_=false R CMD check --as-cran --no-manual "${name}"_*.tar.gz || true
+            log="${name}.Rcheck/00check.log"
+            tail -n 40 "$log"
+
+            grep -q 'checking installed package size \.\.\. OK' "$log" \
+              || { echo "::error::$name: installed size is no longer OK"; exit 1; }
+            grep -q 'checking Rust compilation \.\.\. OK' "$log" \
+              || { echo "::error::$name: Rust compilation check regressed"; exit 1; }
+            grep -q 'checking for GNU extensions in Makefiles \.\.\. OK' "$log" \
+              || { echo "::error::$name: a vendored Makefile came back"; exit 1; }
+
+            so=$(find "${name}.Rcheck/${name}/libs" -name '*.so')
+            bytes=$(stat -c%s "$so")
+            echo "$name: $so is $bytes bytes"
+            test "$bytes" -lt 5000000 \
+              || { echo "::error::$name: shared object exceeded 5 MB"; exit 1; }
+            echo "::endgroup::"
+          done
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: r-cran-check-logs
+          path: |
+            *.Rcheck/00check.log
+            *.Rcheck/00install.out
+          if-no-files-found: warn
+
   fuzz-regressions:
     name: fuzz regressions
     runs-on: ubuntu-latest

@@ -72,6 +72,16 @@ if [ "$verify" -eq 1 ]; then
   rm -rf .cargo target
 fi
 
+echo "==> writing inst/AUTHORS"
+# Generated here rather than by hand so it can never describe a different dependency
+# set from the one being packed two lines below. CRAN requires the copyright holders
+# of bundled code to be identifiable from the package itself.
+pkg_name=$(awk '/^Package: /{print $2; exit}' "$repo/crates/$pkg/DESCRIPTION")
+mkdir -p "$repo/crates/$pkg/inst"
+python3 "$repo/scripts/vendor-authors.py" vendor "$pkg_name" \
+  > "$repo/crates/$pkg/inst/AUTHORS"
+echo "  $(grep -c '^  Licence:' "$repo/crates/$pkg/inst/AUTHORS") crates listed"
+
 echo "==> packing"
 # `Cargo.lock` rides along so the offline build resolves exactly what was verified.
 tar cf - vendor Cargo.lock | xz -9e -T0 > "$crate_dir/vendor.tar.xz"
