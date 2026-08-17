@@ -257,23 +257,32 @@ jobs:
         with:
           name: r-source-tarballs
 
-      - name: Install from the tarball and test
+      # Unpacked and installed from the directory rather than straight from the
+      # tarball. Both take the identical build path, but installing the tarball builds
+      # in a temporary directory that is then removed, leaving nothing to inspect —
+      # and inspecting it is the point.
+      - name: Install the tarball and test
         shell: bash
         run: |
           for name in fastsas fastsasconvert; do
             tarball=$(ls "${name}"_*.tar.gz)
-            echo "::group::install $tarball"
-            R CMD INSTALL "$tarball"
-            echo "::endgroup::"
+            tar xzf "$tarball"
 
-            # The vendored branch is the whole point of this job, so confirm it was
-            # taken rather than assume it: an install that silently fell through to
-            # the network path would pass every other assertion here.
-            echo "::group::verify the build was offline and vendored"
-            Rscript -e "cat(system.file(package = \"${name}\"), \"\n\")"
             test -f "${name}/src/rust/vendor.tar.xz" \
               || { echo "::error::$name tarball carries no vendor.tar.xz"; exit 1; }
+
+            echo "::group::install $name"
+            R CMD INSTALL "${name}"
             echo "::endgroup::"
+
+            # Positive evidence that Makevars.win took its vendored branch. Grepping
+            # the log for `--offline` would not do: make echoes the whole recipe, both
+            # branches included, before the shell picks one. `cargo-home` exists only
+            # if the vendored branch actually ran, and its presence simultaneously
+            # confirms CARGO_HOME was redirected out of the user's home.
+            test -d "${name}/src/rust/target/cargo-home" \
+              || { echo "::error::$name built without the vendored branch"; exit 1; }
+            echo "$name: vendored, offline, CARGO_HOME redirected"
 
             echo "::group::test $name"
             ( cd "${name}/tests" && Rscript testthat.R )
