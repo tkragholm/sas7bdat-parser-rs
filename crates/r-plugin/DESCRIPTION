@@ -4,9 +4,9 @@ Version: 0.1.0
 Authors@R:
     person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre"))
 Description: High-performance reader for SAS7BDAT files. The parsing core is
-    implemented in Rust (the sas7bdat crate) and exposed to R via extendr.
-    Returns a tibble with haven-compatible column types (Date, POSIXct, hms,
-    character, double).
+    implemented in Rust (the 'sas7bdat' crate) and exposed to R via 'extendr'.
+    Returns a 'tibble' with column types compatible with 'haven': Date,
+    POSIXct, hms, character and double.
 License: MIT + file LICENSE
 URL: https://github.com/tkragholm/sas7bdat-parser-rs
 BugReports: https://github.com/tkragholm/sas7bdat-parser-rs/issues
