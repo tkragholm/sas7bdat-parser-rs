@@ -214,6 +214,72 @@ jobs:
             echo "::endgroup::"
           done
 
+  # Installs the released tarballs on Windows, which is the one combination nothing
+  # else covers.
+  #
+  # `r-windows` installs from the repository, where there is no `vendor.tar.xz`, so it
+  # takes Makevars.win's *non*-vendored branch. `r-cran` takes the vendored branch but
+  # on Linux. CRAN builds Windows binaries from a source tarball, so the path that
+  # actually ships — mingw toolchain, vendored sources, `--offline`, redirected
+  # CARGO_HOME, `--jobs 2` — had never run anywhere until this job.
+  #
+  # That gap is not hypothetical. The vendored tarball is a release artefact and is
+  # not committed, so every defect specific to producing or consuming it is invisible
+  # to a normal push. One such defect already shipped and was caught only by building
+  # on a second platform: macOS bsdtar had been embedding AppleDouble members that its
+  # own `tar tf` hides, and they broke the zstd build on Linux.
+  r-windows-cran:
+    name: R packages (CRAN tarball, Windows)
+    runs-on: windows-latest
+    needs: r-cran
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: crates/r-plugin
+          extra-packages: any::testthat
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: crates/r-convert-plugin
+          extra-packages: any::testthat
+
+      - name: Show toolchain
+        run: rustup show && cargo --version
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: r-source-tarballs
+
+      - name: Install from the tarball and test
+        shell: bash
+        run: |
+          for name in fastsas fastsasconvert; do
+            tarball=$(ls "${name}"_*.tar.gz)
+            echo "::group::install $tarball"
+            R CMD INSTALL "$tarball"
+            echo "::endgroup::"
+
+            # The vendored branch is the whole point of this job, so confirm it was
+            # taken rather than assume it: an install that silently fell through to
+            # the network path would pass every other assertion here.
+            echo "::group::verify the build was offline and vendored"
+            Rscript -e "cat(system.file(package = \"${name}\"), \"\n\")"
+            test -f "${name}/src/rust/vendor.tar.xz" \
+              || { echo "::error::$name tarball carries no vendor.tar.xz"; exit 1; }
+            echo "::endgroup::"
+
+            echo "::group::test $name"
+            ( cd "${name}/tests" && Rscript testthat.R )
+            echo "::endgroup::"
+          done
+
   # The only job that needs a nightly toolchain, and the only one that compiles the
   # `nightly-simd` backend.
   #
@@ -384,6 +450,16 @@ jobs:
             *.Rcheck/00check.log
             *.Rcheck/00install.out
           if-no-files-found: warn
+
+      # Handed to `r-windows-cran` below. Publishing the *tarball* rather than having
+      # that job vendor for itself is deliberate: it is what CRAN does — build a
+      # source package once, install it everywhere — and it keeps the vendoring
+      # toolchain (python3, xz) off the Windows runner.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: r-source-tarballs
+          path: '*.tar.gz'
+          if-no-files-found: error
 
   fuzz-regressions:
     name: fuzz regressions
