@@ -882,6 +882,9 @@ fn sas7bdat_polars(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(feature = "arrow")]
 pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    // The wheel's version and the reader's are separate lines that look alike;
+    // this is the only way a caller can tell which core it actually has.
+    m.add("__core_version__", sas7bdat::VERSION)?;
     m.add("PLUGIN_CONTRACT_VERSION", PLUGIN_CONTRACT_VERSION)?;
     m.add_class::<SasDataset>()?;
     m.add_class::<SasIoSource>()?;

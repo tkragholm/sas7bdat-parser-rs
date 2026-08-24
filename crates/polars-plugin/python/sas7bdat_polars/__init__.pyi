@@ -6,6 +6,7 @@ from typing import Any
 import polars as pl
 
 __version__: str
+__core_version__: str
 PLUGIN_CONTRACT_VERSION: str
 
 def read_sas(

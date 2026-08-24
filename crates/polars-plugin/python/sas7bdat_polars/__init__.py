@@ -51,6 +51,14 @@ try:
 except AttributeError:  # pragma: no cover
     __version__ = "unknown"
 
+# The version of the Rust `sas7bdat` crate compiled into this wheel. It moves on its
+# own line: the 0.8.0 wheel carried core 0.6.0 and the 0.9.0 wheel carried core 0.8.0,
+# so `__version__` alone does not tell you which reader you have.
+try:
+    __core_version__ = _native.__core_version__
+except AttributeError:  # pragma: no cover
+    __core_version__ = "unknown"
+
 _SCAN_THREADS_ENV = "SAS7BDAT_SCAN_THREADS"
 
 

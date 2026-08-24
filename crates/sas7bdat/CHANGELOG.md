@@ -15,6 +15,19 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+### Added
+
+- **`sas7bdat::VERSION`**, the crate's own version. It exists because nothing
+  downstream could report which reader it embedded: `sas7bdat-polars` and
+  `sas7bdat-cli` ship on a separate version line, and the numbers collide
+  misleadingly -- the `sas7bdat-polars` 0.8.0 wheel carries this crate at 0.6.0, and
+  0.9.0 carries 0.8.0. Establishing that took walking twelve git tags. The wheel now
+  exposes it as `sas7bdat_polars.__core_version__` and the CLI prints it under
+  `--version` (`-V` stays short).
+
+  Being a new public item, this makes the next release a minor one under Cargo's
+  SemVer rules, so it is 0.9.0 rather than 0.8.2 whenever it goes out.
+
 ## [0.8.1] - 2026-08-24
 
 ### Fixed

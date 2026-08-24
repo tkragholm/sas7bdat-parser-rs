@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use sas7bdat::IoBackendPreference;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 const EXAMPLES: &str = "\
 Examples:
@@ -12,11 +13,27 @@ Examples:
 
 Run 'sas7bdat <command> --help' for the full options of a command.";
 
+/// `--version` output: this CLI's version, and the `sas7bdat` reader compiled into it.
+///
+/// The two are separate version lines whose numbers look alike -- the 0.8.0 wheel of
+/// this CLI carried the reader at 0.6.0 -- so which reader you have is not something
+/// the wheel version tells you. `clap::builder::Str` holds a `&'static str`, hence the
+/// static rather than a `format!` in the attribute.
+static LONG_VERSION: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "{} (sas7bdat core {})",
+        env!("CARGO_PKG_VERSION"),
+        sas7bdat::VERSION
+    )
+});
+
 /// The unified, user-facing CLI: `sas7bdat <command>`.
 #[derive(Parser)]
 #[command(
     name = "sas7bdat",
     version,
+    // `-V` stays short; `--version` also names the reader compiled in.
+    long_version = LONG_VERSION.as_str(),
     about = "Read, inspect, and convert SAS7BDAT files",
     propagate_version = true,
     after_help = EXAMPLES

@@ -38,6 +38,14 @@
 // backend and the scalar fallback both build on stable. See `src/simd`.
 #![cfg_attr(feature = "nightly-simd", feature(portable_simd))]
 
+/// The version of this crate, as declared in its manifest.
+///
+/// Exists so a consumer can report the core it actually embeds. That is not
+/// something a caller can otherwise work out: `sas7bdat-polars` and `sas7bdat-cli`
+/// ship on their own version line, and the numbers collide misleadingly -- the
+/// `sas7bdat-polars` 0.8.0 wheel carries this crate at 0.6.0.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod catalog;
 mod columnar;
 mod compression;
