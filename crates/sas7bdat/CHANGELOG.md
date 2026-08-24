@@ -15,6 +15,38 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-24
+
+### Fixed
+
+- **Mojibake repair no longer gives up on the uppercase half of Latin-1.** The
+  automatic fix for a file that declares a single-byte encoding but holds UTF-8
+  (`MojibakePolicy::Auto`, the default) undid the mangling by walking the *decoded*
+  string back to bytes with `u8::try_from`. That inverse is latin-1, but the damage
+  is done by windows-1252, and the two disagree on `0x80..=0x9F`: where latin-1 has
+  the C1 controls, windows-1252 has typographic characters above U+00FF. `u8::try_from`
+  failed on those and returned the whole string unrepaired.
+
+  That byte band is exactly the codepoints `U+00C0..=U+00DF`, so every uppercase
+  accented character was left mangled while its lowercase counterpart was repaired —
+  27 of 32, the five survivors (`ÁÍÏÐÝ`) owing it to windows-1252's undefined slots
+  mapping below U+0100. For Danish text that meant `Nørrebro` and `KÃ˜BENHAVN` came
+  out of the same column, which is worse than repairing neither: the inconsistency
+  hides the problem rather than showing it. The abort is per string, so one uppercase
+  letter anywhere in a cell forfeited the cell.
+
+  The repair no longer inverts anything. When the bytes are really UTF-8, the wanted
+  text is already there, so it is read as the UTF-8 it is and handed back as a borrow.
+  No character mapping means no band to fall into, and the repaired path now allocates
+  nothing where it previously allocated a `Vec<u8>` and a second `String` per cell.
+  On the lenient paths the probe runs before the decode, so a mojibake cell no longer
+  pays for a string it would discard; the strict paths keep the decode first so strict
+  validation still sees `had_errors`.
+
+  Values that were already decoding correctly are unaffected: bytes carrying no
+  two-byte UTF-8 lead are still left to the declared encoding's decoder, and genuine
+  windows-1252 text transcodes as before.
+
 ## [0.8.0] - 2026-08-14
 
 ### Changed
@@ -435,7 +467,9 @@ different implementation with a `dataset`/`parser`/`cell` module layout and a bu
      `v0.7.0` in particular was a wheel release in July, unrelated to 0.7.0 here.
      `sas7bdat-v0.5.0` was never created, so 0.5.0 has no release to link to. -->
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.7.0...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.8.1...HEAD
+[0.8.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.8.1
+[0.8.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.8.0
 [0.7.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.7.0
 [0.6.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.6.0
 [0.4.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.4.0
