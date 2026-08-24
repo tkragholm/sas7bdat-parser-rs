@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sas7bdat-cli"
-version = "0.9.1"
+version = "0.9.2"
 description = "Fast command-line converter and inspector for SAS7BDAT files"
 readme = "README.md"
 license = "MIT"
