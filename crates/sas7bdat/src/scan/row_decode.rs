@@ -6,8 +6,8 @@ use super::{
     classify_datetime_numeric_value, classify_time_numeric_value, classify_typed_numeric_value,
     compile_column_plan, compile_compiled_projection_column_plan,
     compile_owned_materialization_kind, compile_string_decode_kernel, decode_numeric_cell,
-    is_blank_after_trim_mode, maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes,
-    numeric_bits, resolve_encoding, trim_and_classify_for_mode,
+    is_blank_after_trim_mode, mojibake_repaired, numeric_bits, resolve_encoding,
+    trim_and_classify_for_mode,
 };
 use crate::internal::ProjectionPlan;
 use simdutf8::basic::from_utf8 as simd_from_utf8;
@@ -253,6 +253,11 @@ impl RowDecodePlan {
         }
     }
 
+    // The receiver went unused when the mojibake repair left this arm, but the three
+    // sibling decoders keep it and `push_direct_utf8_owned_family` dispatches all four
+    // through one `Fn(&RowDecodePlan, ..)` shape. Dropping it here would buy an ignored
+    // parameter at every call site.
+    #[allow(clippy::unused_self)]
     #[inline]
     pub(super) fn decode_utf8_lenient_trimmed_bytes_for_batch_direct<'row>(
         &self,
@@ -267,10 +272,10 @@ impl RowDecodePlan {
         if simd_from_utf8(slice).is_ok() {
             DecodedUtf8BatchValue::Borrowed(slice)
         } else {
-            *scratch = maybe_fix_mojibake(
-                String::from_utf8_lossy(slice).into_owned(),
-                self.string_options.mojibake_fix,
-            );
+            // No mojibake repair on this arm: `Utf8Lenient` is only compiled when the
+            // file's own encoding is UTF-8, so nothing decoded the bytes with a
+            // single-byte codec and there is nothing to undo.
+            *scratch = String::from_utf8_lossy(slice).into_owned();
             DecodedUtf8BatchValue::Scratch
         }
     }
@@ -297,15 +302,14 @@ impl RowDecodePlan {
                 Ok(DecodedUtf8BatchValue::Borrowed(value.as_bytes()))
             }
             std::borrow::Cow::Owned(value) => {
-                *scratch = if mojibake_fix_maybe_needed_for_encoded_bytes(
-                    self.encoding,
-                    slice,
-                    self.string_options.mojibake_fix,
-                ) {
-                    maybe_fix_mojibake(value, self.string_options.mojibake_fix)
-                } else {
-                    value
-                };
+                // Checked after the decode, not before it, so strict validation still
+                // sees `had_errors`. The repair itself borrows the row's own bytes.
+                if let Some(text) =
+                    mojibake_repaired(self.encoding, slice, self.string_options.mojibake_fix)
+                {
+                    return Ok(DecodedUtf8BatchValue::Borrowed(text.as_bytes()));
+                }
+                *scratch = value;
                 Ok(DecodedUtf8BatchValue::Scratch)
             }
         }
@@ -322,19 +326,19 @@ impl RowDecodePlan {
             return DecodedUtf8BatchValue::Borrowed(slice);
         }
 
+        // Lenient decoding ignores `had_errors`, so the repair can be tried before the
+        // decode runs: a mojibake cell never pays for the string it would have thrown away.
+        if let Some(text) =
+            mojibake_repaired(self.encoding, slice, self.string_options.mojibake_fix)
+        {
+            return DecodedUtf8BatchValue::Borrowed(text.as_bytes());
+        }
+
         let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
         match decoded {
             std::borrow::Cow::Borrowed(value) => DecodedUtf8BatchValue::Borrowed(value.as_bytes()),
             std::borrow::Cow::Owned(value) => {
-                *scratch = if mojibake_fix_maybe_needed_for_encoded_bytes(
-                    self.encoding,
-                    slice,
-                    self.string_options.mojibake_fix,
-                ) {
-                    maybe_fix_mojibake(value, self.string_options.mojibake_fix)
-                } else {
-                    value
-                };
+                *scratch = value;
                 DecodedUtf8BatchValue::Scratch
             }
         }
@@ -356,10 +360,7 @@ impl RowDecodePlan {
             ),
             StringDecodeKernel::Utf8Lenient => simd_from_utf8(slice).map_or_else(
                 |_| {
-                    owned_strings.push(maybe_fix_mojibake(
-                        String::from_utf8_lossy(slice).into_owned(),
-                        self.string_options.mojibake_fix,
-                    ));
+                    owned_strings.push(String::from_utf8_lossy(slice).into_owned());
                     Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
                 },
                 |value| Ok(PlannedCell::StrBorrowed(value)),
@@ -374,40 +375,39 @@ impl RowDecodePlan {
                 match decoded {
                     std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
                     std::borrow::Cow::Owned(value) => {
-                        Ok(self.push_owned_string(owned_strings, slice, value))
+                        // Probed after the decode, not before it, so strict validation
+                        // still sees `had_errors`.
+                        if let Some(text) = mojibake_repaired(
+                            self.encoding,
+                            slice,
+                            self.string_options.mojibake_fix,
+                        ) {
+                            return Ok(PlannedCell::StrBorrowed(text));
+                        }
+                        owned_strings.push(value);
+                        Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
                     }
                 }
             }
             StringDecodeKernel::EncodedLenient => {
+                // Nothing here consults `had_errors`, so the repair runs before the decode
+                // and a mojibake cell never pays for the string it would have discarded.
+                if let Some(text) =
+                    mojibake_repaired(self.encoding, slice, self.string_options.mojibake_fix)
+                {
+                    return Ok(PlannedCell::StrBorrowed(text));
+                }
                 let (decoded, _) = self.encoding.decode_without_bom_handling(slice);
                 match decoded {
                     std::borrow::Cow::Borrowed(value) => Ok(PlannedCell::StrBorrowed(value)),
                     std::borrow::Cow::Owned(value) => {
-                        Ok(self.push_owned_string(owned_strings, slice, value))
+                        // Already ruled out above; pushing directly avoids a second probe.
+                        owned_strings.push(value);
+                        Ok(PlannedCell::StrOwned(owned_strings.len() - 1))
                     }
                 }
             }
         }
-    }
-
-    fn push_owned_string<'row>(
-        &self,
-        owned_strings: &mut Vec<String>,
-        slice: &[u8],
-        value: String,
-    ) -> PlannedCell<'row> {
-        owned_strings.push(
-            if mojibake_fix_maybe_needed_for_encoded_bytes(
-                self.encoding,
-                slice,
-                self.string_options.mojibake_fix,
-            ) {
-                maybe_fix_mojibake(value, self.string_options.mojibake_fix)
-            } else {
-                value
-            },
-        );
-        PlannedCell::StrOwned(owned_strings.len() - 1)
     }
 
     pub(super) fn plan_numeric_value<'row>(
@@ -517,10 +517,9 @@ impl RowDecodePlan {
                         message: "invalid UTF-8 in fixed-width string cell".to_owned(),
                     }))
                 }
-                Err(_) => Ok(crate::row::OwnedCellValue::String(maybe_fix_mojibake(
+                Err(_) => Ok(crate::row::OwnedCellValue::String(
                     String::from_utf8_lossy(slice).into_owned(),
-                    self.string_options.mojibake_fix,
-                ))),
+                )),
             };
         }
 
@@ -536,18 +535,14 @@ impl RowDecodePlan {
             }));
         }
 
-        let value = decoded.into_owned();
-        Ok(crate::row::OwnedCellValue::String(
-            if mojibake_fix_maybe_needed_for_encoded_bytes(
-                self.encoding,
-                slice,
-                self.string_options.mojibake_fix,
-            ) {
-                maybe_fix_mojibake(value, self.string_options.mojibake_fix)
-            } else {
-                value
-            },
-        ))
+        Ok(crate::row::OwnedCellValue::String(match mojibake_repaired(
+            self.encoding,
+            slice,
+            self.string_options.mojibake_fix,
+        ) {
+            Some(text) => text.to_owned(),
+            None => decoded.into_owned(),
+        }))
     }
 
     pub(super) fn materialize_owned_date(&self, slice: &[u8]) -> crate::row::OwnedCellValue {

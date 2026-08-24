@@ -76,10 +76,7 @@ use row_decode::{
 };
 #[cfg(test)]
 use string::trim_and_classify_ascii;
-use string::{
-    is_blank_after_trim_mode, maybe_fix_mojibake, mojibake_fix_maybe_needed_for_encoded_bytes,
-    trim_and_classify_for_mode,
-};
+use string::{is_blank_after_trim_mode, mojibake_repaired, trim_and_classify_for_mode};
 
 #[derive(Debug, Clone, Default)]
 struct ScanStats {

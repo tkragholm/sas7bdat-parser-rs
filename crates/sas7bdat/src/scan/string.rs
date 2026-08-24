@@ -1,3 +1,5 @@
+use simdutf8::basic::from_utf8 as simd_from_utf8;
+
 use super::{Encoding, MojibakePolicy, TrimMode, TrimmedString};
 use crate::simd::scalar::{
     is_ascii_wide as is_ascii_word,
@@ -83,34 +85,37 @@ fn is_all_space_or_nul_12(slice: &[u8]) -> bool {
     (head == 0 && tail == 0) || (head == SPACES_HEAD_12 && tail == SPACES_TAIL_12)
 }
 
-pub(super) fn maybe_fix_mojibake(value: String, policy: MojibakePolicy) -> String {
-    if !matches!(policy, MojibakePolicy::Auto) || value.is_ascii() {
-        return value;
-    }
-    if !(value.contains("Ã") || value.contains("Â")) {
-        return value;
-    }
-    let mut bytes = Vec::with_capacity(value.len());
-    for ch in value.chars() {
-        let code = u32::from(ch);
-        let Ok(byte) = u8::try_from(code) else {
-            return value;
-        };
-        bytes.push(byte);
-    }
-    match std::str::from_utf8(&bytes) {
-        Ok(decoded) if decoded != value => decoded.to_owned(),
-        _ => value,
-    }
-}
-
+/// Recover the text of a cell whose bytes are really UTF-8 but were declared as
+/// `encoding`, or `None` when that is not what happened.
+///
+/// Decoding UTF-8 bytes with a single-byte encoding turns "Ø" into "Ã˜" and "ø" into
+/// "Ã¸": every two-byte sequence keeps its `0xC2`/`0xC3` lead byte, which is what the
+/// probe below looks for. The repair is then to read the bytes as the UTF-8 they
+/// already are, so it borrows the row and allocates nothing.
+///
+/// This used to run the other way, walking the *decoded* string back to bytes with
+/// `u8::try_from`. That silently gave up on every character whose second UTF-8 byte
+/// lands in `0x80..=0x9F`, because windows-1252 decodes that band to typographic
+/// characters above U+00FF — a small tilde for "Ø", an ellipsis for "Å", a dagger for
+/// "Æ". Those bytes are exactly the codepoints `U+00C0..=U+00DF`, so the entire
+/// uppercase half of Latin-1 was left mangled while the lowercase half was repaired,
+/// which is worse than repairing neither: one column came back holding both
+/// "Nørrebro" and "KÃ˜BENHAVN".
+///
+/// Some byte strings are legitimate single-byte text *and* valid UTF-8 — "Ã¸" in
+/// windows-1252 is "ø" in UTF-8 — and nothing in the bytes tells the two apart. This
+/// keeps the older code's answer and prefers the UTF-8 reading.
 #[inline]
-pub(super) fn mojibake_fix_maybe_needed_for_encoded_bytes(
+pub(super) fn mojibake_repaired<'a>(
     encoding: &'static Encoding,
-    slice: &[u8],
+    slice: &'a [u8],
     policy: MojibakePolicy,
-) -> bool {
-    matches!(policy, MojibakePolicy::Auto)
-        && encoding.is_single_byte()
-        && memchr::memchr2(0xC2, 0xC3, slice).is_some()
+) -> Option<&'a str> {
+    if !matches!(policy, MojibakePolicy::Auto) || !encoding.is_single_byte() {
+        return None;
+    }
+    // Cheap rejection first: without a two-byte lead there is no mojibake to undo,
+    // and this runs on every non-ASCII cell of an encoded scan.
+    memchr::memchr2(0xC2, 0xC3, slice)?;
+    simd_from_utf8(slice).ok()
 }

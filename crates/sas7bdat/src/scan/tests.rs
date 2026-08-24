@@ -2347,3 +2347,142 @@ mod row_window {
         assert!(!range.contains(&1));
     }
 }
+
+/// A two-column dataset whose text cell holds `text` verbatim, under a declared
+/// `encoding`. Used to build the shape a SAS export takes when its encoding label and
+/// its actual bytes disagree.
+fn make_text_dataset(text: &[u8], width: usize, encoding: Option<&str>) -> crate::dataset::Dataset {
+    let mut cell = vec![b' '; width];
+    cell[..text.len()].copy_from_slice(text);
+    let mut row = 1.5_f64.to_le_bytes().to_vec();
+    row.extend_from_slice(&cell);
+
+    let bytes = Arc::<[u8]>::from(make_page(0x0100, 1, 0, &[&row], 256));
+    MockDatasetBuilder::new(bytes)
+        .with_column("num", LogicalType::Float, 8, 0)
+        .with_column(
+            "txt",
+            LogicalType::String,
+            u32::try_from(width).expect("test column width"),
+            8,
+        )
+        .with_row_len(8 + width)
+        .with_encoding(encoding.map(str::to_owned))
+        .build()
+}
+
+fn scanned_text(ds: &crate::dataset::Dataset) -> (String, String) {
+    let rows = ScanBuilder::new(ds).collect_rows().expect("owned rows");
+    let row_path = match &rows[0].cells[1] {
+        OwnedCellValue::String(value) => value.clone(),
+        other => panic!("unexpected text cell: {other:?}"),
+    };
+    // `convert` materialises batches, not rows, so both paths have to agree.
+    let batches = ScanBuilder::new(ds).collect_batches().expect("batches");
+    let batch_path = match &batches[0].columns[1] {
+        OwnedColumnBuffer::Utf8 { data, .. } => {
+            String::from_utf8(data.clone()).expect("utf8 batch")
+        }
+        other => panic!("unexpected text column: {other:?}"),
+    };
+    (row_path, batch_path)
+}
+
+#[test]
+fn mojibake_repair_covers_the_whole_latin1_supplement() {
+    // The regression this pins: the previous implementation inverted the mangling by
+    // mapping each decoded char back through `u8::try_from`, which failed for every
+    // character whose second UTF-8 byte lands in windows-1252's 0x80..=0x9F band —
+    // the entire uppercase half of Latin-1, "Ø", "Å" and "Æ" among them.
+    let mut unrepaired = Vec::new();
+    for code in 0xA0..=0xFF_u32 {
+        let text = char::from_u32(code)
+            .expect("latin-1 supplement")
+            .to_string();
+        let repaired = super::mojibake_repaired(
+            encoding_rs::WINDOWS_1252,
+            text.as_bytes(),
+            crate::MojibakePolicy::Auto,
+        );
+        if repaired != Some(text.as_str()) {
+            unrepaired.push(text);
+        }
+    }
+    assert!(unrepaired.is_empty(), "left mangled: {unrepaired:?}");
+}
+
+#[test]
+fn mojibake_repair_declines_when_there_is_nothing_to_undo() {
+    let utf8_bytes = "Århus".as_bytes();
+    assert_eq!(
+        super::mojibake_repaired(
+            encoding_rs::WINDOWS_1252,
+            utf8_bytes,
+            crate::MojibakePolicy::Off
+        ),
+        None,
+        "the policy is the first gate"
+    );
+    assert_eq!(
+        super::mojibake_repaired(encoding_rs::UTF_8, utf8_bytes, crate::MojibakePolicy::Auto),
+        None,
+        "a UTF-8 file has no single-byte decode to undo"
+    );
+    assert_eq!(
+        super::mojibake_repaired(
+            encoding_rs::WINDOWS_1252,
+            b"K\xd8BENHAVN",
+            crate::MojibakePolicy::Auto
+        ),
+        None,
+        "genuine single-byte bytes carry no two-byte lead and are left to the decoder"
+    );
+    assert_eq!(
+        super::mojibake_repaired(
+            encoding_rs::WINDOWS_1252,
+            b"\xc3bc",
+            crate::MojibakePolicy::Auto
+        ),
+        None,
+        "a lead byte without its continuation is not UTF-8 and is not mojibake"
+    );
+}
+
+#[test]
+fn a_mis_declared_utf8_cell_decodes_to_its_real_text() {
+    for text in [
+        "KØBENHAVN",
+        "Århus",
+        "Æblevej",
+        "Nørrebro",
+        "Blåvand",
+        "Ødegaard",
+    ] {
+        let ds = make_text_dataset(text.as_bytes(), 16, Some("WINDOWS-1252"));
+        let (row_path, batch_path) = scanned_text(&ds);
+        assert_eq!(row_path, text, "row path");
+        assert_eq!(batch_path, text, "batch path");
+    }
+}
+
+#[test]
+fn genuine_windows_1252_bytes_still_transcode() {
+    // 0xD8 is "Ø" in windows-1252 and is not a UTF-8 lead byte, so the repair declines
+    // and the ordinary decode runs. Both spellings reach the same text by different routes.
+    let ds = make_text_dataset(b"K\xd8BENHAVN", 16, Some("WINDOWS-1252"));
+    let (row_path, batch_path) = scanned_text(&ds);
+    assert_eq!(row_path, "KØBENHAVN");
+    assert_eq!(batch_path, "KØBENHAVN");
+}
+
+#[test]
+fn a_utf8_file_with_invalid_bytes_still_falls_back_to_replacement_characters() {
+    // `Utf8Lenient` is only compiled when the file's own encoding is UTF-8, so it never
+    // had a single-byte decode to undo; the mojibake call on that arm could not fire,
+    // because `from_utf8_lossy` had already substituted U+FFFD. This pins that dropping
+    // the call changed nothing.
+    let ds = make_text_dataset(b"K\xd8BENHAVN", 16, None);
+    let (row_path, batch_path) = scanned_text(&ds);
+    assert_eq!(row_path, "K\u{FFFD}BENHAVN");
+    assert_eq!(batch_path, "K\u{FFFD}BENHAVN");
+}
