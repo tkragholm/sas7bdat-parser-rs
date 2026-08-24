@@ -105,6 +105,60 @@ test-core:
 
 test: test-core test-polars-plugin-rust test-polars-plugin
 
+# Bump one crate's version and everything coupled to it: the Python package's
+# pyproject.toml, the lockfiles that pin it -- two of which live outside the
+# workspace and only re-resolve when cargo runs from inside their `src/` -- and the
+# changelog heading. It does not touch the R bindings' version *requirements*, which
+# have to be sequenced against the publish by hand; see the script's docstring.
+#   just bump sas7bdat 0.8.1
+#   just bump polars-plugin 0.9.1
+bump crate version:
+    @python3 scripts/bump-version.py {{crate}} {{version}}
+
+# Everything `release-crate.yml` runs before it uploads, against this working tree.
+# The workflow re-runs all of it on the tagged commit, but by then the tag exists and
+# an irreversible crates.io upload is one green job away — so the useful place to
+# find out is here.
+#
+# Takes a package name, not a directory: `just release-preflight sas7bdat-convert`.
+release-preflight crate="sas7bdat":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "==> version couplings"
+    bash scripts/check-versions.sh
+    echo "==> rustfmt"
+    cargo fmt --all --check
+    echo "==> clippy (workspace)"
+    cargo clippy --workspace --all-targets -- -D warnings
+    echo "==> clippy (sas7bdat, no default features)"
+    cargo clippy -p sas7bdat --all-targets --no-default-features -- -D warnings
+    echo "==> tests (workspace)"
+    cargo test --workspace
+    # Outside the workspace, and `--locked` is the point: it fails on a stale binding
+    # lockfile instead of silently re-resolving one.
+    echo "==> clippy --locked (R bindings)"
+    for dir in crates/r-plugin/src crates/r-convert-plugin/src; do
+      ( cd "$dir" && cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings )
+    done
+    publishable=$(cargo metadata --format-version 1 --no-deps \
+      | python3 -c "import json,sys;n=sys.argv[1];p=next(p for p in json.load(sys.stdin)['packages'] if p['name']==n);print('no' if p.get('publish')==[] else 'yes')" "{{crate}}")
+    if [ "$publishable" = "yes" ]; then
+      echo "==> package and verify"
+      # `--dry-run` refuses a dirty tree, which is right for the real release and
+      # wrong for a preflight, whose whole point is to run before the commit.
+      if [ -n "$(git status --porcelain)" ]; then
+        echo "    tree is dirty, packaging with --allow-dirty (the release will not)"
+        cargo publish --dry-run --locked --allow-dirty -p "{{crate}}"
+      else
+        cargo publish --dry-run --locked -p "{{crate}}"
+      fi
+    else
+      echo "==> {{crate}} is publish = false; it ships as a wheel"
+      echo "    build it with: just build-polars-plugin / just build-cli-wheel"
+    fi
+    echo
+    echo "preflight clean for {{crate}}"
+
 install-polars-reader-baselines:
     @.venv/bin/python -m pip install polars-readstat polars_io
 

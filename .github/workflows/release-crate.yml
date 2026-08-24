@@ -149,7 +149,22 @@ jobs:
       - name: Show toolchain
         run: rustup show && cargo --version
 
+      # `save-if: false` is about the *post* step, not the cache. `cargo publish
+      # --dry-run` below leaves an unpacked copy of the crate at
+      # `target/package/<crate>-<version>/`, and rust-cache's cleanup walks the target
+      # tree treating each subdirectory as a build profile -- so it takes that copy's
+      # `tests/` for one and looks for `tests/target` and `tests/trybuild`, trybuild's
+      # output directories, which this crate has never had. Its guard around that is
+      # `try { cleanTargetDir(..) } catch {}` with no `await`, so the rejection escapes
+      # a synchronous catch and Actions renders it at failure level. The 0.8.1 release
+      # published cleanly and still carried four red annotations.
+      #
+      # Skipping the save returns before any of that cleanup runs. The restore still
+      # happens, and saving a tag build's target directory was worth little anyway:
+      # this job runs once per release.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
 
       # ci.yml already runs these on every push to main, but a tag can point at any
       # commit. Re-running them here means the artifact that reaches crates.io was
