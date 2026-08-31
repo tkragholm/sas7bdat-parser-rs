@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use criterion::{BenchmarkGroup, BenchmarkId, Throughput, measurement::Measurement};
-use sas7bdat::{Dataset, IoBackendPreference, OpenOptions};
+use sas7bdat::{Dataset, IoBackendPreference, OpenOptions, ScanEntry};
 use std::{
     fs,
     hint::black_box,
@@ -69,6 +69,98 @@ pub fn discover_target_roots(fixtures_root: &Path) -> Vec<PathBuf> {
 /// # Panics
 ///
 /// Panics if the benchmark scan itself fails.
+/// The decode pipeline `entry` will take on `dataset`, as a short label.
+///
+/// **Put this in the benchmark id.** This crate has several decode pipelines and they share
+/// almost every symbol below the point where they diverge, so a benchmark cannot otherwise
+/// tell you which one it measured. Two consequences, both of which have already happened
+/// here:
+///
+/// - A change to the tiled column-major fill measured as zero, because the benchmark ran
+///   `visit_batches`, which never reaches that fill.
+/// - Two of the entry points this suite exercises most, `visit_batches` and
+///   `collect_batches`, do not carry the same production consumers, so a number from one
+///   says nothing about the other.
+///
+/// Carrying the path in the id also makes a *change* of path loud: the benchmark is renamed,
+/// so Criterion reports it as new rather than silently comparing against a baseline measured
+/// on different code.
+///
+/// `configure` must apply **the same builder settings the benchmark itself uses**. The path
+/// depends on them: parallelism, the row window and the column-major flag all move it, so a
+/// label taken from a default builder can name a pipeline the benchmark never runs.
+#[must_use]
+pub fn path_label(
+    dataset: &Dataset,
+    entry: ScanEntry,
+    configure: impl for<'a> Fn(sas7bdat::ScanBuilder<'a>) -> sas7bdat::ScanBuilder<'a>,
+) -> String {
+    configure(dataset.scan())
+        .predict_path(entry)
+        .map_or_else(|_| "unknown".to_owned(), |path| path.as_str().to_owned())
+}
+
+/// A benchmark id carrying the pipeline it measures: `name[parallel-descriptors]/param`.
+///
+/// For a benchmark that scans with default settings. Use [`labelled_id_with`] when it does
+/// not, or the label will describe a different scan from the one being timed.
+#[must_use]
+pub fn labelled_id(
+    name: &str,
+    dataset: &Dataset,
+    entry: ScanEntry,
+    parameter: impl std::fmt::Display,
+) -> BenchmarkId {
+    labelled_id_with(name, dataset, entry, parameter, |scan| scan)
+}
+
+/// [`labelled_id`] for a benchmark that configures its scan.
+#[must_use]
+pub fn labelled_id_with(
+    name: &str,
+    dataset: &Dataset,
+    entry: ScanEntry,
+    parameter: impl std::fmt::Display,
+    configure: impl for<'a> Fn(sas7bdat::ScanBuilder<'a>) -> sas7bdat::ScanBuilder<'a>,
+) -> BenchmarkId {
+    BenchmarkId::new(
+        format!("{name}[{}]", path_label(dataset, entry, configure)),
+        parameter,
+    )
+}
+
+/// Rows through `visit_rows`, the entry `sas7bdat-convert` uses and therefore the one behind
+/// the CLI and the R package. It had no benchmark coverage at all until this was added.
+///
+/// # Panics
+///
+/// Panics if the scan fails, which in a benchmark is the right response: a fixture that
+/// cannot be read has nothing to measure.
+pub fn bench_visit_rows<M: Measurement>(
+    group: &mut BenchmarkGroup<'_, M>,
+    dataset: &Dataset,
+    id: BenchmarkId,
+) {
+    group.throughput(Throughput::Elements(dataset.metadata().row_count));
+    group.bench_function(id, |b| {
+        b.iter(|| {
+            let stats = dataset
+                .scan()
+                .visit_rows(|row| {
+                    black_box(row.len());
+                    Ok(std::ops::ControlFlow::Continue(()))
+                })
+                .expect("row scan");
+            black_box(stats.rows_emitted);
+        });
+    });
+}
+
+/// Raw row slices, no decode.
+///
+/// # Panics
+///
+/// Panics if the scan fails; a fixture that cannot be read has nothing to measure.
 pub fn bench_raw_rows<M: Measurement>(
     group: &mut BenchmarkGroup<'_, M>,
     dataset: &Dataset,

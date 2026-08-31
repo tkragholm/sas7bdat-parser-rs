@@ -1,11 +1,11 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use sas7bdat::{BatchHint, Dataset, IoBackendPreference, Projection};
+use sas7bdat::{BatchHint, Dataset, IoBackendPreference, Projection, ScanEntry};
 use std::hint::black_box;
 
 mod common;
-use common::{backend_label, bench_raw_rows, open_dataset};
+use common::{backend_label, bench_raw_rows, labelled_id, open_dataset};
 
 fn bench_string_batches(
     c: &mut Criterion,
@@ -105,7 +105,12 @@ fn bench_backend_raw_rows(
         bench_raw_rows(
             &mut group,
             &dataset,
-            BenchmarkId::new("raw_rows", backend_label(io_backend)),
+            labelled_id(
+                "raw_rows",
+                &dataset,
+                ScanEntry::RawRows,
+                backend_label(io_backend),
+            ),
         );
     }
 
@@ -140,7 +145,12 @@ fn bench_typed_rows(
             continue;
         };
         group.bench_function(
-            BenchmarkId::new("typed_rows", backend_label(io_backend)),
+            labelled_id(
+                "typed_rows",
+                &dataset,
+                ScanEntry::Rows,
+                backend_label(io_backend),
+            ),
             |b| {
                 b.iter(|| {
                     let rows = dataset

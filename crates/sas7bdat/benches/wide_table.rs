@@ -18,9 +18,13 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use sas7bdat::{
-    BatchHint, ColumnMajorDecode, Dataset, LogicalType, Parallelism, test_utils::MockDatasetBuilder,
+    BatchHint, ColumnMajorDecode, Dataset, LogicalType, Parallelism, ScanEntry,
+    test_utils::MockDatasetBuilder,
 };
 use std::{hint::black_box, ops::ControlFlow, sync::Arc};
+
+mod common;
+use common::{labelled_id, labelled_id_with};
 
 /// SAS numeric "missing" sentinel: exponent all ones, fraction == 1. Mirrors the crate's
 /// internal `SAS_NUMERIC_MISSING_SENTINEL`; injecting a few exercises the validity path.
@@ -104,42 +108,57 @@ fn bench_wide_table(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements(total_cells));
 
-        group.bench_function(BenchmarkId::new("row_major", num_cols), |b| {
-            b.iter(|| {
-                let batches = dataset
-                    .scan()
-                    .with_batch_hint(BatchHint::Rows(BATCH_ROWS))
-                    .collect_batches()
-                    .expect("row-major batches");
-                black_box(batches.len());
-            });
-        });
+        group.bench_function(
+            labelled_id("row_major", &dataset, ScanEntry::Batches, num_cols),
+            |b| {
+                b.iter(|| {
+                    let batches = dataset
+                        .scan()
+                        .with_batch_hint(BatchHint::Rows(BATCH_ROWS))
+                        .collect_batches()
+                        .expect("row-major batches");
+                    black_box(batches.len());
+                });
+            },
+        );
 
-        group.bench_function(BenchmarkId::new("column_major", num_cols), |b| {
-            b.iter(|| {
-                let batches = dataset
-                    .scan()
-                    .with_batch_hint(BatchHint::Rows(BATCH_ROWS))
-                    .collect_batches_columnar()
-                    .expect("column-major batches");
-                black_box(batches.len());
-            });
-        });
+        group.bench_function(
+            labelled_id("column_major", &dataset, ScanEntry::Batches, num_cols),
+            |b| {
+                b.iter(|| {
+                    let batches = dataset
+                        .scan()
+                        .with_batch_hint(BatchHint::Rows(BATCH_ROWS))
+                        .collect_batches_columnar()
+                        .expect("column-major batches");
+                    black_box(batches.len());
+                });
+            },
+        );
 
         // Parallel column-major collect (work-stealing chunk pool). Confirms the parallel path
         // scales over serial column-major and isn't regressed by the finer chunking.
-        group.bench_function(BenchmarkId::new("column_major_threads_4", num_cols), |b| {
-            b.iter(|| {
-                let batches = dataset
-                    .scan()
-                    .with_batch_hint(BatchHint::Rows(BATCH_ROWS))
-                    .with_parallelism(Parallelism::Threads(4))
-                    .with_column_major_decode(ColumnMajorDecode::On)
-                    .collect_batches()
-                    .expect("parallel column-major batches");
-                black_box(batches.len());
-            });
-        });
+        group.bench_function(
+            labelled_id_with(
+                "column_major_threads_4",
+                &dataset,
+                ScanEntry::Batches,
+                num_cols,
+                |scan| scan.with_parallelism(Parallelism::Threads(4)),
+            ),
+            |b| {
+                b.iter(|| {
+                    let batches = dataset
+                        .scan()
+                        .with_batch_hint(BatchHint::Rows(BATCH_ROWS))
+                        .with_parallelism(Parallelism::Threads(4))
+                        .with_column_major_decode(ColumnMajorDecode::On)
+                        .collect_batches()
+                        .expect("parallel column-major batches");
+                    black_box(batches.len());
+                });
+            },
+        );
 
         // Streaming path (visit_owned_batches) — the one the Polars plugin drives — with the
         // public flag off vs on, to confirm the speedup carries past collect_batches.

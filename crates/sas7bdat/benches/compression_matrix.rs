@@ -1,9 +1,9 @@
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use sas7bdat::{BatchHint, Dataset, discover_fixture_paths};
+use criterion::{Criterion, criterion_group, criterion_main};
+use sas7bdat::{BatchHint, Dataset, ScanEntry, discover_fixture_paths};
 use std::{fs, hint::black_box, time::Duration};
 
 mod common;
-use common::{bench_raw_rows, discover_target_roots, fixture_path, load_dataset};
+use common::{bench_raw_rows, discover_target_roots, fixture_path, labelled_id, load_dataset};
 
 const TARGET_MIN_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 const TYPED_BATCHES_MEASUREMENT_SECONDS: u64 = 30;
@@ -59,12 +59,21 @@ const NON_TARGET_FIXTURES: &[(&str, &str)] = &[
 fn bench_case(c: &mut Criterion, name: &str, dataset: &Dataset) {
     let mut group = c.benchmark_group(name);
 
-    bench_raw_rows(&mut group, dataset, BenchmarkId::new("raw_rows", "all"));
+    bench_raw_rows(
+        &mut group,
+        dataset,
+        labelled_id("raw_rows", dataset, ScanEntry::RawRows, "all"),
+    );
 
     group.measurement_time(Duration::from_secs(TYPED_BATCHES_MEASUREMENT_SECONDS));
     for &batch_rows in DEFAULT_TYPED_BATCH_ROWS {
         group.bench_with_input(
-            BenchmarkId::new("typed_batches", batch_rows),
+            labelled_id(
+                "typed_batches",
+                dataset,
+                ScanEntry::BorrowedBatches,
+                batch_rows,
+            ),
             &batch_rows,
             |b, &rows| {
                 b.iter(|| {
