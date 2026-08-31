@@ -79,7 +79,7 @@ bytes 1.12.1
   Licence: MIT
   Authors: Carl Lerche <me@carllerche.com>; Sean McArthur <sean@seanmonstar.com>
 
-cc 1.4.3
+cc 1.4.4
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
@@ -127,7 +127,7 @@ csv-core 0.1.13
   Licence: Unlicense OR MIT
   Authors: Andrew Gallant <jamslam@gmail.com>
 
-either 1.17.0
+either 1.18.0
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
@@ -223,7 +223,7 @@ libR-sys 0.7.1
   Licence: MIT
   Authors: andy-thomason <andy@andythomason.com>; Thomas Down; Mossa Merhi Reimert <mossa@sund.ku.dk>; Claus O. Wilke <wilke@austin.utexas.edu>; Ilia A. Kosenkov <ilia.kosenkov@outlook.com>; Hiroaki Yutani
 
-log 0.4.33
+log 0.4.34
   Licence: MIT OR Apache-2.0
   Authors: The Rust Project Developers
 
@@ -311,11 +311,11 @@ ryu 1.0.23
   Licence: Apache-2.0 OR BSL-1.0
   Authors: David Tolnay <dtolnay@gmail.com>
 
-sas7bdat 0.8.0
+sas7bdat 0.9.0
   Licence: MIT
   Authors: (no authors field; see crate sources)
 
-sas7bdat-convert 0.2.1
+sas7bdat-convert 0.3.0
   Licence: MIT
   Authors: (no authors field; see crate sources)
 
@@ -359,7 +359,7 @@ snap 1.1.2
   Licence: BSD-3-Clause
   Authors: Andrew Gallant <jamslam@gmail.com>
 
-syn 3.0.3
+syn 3.0.4
   Licence: MIT OR Apache-2.0
   Authors: David Tolnay <dtolnay@gmail.com>
 
@@ -371,7 +371,7 @@ tiny-keccak 2.0.2
   Licence: CC0-1.0
   Authors: debris <marek.kotewicz@gmail.com>
 
-twox-hash 2.1.3
+twox-hash 2.1.4
   Licence: MIT
   Authors: Jake Goulding <jake.goulding@gmail.com>
 

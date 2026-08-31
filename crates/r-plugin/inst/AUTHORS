@@ -51,7 +51,7 @@ crossbeam-utils 0.8.22
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
-either 1.17.0
+either 1.18.0
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
@@ -135,7 +135,7 @@ rayon-core 1.13.0
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
-sas7bdat 0.8.0
+sas7bdat 0.9.0
   Licence: MIT
   Authors: (no authors field; see crate sources)
 
@@ -155,7 +155,7 @@ simdutf8 0.1.5
   Licence: MIT OR Apache-2.0
   Authors: Hans Kratz <hans@appfour.com>
 
-syn 3.0.3
+syn 3.0.4
   Licence: MIT OR Apache-2.0
   Authors: David Tolnay <dtolnay@gmail.com>
 
