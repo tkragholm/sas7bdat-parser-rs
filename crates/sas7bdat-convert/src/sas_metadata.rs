@@ -102,6 +102,8 @@ mod tests {
             offset: 0,
             label: label.map(str::to_owned),
             format: format.map(str::to_owned),
+            format_width: 0,
+            format_digits: 0,
         }
     }
 

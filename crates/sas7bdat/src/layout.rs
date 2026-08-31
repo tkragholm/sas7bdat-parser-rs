@@ -200,6 +200,11 @@ struct ColumnBuilder {
     name_ref: TextRef,
     label_ref: TextRef,
     format_ref: TextRef,
+    /// The `w` of a SAS `NAMEw.d` format, and its `d`. Stored beside the name rather than
+    /// in it: SAS keeps three fields, and a format is only fully identified by all three.
+    /// Zero means absent, which is why `DATE` and `DATE9.` are different formats.
+    format_width: u16,
+    format_digits: u16,
     offset: u32,
     width: u32,
     type_code: u8,
@@ -212,6 +217,8 @@ impl Default for ColumnBuilder {
             name_ref: TextRef::EMPTY,
             label_ref: TextRef::EMPTY,
             format_ref: TextRef::EMPTY,
+            format_width: 0,
+            format_digits: 0,
             offset: 0,
             width: 0,
             type_code: 0,
@@ -428,6 +435,8 @@ pub fn parse_layout<R: Read + Seek>(
                 offset: column.offset,
                 label,
                 format,
+                format_width: column.format_width,
+                format_digits: column.format_digits,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -580,25 +589,30 @@ fn parse_column_format_subheader(
 ) -> Result<()> {
     let index = state.formats_seen;
     let column = state.ensure_column(index)?;
-    if header.uses_u64_pointers {
-        column.format_ref = parse_text_ref(
-            header.endianness,
-            get_range(bytes, 46, 52, "column format ref")?,
-        );
-        column.label_ref = parse_text_ref(
-            header.endianness,
-            get_range(bytes, 52, 58, "column label ref")?,
-        );
+    // Width and digits sit ahead of the two text refs, at 24/26 on a 64-bit file and 12/14
+    // on a 32-bit one. Reading only the name loses the difference between `DATE` and
+    // `DATE9.`, and drops the sub-second precision of a `DATETIME23.3` entirely.
+    let (width_at, format_at, label_at) = if header.uses_u64_pointers {
+        (24, 46, 52)
     } else {
-        column.format_ref = parse_text_ref(
-            header.endianness,
-            get_range(bytes, 34, 40, "column format ref")?,
-        );
-        column.label_ref = parse_text_ref(
-            header.endianness,
-            get_range(bytes, 40, 46, "column label ref")?,
-        );
-    }
+        (12, 34, 40)
+    };
+    column.format_width = read_u16(
+        header.endianness,
+        get_range(bytes, width_at, width_at + 2, "column format width")?,
+    );
+    column.format_digits = read_u16(
+        header.endianness,
+        get_range(bytes, width_at + 2, width_at + 4, "column format digits")?,
+    );
+    column.format_ref = parse_text_ref(
+        header.endianness,
+        get_range(bytes, format_at, format_at + 6, "column format ref")?,
+    );
+    column.label_ref = parse_text_ref(
+        header.endianness,
+        get_range(bytes, label_at, label_at + 6, "column label ref")?,
+    );
     state.formats_seen += 1;
     Ok(())
 }

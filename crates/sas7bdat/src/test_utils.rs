@@ -63,6 +63,8 @@ impl MockDatasetBuilder {
             offset,
             label: None,
             format: None,
+            format_width: 0,
+            format_digits: 0,
         });
         self
     }

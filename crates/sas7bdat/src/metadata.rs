@@ -154,11 +154,46 @@ pub struct ColumnMeta {
     pub offset: u32,
     /// An optional descriptive label (e.g., "Patient Gender").
     pub label: Option<String>,
-    /// The SAS format assigned to this column (e.g., "DATE9.").
+    /// The *name* of the SAS format assigned to this column, e.g. `DATE` or `DATETIME`.
+    ///
+    /// Bare, without the width and decimal count. SAS keeps those in two separate fields,
+    /// exposed as [`Self::format_width`] and [`Self::format_digits`]; use
+    /// [`Self::format_spec`] to get them assembled the way SAS writes a format.
     pub format: Option<String>,
+    /// The `w` of a `NAMEw.d` format. Zero when the format carries no width, which is a real
+    /// distinction: `DATE` and `DATE9.` are different formats.
+    pub format_width: u16,
+    /// The `d` of a `NAMEw.d` format. Zero when absent. This is where the sub-second
+    /// precision of a `DATETIME23.3` lives.
+    pub format_digits: u16,
 }
 
 impl ColumnMeta {
+    /// The full SAS format, name and width and decimals together, as `DATETIME23.3`.
+    ///
+    /// `None` only when the column has no format at all. A format with a width but **no
+    /// name** is not nothing: SAS writes the plain numeric `w.d` format that way, so a
+    /// column stored with width 4 and 2 decimals and no name has the format `4.2`. Reading
+    /// the name alone reports such a column as unformatted.
+    ///
+    /// The width is omitted when it is zero, and the decimals are omitted unless a width
+    /// was written, which is the order SAS itself uses: there is no `DATE.3`.
+    #[must_use]
+    pub fn format_spec(&self) -> Option<String> {
+        let name = self.format.as_deref().unwrap_or_default().trim();
+        if name.is_empty() && self.format_width == 0 {
+            return None;
+        }
+        if self.format_width == 0 {
+            return Some(name.to_owned());
+        }
+        Some(if self.format_digits == 0 {
+            format!("{name}{}", self.format_width)
+        } else {
+            format!("{name}{}.{}", self.format_width, self.format_digits)
+        })
+    }
+
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name

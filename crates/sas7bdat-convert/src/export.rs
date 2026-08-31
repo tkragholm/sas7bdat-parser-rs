@@ -774,6 +774,8 @@ mod tests {
             offset: 0,
             label: None,
             format: Some(format.to_owned()),
+            format_width: 0,
+            format_digits: 0,
         }
     }
 
