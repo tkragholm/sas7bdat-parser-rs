@@ -89,13 +89,21 @@ impl CatalogueIndex {
         read_page(reader, header, SAS_CATALOG_FIRST_INDEX_PAGE, &mut page)?;
         augment_index(&page[cfg.index_start_offset..], header, &cfg, &mut pointers);
 
+        // Later index pages carry a page header and then the records. That header is 16 bytes
+        // wide on a 32-bit catalog and 32 on a 64-bit one, and hardcoding 16 for both means a
+        // 64-bit catalog large enough to spill past its first index page silently loses every
+        // format the later records point at. No error, just missing value labels.
+        //
+        // The same bug is open upstream as WizardMac/ReadStat#370, where it was found; our
+        // copy of it came from porting the same hardcoded 16.
+        let start = cfg.later_page_offset;
         for index in SAS_CATALOG_USELESS_PAGES..header.page_count {
             read_page(reader, header, index, &mut page)?;
-            if page.len() < 20 {
+            if page.len() < start + 4 {
                 continue;
             }
-            if &page[16..20] == b"XLSR" {
-                augment_index(&page[16..], header, &cfg, &mut pointers);
+            if &page[start..start + 4] == b"XLSR" {
+                augment_index(&page[start..], header, &cfg, &mut pointers);
             }
         }
 
@@ -130,6 +138,10 @@ struct IndexLayout {
     entry_stride: usize,
     index_start_offset: usize,
     object_marker_offset: usize,
+    /// Where `XLSR` records start on an index page *after* the first. The first index page
+    /// puts them at [`Self::index_start_offset`]; later pages carry only a page header, whose
+    /// size is what this is.
+    later_page_offset: usize,
 }
 
 impl IndexLayout {
@@ -138,15 +150,18 @@ impl IndexLayout {
         let mut entry_stride = 212 + pad;
         let mut index_start_offset = 856 + 2 * pad;
         let mut object_marker_offset = 50 + pad;
+        let mut later_page_offset = 16;
         if header.uses_u64_pointers {
             entry_stride += 72;
             index_start_offset += 144;
             object_marker_offset += 24;
+            later_page_offset += 16;
         }
         Self {
             entry_stride,
             index_start_offset,
             object_marker_offset,
+            later_page_offset,
         }
     }
 }
@@ -709,6 +724,37 @@ fn read_u64_be(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn later_index_pages_start_after_the_page_header() {
+        use crate::types::PageSize;
+        let base = HeaderInfo {
+            endianness: crate::metadata::Endianness::Little,
+            uses_u64_pointers: false,
+            page_size: PageSize(4096),
+            page_count: 8,
+            page_header_size: 24,
+            subheader_pointer_size: 12,
+            subheader_signature_size: 4,
+            data_offset: 0,
+            header_size: 0,
+            release: String::new(),
+            is_catalog: true,
+            pad_alignment: 0,
+        };
+        assert_eq!(IndexLayout::new(&base).later_page_offset, 16, "32-bit");
+
+        let wide = HeaderInfo {
+            uses_u64_pointers: true,
+            ..base
+        };
+        assert_eq!(
+            IndexLayout::new(&wide).later_page_offset,
+            32,
+            "64-bit: hardcoding 16 here silently loses every format referenced from an \
+             index record past the first page"
+        );
+    }
 
     #[test]
     fn normalize_format_name_uppercases_and_trims() {
