@@ -752,14 +752,25 @@ where
                     acc.reset_after_flush();
                 }
                 let span = (target_rows - acc.row_count()).min(row_count - row_off);
-                acc.push_contiguous_span_all_staged_numeric(
-                    page_row_base,
-                    page,
-                    row_off,
-                    span,
-                    data_start,
-                    ctx.row_len,
-                )?;
+                if acc.plan_is_all_columns_staged_numeric() {
+                    acc.push_contiguous_span_all_staged_numeric(
+                        page_row_base,
+                        page,
+                        row_off,
+                        span,
+                        data_start,
+                        ctx.row_len,
+                    )?;
+                } else {
+                    acc.push_contiguous_span_mixed(
+                        page_row_base,
+                        page,
+                        row_off,
+                        span,
+                        data_start,
+                        ctx.row_len,
+                    )?;
+                }
                 row_off += span;
             }
         } else {
@@ -878,7 +889,7 @@ pub(super) fn stream_batches_for_descriptor_chunk(
         raw_plan: context.raw_plan,
         window,
         row_len: context.row_len,
-        columnar: context.columnar && acc.plan_is_all_columns_staged_numeric(),
+        columnar: context.columnar && acc.plan_can_fill_span_column_major(),
     };
 
     // The shared routine flushes full batches through `consume`, which streams each to the
@@ -1079,7 +1090,7 @@ impl ScanBuilder<'_> {
             return Ok(stats);
         }
         if column_major
-            && plan.batch.all_columns_staged_numeric()
+            && plan.batch.can_fill_span_column_major()
             && let Some(file_bytes) = column_major_file_bytes(self, true)
         {
             let mut stats = self.stream_batches_columnar_serial(&plan, file_bytes, f)?;

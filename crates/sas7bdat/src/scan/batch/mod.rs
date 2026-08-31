@@ -162,6 +162,12 @@ impl BatchAccumulator {
             .has(BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC)
     }
 
+    /// Whether a contiguous span can be filled column-major. See
+    /// [`super::families::BatchDecodePlan::can_fill_span_column_major`].
+    pub(super) const fn plan_can_fill_span_column_major(&self) -> bool {
+        self.plan.flags.has(BatchPlanFlags::HAS_STAGED_NUMERIC)
+    }
+
     /// Column-major decode of a fixed-stride, contiguous row span into the staged-numeric
     /// builders. Valid only when the plan is all-staged-numeric (every column is a numeric
     /// tile). Fills `span_len` rows starting at page row `span_first_row`.
@@ -184,6 +190,111 @@ impl BatchAccumulator {
         row_len: usize,
     ) -> Result<()> {
         debug_assert!(self.plan_is_all_columns_staged_numeric());
+        if span_len == 0 {
+            return Ok(());
+        }
+        self.fill_staged_numeric_span(
+            page_row_base,
+            page,
+            span_first_row,
+            span_len,
+            data_start,
+            row_len,
+        )?;
+        self.row_count += span_len;
+        Ok(())
+    }
+
+    /// Column-major fill of a span for a plan whose columns are *not* all staged numeric:
+    /// the numerics take the same tiled fill, then the remaining families are filled row by
+    /// row over the same span. Without this a single string column drops every numeric
+    /// column to the row-major path.
+    pub(super) fn push_contiguous_span_mixed(
+        &mut self,
+        page_row_base: u64,
+        page: &[u8],
+        span_first_row: usize,
+        span_len: usize,
+        data_start: usize,
+        row_len: usize,
+    ) -> Result<()> {
+        if span_len == 0 {
+            return Ok(());
+        }
+        if self.plan.flags.has(BatchPlanFlags::HAS_STAGED_NUMERIC) {
+            self.fill_staged_numeric_span(
+                page_row_base,
+                page,
+                span_first_row,
+                span_len,
+                data_start,
+                row_len,
+            )?;
+        } else if self.row_base.is_none() {
+            self.row_base = Some(page_row_base.saturating_add(span_first_row as u64));
+        }
+
+        let span_base = data_start + span_first_row * row_len;
+        for offset in 0..span_len {
+            let start = span_base + offset * row_len;
+            let row = page
+                .get(start..start + row_len)
+                .ok_or_else(|| Error::corruption("contiguous span row out of page bounds"))?;
+            self.push_row_families_except_staged_numeric(row)?;
+        }
+
+        self.row_count += span_len;
+        Ok(())
+    }
+
+    /// Everything [`Self::push_row`] does apart from the staged-numeric family and the row
+    /// count, for use when the numerics were already filled column-major.
+    fn push_row_families_except_staged_numeric(&mut self, row: &[u8]) -> Result<()> {
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::NEEDS_OWNED_STRING_SCRATCH)
+        {
+            self.owned_strings.clear();
+        }
+        if self.plan.flags.has(BatchPlanFlags::HAS_DIRECT_RAW_BYTES) {
+            self.push_direct_raw_bytes_family(row)?;
+        }
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::HAS_DIRECT_UTF8_SINGLE_BYTE)
+        {
+            self.push_direct_utf8_single_byte_family(row)?;
+        }
+        if self
+            .plan
+            .flags
+            .has(BatchPlanFlags::HAS_DIRECT_UTF8_BORROWED)
+        {
+            self.push_direct_utf8_borrowed_family(row)?;
+        }
+        if self.plan.flags.has(BatchPlanFlags::HAS_DIRECT_UTF8_OWNED) {
+            self.push_direct_utf8_owned_family(row)?;
+        }
+        if self.plan.flags.has(BatchPlanFlags::HAS_FALLBACK) {
+            self.push_fallback_family(row)?;
+        }
+        Ok(())
+    }
+
+    /// The tiled column-major fill itself, shared by the all-numeric and mixed entry points.
+    /// Does not touch `row_count`: the caller owns that, because the mixed case has other
+    /// families to fill over the same span first.
+    fn fill_staged_numeric_span(
+        &mut self,
+        page_row_base: u64,
+        page: &[u8],
+        span_first_row: usize,
+        span_len: usize,
+        data_start: usize,
+        row_len: usize,
+    ) -> Result<()> {
         if span_len == 0 {
             return Ok(());
         }
@@ -275,7 +386,6 @@ impl BatchAccumulator {
             tile_start += tile_len;
         }
 
-        self.row_count += span_len;
         self.counters.staged_numeric +=
             (span_len as u64).saturating_mul(self.plan.staged_numeric_cells_per_row);
         Ok(())

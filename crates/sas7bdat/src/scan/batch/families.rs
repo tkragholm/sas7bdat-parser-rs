@@ -149,8 +149,19 @@ impl BatchDecodePlan {
         })
     }
 
+    /// Only the tests ask this now: the column-major gates moved to
+    /// [`Self::can_fill_span_column_major`], which is the weaker condition a mixed plan can
+    /// also satisfy.
+    #[cfg(test)]
     pub(crate) const fn all_columns_staged_numeric(&self) -> bool {
         self.flags.has(BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC)
+    }
+
+    /// Whether a contiguous span can be filled column-major at all: there is a staged-numeric
+    /// family to tile. An all-numeric plan tiles everything; a mixed plan tiles its numerics
+    /// and fills the remaining families row by row over the same span.
+    pub(crate) const fn can_fill_span_column_major(&self) -> bool {
+        self.flags.has(BatchPlanFlags::HAS_STAGED_NUMERIC)
     }
 
     #[cfg(test)]
