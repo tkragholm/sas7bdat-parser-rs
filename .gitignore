@@ -33,3 +33,10 @@ old-implementation/
 # Negated here because a contributor may well have `Cargo.lock` in a global
 # gitignore -- which silently omitted one of these when this package was added.
 !Cargo.lock
+
+# ...except the fuzz harness's, and this has to sit *after* that negation to win.
+# The three tracked lockfiles are the ones something depends on being pinned:
+# `check-versions.sh` guards them and CI builds the R bindings with `--locked`.
+# The fuzz jobs run `cargo fuzz run` with no `--locked`, so this one is churn with
+# nothing reading it.
+crates/sas7bdat/fuzz/Cargo.lock
