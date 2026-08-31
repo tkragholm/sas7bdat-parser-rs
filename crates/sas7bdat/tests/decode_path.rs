@@ -1,0 +1,98 @@
+//! Which pipeline a scan takes, and the fact that it depends on the entry point.
+//!
+//! This crate has several decode pipelines. They share the symbols below the point where
+//! they diverge, so a flat profile of one is indistinguishable from a flat profile of
+//! another. That has already produced one wrong conclusion in this repository's history: an
+//! optimisation was written for the tiled column-major fill, benchmarked through
+//! `visit_batches`, and appeared to do nothing, because `visit_batches` never reaches that
+//! fill however the plan is shaped.
+//!
+//! These tests pin the surprising parts so they cannot change quietly.
+
+use sas7bdat::{Dataset, ScanEntry, ScanPath};
+use std::path::{Path, PathBuf};
+
+fn fixture(rel: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures")
+        .join(rel)
+}
+
+fn dataset() -> Option<Dataset> {
+    let path = fixture("raw_data/ahs2013/homimp.sas7bdat");
+    path.exists().then(|| Dataset::open(&path).expect("open"))
+}
+
+/// `visit_batches` does **not** reach the column-major fill. This is the one that cost time:
+/// it is not obvious, nothing in a profile says so, and a plan full of numeric columns does
+/// not change it.
+#[test]
+fn borrowed_batches_never_reach_the_column_major_fill() {
+    let Some(ds) = dataset() else { return };
+    let path = ds
+        .scan()
+        .predict_path(ScanEntry::BorrowedBatches)
+        .expect("predict");
+    assert_eq!(path, ScanPath::BorrowedBatches);
+    assert!(
+        !path.can_reach_column_major_fill(),
+        "visit_batches cannot reach the tiled fill; benchmark it through collect_batches instead"
+    );
+}
+
+/// The owned batch path is the one that can.
+#[test]
+fn owned_batches_can_reach_the_column_major_fill() {
+    let Some(ds) = dataset() else { return };
+    let path = ds.scan().predict_path(ScanEntry::Batches).expect("predict");
+    assert!(
+        path.can_reach_column_major_fill(),
+        "collect_batches took {path:?}, which cannot reach the tiled fill"
+    );
+}
+
+/// The prediction is a truncated run of the real selection, so it must agree with what a
+/// full scan reports. If these ever diverge the prediction has stopped describing the code.
+#[test]
+fn the_prediction_matches_what_a_full_scan_records() {
+    let Some(ds) = dataset() else { return };
+
+    let predicted = ds
+        .scan()
+        .predict_path(ScanEntry::BorrowedBatches)
+        .expect("predict");
+    let actual = ds
+        .scan()
+        .visit_batches(|_| Ok(std::ops::ControlFlow::Continue(())))
+        .expect("scan")
+        .path;
+    assert_eq!(predicted, actual, "borrowed batches");
+
+    let predicted = ds.scan().predict_path(ScanEntry::RawRows).expect("predict");
+    let actual = ds
+        .scan()
+        .visit_raw_rows(|_| Ok(std::ops::ControlFlow::Continue(())))
+        .expect("scan")
+        .path;
+    assert_eq!(predicted, actual, "raw rows");
+}
+
+/// Every path a scan can finish on must be a real one. `Unrecorded` means a pipeline was
+/// added without stamping itself, which is how the labelling silently goes stale.
+#[test]
+fn every_entry_point_records_a_path() {
+    let Some(ds) = dataset() else { return };
+    for entry in [
+        ScanEntry::Batches,
+        ScanEntry::BorrowedBatches,
+        ScanEntry::Rows,
+        ScanEntry::RawRows,
+    ] {
+        let path = ds.scan().predict_path(entry).expect("predict");
+        assert_ne!(
+            path,
+            ScanPath::Unrecorded,
+            "{entry:?} did not record a path"
+        );
+    }
+}

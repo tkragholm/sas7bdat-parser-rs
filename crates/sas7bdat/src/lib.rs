@@ -119,5 +119,6 @@ pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
 #[cfg(feature = "arrow")]
 pub use scan::SAS_LOGICAL_TYPE_KEY;
 pub use scan::{
-    OwnedBatchScanBreakdown, ScanBuilder, ScanProgress, ScanProgressObserver, ScanStatsSummary,
+    OwnedBatchScanBreakdown, ScanBuilder, ScanEntry, ScanPath, ScanProgress, ScanProgressObserver,
+    ScanStatsSummary,
 };

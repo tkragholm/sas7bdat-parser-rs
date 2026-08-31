@@ -1,3 +1,45 @@
+//! Scanning: turning a dataset's pages into rows or batches.
+//!
+//! # The pipelines, and why there is more than one
+//!
+//! There are several decode pipelines here, and **which one runs depends on the method you
+//! called as much as on the file**. They share almost everything below the point where they
+//! diverge, so a profile of one looks like a profile of another.
+//!
+//! ```text
+//!   visit_raw_rows ─────────────────────────────► RawRows
+//!   visit_rows ─────────────────────────────────► Rows
+//!   visit_batches ──────────────────────────────► BorrowedBatches
+//!                                                 (borrows the page; never reaches the
+//!                                                  tiled fill, whatever the plan looks like)
+//!   collect_batches / scan_batches ─┬─ fused? ──► FusedOnePass         ┐
+//!                                   ├─ parallel? ► ParallelDescriptors │ these three reach
+//!                                   ├─ columnar? ► ColumnarSerial      ┘ the tiled fill
+//!                                   └─ else ────► RowMajorTap
+//! ```
+//!
+//! The first three of those four are tried in order and each declines by returning `None`,
+//! so the conditions are spread across modules rather than written in one place:
+//!
+//! | condition | where |
+//! |---|---|
+//! | `ColumnMajorDecode` requested | [`crate::ScanBuilder::with_column_major_decode`] |
+//! | whole-file window, in-memory source | `column_major_file_bytes` in [`builder`] |
+//! | file source is a path, no cached descriptors, page geometry | [`fused::try_stream_batches_fused`] |
+//! | worker count and ordering | `try_stream_batches_parallel` in [`builder`] |
+//! | plan has a staged-numeric family | [`batch::BatchDecodePlan`] flags |
+//! | page is `FusedContiguousUncompressed` | the descriptor's `exec_class` |
+//!
+//! Below that split, `stream_descriptors_into_batches` chooses per page between the tiled
+//! column-major fill and `emit_rows_from_page`.
+//!
+//! # Before you benchmark
+//!
+//! Ask [`crate::ScanBuilder::predict_path`] which pipeline your scan will take, and label
+//! the measurement with it. [`ScanStatsSummary::path`] reports the same thing after the
+//! fact. An optimisation to the tiled fill, benchmarked through `visit_batches`, will
+//! measure as exactly zero, and nothing in the profile will say why.
+
 use crate::{
     columnar::{ColumnBuffer, ColumnarBatch, OwnedColumnBuffer, OwnedColumnarBatch},
     compression::decompress_row,
@@ -36,6 +78,85 @@ pub use builder::ScanBuilder;
 #[cfg(feature = "arrow")]
 pub use plan::SAS_LOGICAL_TYPE_KEY;
 
+/// Which decode pipeline a scan ran through.
+///
+/// There are several, they are chosen by a chain of conditions spread over the builder, the
+/// batch plan and the page descriptors, and **the symbols below the split are shared**, so a
+/// flat profile of one is indistinguishable from a flat profile of another. That has already
+/// cost one wrong conclusion: an optimisation was written for the tiled fill, measured
+/// through `visit_batches`, and appeared to do nothing because `visit_batches` never reaches
+/// it.
+///
+/// Every scan records the path it took in [`ScanStatsSummary::path`], and
+/// [`crate::ScanBuilder::predict_path`] answers the same question without running anything.
+/// A test asserts the two agree across the corpus, which is what stops the prediction
+/// drifting away from the selection it describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+pub enum ScanPath {
+    /// Not recorded, which for a completed scan is a bug in the recording rather than a path.
+    #[default]
+    Unrecorded,
+    /// One pass that compiles page descriptors and decodes from the same reads.
+    /// [`crate::scan::fused`], reached only for a whole-file scan.
+    FusedOnePass,
+    /// Descriptors compiled first, then decoded across worker threads.
+    ParallelDescriptors,
+    /// Descriptors compiled first, then decoded on this thread through the column-major
+    /// entry point. Requires a whole-file scan of an in-memory source.
+    ColumnarSerial,
+    /// The general row-major path, which every other case falls back to.
+    RowMajorTap,
+    /// Batches that borrow the page rather than owning their bytes. A different pipeline
+    /// again: it does **not** go through `stream_descriptors_into_batches`, so the tiled
+    /// column-major fill never applies to it.
+    BorrowedBatches,
+    /// Row-at-a-time visiting, not batched at all.
+    Rows,
+    /// Raw row slices, no decode.
+    RawRows,
+}
+
+impl ScanPath {
+    /// Whether this path can reach the tiled column-major fill for a fused page.
+    ///
+    /// The answer is no for most of them, which is the thing that is easy to get wrong.
+    #[must_use]
+    pub const fn can_reach_column_major_fill(self) -> bool {
+        matches!(
+            self,
+            Self::FusedOnePass | Self::ParallelDescriptors | Self::ColumnarSerial
+        )
+    }
+
+    /// A short stable name, for labelling a benchmark or a profile.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unrecorded => "unrecorded",
+            Self::FusedOnePass => "fused-one-pass",
+            Self::ParallelDescriptors => "parallel-descriptors",
+            Self::ColumnarSerial => "columnar-serial",
+            Self::RowMajorTap => "row-major-tap",
+            Self::BorrowedBatches => "borrowed-batches",
+            Self::Rows => "rows",
+            Self::RawRows => "raw-rows",
+        }
+    }
+}
+
+/// Which scan method a caller intends to use, for [`crate::ScanBuilder::predict_path`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanEntry {
+    /// [`crate::ScanBuilder::collect_batches`] and friends: owned columnar batches.
+    Batches,
+    /// [`crate::ScanBuilder::visit_batches`]: batches borrowing the page.
+    BorrowedBatches,
+    /// [`crate::ScanBuilder::visit_rows`].
+    Rows,
+    /// [`crate::ScanBuilder::visit_raw_rows`].
+    RawRows,
+}
+
 /// User-facing scan statistics returned by all public scan methods.
 ///
 /// `fused_pages` and `indexed_pages` describe SAS7BDAT page layout classes
@@ -55,6 +176,8 @@ pub struct ScanStatsSummary {
     pub raw_bytes_read: u64,
     pub row_bytes_materialized: u64,
     pub decode_batches: u64,
+    /// Which pipeline decoded this scan. See [`ScanPath`].
+    pub path: ScanPath,
 }
 
 use batch::{BatchAccumulator, BatchDecodePlan, unexpected_batch_cell};
@@ -97,6 +220,7 @@ struct ScanStats {
     pub batch_direct_utf8_owned_interned_hits: u64,
     pub batch_direct_utf8_owned_seen_once_promotions: u64,
     pub batch_fallback_cells: u64,
+    pub path: ScanPath,
 }
 
 impl ScanStats {
@@ -112,6 +236,7 @@ impl ScanStats {
             raw_bytes_read: self.raw_bytes_read,
             row_bytes_materialized: self.row_bytes_materialized,
             decode_batches: self.decode_batches,
+            path: self.path,
         }
     }
 }

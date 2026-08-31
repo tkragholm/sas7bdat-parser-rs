@@ -475,6 +475,42 @@ impl<'a> ScanBuilder<'a> {
             .map(|stats| stats.summary())
     }
 
+    /// Which decode pipeline this scan will take, for the given entry point.
+    ///
+    /// The pipeline depends on the method you call as much as on the file: `visit_batches`
+    /// and `collect_batches` decode the same data through different code, and only the
+    /// latter can reach the tiled column-major fill. Label a benchmark with this, or it may
+    /// be measuring a path the change under test cannot reach.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if opening or planning the scan fails.
+    pub fn predict_path(&self, entry: crate::ScanEntry) -> Result<crate::ScanPath> {
+        // Deliberately a truncated real scan rather than a re-statement of the conditions.
+        // The selection chain is long (an in-memory source, a whole-file window, cached
+        // descriptors, page geometry, the batch plan's families, a parallel-worker decision)
+        // and spread across three modules. A predicate that restated it would be correct
+        // only until one of them moved. Running it and stopping at the first item cannot
+        // drift, at the cost of decoding one batch or row.
+        let stats = match entry {
+            crate::ScanEntry::Batches => self.scan_batches_with_column_major(
+                matches!(self.column_major, ColumnMajorDecode::On),
+                &mut |_| Ok(ControlFlow::Break(())),
+            )?,
+            crate::ScanEntry::BorrowedBatches => {
+                let mut stats = self.scan_batches_borrowed_with_tap(
+                    &mut |_| Ok(ControlFlow::Break(())),
+                    &mut |_, _| {},
+                )?;
+                stats.path = crate::ScanPath::BorrowedBatches;
+                stats
+            }
+            crate::ScanEntry::Rows => self.scan_rows(&mut |_| Ok(ControlFlow::Break(())))?,
+            crate::ScanEntry::RawRows => self.scan_raw_rows(&mut |_| Ok(ControlFlow::Break(())))?,
+        };
+        Ok(stats.path)
+    }
+
     /// # Errors
     ///
     /// Returns an error if the scan or batch decoding fails.
@@ -483,7 +519,10 @@ impl<'a> ScanBuilder<'a> {
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
     {
         self.scan_batches_borrowed_with_tap(&mut f, &mut |_, _| {})
-            .map(|stats| stats.summary())
+            .map(|mut stats| {
+                stats.path = crate::ScanPath::BorrowedBatches;
+                stats.summary()
+            })
     }
 
     /// # Errors
@@ -936,7 +975,9 @@ impl ScanBuilder<'_> {
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
     {
         let plan = ScanPlan::new(self)?;
-        scan_raw_rows_with_plan(self, &plan.raw, f)
+        let mut stats = scan_raw_rows_with_plan(self, &plan.raw, f)?;
+        stats.path = crate::ScanPath::RawRows;
+        Ok(stats)
     }
 
     fn scan_raw_rows_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
@@ -964,7 +1005,7 @@ impl ScanBuilder<'_> {
 
         let plan = ScanPlan::new(self)?;
         let mut owned_strings = Vec::new();
-        scan_raw_rows_with_plan(self, &plan.raw, &mut |raw| {
+        let mut stats = scan_raw_rows_with_plan(self, &plan.raw, &mut |raw| {
             let planned = plan.row.plan_cells(raw.bytes, &mut owned_strings)?;
             let cells = materialize_planned_cells(&planned, &owned_strings)?;
             let row = RowView {
@@ -973,7 +1014,9 @@ impl ScanBuilder<'_> {
                 cells: &cells,
             };
             f(row)
-        })
+        })?;
+        stats.path = crate::ScanPath::Rows;
+        Ok(stats)
     }
 
     fn scan_rows_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
@@ -1025,19 +1068,27 @@ impl ScanBuilder<'_> {
         let plan = ScanPlan::new(self)?;
         // One pass where it applies: compiling descriptors and decoding rows from the same
         // reads halves the bytes moved, which is the whole cost on a network share.
-        if let Some(stats) = super::fused::try_stream_batches_fused(self, &plan, column_major, f)? {
+        if let Some(mut stats) =
+            super::fused::try_stream_batches_fused(self, &plan, column_major, f)?
+        {
+            stats.path = crate::ScanPath::FusedOnePass;
             return Ok(stats);
         }
-        if let Some(stats) = self.try_stream_batches_parallel(&plan, column_major, f)? {
+        if let Some(mut stats) = self.try_stream_batches_parallel(&plan, column_major, f)? {
+            stats.path = crate::ScanPath::ParallelDescriptors;
             return Ok(stats);
         }
         if column_major
             && plan.batch.all_columns_staged_numeric()
             && let Some(file_bytes) = column_major_file_bytes(self, true)
         {
-            return self.stream_batches_columnar_serial(&plan, file_bytes, f);
+            let mut stats = self.stream_batches_columnar_serial(&plan, file_bytes, f)?;
+            stats.path = crate::ScanPath::ColumnarSerial;
+            return Ok(stats);
         }
-        self.scan_batches_with_tap(f, &mut |_, _| {})
+        let mut stats = self.scan_batches_with_tap(f, &mut |_, _| {})?;
+        stats.path = crate::ScanPath::RowMajorTap;
+        Ok(stats)
     }
 
     /// Serial owned-batch streaming via the column-major fill. Preconditions (in-memory source,
@@ -1385,6 +1436,10 @@ impl ScanBuilder<'_> {
     }
 
     #[cfg_attr(feature = "hotpath-profile", hotpath::measure)]
+    #[allow(clippy::doc_markdown)]
+    /// Batches that borrow the page. **A different pipeline from the owned batch path**: it
+    /// does not go through `stream_descriptors_into_batches`, so the tiled column-major fill
+    /// never applies here however the plan is shaped.
     fn scan_batches_borrowed_with_tap<F, T>(&self, f: &mut F, tap: &mut T) -> Result<ScanStats>
     where
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
