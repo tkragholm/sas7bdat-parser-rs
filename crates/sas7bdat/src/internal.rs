@@ -26,6 +26,9 @@ pub struct LayoutPlan {
     pub header: HeaderInfo,
     pub row_len: RowLength,
     pub total_rows: u64,
+    /// How many of `total_rows` are tombstones. Zero for almost every file, and when it is
+    /// zero no page is examined for a deleted-row bitmap at all.
+    pub deleted_rows: u64,
     pub compression: CompressionKind,
     pub rows_per_page: u64,
 }

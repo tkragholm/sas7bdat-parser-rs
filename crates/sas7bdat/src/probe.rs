@@ -130,6 +130,7 @@ pub fn probe_header<R: Read + Seek>(reader: &mut R) -> Result<(HeaderInfo, Datas
         page_size,
         page_count,
         row_count: 0,
+        deleted_row_count: 0,
         row_len: crate::types::RowLength(0).into(),
         compression: CompressionKind::None,
         created_at,

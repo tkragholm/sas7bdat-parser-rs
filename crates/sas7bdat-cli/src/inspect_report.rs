@@ -81,10 +81,23 @@ fn append_inspect_summary(
     if let Ok(size) = std::fs::metadata(source) {
         let _ = write!(stats, "{} · ", human_bytes(size.len()));
     }
+    // The header's row count includes rows SAS deleted in place, which no scan delivers.
+    // Printing it alone would promise more rows than `convert` writes, so when any are
+    // deleted the live count leads and the header's is shown as the qualifier.
+    if meta.deleted_row_count > 0 {
+        let _ = write!(
+            stats,
+            "{} rows ({} deleted of {}) · ",
+            thousands(meta.row_count - meta.deleted_row_count),
+            thousands(meta.deleted_row_count),
+            thousands(meta.row_count),
+        );
+    } else {
+        let _ = write!(stats, "{} rows · ", thousands(meta.row_count));
+    }
     let _ = write!(
         stats,
-        "{} rows · {} cols · {} · {}",
-        thousands(meta.row_count),
+        "{} cols · {} · {}",
         thousands(total_count as u64),
         compression_label(meta.compression),
         meta.encoding.as_deref().unwrap_or("unknown encoding"),

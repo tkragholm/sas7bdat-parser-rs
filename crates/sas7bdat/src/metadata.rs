@@ -116,8 +116,16 @@ pub struct DatasetMetadata {
     pub page_size: u32,
     /// Total number of pages in the file (including metadata).
     pub page_count: u64,
-    /// Total number of logical rows in the dataset.
+    /// Total number of logical rows the header records, tombstones included.
+    ///
+    /// SAS deletes a row by marking it, not by removing it, so this stays at the value it had
+    /// before the deletion and is **not** the number of rows a scan delivers. Subtract
+    /// [`Self::deleted_row_count`], or read [`crate::ScanStatsSummary`] after a scan, for that.
     pub row_count: u64,
+    /// How many of [`Self::row_count`] are deleted, and so are skipped by every scan.
+    ///
+    /// Zero for almost every file. Non-zero only where a SAS session deleted rows in place.
+    pub deleted_row_count: u64,
     /// Length of a single row in bytes on disk.
     pub row_len: u32,
     /// The compression algorithm used for data pages.

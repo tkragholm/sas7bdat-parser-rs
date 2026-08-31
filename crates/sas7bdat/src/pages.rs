@@ -519,6 +519,38 @@ fn classify_descriptor(
         ));
     }
 
+    // See the longer note at the other fused-page site: a page carrying deleted rows cannot
+    // be addressed positionally, so it is demoted to explicit spans over the live rows. Gated
+    // on the file-level count, so a file with no deletions does not reach this at all.
+    if layout.deleted_rows > 0
+        && let Some(bitmap) = deleted_row_bitmap(layout, page, data_start, rows_to_take)?
+    {
+        {
+            let row_span_start = u32::try_from(row_spans.len()).unwrap_or(u32::MAX);
+            let live = push_live_row_spans(
+                row_spans,
+                data_start,
+                u32::from(layout.row_len),
+                rows_to_take,
+                bitmap,
+            )?;
+            let row_span_count = u32::try_from(live).unwrap_or(u32::MAX);
+            return Ok(PageDescriptor {
+                page_index: PageIndex::from(page_index),
+                row_base: RowIndex::from(row_base),
+                row_count: row_span_count,
+                data_start: ByteOffset::from(0),
+                row_span_start,
+                row_span_count,
+                exec_class: if row_span_count == 0 {
+                    PageExecClass::MetadataOrEmpty
+                } else {
+                    PageExecClass::IndexedPointerRows
+                },
+            });
+        }
+    }
+
     Ok(PageDescriptor {
         page_index: PageIndex::from(page_index),
         row_base: RowIndex::from(row_base),
@@ -607,7 +639,27 @@ fn parse_subheader_pointers(
                     }
                 }
             }
-            1 => {}
+            // Two codes, one behaviour: emit no row.
+            //
+            // 0x01, "truncated", addresses nothing in the first place. 0x05 is a compressed
+            // row that has been *deleted*: SAS marks rather than removes, so the row is still
+            // on the page and still counted by the header, and must not be delivered. The
+            // uncompressed equivalent is the page bitmap read by `deleted_row_bitmap`; here
+            // the tombstone is the subheader pointer's own code.
+            //
+            // They share an arm because today they need the same thing. They would separate
+            // again if this ever validated the count, the way ReadStat's
+            // `sas7bdat_register_deleted_row` does: a 0x05 beyond the declared deleted count
+            // is a corrupt file, while a 0x01 is not.
+            //
+            // hpoettker reads this byte as a bitmap rather than an enum in
+            // WizardMac/ReadStat#365, making 0x05 = 0x01 | 0x04: skip, and a compressed row.
+            // That explains the value, but the other codes it predicts (0x02, 0x03, 0x06,
+            // 0x0d, "moved" rows) are still being reverse-engineered upstream and no file
+            // here exercises them. So this takes the one combination with evidence behind it
+            // and leaves the rest to the error arm, where an unknown code stays loud rather
+            // than being silently skipped.
+            1 | 5 => {}
             4 => {
                 let produced = u64::from(
                     u32::try_from(row_spans.len())
@@ -736,6 +788,49 @@ fn classify_indexed_descriptor(
     let possible_rows = available / row_len;
     let rows_to_take =
         calculate_rows_to_take(layout, kind, possible_rows, page_row_count, remaining_rows);
+
+    // Deleted rows, but only for files that declare some. SAS marks a deleted row in place
+    // rather than removing it, so the rows are still here and still counted by the header;
+    // a trailing bitmap on the page says which. Reading that bitmap costs a page-header
+    // field and a bounds check, so it is gated on the file-level count from the ROW_SIZE
+    // subheader: when nothing is deleted, which is nearly every file, this is one `!= 0`
+    // and the fused path below is reached unchanged.
+    //
+    // A page with deletions cannot stay fused. `FusedContiguousUncompressed` addresses rows
+    // as `data_start + i * row_len` with no per-row spans, and there is no way to express a
+    // hole in that. Such a page is demoted to explicit spans covering the live rows only, so
+    // the cost of the feature falls on the pages that need it rather than on the hot path.
+    //
+    // Layout follows ReadStat (MIT), which reverse-engineered it in WizardMac/ReadStat#366.
+    if layout.deleted_rows > 0
+        && rows_to_take > 0
+        && let Some(bitmap) = deleted_row_bitmap(layout, page, data_start, rows_to_take)?
+    {
+        {
+            let live = push_live_row_spans(
+                row_spans,
+                data_start,
+                u32::from(layout.row_len),
+                rows_to_take,
+                bitmap,
+            )?;
+            let row_span_count = u32::try_from(live).unwrap_or(u32::MAX);
+            return Ok(PageDescriptor {
+                page_index: PageIndex::from(page_index),
+                row_base: RowIndex::from(row_base),
+                row_count: row_span_count,
+                data_start: ByteOffset::from(0),
+                row_span_start,
+                row_span_count,
+                exec_class: if row_span_count == 0 {
+                    PageExecClass::MetadataOrEmpty
+                } else {
+                    PageExecClass::IndexedPointerRows
+                },
+            });
+        }
+    }
+
     let row_count = u32::try_from(rows_to_take).unwrap_or(u32::MAX);
     let exec_class = if row_count == 0 {
         PageExecClass::MetadataOrEmpty
@@ -755,6 +850,94 @@ fn classify_indexed_descriptor(
         row_span_count: 0,
         exec_class,
     })
+}
+
+/// The deleted-row bitmap for one uncompressed data page, or `None` when the page carries no
+/// deleted rows and can stay on the fused path.
+///
+/// It sits after the row data, past whatever slack the page header records as unused. Returns
+/// an error rather than a silent `None` when the region would fall outside the page: a file
+/// that declares deletions but cannot place the bitmap is corrupt, and guessing would mean
+/// dropping live rows.
+fn deleted_row_bitmap<'a>(
+    layout: &LayoutPlan,
+    page: &'a [u8],
+    data_start: u32,
+    rows: u64,
+) -> Result<Option<&'a [u8]>> {
+    let header = &layout.header;
+    let unused_bytes = if header.uses_u64_pointers {
+        let bytes = page
+            .get(24..32)
+            .ok_or_else(|| page_corruption("page too short for unused-byte count"))?;
+        read_u64(header.endianness, bytes)
+    } else {
+        let bytes = page
+            .get(12..16)
+            .ok_or_else(|| page_corruption("page too short for unused-byte count"))?;
+        u64::from(read_u32(header.endianness, bytes))
+    };
+
+    let needed = rows.div_ceil(8);
+    let start = u64::from(data_start)
+        .checked_add(rows.saturating_mul(u64::from(layout.row_len)))
+        .and_then(|offset| offset.checked_add(unused_bytes))
+        .ok_or_else(|| page_corruption("deleted-row bitmap offset overflows"))?;
+    let end = start
+        .checked_add(needed)
+        .ok_or_else(|| page_corruption("deleted-row bitmap extends past u64"))?;
+
+    let (start, end) = (
+        usize::try_from(start).map_err(|_| page_corruption("bitmap offset exceeds usize"))?,
+        usize::try_from(end).map_err(|_| page_corruption("bitmap end exceeds usize"))?,
+    );
+    let bitmap = page
+        .get(start..end)
+        .ok_or_else(|| page_corruption("deleted-row bitmap falls outside the page"))?;
+
+    // Every bit clear means nothing on this page was deleted, even though the file has
+    // deletions elsewhere. Say so, and let the caller keep the fused path.
+    if bitmap.iter().all(|byte| *byte == 0) {
+        return Ok(None);
+    }
+    Ok(Some(bitmap))
+}
+
+/// Whether row `index` is marked deleted. Bits run most-significant-first within each byte.
+fn row_is_deleted(bitmap: &[u8], index: usize) -> bool {
+    let Some(byte) = bitmap.get(index / 8) else {
+        return false;
+    };
+    byte & (1 << (7 - index % 8)) != 0
+}
+
+/// Pushes one span per *live* row, skipping the deleted ones. Returns how many were pushed.
+fn push_live_row_spans(
+    row_spans: &mut Vec<RowSpan>,
+    data_start: u32,
+    row_len: u32,
+    rows: u64,
+    bitmap: &[u8],
+) -> Result<u64> {
+    let row_len_usize =
+        usize::try_from(row_len).map_err(|_| page_corruption("row length exceeds usize"))?;
+    let mut offset =
+        usize::try_from(data_start).map_err(|_| page_corruption("row offset exceeds usize"))?;
+    let mut live = 0u64;
+    for index in 0..usize::try_from(rows).unwrap_or(usize::MAX) {
+        if !row_is_deleted(bitmap, index) {
+            row_spans.push(RowSpan {
+                offset: ByteOffset::from(
+                    u32::try_from(offset).map_err(|_| page_corruption("row offset exceeds u32"))?,
+                ),
+                len: row_len,
+                kind: RowSpanKind::Borrowed,
+            });
+            live += 1;
+        }
+        offset = offset.saturating_add(row_len_usize);
+    }
+    Ok(live)
 }
 
 fn push_contiguous_row_spans(

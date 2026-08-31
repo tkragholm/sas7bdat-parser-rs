@@ -229,6 +229,10 @@ impl Default for ColumnBuilder {
 struct RowInfoRaw {
     row_length: u32,
     total_rows: u64,
+    /// Rows the file says are deleted. `total_rows` counts them, so the live count is the
+    /// difference. Non-zero is the gate for reading any per-page deleted-row bitmap: a file
+    /// declaring none pays nothing per page, which is nearly every file.
+    deleted_rows: u64,
     rows_per_page: u64,
     compression_ref: TextRef,
     label_ref: TextRef,
@@ -389,17 +393,10 @@ pub fn parse_layout<R: Read + Seek>(
     }
     state.columns.truncate(column_count as usize);
 
-    let compression =
-        state
-            .text_store
-            .resolve(row_info.compression_ref)
-            .map_or(CompressionKind::None, |value| match value.trim() {
-                "SASYZCR2" => CompressionKind::Binary,
-                "SASYZCRL" => CompressionKind::Row,
-                _ => CompressionKind::None,
-            });
+    let compression = resolve_compression(&state, row_info.compression_ref);
 
     metadata.row_count = row_info.total_rows;
+    metadata.deleted_row_count = row_info.deleted_rows;
     metadata.row_len = row_info.row_length;
     metadata.compression = compression;
     metadata.file_label = state.text_store.resolve_label(row_info.label_ref);
@@ -447,6 +444,7 @@ pub fn parse_layout<R: Read + Seek>(
             header,
             row_len: RowLength::from(row_info.row_length),
             total_rows: row_info.total_rows,
+            deleted_rows: row_info.deleted_rows,
             compression,
             rows_per_page: row_info.rows_per_page,
         },
@@ -644,6 +642,19 @@ fn parse_column_size_subheader(
     state.reserve_columns(count)
 }
 
+/// The compression marker is a name in the text store, not a flag: absent or unrecognised
+/// means uncompressed.
+fn resolve_compression(state: &MetadataState, compression_ref: TextRef) -> CompressionKind {
+    state
+        .text_store
+        .resolve(compression_ref)
+        .map_or(CompressionKind::None, |value| match value.trim() {
+            "SASYZCR2" => CompressionKind::Binary,
+            "SASYZCRL" => CompressionKind::Row,
+            _ => CompressionKind::None,
+        })
+}
+
 fn parse_row_size_subheader(bytes: &[u8], header: &HeaderInfo) -> Result<RowInfoRaw> {
     let row_length = if header.uses_u64_pointers {
         u32::try_from(read_u64(
@@ -663,6 +674,22 @@ fn parse_row_size_subheader(bytes: &[u8], header: &HeaderInfo) -> Result<RowInfo
             get_range(bytes, 24, 28, "total rows")?,
         ))
     };
+
+    // Immediately after `total_rows` in both layouts. SAS keeps deleted rows in place and
+    // marks them, so this is how many of `total_rows` are tombstones.
+    let deleted_rows = if header.uses_u64_pointers {
+        read_u64(header.endianness, get_range(bytes, 56, 64, "deleted rows")?)
+    } else {
+        u64::from(read_u32(
+            header.endianness,
+            get_range(bytes, 28, 32, "deleted rows")?,
+        ))
+    };
+    if deleted_rows > total_rows {
+        return Err(metadata_error(format!(
+            "row size subheader claims {deleted_rows} deleted rows of {total_rows} total"
+        )));
+    }
 
     let rows_per_page = if header.uses_u64_pointers {
         read_u64(
@@ -688,6 +715,7 @@ fn parse_row_size_subheader(bytes: &[u8], header: &HeaderInfo) -> Result<RowInfo
     Ok(RowInfoRaw {
         row_length,
         total_rows,
+        deleted_rows,
         rows_per_page,
         compression_ref: parse_text_ref(
             header.endianness,

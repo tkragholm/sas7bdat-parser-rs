@@ -123,6 +123,7 @@ impl MockDatasetBuilder {
             },
             row_len: RowLength(row_len_u32),
             total_rows,
+            deleted_rows: 0,
             compression: self.compression,
             rows_per_page,
         };
@@ -269,6 +270,7 @@ pub fn simple_layout(page_size: u32, page_count: u64, row_len: u32, total_rows: 
         },
         row_len: RowLength(row_len),
         total_rows,
+        deleted_rows: 0,
         compression: CompressionKind::None,
         rows_per_page: 1,
     }
