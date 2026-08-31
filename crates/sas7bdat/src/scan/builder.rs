@@ -482,6 +482,15 @@ impl<'a> ScanBuilder<'a> {
     /// latter can reach the tiled column-major fill. Label a benchmark with this, or it may
     /// be measuring a path the change under test cannot reach.
     ///
+    /// # Performance
+    ///
+    /// The cost is **unspecified and may change**. Today this runs the real selection and
+    /// stops at the first item, so it decodes one batch or one row, which is deliberate: the
+    /// conditions are spread across three modules and a predicate restating them would be
+    /// right only until one of them moved. If the selection is ever lifted into a value the
+    /// answer becomes free, and that is not a breaking change. Call it once to label a
+    /// benchmark or a log line, not inside a loop.
+    ///
     /// # Errors
     ///
     /// Returns an error if opening or planning the scan fails.
