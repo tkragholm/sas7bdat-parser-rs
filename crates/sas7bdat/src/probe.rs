@@ -314,10 +314,24 @@ fn decode_padded_string(bytes: &[u8]) -> Option<String> {
     }
 }
 
+/// Converts a header timestamp from SAS seconds to Unix seconds.
+///
+/// `time` is seconds since the SAS epoch, 1960-01-01. `diff` is the UTC offset SAS stores
+/// immediately after it, because the header records *local* time under some configurations
+/// (WizardMac/ReadStat#309); subtracting it normalises to UTC.
+///
+/// Two things were wrong here and they compounded. The offset was **added** rather than
+/// subtracted, and it was 315,532,800 rather than 315,619,200: 1960-01-01 to 1970-01-01 is
+/// 3,653 days, not 3,652, because 1960, 1964 and 1968 are all leap years. Every header
+/// timestamp came back 20 years and a day late, which nothing noticed because nothing
+/// compared them to anything.
+///
+/// The constant now comes from [`SasDateTime`], which the value path already used, so the
+/// two cannot drift apart again.
 fn convert_sas_time(time: f64, diff: f64) -> Option<SystemTime> {
-    const SAS_EPOCH_OFFSET_F64: f64 = 315_532_800.0;
-    let unix_seconds = SAS_EPOCH_OFFSET_F64 + (time - diff);
-    system_time_from_unix_seconds(unix_seconds)
+    #[allow(clippy::cast_precision_loss)]
+    let epoch_offset = crate::metadata::SasDateTime::SECONDS_SAS_TO_UNIX as f64;
+    system_time_from_unix_seconds((time - diff) - epoch_offset)
 }
 
 fn system_time_from_unix_seconds(seconds: f64) -> Option<SystemTime> {
