@@ -9,7 +9,10 @@
 //!
 //! These tests pin the surprising parts so they cannot change quietly.
 
-use sas7bdat::{Dataset, FillStrategy, PageSource, ScanEntry};
+use sas7bdat::{
+    Dataset, FillStrategy, IoBackendPreference, OpenOptions, PageSource, Parallelism, ScanEntry,
+    SourceDeclined,
+};
 use std::path::{Path, PathBuf};
 
 fn fixture(rel: &str) -> PathBuf {
@@ -147,4 +150,90 @@ fn the_free_selection_agrees_with_the_scan_it_describes() {
             "{parallelism:?}: predicted source differs from the scan's"
         );
     }
+}
+
+/// One worker is the parallel scan run on the calling thread, not a pipeline beside it. What
+/// used to be a separate serial function existed only to give single-threaded scans the tiled
+/// fill; it is gone, and this is the fact that proves it did not take the fill with it.
+#[test]
+fn a_single_worker_still_reaches_the_tiled_fill() {
+    let Some(ds) = dataset() else { return };
+    let serial = ds
+        .scan()
+        .with_parallelism(Parallelism::None)
+        .predict_path(ScanEntry::Batches)
+        .expect("predict");
+    let parallel = ds
+        .scan()
+        .with_parallelism(Parallelism::Threads(4))
+        .predict_path(ScanEntry::Batches)
+        .expect("predict");
+
+    assert_eq!(serial.source, PageSource::TwoPassSerial);
+    assert_eq!(parallel.source, PageSource::TwoPassParallel);
+    assert_eq!(
+        serial.fill, parallel.fill,
+        "the worker count must not change the fill"
+    );
+    assert_eq!(serial.fill, FillStrategy::Tiled);
+}
+
+/// And it decodes the same rows. The two forms share the plan and the chunk decode, so a
+/// divergence here would mean the inline run is not the code it claims to be.
+#[test]
+fn a_single_worker_decodes_what_the_workers_do() {
+    let Some(ds) = dataset() else { return };
+    let count = |parallelism| {
+        let mut rows = 0usize;
+        let mut cells = 0usize;
+        let stats = ds
+            .scan()
+            .with_parallelism(parallelism)
+            .visit_owned_batches(|batch| {
+                rows += batch.row_count;
+                cells += batch.columns.len() * batch.row_count;
+                Ok(std::ops::ControlFlow::Continue(()))
+            })
+            .expect("scan");
+        (rows, cells, stats.rows_emitted)
+    };
+    assert_eq!(count(Parallelism::None), count(Parallelism::Threads(4)));
+}
+
+/// The one scan that is still a pipeline of its own, and the reason it is: a path source
+/// hands out pages through a reader pool, and one worker leaves no thread to read ahead of
+/// the decode. It streams rows instead, which is why it cannot tile.
+#[test]
+fn a_streamed_source_with_one_worker_falls_back_to_row_streaming() {
+    let path = fixture("raw_data/ahs2013/homimp.sas7bdat");
+    if !path.exists() {
+        return;
+    }
+    let ds = Dataset::open_with(
+        &path,
+        OpenOptions::builder()
+            .io_backend(IoBackendPreference::Buffered)
+            .build(),
+    )
+    .expect("open");
+
+    let (source, declined) = ds
+        .scan()
+        .with_parallelism(Parallelism::None)
+        .predict_page_source()
+        .expect("select");
+    assert_eq!(source, PageSource::TwoPassRowStream);
+    assert!(
+        declined.contains(&SourceDeclined::TwoPassStream),
+        "declined: {declined:?}"
+    );
+
+    let actual = ds
+        .scan()
+        .with_parallelism(Parallelism::None)
+        .visit_owned_batches(|_| Ok(std::ops::ControlFlow::Continue(())))
+        .expect("scan")
+        .path;
+    assert_eq!(actual.source, source);
+    assert_eq!(actual.fill, FillStrategy::RowMajor);
 }

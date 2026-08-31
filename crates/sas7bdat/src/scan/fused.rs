@@ -211,6 +211,9 @@ where
             target_rows: plan.batch_row_capacity,
             capacity_hint_rows: plan.capacity_hint_rows.div_ceil(workers).max(1),
             row_len: usize::from(layout.row_len),
+            // Always more than one worker here (the plan declines below two), so a chunk
+            // materialises its batch on the thread that decoded it.
+            materialize_threads: 1,
             // Whole-file scan is a precondition above, so the column-major fill is free to
             // ignore row selection; each worker additionally requires an all-staged-numeric
             // plan.

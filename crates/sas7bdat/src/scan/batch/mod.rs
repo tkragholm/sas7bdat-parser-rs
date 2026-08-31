@@ -162,10 +162,10 @@ impl BatchAccumulator {
             .has(BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC)
     }
 
-    /// Whether a contiguous span can be filled column-major. See
-    /// [`super::families::BatchDecodePlan::can_fill_span_column_major`].
+    /// Whether a contiguous span can be filled column-major. The condition itself lives on
+    /// the plan, so the accumulator and the plan cannot answer this differently.
     pub(super) const fn plan_can_fill_span_column_major(&self) -> bool {
-        self.plan.flags.has(BatchPlanFlags::HAS_STAGED_NUMERIC)
+        self.plan.can_fill_span_column_major()
     }
 
     /// Column-major decode of a fixed-stride, contiguous row span into the staged-numeric

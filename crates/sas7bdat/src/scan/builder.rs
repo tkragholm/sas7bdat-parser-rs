@@ -700,24 +700,6 @@ impl<'a> ScanBuilder<'a> {
     }
 }
 
-/// In-memory file bytes for the column-major path, or `None` if it must not engage: the path
-/// only handles whole-file scans of an in-memory source, because its fill walks a page's rows
-/// by position rather than by row index. The caller additionally requires an all-staged-numeric
-/// plan.
-fn column_major_file_bytes<'a>(
-    builder: &'a ScanBuilder<'_>,
-    column_major: bool,
-) -> Option<&'a [u8]> {
-    if !column_major || !builder.row_window().is_whole_file() {
-        return None;
-    }
-    match &builder.ds.file.source {
-        FileSource::Bytes(bytes) => Some(bytes.as_ref()),
-        FileSource::Mmap(mmap) => Some(&mmap[..]),
-        FileSource::Path(_) => None,
-    }
-}
-
 /// Inputs shared across a run of page-descriptor decodes (the descriptor table for span
 /// lookups, the raw plan, the in-memory file bytes, the fixed row stride, and whether the
 /// column-major fill is permitted).
@@ -727,6 +709,10 @@ struct ColumnarDecodeCtx<'a> {
     window: super::raw::PageWindow<'a>,
     row_len: usize,
     columnar: bool,
+    /// Called after each page with the running counters, for callers that report progress
+    /// while the scan runs. Parallel workers pass `None`: they publish their counters once
+    /// per chunk instead, on a thread that is not the one delivering batches.
+    page_tap: Option<&'a dyn Fn(&ScanStats)>,
 }
 
 /// Decode a run of page descriptors, invoking `consume` on each *full* batch (the caller is
@@ -833,6 +819,9 @@ where
                 return Ok(ControlFlow::Break(()));
             }
         }
+        if let Some(tap) = ctx.page_tap {
+            tap(stats);
+        }
     }
     Ok(ControlFlow::Continue(()))
 }
@@ -850,12 +839,12 @@ const fn store_batch_counters(stats: &mut ScanStats, counters: super::batch::Bat
     stats.batch_fallback_cells = counters.fallback;
 }
 
-/// A parallel streamed scan, fully decided before any thread starts.
+/// A two-pass streamed scan, fully decided before any thread starts.
 ///
-/// Exists to keep [`ScanBuilder::plan_parallel_stream`] and the `thread::scope` that consumes
-/// it readable apart: one picks chunk sizes, read spans and worker counts from geometry, the
-/// other only spawns and collects.
-struct ParallelStreamPlan<'a> {
+/// Exists to keep [`ScanBuilder::plan_two_pass_stream`] and the runs that consume it readable
+/// apart: one picks chunk sizes, read spans and worker counts from geometry, the others only
+/// decode and collect.
+struct TwoPassStreamPlan<'a> {
     /// Page descriptors cut into per-chunk slices. A chunk is both the unit of work and the
     /// batch boundary.
     chunks: Vec<&'a [crate::internal::PageDescriptor]>,
@@ -880,17 +869,31 @@ struct ParallelStreamPlan<'a> {
 pub enum SourceDeclined {
     /// The one-pass scan, and what ruled it out.
     OnePass(super::fused::FusedDecline),
-    /// The parallel two-pass scan: fewer than two workers, or fewer than two pages.
-    TwoPassParallel,
+    /// The streamed two-pass scan, in either of its forms: the source is a path and only one
+    /// worker was resolved, so no thread is left to read ahead of the decode.
+    TwoPassStream,
 }
 
-enum ParallelStreamDecision<'a> {
-    /// This scan is not a fit — too few pages or workers. The caller falls back.
+enum TwoPassDecision<'a> {
+    /// A streamed source with a single worker: there is no second thread to read ahead while
+    /// this one decodes. The caller falls back to row streaming.
     NotApplicable,
     /// The rows are zero bytes wide, so there is nothing to decode. Distinct from
     /// `NotApplicable`: falling back would just rediscover the same emptiness.
-    NothingToScan,
-    Run(ParallelStreamPlan<'a>),
+    NothingToScan {
+        workers: usize,
+    },
+    Run(TwoPassStreamPlan<'a>),
+}
+
+/// Which form of the two-pass scan a resolved worker count means. One worker decodes the
+/// chunks inline on the calling thread; more than one spawns them.
+const fn two_pass_source(workers: usize) -> crate::PageSource {
+    if workers > 1 {
+        crate::PageSource::TwoPassParallel
+    } else {
+        crate::PageSource::TwoPassSerial
+    }
 }
 
 /// Inputs every chunk decode shares. The descriptor table is passed separately because the
@@ -902,6 +905,10 @@ pub(super) struct DescriptorChunkContext<'a> {
     pub capacity_hint_rows: usize,
     pub row_len: usize,
     pub columnar: bool,
+    /// Threads the accumulator may use to materialise a batch. One per chunk when chunks are
+    /// decoded in parallel, since the cores are already spoken for; the resolved budget when a
+    /// single worker runs the whole scan.
+    pub materialize_threads: usize,
 }
 
 pub(super) enum StreamedBatchMessage {
@@ -915,21 +922,29 @@ pub(super) enum StreamedBatchMessage {
     Error(Error),
 }
 
-pub(super) fn stream_batches_for_descriptor_chunk(
+/// Decode one chunk of page descriptors into batches, handing each to `consume`.
+///
+/// The whole of a chunk's decode: its own accumulator, the per-page choice between the tiled
+/// and row-major fills, and the flush of whatever is left at the end. Where the batches go is
+/// the only thing that differs between a worker thread and a single-worker scan running on
+/// the calling thread, and that is `consume`.
+fn decode_descriptor_chunk<C>(
     window: super::raw::PageWindow<'_>,
     descriptor_table: &crate::internal::PageDescriptorTable,
     descriptor_chunk: &[crate::internal::PageDescriptor],
-    chunk_idx: usize,
     context: &DescriptorChunkContext<'_>,
-    tx: &SyncSender<StreamedBatchMessage>,
-    stop: &AtomicBool,
-) -> ScanStats {
+    page_tap: Option<&dyn Fn(&ScanStats)>,
+    consume: &mut C,
+) -> Result<(ScanStats, ControlFlow<()>)>
+where
+    C: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
+{
     let mut acc = BatchAccumulator::new(
         context.batch_plan.clone(),
         context.target_rows,
         context.capacity_hint_rows,
     )
-    .with_materialize_threads(1);
+    .with_materialize_threads(context.materialize_threads);
     let mut stats = ScanStats::default();
     let mut decode_batches = 0u64;
 
@@ -939,21 +954,55 @@ pub(super) fn stream_batches_for_descriptor_chunk(
         window,
         row_len: context.row_len,
         columnar: context.columnar && acc.plan_can_fill_span_column_major(),
+        page_tap,
     };
 
-    // The shared routine flushes full batches through `consume`, which streams each to the
-    // collector and stops the worker when the channel closes or the consumer requested a stop.
-    let result = stream_descriptors_into_batches(
+    let mut flow = stream_descriptors_into_batches(
         &mut acc,
         &ctx,
         descriptor_chunk,
         &mut stats,
         &mut |batch| {
             decode_batches = decode_batches.saturating_add(1);
-            if tx
-                .send(StreamedBatchMessage::Batch { chunk_idx, batch })
-                .is_err()
-                || stop.load(Ordering::Relaxed)
+            consume(batch)
+        },
+    )?;
+
+    if flow.is_continue() && !acc.is_empty() {
+        let batch = acc.take_batch()?;
+        decode_batches = decode_batches.saturating_add(1);
+        flow = consume(batch)?;
+    }
+
+    stats.decode_batches = decode_batches;
+    store_batch_counters(&mut stats, acc.counters());
+    Ok((stats, flow))
+}
+
+/// A worker's view of [`decode_descriptor_chunk`]: batches go to the collector over `tx`, and
+/// the chunk stops early when the consumer asked to or the channel closed. An error is
+/// reported to the collector rather than returned, because the worker's return value is
+/// joined long after the collector has already given up.
+pub(super) fn stream_batches_for_descriptor_chunk(
+    window: super::raw::PageWindow<'_>,
+    descriptor_table: &crate::internal::PageDescriptorTable,
+    descriptor_chunk: &[crate::internal::PageDescriptor],
+    chunk_idx: usize,
+    context: &DescriptorChunkContext<'_>,
+    tx: &SyncSender<StreamedBatchMessage>,
+    stop: &AtomicBool,
+) -> ScanStats {
+    let result = decode_descriptor_chunk(
+        window,
+        descriptor_table,
+        descriptor_chunk,
+        context,
+        None,
+        &mut |batch| {
+            if stop.load(Ordering::Relaxed)
+                || tx
+                    .send(StreamedBatchMessage::Batch { chunk_idx, batch })
+                    .is_err()
             {
                 return Ok(ControlFlow::Break(()));
             }
@@ -962,30 +1011,15 @@ pub(super) fn stream_batches_for_descriptor_chunk(
     );
 
     match result {
-        Ok(flow) => {
-            if flow.is_continue() && !stop.load(Ordering::Relaxed) && !acc.is_empty() {
-                match acc.take_batch() {
-                    Ok(batch) => {
-                        decode_batches = decode_batches.saturating_add(1);
-                        let _ = tx.send(StreamedBatchMessage::Batch { chunk_idx, batch });
-                    }
-                    Err(e) => {
-                        let _ = tx.send(StreamedBatchMessage::Error(e));
-                        return stats;
-                    }
-                }
-            }
+        Ok((stats, _)) => {
+            let _ = tx.send(StreamedBatchMessage::Finished { chunk_idx });
+            stats
         }
         Err(e) => {
             let _ = tx.send(StreamedBatchMessage::Error(e));
-            return stats;
+            ScanStats::default()
         }
     }
-
-    stats.decode_batches = decode_batches;
-    store_batch_counters(&mut stats, acc.counters());
-    let _ = tx.send(StreamedBatchMessage::Finished { chunk_idx });
-    stats
 }
 
 pub(super) const fn merge_scan_stats(into: &mut ScanStats, from: &ScanStats) {
@@ -1141,20 +1175,19 @@ impl ScanBuilder<'_> {
             stats.path = stats.path.with_source(crate::PageSource::OnePass);
             return Ok(stats);
         }
-        if let Some(mut stats) = self.try_stream_batches_parallel(&plan, column_major, f)? {
-            stats.path = stats.path.with_source(crate::PageSource::TwoPassParallel);
+        // Descriptors first, then the pages decoded chunk by chunk: across threads when there
+        // is more than one worker, on this thread when there is one. Same planning, same chunk
+        // decode; the source it reports says which of the two ran.
+        if let Some(stats) = self.try_stream_batches_two_pass(&plan, column_major, f)? {
             return Ok(stats);
         }
-        if column_major
-            && plan.batch.can_fill_span_column_major()
-            && let Some(file_bytes) = column_major_file_bytes(self, true)
-        {
-            let mut stats = self.stream_batches_columnar_serial(&plan, file_bytes, f)?;
-            stats.path = stats.path.with_source(crate::PageSource::TwoPassSerial);
-            return Ok(stats);
-        }
+        // Row streaming fills a cell at a time by construction, so both axes are known here
+        // rather than observed: nothing on this path can reach the tiled fill.
         let mut stats = self.scan_batches_with_tap(f, &mut |_, _| {})?;
-        stats.path = stats.path.with_source(crate::PageSource::TwoPassSerial);
+        stats.path = crate::ScanPath {
+            source: crate::PageSource::TwoPassRowStream,
+            fill: crate::FillStrategy::RowMajor,
+        };
         Ok(stats)
     }
 
@@ -1180,85 +1213,103 @@ impl ScanBuilder<'_> {
         }
 
         let descriptors = self.ds.descriptors()?;
-        match self.plan_parallel_stream(plan, descriptors.as_ref(), column_major)? {
-            ParallelStreamDecision::Run(_) | ParallelStreamDecision::NothingToScan => {
-                return Ok((crate::PageSource::TwoPassParallel, declined));
+        match self.plan_two_pass_stream(plan, descriptors.as_ref(), column_major)? {
+            TwoPassDecision::Run(stream) => {
+                return Ok((two_pass_source(stream.workers), declined));
             }
-            ParallelStreamDecision::NotApplicable => {
-                declined.push(SourceDeclined::TwoPassParallel);
+            TwoPassDecision::NothingToScan { workers } => {
+                return Ok((two_pass_source(workers), declined));
+            }
+            TwoPassDecision::NotApplicable => {
+                declined.push(SourceDeclined::TwoPassStream);
             }
         }
 
-        // Both remaining candidates are the serial source; they differ only in the fill they
-        // are able to reach, which is why this reports one source either way.
-        Ok((crate::PageSource::TwoPassSerial, declined))
+        Ok((crate::PageSource::TwoPassRowStream, declined))
     }
 
-    /// Serial owned-batch streaming via the column-major fill. Preconditions (in-memory source,
-    /// whole-file scan, all-staged-numeric plan) are checked by the caller; non-fused pages
-    /// still stream row-major inside [`stream_descriptors_into_batches`].
-    fn stream_batches_columnar_serial<F>(
+    /// The one-worker case of the two-pass scan, run on the calling thread.
+    ///
+    /// No threads, no channel, no reordering buffer: the chunks are decoded in order and each
+    /// batch goes straight to `f`. It exists because [`Self::plan_two_pass_stream`] resolves
+    /// one worker for `Parallelism::None`, for `Threads(1)`, and for any file with a single
+    /// page in the window, and those scans want the same tiled fill as the parallel ones.
+    /// Planning it separately is what used to make it a pipeline of its own.
+    fn run_two_pass_inline<F>(
         &self,
-        plan: &ScanPlan,
-        file_bytes: &[u8],
+        stream: &TwoPassStreamPlan<'_>,
+        descriptors: &crate::internal::PageDescriptorTable,
         f: &mut F,
     ) -> Result<ScanStats>
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
-        super::raw::RawScanPlan::validate_builder(self)?;
-        let row_len = usize::from(self.ds.layout.row_len);
-        if row_len == 0 {
-            return Ok(ScanStats::default());
-        }
-        let descriptors = self.ds.descriptors()?;
-        let mut acc = BatchAccumulator::new(
-            plan.batch.clone(),
-            plan.batch_row_capacity,
-            plan.capacity_hint_rows,
-        )
-        .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
-        let ctx = ColumnarDecodeCtx {
-            descriptors: descriptors.as_ref(),
-            raw_plan: &plan.raw,
-            window: super::raw::PageWindow::whole_file(file_bytes),
-            row_len,
-            columnar: true,
+        // Guaranteed by the planner, which declines a single worker on a streamed source
+        // because there is then no second thread to read while this one decodes.
+        let Some(file_bytes) = stream.mapped else {
+            return Err(Error::internal(
+                "single-worker batch streaming requires an in-memory source",
+            ));
         };
+        let window = super::raw::PageWindow::whole_file(file_bytes);
 
-        let mut stats = ScanStats::default();
-        let mut decode_batches = 0u64;
-        let flow = stream_descriptors_into_batches(
-            &mut acc,
-            &ctx,
-            &descriptors.pages,
-            &mut stats,
-            &mut |batch| {
-                decode_batches = decode_batches.saturating_add(1);
-                f(batch)
-            },
-        )?;
-        if flow.is_continue() && !acc.is_empty() {
-            let batch = acc.take_batch()?;
-            decode_batches = decode_batches.saturating_add(1);
-            let _ = f(batch)?;
+        // Reported per page, not per chunk. A single worker is a single chunk, so chunk-end
+        // counters would leave a progress bar at zero for the whole of the scan.
+        let observer = self.progress.as_ref();
+        let emit = |stats: &ScanStats| {
+            if let Some(observer) = observer {
+                observer(crate::ScanProgress {
+                    pages_seen: stats.pages_seen,
+                    total_pages: stream.total_pages,
+                    raw_bytes_read: stats.raw_bytes_read,
+                    estimated_total_bytes: stream.estimated_total_bytes,
+                    compressed_pages: stats.compressed_pages,
+                    rows_seen: stats.rows_seen,
+                    rows_emitted: stats.rows_emitted,
+                });
+            }
+        };
+        let page_tap: Option<&dyn Fn(&ScanStats)> = observer.map(|_| &emit as &dyn Fn(&ScanStats));
+
+        let mut total = ScanStats::default();
+        let mut delivered_batches = 0u64;
+        let mut delivered_rows = 0u64;
+        for chunk in &stream.chunks {
+            let (chunk_stats, flow) = decode_descriptor_chunk(
+                window,
+                descriptors,
+                chunk,
+                &stream.context,
+                page_tap,
+                &mut |batch| {
+                    delivered_batches = delivered_batches.saturating_add(1);
+                    delivered_rows = delivered_rows
+                        .saturating_add(u64::try_from(batch.row_count).unwrap_or(u64::MAX));
+                    f(batch)
+                },
+            )?;
+            merge_scan_stats(&mut total, &chunk_stats);
+            if flow.is_break() {
+                break;
+            }
         }
 
-        stats.decode_batches = decode_batches;
-        store_batch_counters(&mut stats, acc.counters());
-        Ok(stats)
+        total.decode_batches = delivered_batches;
+        total.rows_emitted = delivered_rows;
+        Ok(total)
     }
 
-    /// Plan a parallel streamed scan, or `None` when this scan should take another path.
+    /// Plan a two-pass streamed scan, or decline so the caller falls back.
     ///
     /// Split from the run so the two can be read separately: everything here is decided before
-    /// a thread exists, and nothing here touches file bytes.
-    fn plan_parallel_stream<'p>(
+    /// a thread exists, and nothing here touches file bytes. The plan covers both the parallel
+    /// and the single-worker case; `workers` is what tells them apart.
+    fn plan_two_pass_stream<'p>(
         &'p self,
         plan: &'p ScanPlan,
         descriptors: &'p crate::internal::PageDescriptorTable,
         column_major: bool,
-    ) -> Result<ParallelStreamDecision<'p>> {
+    ) -> Result<TwoPassDecision<'p>> {
         // Chunk only the pages the window wants. A bounded scan is parallel now that the bound
         // is an absolute row range rather than a per-worker emitted-row count, so this is what
         // keeps it from also reading the rest of the file. Worker count follows the windowed
@@ -1266,9 +1317,6 @@ impl ScanBuilder<'_> {
         let window_pages = plan.raw.window().page_range(&descriptors.pages);
         let page_count = window_pages.len();
         let workers = resolved_parallel_workers(self.parallelism, page_count);
-        if workers <= 1 || page_count <= 1 {
-            return Ok(ParallelStreamDecision::NotApplicable);
-        }
 
         // Mapped and in-memory sources decode straight out of one contiguous buffer. A path
         // source has no buffer to decode from, so pages arrive as extents streamed by a small
@@ -1283,21 +1331,37 @@ impl ScanBuilder<'_> {
             _ => None,
         };
 
+        // One worker decodes inline, on the calling thread, which a buffer in memory allows and
+        // a streamed source does not: its pages arrive from a reader pool, and with a single
+        // worker there is no thread left to read while this one decodes. Those scans fall back
+        // to row streaming instead.
+        if workers <= 1 && mapped.is_none() {
+            return Ok(TwoPassDecision::NotApplicable);
+        }
+
         super::raw::RawScanPlan::validate_builder(self)?;
         let row_len = usize::from(self.ds.layout.row_len);
         if row_len == 0 {
-            return Ok(ParallelStreamDecision::NothingToScan);
+            return Ok(TwoPassDecision::NothingToScan { workers });
         }
 
         // Extent-sized chunks for streamed sources: the chunk IS the unit of I/O there, so it
         // is sized by the measured best read size rather than by worker count.
         let chunk_size = if mapped.is_some() {
-            balanced_chunk_size(
-                page_count,
-                workers,
-                self.ds.layout.rows_per_page,
-                plan.batch_row_capacity,
-            )
+            if workers == 1 {
+                // Chunks exist to give idle workers something to steal, and a chunk is also an
+                // accumulator and a batch boundary. With one worker there is nothing to
+                // balance, so cutting the file up would only add a partial batch per boundary
+                // and throw away the string dictionary built up to that point.
+                page_count.max(1)
+            } else {
+                balanced_chunk_size(
+                    page_count,
+                    workers,
+                    self.ds.layout.rows_per_page,
+                    plan.batch_row_capacity,
+                )
+            }
         } else {
             // Extent size is an I/O choice, but the chunk is also the batch boundary, so it
             // must still cover one batch — otherwise wide tables get tiny batches.
@@ -1327,7 +1391,7 @@ impl ScanBuilder<'_> {
                 .collect::<Result<Vec<_>>>()?
         };
 
-        Ok(ParallelStreamDecision::Run(ParallelStreamPlan {
+        Ok(TwoPassDecision::Run(TwoPassStreamPlan {
             chunks,
             spans,
             mapped,
@@ -1343,6 +1407,13 @@ impl ScanBuilder<'_> {
                 target_rows: plan.batch_row_capacity,
                 capacity_hint_rows: plan.capacity_hint_rows.div_ceil(workers).max(1),
                 row_len,
+                // Nothing else is decoding when a single worker runs the scan, so the batch
+                // may be materialised across the whole resolved budget rather than one thread.
+                materialize_threads: if workers == 1 {
+                    resolved_batch_materialize_threads(self.parallelism)
+                } else {
+                    1
+                },
                 // The column-major fill ignores row selection, so it only applies to whole-file
                 // scans; each worker additionally requires an all-staged-numeric plan.
                 columnar: column_major && self.row_window().is_whole_file(),
@@ -1350,14 +1421,17 @@ impl ScanBuilder<'_> {
         }))
     }
 
-    /// Run a planned parallel stream: spawn the workers, collect batches in order, join.
+    /// Run a planned two-pass stream, and report which of its two forms ran.
+    ///
+    /// One worker decodes the chunks inline and returns early; the rest of this is the
+    /// parallel form: spawn the workers, collect batches in order, join.
     ///
     /// Still long, and deliberately not split further. What remains is one `thread::scope`
     /// whose pieces all borrow the same scope-local channels, stop flag and counters; lifting
     /// either spawn branch out would mean a helper taking a dozen `&'scope` parameters, which
     /// reads worse than the loop it replaced. The planning that *could* be separated already is.
     #[allow(clippy::too_many_lines)]
-    fn try_stream_batches_parallel<F>(
+    fn try_stream_batches_two_pass<F>(
         &self,
         plan: &ScanPlan,
         column_major: bool,
@@ -1367,13 +1441,26 @@ impl ScanBuilder<'_> {
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
         let descriptors = self.ds.descriptors()?;
-        let stream = match self.plan_parallel_stream(plan, descriptors.as_ref(), column_major)? {
-            ParallelStreamDecision::NotApplicable => return Ok(None),
-            ParallelStreamDecision::NothingToScan => return Ok(Some(ScanStats::default())),
-            ParallelStreamDecision::Run(stream) => stream,
+        let stream = match self.plan_two_pass_stream(plan, descriptors.as_ref(), column_major)? {
+            TwoPassDecision::NotApplicable => return Ok(None),
+            TwoPassDecision::NothingToScan { workers } => {
+                let stats = ScanStats {
+                    path: crate::ScanPath::default().with_source(two_pass_source(workers)),
+                    ..ScanStats::default()
+                };
+                return Ok(Some(stats));
+            }
+            TwoPassDecision::Run(stream) => stream,
         };
 
-        let ParallelStreamPlan {
+        let source = two_pass_source(stream.workers);
+        if stream.workers == 1 {
+            let mut stats = self.run_two_pass_inline(&stream, descriptors.as_ref(), f)?;
+            stats.path = stats.path.with_source(source);
+            return Ok(Some(stats));
+        }
+
+        let TwoPassStreamPlan {
             chunks,
             spans,
             mapped,
@@ -1535,6 +1622,8 @@ impl ScanBuilder<'_> {
             total.rows_emitted = delivered_rows;
             Ok(total)
         })?;
+        let mut total_stats = total_stats;
+        total_stats.path = total_stats.path.with_source(source);
         Ok(Some(total_stats))
     }
 

@@ -13,27 +13,35 @@
 //!   visit_batches ────────────────────────────► borrowed-stream     row-major
 //!                                                (its own pipeline; never reaches the
 //!                                                 tiled fill, whatever the plan looks like)
-//!   collect_batches ─┬─ buffered source? ─────► one-pass         ┐
-//!                    ├─ >1 worker, >1 page? ──► two-pass-parallel │ tiled *or* row-major,
-//!                    └─ otherwise ────────────► two-pass-serial   ┘ decided per page
+//!   collect_batches ─┬─ buffered source? ─────► one-pass           ┐
+//!                    ├─ path source, 1 worker? ► two-pass-row-stream│ tiled *or* row-major,
+//!                    ├─ >1 worker? ───────────► two-pass-parallel  │ decided per page
+//!                    └─ otherwise ────────────► two-pass-serial    ┘
 //! ```
 //!
 //! The two axes are independent, which is why they are reported separately. `two-pass-serial`
-//! with a tiled fill and `two-pass-serial` with a row-major one are two of the four things
-//! that used to be called "different pipelines"; splitting the axes makes it visible that
-//! they differ only in the fill, which is the argument for merging them.
+//! with a tiled fill and `two-pass-serial` with a row-major one used to be counted as two
+//! pipelines; splitting the axes made it visible that they differ only in the fill, and they
+//! are now one code path that decides the fill per page.
 //!
-//! The first three of those four are tried in order and each declines by returning `None`,
-//! so the conditions are spread across modules rather than written in one place:
+//! `two-pass-parallel` and `two-pass-serial` are likewise one implementation: the same plan,
+//! the same chunk decode, run on worker threads or on the calling thread. The source names
+//! which, because it is what a benchmark or a profile needs to know.
+//!
+//! Each candidate declines in turn, so the conditions are spread across modules rather than
+//! written in one place:
 //!
 //! | condition | where |
 //! |---|---|
 //! | `ColumnMajorDecode` requested | [`crate::ScanBuilder::with_column_major_decode`] |
-//! | whole-file window, in-memory source | `column_major_file_bytes` in [`builder`] |
-//! | file source is a path, no cached descriptors, page geometry | [`fused::try_stream_batches_fused`] |
-//! | worker count and ordering | `try_stream_batches_parallel` in [`builder`] |
+//! | file source is a path, no cached descriptors, page geometry | [`fused::plan_fused_stream`] |
+//! | worker count, source kind, chunking and ordering | `plan_two_pass_stream` in [`builder`] |
+//! | whole-file window | `plan_two_pass_stream` in [`builder`] |
 //! | plan has a staged-numeric family | [`batch::BatchDecodePlan`] flags |
 //! | page is `FusedContiguousUncompressed` | the descriptor's `exec_class` |
+//!
+//! [`crate::ScanBuilder::predict_page_source`] runs exactly those conditions without decoding
+//! anything, and reports the candidates that declined alongside the one that won.
 //!
 //! Below that split, `stream_descriptors_into_batches` chooses per page between the tiled
 //! column-major fill and `emit_rows_from_page`.
@@ -98,9 +106,14 @@ pub enum PageSource {
     OnePass,
     /// Descriptors compiled first, then decoded across worker threads.
     TwoPassParallel,
-    /// Descriptors compiled first, then decoded on the calling thread. The parallel runner
-    /// declines below two workers or two pages, and this is what picks those up.
+    /// Descriptors compiled first, then the same chunk decode run inline on the calling
+    /// thread. This is the parallel scan with one worker, not a pipeline beside it: same
+    /// planning, same chunks, same fills, no threads.
     TwoPassSerial,
+    /// Descriptors compiled first, then rows streamed one at a time into the batch
+    /// accumulator. The fallback when the chunked scan declines, which is a path source with
+    /// a single worker: its pages arrive from a reader pool that needs a thread of its own.
+    TwoPassRowStream,
     /// Descriptors compiled first, then batches that borrow the page rather than owning
     /// their bytes. A pipeline of its own: it does not go through
     /// `stream_descriptors_into_batches`, so it can never reach the tiled fill.
@@ -118,6 +131,7 @@ impl PageSource {
             Self::OnePass => "one-pass",
             Self::TwoPassParallel => "two-pass-parallel",
             Self::TwoPassSerial => "two-pass-serial",
+            Self::TwoPassRowStream => "two-pass-row-stream",
             Self::BorrowedStream => "borrowed-stream",
             Self::RowStream => "row-stream",
         }
