@@ -15,6 +15,80 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-31
+
+Five correctness fixes, four of which change what a scan returns for files that were
+previously read wrong. **Read the first entry before upgrading: row counts move.**
+
+Every fix was checked against `ReadStat` built at `da9fcaa`, which is master after
+WizardMac/ReadStat#366 and the only build that gets deleted rows right. The released
+ReadStat 1.1.9 that `haven` and `pyreadstat` ship does not.
+
+### Fixed
+
+- **Deleted rows were delivered as live data.** SAS tombstones a deleted row rather
+  than removing it: the row stays on the page, stays counted by the header, and a
+  reader that does not look for the mark returns it. Two representations, so two
+  mechanisms: an uncompressed page carries a trailing bitmap, and a compressed row is
+  tombstoned by its subheader pointer's compression code `0x05`.
+
+  **Row counts change for affected files.** Measured on fixtures already in the corpus:
+  `all_rand_normal_with_deleted` 37 to 36, `all_rand_normal_with_deleted2` 37 to 32,
+  `data_page_with_deleted` 998 to 997, `pandas/load_log` 2097 to 2088. `comp_deleted`
+  previously failed to open at all with "unsupported subheader compression mode 5"; the
+  four before it read cleanly and were quietly wrong, which is the worse failure.
+
+  Gated on a deleted-row count read once per file from the ROW_SIZE subheader, so a file
+  that declares no deletions does one extra `u64` read at metadata time and nothing per
+  page. A page with tombstones cannot stay on the fused contiguous path, which addresses
+  rows as `data_start + i * row_len` and has nowhere to put a hole, so such a page is
+  demoted to explicit spans over the live rows. Only pages that need it pay.
+
+- **A 64-bit subheader signature was compared four bytes at a time.** On a little-endian
+  64-bit file the signature is eight bytes. Any `f64` whose low word happened to equal a
+  signature constant was then taken for a subheader, so an uncompressed row stored in a
+  subheader whose first numeric column holds such a value was skipped or failed to parse.
+  Little-endian 64-bit is what SAS on Linux writes, so this is the ordinary shape rather
+  than an exotic one. Upstream is WizardMac/ReadStat#369, whose fix breaks big-endian:
+  porting it verbatim broke twelve files here, so the big-endian branch is kept as it was.
+
+- **A 64-bit catalog lost every format past its first index page.** `XLSR` records on
+  index pages after the first were read at a hardcoded offset 16, which is the page
+  header's width on a 32-bit catalog; on a 64-bit one it is 32. A 64-bit catalog big
+  enough to spill past its first index page silently dropped every format the later
+  records point at, with no error and no warning. The offset now comes from
+  `IndexLayout` beside the other widths that switch on `uses_u64_pointers`.
+
+  Upstream as WizardMac/ReadStat#370, unmerged. **No fixture here exercises the 64-bit
+  multi-page path**: the only 64-bit catalog in the corpus is three pages and the loop
+  starts at page three. Correct by construction and pinned by a unit test, but recorded
+  rather than papered over.
+
+- **A column's format is three fields, and we read one of them.** SAS stores a format as
+  a name, a width and a decimal count. Reading the name alone made `DATETIME22.3` come
+  back as `DATETIME`, and made the plain numeric `w.d` format -- which has a width and no
+  name -- look like no format at all.
+
+  Additive, not a change in meaning: `ColumnMeta::format` still holds the bare name, so
+  `infer_logical_type` and any caller matching on `"DATE"` is untouched. The new
+  `ColumnMeta::format_width` and `ColumnMeta::format_digits` sit beside it, and the new
+  `ColumnMeta::format_spec()` assembles the three the way SAS writes them. Upstream this
+  is WizardMac/ReadStat#364 for the fields and #361 for the unnamed `w.d`.
+
+  Verified against every column of every fixture rather than a sample: 4,782 columns
+  against `readstat_variable_get_format`, zero differences.
+
+- **Every header timestamp was twenty years and a day late.** The conversion added the
+  SAS-to-Unix epoch offset where it had to subtract it, and used 315,532,800 where the
+  correct value is 315,619,200: 1960-01-01 to 1970-01-01 spans 3,653 days, not 3,652,
+  because 1960, 1964 and 1968 are all leap years. The two errors compound, so a file SAS
+  wrote in May 2015 was reported as May 2035.
+
+  Only the two header fields were affected. Date and datetime *values* in the data were
+  always right: they go through `SasDateTime::SECONDS_SAS_TO_UNIX`, which has the correct
+  constant, and the conversion now uses that same constant so the two cannot drift apart
+  again. Verified across 318 files, both timestamps each, no differences.
+
 ### Added
 
 - **`sas7bdat::VERSION`**, the crate's own version. It exists because nothing
@@ -25,8 +99,43 @@ earlier are written by hand.
   exposes it as `sas7bdat_polars.__core_version__` and the CLI prints it under
   `--version` (`-V` stays short).
 
-  Being a new public item, this makes the next release a minor one under Cargo's
-  SemVer rules, so it is 0.9.0 rather than 0.8.2 whenever it goes out.
+- **`ScanPath`, and a way to ask for it without scanning.** This crate has several decode
+  pipelines, they share almost every symbol below the point where they diverge, and
+  nothing said which one a given scan took. That cost a wrong conclusion: an optimisation
+  was written for the tiled column-major fill, benchmarked through `visit_batches`, and
+  appeared to do nothing, because `visit_batches` never reaches that fill however the plan
+  is shaped.
+
+  `ScanStatsSummary::path` now reports what ran, on two independent axes: `PageSource`
+  (how pages were read and planned) and `FillStrategy` (how page bytes became columns).
+  They are separate because `ColumnMajorDecode::Off` changes the second and leaves the
+  first alone, which a single name reported identically.
+  `ScanBuilder::predict_path(ScanEntry)` answers the same question ahead of a full scan,
+  and `ScanBuilder::predict_page_source()` answers the source half for free, returning the
+  candidates that declined and why as `Vec<SourceDeclined>`.
+
+### Changed
+
+- **Trimming and classifying a narrow string cell takes two word loads instead of two
+  byte scans.** Cells up to sixteen bytes wide -- the common register shape -- find their
+  trailing padding with a SWAR zero-and-space test over the first and last eight bytes
+  rather than scanning twice. Measured at 1.38x on the string-path benchmark.
+
+- **A short string cell is copied as a fixed sixteen bytes and cut back**, rather than
+  calling `memcpy` for five. Safe code: a fixed-size `extend_from_slice` followed by
+  `truncate`, no `unsafe`. Measured at 1.14x.
+
+- **The tiled column-major fill now runs when a string column is present**, filling the
+  numerics column-major over the same span and the remaining families row by row, where
+  before a single string column sent the whole page row-major. Measured at 1.17x.
+
+- **The serial batch scan is gone as a separate pipeline.** A single worker now runs the
+  same plan and the same chunk decode as the parallel scan, inline on the calling thread,
+  so it can no longer drift from it. A path source with one worker still falls back to row
+  streaming, since its pages arrive from a reader pool that needs a thread of its own;
+  that fallback reports the new `PageSource::TwoPassRowStream` rather than sharing a name
+  with the inline run. Single-threaded owned-batch scans now report progress per page.
+  Costs about 35 us per scan in planning, which does not scale with rows.
 
 ## [0.8.1] - 2026-08-24
 
@@ -480,7 +589,8 @@ different implementation with a `dataset`/`parser`/`cell` module layout and a bu
      `v0.7.0` in particular was a wheel release in July, unrelated to 0.7.0 here.
      `sas7bdat-v0.5.0` was never created, so 0.5.0 has no release to link to. -->
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.8.1...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.9.0...HEAD
+[0.9.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.0
 [0.8.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.8.1
 [0.8.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.8.0
 [0.7.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.7.0
