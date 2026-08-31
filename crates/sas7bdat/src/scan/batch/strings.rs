@@ -12,8 +12,8 @@
 use super::{
     CompiledColumnPlan, CompiledDecodeKernel, DICT_ID_NONE, Error, OwnedBatchColumnBuilder, Result,
     RowDecodePlan, StageLookupHit, StagedStringLookup, StringDecodeKernel, TrimMode, TrimmedString,
-    TrustedOffsets, push_dictionary_id, push_variable_valid, push_variable_valid_without_validity,
-    simd_from_utf8, staged_entry_to_dictionary_id,
+    TrustedOffsets, push_dictionary_id, push_variable_valid, push_variable_valid_overcopy,
+    push_variable_valid_without_validity, simd_from_utf8, staged_entry_to_dictionary_id,
 };
 use crate::columnar::BLANK_ID;
 use crate::scan::DecodedUtf8BatchValue;
@@ -327,7 +327,30 @@ pub(super) fn append_direct_utf8_borrowed_batch_column(
     }
 }
 
-#[inline]
+/// The four buffers a UTF-8 batch column is built from.
+type Utf8BuilderParts<'a> = (
+    &'a mut TrustedOffsets,
+    &'a mut Vec<u8>,
+    &'a mut Option<Vec<u64>>,
+    &'a mut Option<Vec<u32>>,
+);
+
+/// The ASCII arm of the owned path, lifted out so its caller stays inside the line budget.
+fn push_ascii_cell(
+    builder: Utf8BuilderParts<'_>,
+    row: &[u8],
+    start: usize,
+    keep: usize,
+) -> Result<bool> {
+    let (offsets, data, valid, dictionary_ids) = builder;
+    // No width gate. One was tried, on the reasoning that a two-byte cell should not move
+    // sixteen bytes, and it measured worse on the very fixtures it was meant to protect:
+    // the fixed move beats the `memcpy` call even when most of what it moves is discarded.
+    push_variable_valid_overcopy(offsets, data, valid, row, start, keep)?;
+    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
+    Ok(true)
+}
+
 pub(super) fn append_direct_utf8_owned_batch_column(
     source: (&RowDecodePlan, &CompiledColumnPlan, &[u8]),
     batch_column: &mut OwnedBatchColumnBuilder,
@@ -361,9 +384,14 @@ pub(super) fn append_direct_utf8_owned_batch_column(
                         return Ok(true);
                     }
                     TrimmedCellClass::Ascii(bytes) => {
-                        push_variable_valid(offsets, data, valid, bytes)?;
-                        push_dictionary_id(dictionary_ids, DICT_ID_NONE);
-                        return Ok(true);
+                        // The dominant case on register data: every cell is ASCII, so this
+                        // is the arm that runs 158,000 times for a single lmdb year.
+                        return push_ascii_cell(
+                            (offsets, data, valid, dictionary_ids),
+                            row,
+                            column.start,
+                            bytes.len(),
+                        );
                     }
                     TrimmedCellClass::NonAscii(trimmed) => (trimmed, trimmed.bytes),
                 };
