@@ -502,7 +502,7 @@ impl<'a> ScanBuilder<'a> {
                     &mut |_| Ok(ControlFlow::Break(())),
                     &mut |_, _| {},
                 )?;
-                stats.path = crate::ScanPath::BorrowedBatches;
+                stats.path = crate::ScanPath::borrowed_batches();
                 stats
             }
             crate::ScanEntry::Rows => self.scan_rows(&mut |_| Ok(ControlFlow::Break(())))?,
@@ -520,7 +520,7 @@ impl<'a> ScanBuilder<'a> {
     {
         self.scan_batches_borrowed_with_tap(&mut f, &mut |_, _| {})
             .map(|mut stats| {
-                stats.path = crate::ScanPath::BorrowedBatches;
+                stats.path = crate::ScanPath::borrowed_batches();
                 stats.summary()
             })
     }
@@ -739,6 +739,10 @@ where
             let page_row_base: u64 = descriptor.row_base.into();
             let row_count_u64 = u64::try_from(row_count).unwrap_or(u64::MAX);
             stats.fused_pages = stats.fused_pages.saturating_add(1);
+            // Observed, not assumed: a source that permits tiling can still fill row-major
+            // when the plan or the page class declines, and that difference is exactly what
+            // a benchmark of the tiled fill needs to know.
+            stats.path.fill = crate::FillStrategy::Tiled;
             // Whole-file scan (the column-major precondition), so every row is seen and emitted.
             stats.rows_seen = stats.rows_seen.saturating_add(row_count_u64);
             stats.rows_emitted = stats.rows_emitted.saturating_add(row_count_u64);
@@ -774,6 +778,9 @@ where
                 row_off += span;
             }
         } else {
+            if matches!(stats.path.fill, crate::FillStrategy::Unrecorded) {
+                stats.path.fill = crate::FillStrategy::RowMajor;
+            }
             let stopped = super::raw::emit_rows_from_page(
                 ctx.raw_plan,
                 ctx.descriptors,
@@ -943,6 +950,13 @@ pub(super) const fn merge_scan_stats(into: &mut ScanStats, from: &ScanStats) {
     into.rows_seen = into.rows_seen.saturating_add(from.rows_seen);
     into.rows_emitted = into.rows_emitted.saturating_add(from.rows_emitted);
     into.pages_seen = into.pages_seen.saturating_add(from.pages_seen);
+    // A worker that tiled anything makes the whole scan tiled: the question the caller is
+    // asking is whether the fill ran at all, not on what fraction of pages.
+    if matches!(from.path.fill, crate::FillStrategy::Tiled) {
+        into.path.fill = crate::FillStrategy::Tiled;
+    } else if matches!(into.path.fill, crate::FillStrategy::Unrecorded) {
+        into.path.fill = from.path.fill;
+    }
     into.fused_pages = into.fused_pages.saturating_add(from.fused_pages);
     into.indexed_pages = into.indexed_pages.saturating_add(from.indexed_pages);
     into.compressed_pages = into.compressed_pages.saturating_add(from.compressed_pages);
@@ -987,7 +1001,7 @@ impl ScanBuilder<'_> {
     {
         let plan = ScanPlan::new(self)?;
         let mut stats = scan_raw_rows_with_plan(self, &plan.raw, f)?;
-        stats.path = crate::ScanPath::RawRows;
+        stats.path = crate::ScanPath::rows();
         Ok(stats)
     }
 
@@ -1026,7 +1040,7 @@ impl ScanBuilder<'_> {
             };
             f(row)
         })?;
-        stats.path = crate::ScanPath::Rows;
+        stats.path = crate::ScanPath::rows();
         Ok(stats)
     }
 
@@ -1082,11 +1096,11 @@ impl ScanBuilder<'_> {
         if let Some(mut stats) =
             super::fused::try_stream_batches_fused(self, &plan, column_major, f)?
         {
-            stats.path = crate::ScanPath::FusedOnePass;
+            stats.path = stats.path.with_source(crate::PageSource::OnePass);
             return Ok(stats);
         }
         if let Some(mut stats) = self.try_stream_batches_parallel(&plan, column_major, f)? {
-            stats.path = crate::ScanPath::ParallelDescriptors;
+            stats.path = stats.path.with_source(crate::PageSource::TwoPassParallel);
             return Ok(stats);
         }
         if column_major
@@ -1094,11 +1108,11 @@ impl ScanBuilder<'_> {
             && let Some(file_bytes) = column_major_file_bytes(self, true)
         {
             let mut stats = self.stream_batches_columnar_serial(&plan, file_bytes, f)?;
-            stats.path = crate::ScanPath::ColumnarSerial;
+            stats.path = stats.path.with_source(crate::PageSource::TwoPassSerial);
             return Ok(stats);
         }
         let mut stats = self.scan_batches_with_tap(f, &mut |_, _| {})?;
-        stats.path = crate::ScanPath::RowMajorTap;
+        stats.path = stats.path.with_source(crate::PageSource::TwoPassSerial);
         Ok(stats)
     }
 

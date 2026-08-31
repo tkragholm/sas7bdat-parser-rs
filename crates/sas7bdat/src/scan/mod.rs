@@ -7,16 +7,21 @@
 //! diverge, so a profile of one looks like a profile of another.
 //!
 //! ```text
-//!   visit_raw_rows ─────────────────────────────► RawRows
-//!   visit_rows ─────────────────────────────────► Rows
-//!   visit_batches ──────────────────────────────► BorrowedBatches
-//!                                                 (borrows the page; never reaches the
-//!                                                  tiled fill, whatever the plan looks like)
-//!   collect_batches / scan_batches ─┬─ fused? ──► FusedOnePass         ┐
-//!                                   ├─ parallel? ► ParallelDescriptors │ these three reach
-//!                                   ├─ columnar? ► ColumnarSerial      ┘ the tiled fill
-//!                                   └─ else ────► RowMajorTap
+//!                                              page source          fill
+//!   visit_raw_rows ───────────────────────────► row-stream          n/a
+//!   visit_rows ───────────────────────────────► row-stream          n/a
+//!   visit_batches ────────────────────────────► borrowed-stream     row-major
+//!                                                (its own pipeline; never reaches the
+//!                                                 tiled fill, whatever the plan looks like)
+//!   collect_batches ─┬─ buffered source? ─────► one-pass         ┐
+//!                    ├─ >1 worker, >1 page? ──► two-pass-parallel │ tiled *or* row-major,
+//!                    └─ otherwise ────────────► two-pass-serial   ┘ decided per page
 //! ```
+//!
+//! The two axes are independent, which is why they are reported separately. `two-pass-serial`
+//! with a tiled fill and `two-pass-serial` with a row-major one are two of the four things
+//! that used to be called "different pipelines"; splitting the axes makes it visible that
+//! they differ only in the fill, which is the argument for merging them.
 //!
 //! The first three of those four are tried in order and each declines by returning `None`,
 //! so the conditions are spread across modules rather than written in one place:
@@ -78,69 +83,134 @@ pub use builder::ScanBuilder;
 #[cfg(feature = "arrow")]
 pub use plan::SAS_LOGICAL_TYPE_KEY;
 
-/// Which decode pipeline a scan ran through.
+/// How a scan read and planned the file's pages.
 ///
-/// There are several, they are chosen by a chain of conditions spread over the builder, the
+/// One of the two axes of [`ScanPath`]. Independent of [`FillStrategy`]: any source can be
+/// paired with either fill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+pub enum PageSource {
+    /// Not recorded. For a completed scan this is a bug in the recording, not a source.
+    #[default]
+    Unrecorded,
+    /// Descriptors compiled and rows decoded from the same reads, in one pass over the file.
+    /// Chosen only for a path source, which is the buffered backend, which is the
+    /// network-share case: one pass halves the bytes moved and that is the whole cost there.
+    OnePass,
+    /// Descriptors compiled first, then decoded across worker threads.
+    TwoPassParallel,
+    /// Descriptors compiled first, then decoded on the calling thread. The parallel runner
+    /// declines below two workers or two pages, and this is what picks those up.
+    TwoPassSerial,
+    /// Descriptors compiled first, then batches that borrow the page rather than owning
+    /// their bytes. A pipeline of its own: it does not go through
+    /// `stream_descriptors_into_batches`, so it can never reach the tiled fill.
+    BorrowedStream,
+    /// Rows streamed without batching: `visit_rows` and `visit_raw_rows`.
+    RowStream,
+}
+
+impl PageSource {
+    /// A short stable name, for labelling a benchmark or a profile.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unrecorded => "unrecorded",
+            Self::OnePass => "one-pass",
+            Self::TwoPassParallel => "two-pass-parallel",
+            Self::TwoPassSerial => "two-pass-serial",
+            Self::BorrowedStream => "borrowed-stream",
+            Self::RowStream => "row-stream",
+        }
+    }
+}
+
+/// How a scan turned page bytes into columns.
+///
+/// The other axis of [`ScanPath`], and the one that matters when timing the tiled fill.
+/// `ColumnMajorDecode::Off` changes this and leaves [`PageSource`] alone, which is why the
+/// two are reported separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+pub enum FillStrategy {
+    /// Not recorded, or the scan produced no batches to fill.
+    #[default]
+    Unrecorded,
+    /// Rows are not materialised into columns at all: the row and raw-row entries.
+    NotApplicable,
+    /// One cell at a time, in row order. Every cell pays a column lookup, a match on the
+    /// builder variant, and branches on values fixed for the whole column.
+    RowMajor,
+    /// At least one page filled column-major, a tile at a time, with that dispatch hoisted
+    /// out of the inner loop.
+    Tiled,
+}
+
+impl FillStrategy {
+    /// A short stable name, for labelling a benchmark or a profile.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unrecorded => "unrecorded",
+            Self::NotApplicable => "n/a",
+            Self::RowMajor => "row-major",
+            Self::Tiled => "tiled",
+        }
+    }
+}
+
+/// Which decode pipeline a scan ran through, on both axes.
+///
+/// This crate has several, chosen by a chain of conditions spread over the builder, the
 /// batch plan and the page descriptors, and **the symbols below the split are shared**, so a
 /// flat profile of one is indistinguishable from a flat profile of another. That has already
 /// cost one wrong conclusion: an optimisation was written for the tiled fill, measured
 /// through `visit_batches`, and appeared to do nothing because `visit_batches` never reaches
 /// it.
 ///
-/// Every scan records the path it took in [`ScanStatsSummary::path`], and
-/// [`crate::ScanBuilder::predict_path`] answers the same question without running anything.
-/// A test asserts the two agree across the corpus, which is what stops the prediction
-/// drifting away from the selection it describes.
+/// The two axes are deliberately separate. Reporting a single name conflated them, so
+/// `ColumnMajorDecode::Off` was indistinguishable from `On`: both changed the fill and
+/// neither changed the source.
+///
+/// Every scan records this in [`ScanStatsSummary::path`], and
+/// [`crate::ScanBuilder::predict_path`] answers the same question without a full scan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
-pub enum ScanPath {
-    /// Not recorded, which for a completed scan is a bug in the recording rather than a path.
-    #[default]
-    Unrecorded,
-    /// One pass that compiles page descriptors and decodes from the same reads.
-    /// [`crate::scan::fused`], reached only for a whole-file scan.
-    FusedOnePass,
-    /// Descriptors compiled first, then decoded across worker threads.
-    ParallelDescriptors,
-    /// Descriptors compiled first, then decoded on this thread through the column-major
-    /// entry point. Requires a whole-file scan of an in-memory source.
-    ColumnarSerial,
-    /// The general row-major path, which every other case falls back to.
-    RowMajorTap,
-    /// Batches that borrow the page rather than owning their bytes. A different pipeline
-    /// again: it does **not** go through `stream_descriptors_into_batches`, so the tiled
-    /// column-major fill never applies to it.
-    BorrowedBatches,
-    /// Row-at-a-time visiting, not batched at all.
-    Rows,
-    /// Raw row slices, no decode.
-    RawRows,
+pub struct ScanPath {
+    /// How pages were read and planned.
+    pub source: PageSource,
+    /// How page bytes became columns.
+    pub fill: FillStrategy,
 }
 
 impl ScanPath {
-    /// Whether this path can reach the tiled column-major fill for a fused page.
-    ///
-    /// The answer is no for most of them, which is the thing that is easy to get wrong.
-    #[must_use]
-    pub const fn can_reach_column_major_fill(self) -> bool {
-        matches!(
-            self,
-            Self::FusedOnePass | Self::ParallelDescriptors | Self::ColumnarSerial
-        )
+    pub(crate) const fn borrowed_batches() -> Self {
+        Self {
+            source: PageSource::BorrowedStream,
+            fill: FillStrategy::RowMajor,
+        }
     }
 
-    /// A short stable name, for labelling a benchmark or a profile.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Unrecorded => "unrecorded",
-            Self::FusedOnePass => "fused-one-pass",
-            Self::ParallelDescriptors => "parallel-descriptors",
-            Self::ColumnarSerial => "columnar-serial",
-            Self::RowMajorTap => "row-major-tap",
-            Self::BorrowedBatches => "borrowed-batches",
-            Self::Rows => "rows",
-            Self::RawRows => "raw-rows",
+    pub(crate) const fn rows() -> Self {
+        Self {
+            source: PageSource::RowStream,
+            fill: FillStrategy::NotApplicable,
         }
+    }
+
+    pub(crate) const fn with_source(self, source: PageSource) -> Self {
+        Self { source, ..self }
+    }
+
+    /// Whether the tiled column-major fill actually ran. **Ask this before trusting a
+    /// benchmark of that fill**: a scan can be on a source that permits tiling and still
+    /// fill row-major, because the plan or the page class declined.
+    #[must_use]
+    pub const fn used_tiled_fill(self) -> bool {
+        matches!(self.fill, FillStrategy::Tiled)
+    }
+
+    /// `source/fill`, for a benchmark id or a profile label.
+    #[must_use]
+    pub fn label(self) -> String {
+        format!("{}/{}", self.source.as_str(), self.fill.as_str())
     }
 }
 

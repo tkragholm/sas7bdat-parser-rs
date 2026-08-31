@@ -97,7 +97,7 @@ pub fn path_label(
 ) -> String {
     configure(dataset.scan())
         .predict_path(entry)
-        .map_or_else(|_| "unknown".to_owned(), |path| path.as_str().to_owned())
+        .map_or_else(|_| "unknown".to_owned(), sas7bdat::ScanPath::label)
 }
 
 /// A benchmark id carrying the pipeline it measures: `name[parallel-descriptors]/param`.
