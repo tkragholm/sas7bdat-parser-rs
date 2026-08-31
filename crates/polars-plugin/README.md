@@ -58,6 +58,15 @@ lf = sp.scan_sas("data.sas7bdat", catalog_path="formats.sas7bcat")
 schema = sp.schema_for_file("data.sas7bdat")
 ```
 
+## Where this differs from `pyreadstat`
+
+**Deleted rows are excluded.** SAS tombstones a deleted row rather than removing it:
+the row stays on the page and stays counted by the header. This plugin recognises the
+mark, in both the uncompressed and the compressed representation, and drops those rows.
+The ReadStat 1.1.9 that `pyreadstat` ships does not, so on a file with deletions this
+plugin returns fewer rows, and the difference is `pyreadstat`'s. ReadStat built after
+[#366](https://github.com/WizardMac/ReadStat/pull/366) agrees with this plugin.
+
 ## Performance & threading
 
 Benchmarked on a 2.1 GB / 4041-column file (warm cache): a full `.collect()` takes

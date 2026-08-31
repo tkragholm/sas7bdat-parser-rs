@@ -40,6 +40,14 @@ ISO-8859-1 leaves as control characters and real SAS-on-Windows files use for
 curly quotes, dashes and the euro sign. `haven` decodes those as controls, so the
 two packages differ on exactly those bytes.
 
+**Deleted rows are excluded, and `haven` returns them.** SAS tombstones a deleted
+row rather than removing it: the row stays on the page and stays counted by the
+header. `fastsas` recognises the mark, in both the uncompressed and the compressed
+representation, and drops those rows. The ReadStat 1.1.9 that `haven` ships does
+not, so on a file with deletions `fastsas` returns fewer rows than `haven` and the
+difference is `haven`'s. ReadStat built after
+[#366](https://github.com/WizardMac/ReadStat/pull/366) agrees with `fastsas`.
+
 SAS variable labels are attached as each column's `label` attribute, matching
 `haven` byte for byte: trailing ASCII padding is dropped (SAS writes a label at
 its declared width), while a leading space — or a trailing non-breaking space — is

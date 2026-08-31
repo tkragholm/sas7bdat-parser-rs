@@ -7,6 +7,16 @@ The large binary fixture corpus is intentionally kept out of git. Only this
 README stays tracked. Populate the directory locally when running broad parser
 validation or benchmarks.
 
+### Known gap: `ahs2013n.sas7bdat`
+
+Referenced throughout this file and by `crates/polars-plugin/tests`, and **not in the
+corpus**. 21 of the 24 Python plugin tests open with `assert FIXTURE.exists()` against
+it and fail immediately when it is absent, so without it that suite is effectively three
+tests. The `just bench-plugin-vs-raw` and `just bench-plugins-single` defaults name it
+too. No other file in the corpus carries its `DEGREE` or `LMED` columns, so nothing can
+stand in for it. It is public US Census AHS 2013 national data, so it can be fetched
+again rather than recreated.
+
 ## Source and coverage
 
 - `raw_data/pandas/`: copied from pandas SAS test corpus (BSD-3-Clause)

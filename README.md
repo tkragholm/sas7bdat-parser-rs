@@ -28,6 +28,9 @@ binaries and Python wheels instead of a C build toolchain.
 - Row range selection
 - `WINDOWS-1252` and UTF-8 encoding support
 - Companion `.sas7bcat` catalog support for hydrating value labels
+- Deleted rows are recognised and excluded, in both the uncompressed and the compressed
+  representation (see [Related work](#related-work): released ReadStat does not do this)
+- Every scan reports which decode pipeline it took, and can be asked before it runs
 
 ## Usage
 
@@ -35,10 +38,10 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sas7bdat = "0.3"
+sas7bdat = "0.9"
 
 # With Arrow output support:
-sas7bdat = { version = "0.3", features = ["arrow"] }
+sas7bdat = { version = "0.9", features = ["arrow"] }
 ```
 
 ### Stream decoded rows
@@ -103,7 +106,15 @@ This repository is a Cargo workspace:
 |---|---|
 | `sas7bdat` (`crates/sas7bdat/`) | Core parser library (published to crates.io) |
 | `sas7bdat-cli` (`crates/sas7bdat-cli/`) | The `sas7bdat` CLI (`convert`/`info`/`head`/`completions`), plus compatibility and profiling binaries |
+| `sas7bdat-convert` (`crates/sas7bdat-convert/`) | Conversion driver behind the CLI: Parquet, CSV and TSV sinks (published to crates.io) |
 | `sas7bdat-polars` (`crates/polars-plugin/`) | Polars IO plugin (Python wheel via maturin) |
+| `fastsas` (`crates/r-plugin/`) | R binding: `read_sas()` into a data frame, via extendr |
+| `fastsasconvert` (`crates/r-convert-plugin/`) | R binding for the conversion driver |
+
+The two R packages sit outside the Cargo workspace and depend on `sas7bdat` **by version**
+rather than by path, so a tarball built with `R CMD build` resolves it from crates.io.
+`crates/*/src/.cargo/config.toml` patches that back to this checkout for local work, and
+`scripts/check-versions.sh` guards the two from drifting apart.
 
 ## CLI tools
 
@@ -173,8 +184,11 @@ maturin build --release          # produce a wheel under target/wheels/
 
 ## Building
 
-Requires Rust nightly — the core crate uses portable SIMD (`#![feature(portable_simd)]`).
-The pinned toolchain is in `rust-toolchain.toml`.
+Builds on stable. The pinned toolchain is in `rust-toolchain.toml`, at an exact version
+rather than floating on `stable`, so a new release's clippy lints turn CI red when someone
+chooses to bump it rather than on the Thursday Rust ships. Only the opt-in `nightly-simd`
+feature, which swaps the default `fearless_simd` backend for `std::simd`, needs a nightly
+toolchain.
 
 ```sh
 cargo build --release
@@ -235,7 +249,14 @@ references and prior art for the (reverse-engineered, undocumented) SAS7BDAT for
   [BioStatMatt/sas7bdat](https://github.com/BioStatMatt/sas7bdat)).
 
 No code from these projects is included; outputs are validated against ReadStat,
-`pyreadstat`, and `haven` used as external oracles. A handful of small test fixtures
+`pyreadstat`, and `haven` used as external oracles.
+
+**Where this reader deliberately disagrees with them:** deleted rows. SAS tombstones a
+deleted row rather than removing it, and ReadStat 1.1.9 — which is what `haven` and
+`pyreadstat` ship — returns those rows as data. This reader excludes them, so its row
+counts are lower than theirs on affected files. ReadStat built after
+[#366](https://github.com/WizardMac/ReadStat/pull/366) agrees with this reader; that is the
+build used as the oracle here. A handful of small test fixtures
 originate from the pyreadstat and Parso test corpora (Apache-2.0) — see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
