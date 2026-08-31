@@ -2,8 +2,9 @@ use crate::{
     encoding::resolve_encoding,
     error::{Error, Result},
     internal::{
-        HeaderInfo, LayoutPlan, PageKind, classify_page, parse_subheader_signature, read_u16,
-        read_u32, read_u64,
+        HeaderInfo, LayoutPlan, PageKind, SIG_COLUMN_ATTRS, SIG_COLUMN_FORMAT, SIG_COLUMN_NAME,
+        SIG_COLUMN_SIZE, SIG_COLUMN_TEXT, SIG_ROW_SIZE, classify_page, parse_subheader_signature,
+        read_u16, read_u32, read_u64,
     },
     metadata::{ColumnMeta, CompressionKind, DatasetMetadata, LogicalType},
     pages::walk_pages,
@@ -15,13 +16,6 @@ use std::{
     io::{Read, Seek},
     ops::ControlFlow,
 };
-
-const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
-const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
-const SIG_COLUMN_TEXT: u32 = 0xFFFF_FFFD;
-const SIG_COLUMN_NAME: u32 = 0xFFFF_FFFF;
-const SIG_COLUMN_ATTRS: u32 = 0xFFFF_FFFC;
-const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
 
 /// Absolute ceiling on the column table, as a resource limit rather than a format rule.
 ///

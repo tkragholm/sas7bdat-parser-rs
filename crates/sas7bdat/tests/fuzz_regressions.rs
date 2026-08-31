@@ -29,7 +29,8 @@ const EXPECTED: &[(&str, &str)] = &[
     // 2.5 GiB before any row was read; libFuzzer caught them as OOMs within 90
     // seconds of the target first running. The declared count is now refuted against
     // the file's own geometry, so they fail in constant space.
-    ("oom_declared_column_count_8k", "columns"),
+    // `_8k` moved to `EXPECTED_NO_DIAGNOSTIC` below: it no longer reaches the column
+    // guard, so its message is now incidental. `_32k` still pins that diagnostic.
     ("oom_declared_column_count_32k", "columns"),
     // Found on the very next run, once the OOM above stopped truncating it. A numeric
     // column declared 67 bytes wide reached `numeric_bits`, whose `unreachable!` arm
@@ -52,6 +53,14 @@ const EXPECTED: &[(&str, &str)] = &[
 /// contract is that the run finishes. Whatever error they do or do not return is
 /// incidental and must not be pinned.
 const EXPECTED_NO_DIAGNOSTIC: &[&str] = &[
+    // Was pinned to "columns" until the 64-bit subheader signature started being read as
+    // eight bytes rather than four. This artifact's `COLUMN_SIZE` carries a mutated upper
+    // word (`0x40200000` where a real one is zero), so it is now refused as data before any
+    // column count is declared, and the file fails for a missing `ROW_SIZE` instead. Still
+    // refused, still in constant space, which is what the artifact exists to prove; which
+    // guard catches it is not. `oom_declared_column_count_32k` still covers the column
+    // diagnostic itself.
+    "oom_declared_column_count_8k",
     // 9 KB, 204 rows, 4 columns — a plausible-looking file whose declared `rows_per_page`
     // and row count together drove `BatchAccumulator::new` to ask for 876 GB through
     // `OwnedBatchColumnBuilder::with_capacity_hint`. Reached only via `visit_batches`.

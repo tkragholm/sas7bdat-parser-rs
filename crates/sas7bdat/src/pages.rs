@@ -2,8 +2,9 @@ use crate::{
     error::{Error, Result},
     internal::{
         LayoutPlan, PageDescriptor, PageDescriptorTable, PageExecClass, PageKind, RowSpan,
-        RowSpanKind, SAS_PAGE_TYPE_COMP, classify_page, parse_subheader_signature, read_u32,
-        read_u64,
+        RowSpanKind, SAS_PAGE_TYPE_COMP, SIG_COLUMN_ATTRS, SIG_COLUMN_FORMAT, SIG_COLUMN_LIST,
+        SIG_COLUMN_NAME, SIG_COLUMN_SIZE, SIG_COLUMN_TEXT, SIG_COUNTS, SIG_ROW_SIZE, classify_page,
+        parse_subheader_signature, read_u32, read_u64,
     },
     types::{ByteOffset, PageIndex, PageSlice, RowIndex},
 };
@@ -14,14 +15,6 @@ use std::{
 };
 
 const SUBHEADER_POINTER_OFFSET: usize = 8;
-const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
-const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
-const SIG_COLUMN_TEXT: u32 = 0xFFFF_FFFD;
-const SIG_COLUMN_NAME: u32 = 0xFFFF_FFFF;
-const SIG_COLUMN_ATTRS: u32 = 0xFFFF_FFFC;
-const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
-const SIG_COUNTS: u32 = 0xFFFF_FC00;
-const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
 
 pub fn walk_pages<R, F>(
     reader: &mut R,

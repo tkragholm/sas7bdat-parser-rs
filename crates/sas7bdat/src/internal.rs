@@ -163,19 +163,75 @@ pub const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> 
     }
 }
 
+// Subheader signatures. Defined once here because `layout` and `pages` both classify
+// subheaders and previously each kept its own copy of the list.
+pub const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
+pub const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
+pub const SIG_COLUMN_TEXT: u32 = 0xFFFF_FFFD;
+pub const SIG_COLUMN_NAME: u32 = 0xFFFF_FFFF;
+pub const SIG_COLUMN_ATTRS: u32 = 0xFFFF_FFFC;
+pub const SIG_COLUMN_FORMAT: u32 = 0xFFFF_FBFE;
+pub const SIG_COUNTS: u32 = 0xFFFF_FC00;
+pub const SIG_COLUMN_LIST: u32 = 0xFFFF_FFFE;
+
+/// On a 64-bit file every signature except `ROW_SIZE` and `COLUMN_SIZE` carries an all-ones
+/// upper word. That word is the only thing separating a real signature from eight bytes of
+/// data that happen to start with the right four.
+const SIG_64BIT_UPPER: u64 = 0xFFFF_FFFF_0000_0000;
+
+/// The subheader's signature, or `None` when these bytes are data rather than a signature.
+///
+/// Both callers treat `None` and an unrecognised value the same way, as "not a subheader we
+/// know", which is what makes returning `None` here safe.
+///
+/// **All eight bytes matter on a little-endian 64-bit file.** Reading only the first four and
+/// comparing against the 32-bit constants misreads any `f64` whose low word happens to equal
+/// one: an uncompressed row stored in a subheader, whose first numeric column holds such a
+/// value, is then taken for a subheader and the row is skipped or fails to parse. That is
+/// WizardMac/ReadStat#369, and little-endian 64-bit is what SAS on Linux writes, so it is the
+/// common shape rather than an exotic one.
+///
+/// The two widths lay the eight bytes out differently, and the difference is not cosmetic:
+///
+/// - **little-endian**: the whole `u64` is the value. `ROW_SIZE` and `COLUMN_SIZE` carry a
+///   zero upper word; every other signature carries an all-ones upper word. Anything else is
+///   data.
+/// - **big-endian**: the significant four bytes come first, followed by padding, *except*
+///   for the `0xFFFF_*` family, where an all-ones word comes first and the signature second.
+///
+/// Upstream's fix for #369 applies the little-endian rule to both, which breaks big-endian
+/// 64-bit files: `ReadStat` at `da9fcaa` fails on `raw_data/csharp/54-class.sas7bdat`
+/// ("A row in the file was not the expected length", 0 rows) where 1.1.9 read it. That file
+/// is big-endian 64-bit, a shape their test suite does not cover. So the big-endian branch
+/// here is deliberately the older logic, which is correct for it.
 pub fn parse_subheader_signature(header: &HeaderInfo, data: &[u8]) -> Option<u32> {
     if data.len() < header.subheader_signature_size {
         return None;
     }
-    let mut signature = read_u32(header.endianness, &data[0..4]);
-    if matches!(header.endianness, crate::metadata::Endianness::Big)
-        && header.uses_u64_pointers
-        && signature == u32::MAX
-        && data.len() >= 8
-    {
-        signature = read_u32(header.endianness, &data[4..8]);
+    if !header.uses_u64_pointers {
+        return Some(read_u32(header.endianness, &data[0..4]));
     }
-    Some(signature)
+    if data.len() < 8 {
+        return None;
+    }
+
+    if matches!(header.endianness, crate::metadata::Endianness::Big) {
+        let leading = read_u32(header.endianness, &data[0..4]);
+        return Some(if leading == u32::MAX {
+            read_u32(header.endianness, &data[4..8])
+        } else {
+            leading
+        });
+    }
+
+    let wide = read_u64(header.endianness, &data[0..8]);
+    if wide == u64::from(SIG_ROW_SIZE) || wide == u64::from(SIG_COLUMN_SIZE) {
+        return u32::try_from(wide).ok();
+    }
+    if wide & SIG_64BIT_UPPER == SIG_64BIT_UPPER {
+        return u32::try_from(wide & 0xFFFF_FFFF).ok();
+    }
+    None
 }
 
 pub const SAS_PAGE_TYPE_MASK: u16 = 0x0F00;
@@ -215,5 +271,86 @@ pub const fn classify_page(page_type: u16) -> PageKind {
         SAS_PAGE_TYPE_MIX => PageKind::Mix,
         SAS_PAGE_TYPE_AMD => PageKind::Amd,
         _ => PageKind::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::{HeaderInfo, SIG_COLUMN_TEXT, SIG_ROW_SIZE, parse_subheader_signature};
+    use crate::metadata::Endianness;
+    use crate::types::PageSize;
+
+    fn header(uses_u64_pointers: bool) -> HeaderInfo {
+        HeaderInfo {
+            endianness: Endianness::Little,
+            uses_u64_pointers,
+            page_size: PageSize(4096),
+            page_count: 1,
+            page_header_size: if uses_u64_pointers { 40 } else { 24 },
+            subheader_pointer_size: if uses_u64_pointers { 24 } else { 12 },
+            subheader_signature_size: if uses_u64_pointers { 8 } else { 4 },
+            data_offset: 0,
+            header_size: 0,
+            release: String::new(),
+            is_catalog: false,
+            pad_alignment: 0,
+        }
+    }
+
+    /// The three values `ReadStat`'s own test for `WizardMac/ReadStat#369` uses. Each is an
+    /// ordinary `f64` whose low four bytes, read alone, are a valid subheader signature.
+    /// On a 64-bit file the upper word is what distinguishes them from the real thing.
+    #[test]
+    fn doubles_that_collide_in_their_low_word_are_not_signatures() {
+        let h = header(true);
+        for value in [
+            0.001_044_974_633_145_565_9_f64, // F7 F7 F7 F7 ... looks like ROW_SIZE
+            -1.317_785_874_549_065_4e-51_f64, // F9 FF FF FF ... looks like a COLUMN_* value
+            4.484_192_964_865_350_7e-13_f64, // FD FF FF FF ... looks like COLUMN_TEXT
+        ] {
+            let bytes = value.to_le_bytes();
+            assert_eq!(
+                parse_subheader_signature(&h, &bytes),
+                None,
+                "{value:e} has a data upper word and must not read as a signature"
+            );
+            // The bug this guards: taking only the low four bytes finds a signature.
+            let low = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            assert!(
+                low == SIG_ROW_SIZE || low & 0xFFFF_FFF8 == 0xFFFF_FFF8,
+                "{value:e} was chosen because its low word collides; it no longer does"
+            );
+        }
+    }
+
+    #[test]
+    fn real_64bit_signatures_still_parse() {
+        let h = header(true);
+        // ROW_SIZE and COLUMN_SIZE carry a zero upper word.
+        let mut row_size = [0u8; 8];
+        row_size[..4].copy_from_slice(&SIG_ROW_SIZE.to_le_bytes());
+        assert_eq!(parse_subheader_signature(&h, &row_size), Some(SIG_ROW_SIZE));
+
+        // Everything else carries an all-ones upper word.
+        let mut column_text = [0xFFu8; 8];
+        column_text[..4].copy_from_slice(&SIG_COLUMN_TEXT.to_le_bytes());
+        assert_eq!(
+            parse_subheader_signature(&h, &column_text),
+            Some(SIG_COLUMN_TEXT)
+        );
+    }
+
+    /// A 32-bit file has only four bytes to go on, so its behaviour must not change.
+    #[test]
+    fn the_32bit_path_reads_four_bytes_as_before() {
+        let h = header(false);
+        assert_eq!(
+            parse_subheader_signature(&h, &SIG_COLUMN_TEXT.to_le_bytes()),
+            Some(SIG_COLUMN_TEXT)
+        );
+        assert_eq!(
+            parse_subheader_signature(&h, &0x1234_5678_u32.to_le_bytes()),
+            Some(0x1234_5678)
+        );
     }
 }
