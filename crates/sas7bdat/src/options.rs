@@ -316,13 +316,25 @@ pub enum OrderingMode {
 /// How many threads a scan may use to decode pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Parallelism {
-    /// Use every logical core (`available_parallelism`), clamped to the available work.
+    /// Every logical core (`available_parallelism`), **clamped to the work the file holds**.
+    ///
+    /// The clamp is the point. Spawning threads costs more than it saves on a small file:
+    /// timed across the corpus, twelve threads decode `cars` 2.70x *slower* than one, and
+    /// `date_format_time_loop` 1.75x slower, while `homimp` runs 3.86x faster. So `Auto`
+    /// resolves to a single worker until there are enough rows and pages to hand each thread
+    /// a real share, and a single worker is not a lesser path: it runs the same chunk decode
+    /// inline on the calling thread and still reaches the tiled fill.
+    ///
+    /// The thresholds and the evidence behind them are on `resolved_parallel_workers` in
+    /// `scan::builder`, including one file this policy is known to get wrong.
+    ///
     /// A caller running several scans at once should divide the machine between them with
-    /// [`Parallelism::Threads`].
+    /// [`Parallelism::Threads`] instead.
     Auto,
     /// One thread. Decode runs on the calling thread.
     None,
-    /// Exactly this many threads, uncapped — for callers that know their own workload.
+    /// Exactly this many threads, clamped only to the pages that exist — for callers that
+    /// know their own workload. No grain check: naming a number says you know better.
     Threads(usize),
 }
 

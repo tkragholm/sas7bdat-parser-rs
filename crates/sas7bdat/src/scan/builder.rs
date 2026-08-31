@@ -24,8 +24,8 @@ use std::{
 /// Thread budget for [`Parallelism::Auto`]: every logical core.
 ///
 /// No fixed ceiling, since a ceiling would leave most of a many-core host idle on the large
-/// files this crate targets. `resolved_parallel_workers` clamps to the available work, so
-/// small files do not over-spawn.
+/// files this crate targets. `resolved_parallel_workers` clamps this to the work the file
+/// actually holds, so small files do not over-spawn.
 ///
 /// These are `std::thread::scope` threads rather than a shared pool, so concurrent scans
 /// multiply the budget; those callers should set [`Parallelism::Threads`].
@@ -41,11 +41,59 @@ fn resolved_batch_materialize_threads(parallelism: Parallelism) -> usize {
     }
 }
 
-pub(super) fn resolved_parallel_workers(parallelism: Parallelism, work_items: usize) -> usize {
+/// Rows a scan must decode before parallelising it pays for itself, for [`Parallelism::Auto`].
+///
+/// Not a guess. Timing every corpus fixture serially against all twelve cores put the
+/// crossover in a wide gap: every file that parallelised faster had at least 17,678 rows
+/// (`rmov` 2.32x, `owner` 3.19x, `homimp` 3.86x), and every file that parallelised slower
+/// had at most 4,446 (`cars` 2.70x slower, `date_format_time_loop` 1.75x slower). 8,192 sits
+/// between them with margin on both sides.
+///
+/// **Rows, not bytes.** Bytes do not separate these at all: `owner` wins at 386 KB while
+/// `date_format_time_loop` loses at 1.5 MB. A narrow table can hold a lot of work in few
+/// bytes -- `homimp` decodes 46,641 rows out of 1.1 MB, because its rows are 24 bytes wide.
+const AUTO_MIN_ROWS_TO_PARALLELISE: u64 = 8_192;
+
+/// Pages a scan must span before parallelising it pays, since the page chunk is the unit of
+/// work handed out. Threads with nothing to steal are spawns and a channel for no gain.
+const AUTO_MIN_PAGES_TO_PARALLELISE: usize = 16;
+
+/// Workers for a scan over `work_items` pages carrying about `rows` rows.
+///
+/// `Auto` asks one question -- is there enough work here to be worth threads at all -- and
+/// then uses the machine. **A gate, not a divisor.** Dividing the row count to get a worker
+/// count was tried and measured worse than either extreme: it gave `rmov` two workers, which
+/// ran 2.7x slower than the twelve it had before and slower than one, because two workers pay
+/// the whole chunking cost (an accumulator and a string dictionary each, a channel, an
+/// ordering buffer) for barely any parallelism. Below the thresholds take one worker; above
+/// them take the machine.
+///
+/// A single worker is not a lesser path: since the serial fold it runs the same chunk decode
+/// inline on the calling thread and still reaches the tiled fill. Saying no costs a small file
+/// nothing.
+///
+/// `Threads(n)` is honoured as asked, clamped only to the pages that exist. A caller naming a
+/// number knows something this does not.
+///
+/// **Known gap.** `topical` (827 pages, 84,355 rows, 106 of its 114 columns text) decodes
+/// 1.19x *faster* serially than on twelve threads, and no threshold here catches it: it is
+/// large by every metric. The suspected cause is per-chunk cost on a wide string table, since
+/// each chunk builds its own accumulator and its own string-interning dictionary. One
+/// measurement is not enough to encode a rule, so this deliberately does not try.
+pub(super) fn resolved_parallel_workers(
+    parallelism: Parallelism,
+    work_items: usize,
+    rows: u64,
+) -> usize {
     match parallelism {
         Parallelism::Threads(n) => n.max(1).min(work_items.max(1)),
-        Parallelism::Auto => auto_thread_budget().min(work_items.max(1)),
         Parallelism::None => 1,
+        Parallelism::Auto => {
+            if rows < AUTO_MIN_ROWS_TO_PARALLELISE || work_items < AUTO_MIN_PAGES_TO_PARALLELISE {
+                return 1;
+            }
+            auto_thread_budget().min(work_items.max(1))
+        }
     }
 }
 
@@ -1316,7 +1364,22 @@ impl ScanBuilder<'_> {
         // page count, so a small limit does not spawn a thread per idle core.
         let window_pages = plan.raw.window().page_range(&descriptors.pages);
         let page_count = window_pages.len();
-        let workers = resolved_parallel_workers(self.parallelism, page_count);
+        // Rows the window will decode, from the header's declared total scaled by the share of
+        // pages the window covers.
+        //
+        // Not `layout.rows_per_page * pages`, which was tried and is not a proxy for anything:
+        // it is the value SAS declares in the ROW_SIZE subheader, and on `topical` it is under
+        // 10 while the file actually averages 102 rows per page. That estimate put an
+        // 84,355-row file below the gate and decoded it on one thread.
+        let total_pages = u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX);
+        let windowed_rows = self
+            .ds
+            .metadata()
+            .row_count
+            .saturating_mul(u64::try_from(page_count).unwrap_or(u64::MAX))
+            .checked_div(total_pages)
+            .unwrap_or(0);
+        let workers = resolved_parallel_workers(self.parallelism, page_count, windowed_rows);
 
         // Mapped and in-memory sources decode straight out of one contiguous buffer. A path
         // source has no buffer to decode from, so pages arrive as extents streamed by a small

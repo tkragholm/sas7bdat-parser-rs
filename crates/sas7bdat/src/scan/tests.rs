@@ -2490,3 +2490,58 @@ fn a_utf8_file_with_invalid_bytes_still_falls_back_to_replacement_characters() {
     assert_eq!(row_path, "K\u{FFFD}BENHAVN");
     assert_eq!(batch_path, "K\u{FFFD}BENHAVN");
 }
+
+/// The grain policy behind [`Parallelism::Auto`], pinned at the numbers it was calibrated on.
+///
+/// The first version of this divided the row count to get a worker count, and that is the
+/// mistake worth guarding: it handed `rmov` two workers, which measured 2.7x slower than the
+/// twelve it had before and slower than one, because two workers pay the whole chunking cost
+/// for barely any parallelism. `Auto` is a gate, not a divisor.
+mod auto_grain {
+    use crate::Parallelism;
+    use crate::scan::builder::resolved_parallel_workers;
+
+    fn budget() -> usize {
+        std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+    }
+
+    #[test]
+    fn too_little_work_takes_one_worker() {
+        // cars: 34 pages, 1,081 rows. Twelve threads decoded it 2.70x slower than one.
+        assert_eq!(resolved_parallel_workers(Parallelism::Auto, 34, 1_081), 1);
+        // date_format_time_loop: past the page gate, short of the row gate.
+        assert_eq!(resolved_parallel_workers(Parallelism::Auto, 47, 4_446), 1);
+        // Past the row gate, short of the page gate: too few chunks to hand out.
+        assert_eq!(resolved_parallel_workers(Parallelism::Auto, 4, 100_000), 1);
+    }
+
+    #[test]
+    fn enough_work_takes_the_machine_not_a_fraction_of_it() {
+        // rmov: 127 pages, 17,678 rows, the smallest file measured faster in parallel.
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Auto, 127, 17_678),
+            budget().min(127),
+            "Auto must not divide the row count into a worker count"
+        );
+        // homimp, which runs 3.86x faster on threads than on one.
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Auto, 140, 46_641),
+            budget().min(140)
+        );
+    }
+
+    #[test]
+    fn an_explicit_count_is_not_second_guessed() {
+        // Naming a number says the caller knows its own workload; the grain gate does not apply.
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Threads(4), 34, 1_081),
+            4
+        );
+        // Still clamped to the pages that exist, since a worker with no chunk does nothing.
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Threads(64), 8, 1_000_000),
+            8
+        );
+        assert_eq!(resolved_parallel_workers(Parallelism::None, 827, 84_355), 1);
+    }
+}
