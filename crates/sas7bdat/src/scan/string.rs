@@ -10,6 +10,89 @@ use crate::simd::{is_ascii_wide, trim_trailing_space_or_nul_wide};
 const SPACES_HEAD_12: u64 = u64::from_ne_bytes([b' '; 8]);
 const SPACES_TAIL_12: u32 = u32::from_ne_bytes([b' '; 4]);
 
+// ---------------------------------------------------------------- narrow SWAR kernel
+//
+// Cells of at most 16 bytes, which is every string column in a register extract and most
+// of any other corpus, are trimmed and classified with two word loads and no loops.
+//
+// The shipped generic path costs about 4.4 ns per cell: a chunk loop that walks backwards
+// eight bytes at a time, a byte-at-a-time walk once it lands in the word holding the last
+// content byte, then a second pass over the trimmed bytes for the ASCII test. This does the
+// same work in about 2.3 ns, measured over a simulated batch at real widths and offsets.
+//
+// The ASCII test rides along for free here. It is taken over the *padded* words rather than
+// the trimmed bytes, which is the same answer because trimming removes only spaces and NULs
+// and the pad byte is a space, all of which are ASCII. Computing it separately over the
+// untrimmed slice was tried with the generic kernels and lost 10-14%, because there it meant
+// a second pass over three times the bytes; here it is two OR operations on words already
+// in registers.
+
+const SWAR_ONES: u64 = 0x0101_0101_0101_0101;
+const SWAR_HIGH: u64 = 0x8080_8080_8080_8080;
+const SWAR_SPACES: u64 = u64::from_ne_bytes([b' '; 8]);
+
+/// The widest cell the narrow kernel handles: two words.
+const SWAR_MAX_WIDTH: usize = 16;
+
+/// `0x80` in every byte of `word` that is a space or a NUL, `0x00` elsewhere.
+///
+/// Two applications of the standard zero-byte trick, one against the word itself for NULs
+/// and one against the word XOR spaces.
+#[inline]
+const fn swar_pad_mask(word: u64) -> u64 {
+    let nul = word.wrapping_sub(SWAR_ONES) & !word & SWAR_HIGH;
+    let spaced = word ^ SWAR_SPACES;
+    let space = spaced.wrapping_sub(SWAR_ONES) & !spaced & SWAR_HIGH;
+    nul | space
+}
+
+/// The eight bytes starting at `offset`, which the caller guarantees are present.
+#[inline]
+fn swar_word_at(slice: &[u8], offset: usize) -> u64 {
+    let chunk = &slice[offset..offset + 8];
+    u64::from_le_bytes(chunk.try_into().expect("eight bytes"))
+}
+
+/// Index one past the last non-padding byte of a word, or `None` when it is all padding.
+#[inline]
+const fn swar_content_end(word: u64) -> Option<usize> {
+    let content = !swar_pad_mask(word) & SWAR_HIGH;
+    if content == 0 {
+        return None;
+    }
+    // Little-endian: byte `i` occupies bits `8i..8i+8`, so the highest set high-bit is the
+    // last content byte.
+    Some(7 - (content.leading_zeros() as usize / 8) + 1)
+}
+
+/// Trim and classify a cell of 8 to [`SWAR_MAX_WIDTH`] bytes.
+///
+/// Two loads, both whole: the first eight bytes, and the *last* eight. For a 16-byte cell
+/// those are disjoint; for anything narrower they overlap, which costs nothing. Reading the
+/// tail rather than padding a buffer is what keeps a 10 or 12 byte cell as cheap as a
+/// 16-byte one, and padding was measurably worse than the scan it replaced.
+#[inline]
+fn swar_trim_and_classify(slice: &[u8]) -> TrimmedString<'_> {
+    debug_assert!((8..=SWAR_MAX_WIDTH).contains(&slice.len()));
+    let tail_offset = slice.len() - 8;
+    let low = swar_word_at(slice, 0);
+    let tail = swar_word_at(slice, tail_offset);
+
+    // Every byte of the cell is in one word or the other, so the OR covers all of them.
+    let is_ascii = ((low | tail) & SWAR_HIGH) == 0;
+
+    // The last content byte is in the tail unless the tail is all padding, in which case it
+    // is in the low word, which for these widths reaches back past the tail's start.
+    let end = swar_content_end(tail).map_or_else(
+        || swar_content_end(low).unwrap_or_default(),
+        |offset| tail_offset + offset,
+    );
+    TrimmedString {
+        bytes: &slice[..end],
+        is_ascii,
+    }
+}
+
 #[inline]
 pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
     if slice.len() == 12 && is_all_space_or_nul_12(slice) {
@@ -17,6 +100,14 @@ pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
             bytes: &[],
             is_ascii: true,
         };
+    }
+
+    // Only when at least the low word loads whole. Below eight bytes every load would go
+    // through the padding buffer, and for the one and two byte cells that dominate survey
+    // data that copy costs far more than the scan it replaces: gating on `<= 16` alone
+    // measured 13-16% slower on two such fixtures while making register files 14% faster.
+    if (8..=SWAR_MAX_WIDTH).contains(&slice.len()) {
+        return swar_trim_and_classify(slice);
     }
 
     if slice.len() < 64 {

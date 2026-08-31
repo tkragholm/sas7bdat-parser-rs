@@ -69,11 +69,14 @@ fn trim_and_classify_ascii_fast_path_handles_all_space_width_12() {
 
 /// Differential test against the obvious implementation.
 ///
-/// `trim_and_classify_ascii` picks one of four kernels by width — a 16-lane vector, a
-/// 32-lane vector, an 8-byte word scan, or a 64-lane vector — and the interesting bugs
-/// live at the boundaries between them and in the vector kernels' zero padding. Rather
-/// than guess which cases matter, compare every width from 0 to 80 against a definition
-/// nobody can get wrong.
+/// `trim_and_classify_ascii` picks a kernel by width — the SWAR word pair for 8 to 16
+/// bytes, then a 16-lane vector, a 32-lane vector, an 8-byte word scan, or a 64-lane
+/// vector — and the interesting bugs live at the boundaries between them and in the
+/// vector kernels' zero padding. Rather than guess which cases matter, compare every
+/// width from 0 to 80 against a definition nobody can get wrong.
+///
+/// The 8-to-16 band is the one register data lands in and the one the SWAR kernel owns,
+/// so it gets an order of magnitude more patterns than the rest.
 #[test]
 fn trim_and_classify_ascii_matches_a_naive_reference() {
     fn reference(slice: &[u8]) -> (&[u8], bool) {
@@ -93,7 +96,8 @@ fn trim_and_classify_ascii_matches_a_naive_reference() {
     for len in 0..=80usize {
         // A handful of deterministic patterns per length, including all-trim,
         // all-content, and content in the last position (nothing to trim).
-        for seed in 0..24u32 {
+        let seeds = if (8..=16).contains(&len) { 400u32 } else { 24 };
+        for seed in 0..seeds {
             buf.clear();
             for i in 0..len {
                 // A cheap LCG keeps this deterministic without a dependency. `len` never
