@@ -75,6 +75,102 @@ struct FusedRun<'a> {
 /// table isn't already cached, and the scan covers every row (no limit, no row selection) —
 /// fusion plans its reads from header geometry, which only describes the whole file.
 ///
+/// Why the one-pass scan declined, so the caller can say which pipeline it got and why.
+///
+/// Every variant is a fact about the file or the request, not a failure: the two-pass path
+/// handles all of them, and several are its errors to diagnose rather than this one's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FusedDecline {
+    /// The source is mapped or in memory. One pass only pays when each read is expensive,
+    /// which is the buffered backend, which is the network case.
+    SourceIsNotAPath,
+    /// Row selection. The fill walks a page's rows by position, not by row index.
+    NotAWholeFileScan,
+    /// Descriptors are already compiled, so the second pass is already paid for.
+    DescriptorsAlreadyCached,
+    /// Zero-length page or row: nothing to decode, and the two-pass path reports it.
+    DegenerateGeometry,
+    /// A page cannot hold its own header, or the header cannot hold the fields the
+    /// classifier reads.
+    PageHeaderOutOfRange,
+    /// One worker, or one page: nothing to overlap.
+    NothingToParallelise,
+    /// The extent plan overflowed, or covered no chunks.
+    NoExtentPlan,
+}
+
+/// What the one-pass scan needs, once it has decided it applies.
+pub(super) struct FusedPlan<'a> {
+    pub path: &'a std::path::Path,
+    pub page_size: usize,
+    pub page_count: u64,
+    pub workers: usize,
+    pub spans: Vec<(u64, usize)>,
+    pub chunk_count: usize,
+}
+
+/// Decide whether the one-pass scan applies, without running it.
+///
+/// Extracted so the choice is a value rather than a side effect of trying. The executor
+/// calls this first and declines on `Err`, so there is exactly one copy of the conditions
+/// and the report cannot drift from the behaviour.
+pub(super) fn plan_fused_stream<'a>(
+    builder: &'a ScanBuilder<'_>,
+    plan: &ScanPlan,
+) -> std::result::Result<FusedPlan<'a>, FusedDecline> {
+    let FileSource::Path(path) = &builder.ds.file.source else {
+        return Err(FusedDecline::SourceIsNotAPath);
+    };
+    if !builder.row_window().is_whole_file() {
+        return Err(FusedDecline::NotAWholeFileScan);
+    }
+    if builder.ds.has_cached_descriptors() {
+        return Err(FusedDecline::DescriptorsAlreadyCached);
+    }
+
+    let layout = builder.ds.layout.as_ref();
+    let header = &layout.header;
+    let page_size = usize::from(header.page_size);
+    let page_count = header.page_count;
+    if page_size == 0 || usize::from(layout.row_len) == 0 {
+        return Err(FusedDecline::DegenerateGeometry);
+    }
+    if header.page_header_size > u32::from(header.page_size) || header.page_header_size < 8 {
+        return Err(FusedDecline::PageHeaderOutOfRange);
+    }
+
+    let workers = resolved_parallel_workers(
+        builder.parallelism,
+        usize::try_from(page_count).unwrap_or(usize::MAX),
+    );
+    if workers <= 1 || page_count <= 1 {
+        return Err(FusedDecline::NothingToParallelise);
+    }
+
+    // The extent is both the read unit and the batch boundary, so it is sized by the measured
+    // best read size but never below one batch's worth of pages.
+    let pages_per_chunk = pages_per_extent(page_size).max(pages_per_batch(
+        layout.rows_per_page,
+        plan.batch_row_capacity,
+    ));
+    let spans =
+        plan_spans_from_geometry(header.data_offset, page_size, page_count, pages_per_chunk)
+            .ok_or(FusedDecline::NoExtentPlan)?;
+    let chunk_count = spans.len();
+    if chunk_count == 0 {
+        return Err(FusedDecline::NoExtentPlan);
+    }
+
+    Ok(FusedPlan {
+        path: path.as_path(),
+        page_size,
+        page_count,
+        workers,
+        spans,
+        chunk_count,
+    })
+}
+
 /// # Errors
 ///
 /// Returns an error if reading, descriptor compilation, or decoding fails.
@@ -87,55 +183,20 @@ pub(super) fn try_stream_batches_fused<F>(
 where
     F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
 {
-    let FileSource::Path(path) = &builder.ds.file.source else {
-        return Ok(None);
-    };
-    if !builder.row_window().is_whole_file() {
-        return Ok(None);
-    }
-    if builder.ds.has_cached_descriptors() {
-        return Ok(None);
-    }
-
-    let layout = builder.ds.layout.as_ref();
-    let header = &layout.header;
-    let page_size = usize::from(header.page_size);
-    let page_count = header.page_count;
-    // Geometry the classifier assumes: a page must hold its own header, and a zero-length row
-    // means nothing to decode. Both are the two-pass path's errors to report, not this one's.
-    if page_size == 0 || usize::from(layout.row_len) == 0 {
-        return Ok(None);
-    }
-    // A page has to hold its own header, and the header has to hold the three trailing fields
-    // the classifier reads. Anything else is the two-pass path's error to report, not this
-    // one's, so decline rather than diagnose.
-    if header.page_header_size > u32::from(header.page_size) || header.page_header_size < 8 {
-        return Ok(None);
-    }
-
-    let workers = resolved_parallel_workers(
-        builder.parallelism,
-        usize::try_from(page_count).unwrap_or(usize::MAX),
-    );
-    if workers <= 1 || page_count <= 1 {
-        return Ok(None);
-    }
-
-    // The extent is both the read unit and the batch boundary, so it is sized by the measured
-    // best read size but never below one batch's worth of pages.
-    let pages_per_chunk = pages_per_extent(page_size).max(pages_per_batch(
-        layout.rows_per_page,
-        plan.batch_row_capacity,
-    ));
-    let Some(spans) =
-        plan_spans_from_geometry(header.data_offset, page_size, page_count, pages_per_chunk)
+    // Every decline is a fact about the file or the request, not a failure: the two-pass path
+    // handles all of them, and `select_page_source` reports which one it was.
+    let Ok(FusedPlan {
+        path,
+        page_size,
+        page_count,
+        workers,
+        spans,
+        chunk_count,
+    }) = plan_fused_stream(builder, plan)
     else {
         return Ok(None);
     };
-    let chunk_count = spans.len();
-    if chunk_count == 0 {
-        return Ok(None);
-    }
+    let layout = builder.ds.layout.as_ref();
 
     let run = FusedRun {
         path,

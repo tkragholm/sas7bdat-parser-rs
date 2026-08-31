@@ -119,3 +119,32 @@ fn every_entry_point_records_both_axes() {
         );
     }
 }
+
+/// The selection is now a value the executor also uses, so asking it must give the same
+/// answer as running the scan. If these diverge, the report has stopped describing the code,
+/// which is the exact failure the whole mechanism exists to prevent.
+#[test]
+fn the_free_selection_agrees_with_the_scan_it_describes() {
+    let Some(ds) = dataset() else { return };
+    for parallelism in [
+        sas7bdat::Parallelism::Auto,
+        sas7bdat::Parallelism::None,
+        sas7bdat::Parallelism::Threads(4),
+    ] {
+        let predicted = ds
+            .scan()
+            .with_parallelism(parallelism)
+            .predict_path(ScanEntry::Batches)
+            .expect("predict");
+        let actual_path = ds
+            .scan()
+            .with_parallelism(parallelism)
+            .visit_owned_batches(|_| Ok(std::ops::ControlFlow::Continue(())))
+            .expect("scan")
+            .path;
+        assert_eq!(
+            predicted.source, actual_path.source,
+            "{parallelism:?}: predicted source differs from the scan's"
+        );
+    }
+}

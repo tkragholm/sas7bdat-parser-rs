@@ -482,6 +482,26 @@ impl<'a> ScanBuilder<'a> {
     /// latter can reach the tiled column-major fill. Label a benchmark with this, or it may
     /// be measuring a path the change under test cannot reach.
     ///
+    /// Which page source an owned-batch scan will use, and why the other candidates
+    /// declined. Free: it evaluates the same conditions the scan does without decoding
+    /// anything.
+    ///
+    /// This answers only one of [`crate::ScanPath`]'s two axes. The fill is decided per page
+    /// from the descriptor's class during decode, so [`Self::predict_path`] runs a truncated
+    /// scan to report it and costs a batch.
+    ///
+    /// The declines are the useful half when a change measures as nothing: they say, for
+    /// example, that the one-pass scan was skipped because the source is mapped rather than
+    /// buffered, which is a sentence that previously required instrumenting a branch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if planning the scan or compiling descriptors fails.
+    pub fn predict_page_source(&self) -> Result<(crate::PageSource, Vec<crate::SourceDeclined>)> {
+        let plan = ScanPlan::new(self)?;
+        self.select_page_source(&plan, matches!(self.column_major, ColumnMajorDecode::On))
+    }
+
     /// # Performance
     ///
     /// The cost is **unspecified and may change**. Today this runs the real selection and
@@ -851,6 +871,19 @@ struct ParallelStreamPlan<'a> {
 }
 
 /// What planning concluded about a candidate parallel scan.
+/// A page source that was considered and passed over, with the reason it was.
+///
+/// Returned beside the choice so a caller, a log line or a bug report can say not just which
+/// pipeline ran but why the others did not. Reconstructing that previously meant
+/// instrumenting a branch and rebuilding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceDeclined {
+    /// The one-pass scan, and what ruled it out.
+    OnePass(super::fused::FusedDecline),
+    /// The parallel two-pass scan: fewer than two workers, or fewer than two pages.
+    TwoPassParallel,
+}
+
 enum ParallelStreamDecision<'a> {
     /// This scan is not a fit — too few pages or workers. The caller falls back.
     NotApplicable,
@@ -1123,6 +1156,42 @@ impl ScanBuilder<'_> {
         let mut stats = self.scan_batches_with_tap(f, &mut |_, _| {})?;
         stats.path = stats.path.with_source(crate::PageSource::TwoPassSerial);
         Ok(stats)
+    }
+
+    /// Which page source an owned-batch scan will use, and why the others declined.
+    ///
+    /// The same conditions the chain above runs, evaluated without running anything. Each
+    /// candidate's preconditions live in one place and are called from both here and the
+    /// executor, so this cannot report a choice the scan would not make.
+    ///
+    /// The one thing it cannot answer is the fill: whether a page takes the tiled or the
+    /// row-major fill is decided per page, inside the decode, from the descriptor's class.
+    /// [`Self::predict_path`] runs a truncated scan for that reason.
+    pub(super) fn select_page_source(
+        &self,
+        plan: &ScanPlan,
+        column_major: bool,
+    ) -> Result<(crate::PageSource, Vec<SourceDeclined>)> {
+        let mut declined = Vec::new();
+
+        match super::fused::plan_fused_stream(self, plan) {
+            Ok(_) => return Ok((crate::PageSource::OnePass, declined)),
+            Err(reason) => declined.push(SourceDeclined::OnePass(reason)),
+        }
+
+        let descriptors = self.ds.descriptors()?;
+        match self.plan_parallel_stream(plan, descriptors.as_ref(), column_major)? {
+            ParallelStreamDecision::Run(_) | ParallelStreamDecision::NothingToScan => {
+                return Ok((crate::PageSource::TwoPassParallel, declined));
+            }
+            ParallelStreamDecision::NotApplicable => {
+                declined.push(SourceDeclined::TwoPassParallel);
+            }
+        }
+
+        // Both remaining candidates are the serial source; they differ only in the fill they
+        // are able to reach, which is why this reports one source either way.
+        Ok((crate::PageSource::TwoPassSerial, declined))
     }
 
     /// Serial owned-batch streaming via the column-major fill. Preconditions (in-memory source,

@@ -79,7 +79,7 @@ mod raw;
 mod row_decode;
 mod string;
 
-pub use builder::ScanBuilder;
+pub use builder::{ScanBuilder, SourceDeclined};
 #[cfg(feature = "arrow")]
 pub use plan::SAS_LOGICAL_TYPE_KEY;
 

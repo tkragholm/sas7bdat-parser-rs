@@ -120,5 +120,5 @@ pub use row::{CellValue, OwnedCellValue, OwnedRow, RawRow, RowView};
 pub use scan::SAS_LOGICAL_TYPE_KEY;
 pub use scan::{
     FillStrategy, OwnedBatchScanBreakdown, PageSource, ScanBuilder, ScanEntry, ScanPath,
-    ScanProgress, ScanProgressObserver, ScanStatsSummary,
+    ScanProgress, ScanProgressObserver, ScanStatsSummary, SourceDeclined,
 };
