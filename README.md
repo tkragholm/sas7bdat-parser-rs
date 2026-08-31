@@ -219,8 +219,13 @@ With [`just`](https://github.com/casey/just):
 ```sh
 just doctor        # what is missing on this machine, and the command that fixes each
 just test-core     # the Rust core and the CLI
-just test          # the above, plus the Polars plugin (Rust and Python) and both R suites
+just test          # the above, plus the Polars plugin (Rust and Python)
+just test-all      # the above, plus both R suites
 ```
+
+`test-all` is separate from `test` because `just test-r` installs `fastsas` and
+`fastsasconvert` into your user R library, which is the only way to run their suites.
+A command that reads like it only runs tests should not change the machine.
 
 **Start with `just doctor`.** The suites depend on things a fresh clone does not have:
 a Python venv the plugin tests build into, the binary fixture corpus, and the two R

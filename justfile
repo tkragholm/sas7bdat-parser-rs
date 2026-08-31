@@ -103,6 +103,8 @@ check-polars-plugin:
 # pytest-xdist is not optional -- pytest resolves the *parent* directory's
 # pyproject.toml as its config when this repo sits inside another, and that one
 # passes `-n`.
+#
+# Create the venv the Polars plugin tests build into. Idempotent.
 setup-python:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -127,7 +129,10 @@ test-polars-plugin-rust:
 #
 # `R CMD INSTALL` compiles the binding against this working tree, through the
 # `[patch.crates-io]` in each package's `src/.cargo/config.toml`. It also installs
-# into your user R library, which is what CI does and is the point.
+# into your user R library, which is what CI does. That side effect is why this is
+# not part of `test`: reach it through `test-all`, or run it directly.
+#
+# Run both R testthat suites, installing the packages into your user R library.
 test-r:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -142,10 +147,19 @@ test-r:
 test-core:
     @cargo nextest run --release -p sas7bdat -p sas7bdat-cli
 
-test: test-core test-polars-plugin-rust test-polars-plugin test-r
+test: test-core test-polars-plugin-rust test-polars-plugin
 
-# Install the repository's git hooks. Currently one: a commit-msg check that
-# rejects a subject git-cliff would silently drop from the changelog.
+# Kept separate from `test` because `test-r` installs two packages into your user R
+# library, and a command that reads like it only runs tests should not change the
+# machine.
+#
+# Everything `test` runs, plus the R suites.
+test-all: test test-r
+
+# The one hook so far is a commit-msg check: cliff.toml filters unconventional
+# subjects, so a badly-typed commit never reaches CHANGELOG.md and nothing says so.
+#
+# Install this repository's git hooks. Run once per clone.
 install-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -157,10 +171,11 @@ install-hooks:
 doctor:
     @python3 scripts/doctor.py
 
-# Plan or run a release, including everything it forces. Prints the plan and stops
-# unless --execute is passed; safe to re-run, since it works out where it got to.
-#   just release sas7bdat 0.9.0
-#   just release sas7bdat 0.9.0 --execute
+#   just release sas7bdat 0.10.0                      # plan only
+#   just release sas7bdat 0.10.0 --execute            # local work, and push main
+#   just release sas7bdat 0.10.0 --execute --publish  # also push tags
+#
+# Plan or run a release and everything it forces. Prints the plan; re-run to resume.
 release crate version *flags:
     @python3 scripts/release.py {{crate}} {{version}} {{flags}}
 
