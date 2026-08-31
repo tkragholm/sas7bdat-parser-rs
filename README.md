@@ -217,15 +217,50 @@ cargo test -p sas7bdat
 With [`just`](https://github.com/casey/just):
 
 ```sh
-just test-core
-just test
+just doctor        # what is missing on this machine, and the command that fixes each
+just test-core     # the Rust core and the CLI
+just test          # the above, plus the Polars plugin (Rust and Python) and both R suites
 ```
+
+**Start with `just doctor`.** The suites depend on things a fresh clone does not have:
+a Python venv the plugin tests build into, the binary fixture corpus, and the two R
+packages installed into your R library. `doctor` names each gap and the recipe that
+closes it, rather than letting you find out through a maturin error that points
+somewhere else. `just setup-python` and `just test-r` create what they need.
+
+A missing corpus file makes a suite *smaller*, never silently green: the Polars tests
+skip with a banner naming the file and the count.
+
+Run `just install-hooks` once. It installs a `commit-msg` check that rejects a subject
+[git-cliff](https://git-cliff.org) would drop from the changelog, which is otherwise
+silent: `cliff.toml` sets `filter_unconventional = true`, and a commit that does not
+match a `commit_parsers` entry simply never appears in `CHANGELOG.md`.
 
 Correctness is checked with golden-parity tests that compare decoded output row-by-row
 against reference CSV snapshots, plus a broad fixture smoke suite spanning compression
 modes, encodings, and date/time types. Test fixtures are drawn in part from the
 [pandas](https://github.com/pandas-dev/pandas) SAS test corpus (BSD-3-Clause); the large
 binary corpus is kept out of git (see `fixtures/README.md`).
+
+## Releasing
+
+```sh
+just release sas7bdat 0.10.0                      # print the plan; changes nothing
+just release sas7bdat 0.10.0 --execute            # the local work, and push main
+just release sas7bdat 0.10.0 --execute --publish  # also push tags, which uploads
+```
+
+A release here is never one crate and never one step. `sas7bdat-convert` depends on the
+core by version as well as by path, so bumping the core across a `0.x` boundary forces a
+breaking release of the convert crate too; both R bindings' requirements move with them;
+and `inst/AUTHORS`, which CI gates on, cannot be regenerated until the crates are
+actually on crates.io, because `vendor-r-package.sh` strips the local `[patch]` exactly
+as `R CMD build` does.
+
+`just release` works all of that out from the manifests, prints the ordered plan with
+what is already done, and names what each remaining step waits for. It is resumable:
+every step decides for itself whether it has happened, so recovering from an
+interruption is just running it again.
 
 ## Performance
 

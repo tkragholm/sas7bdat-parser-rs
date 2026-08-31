@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Reject a commit subject that `git-cliff` would silently drop from the changelog.
+
+`cliff.toml` sets `conventional_commits = true` and `filter_unconventional = true`,
+so a subject that is not `type(scope): summary` never reaches CHANGELOG.md. Nothing
+fails: the entry simply is not there. Fourteen commits went in that way once,
+including five that changed what a scan returns, and it was only caught by reading
+`cliff.toml` before a release.
+
+The accepted types are read from `cliff.toml` rather than listed here, so this hook
+and the changelog cannot disagree. That also catches the subtler trap: a type that
+looks conventional but matches no `commit_parsers` entry (`release:`, `bench:`) is
+dropped just as silently as prose, because `filter_commits = true` drops anything
+unmatched.
+
+Installed by `just install-hooks`.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+# Subjects git itself generates, which are not the author's to reword.
+EXEMPT = re.compile(r"^(Merge|Revert|fixup!|squash!|amend!)\b")
+
+SUBJECT = re.compile(
+    r"^(?P<type>[a-z]+)"          # feat
+    r"(?:\((?P<scope>[^()]+)\))?"  # (scan)
+    r"(?P<breaking>!)?"            # feat(scan)!
+    r": (?P<summary>.+)$"
+)
+
+
+def repo_root() -> Path:
+    out = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+    )
+    return Path(out.stdout.strip())
+
+
+def parsers(cliff: Path) -> list[tuple[str, str | None]]:
+    """(type, changelog group) for each parser, `None` where the type is skipped."""
+    config = tomllib.loads(cliff.read_text())
+    found: list[tuple[str, str | None]] = []
+    for parser in config.get("git", {}).get("commit_parsers", []):
+        message = parser.get("message", "")
+        match = re.fullmatch(r"\^([a-z]+)", message)
+        if not match:
+            continue
+        found.append((match.group(1), None if parser.get("skip") else parser.get("group")))
+    return found
+
+
+def main() -> int:
+    path = Path(sys.argv[1])
+    subject = path.read_text(encoding="utf-8").splitlines()[0].strip()
+
+    if not subject or subject.startswith("#") or EXEMPT.match(subject):
+        return 0
+
+    root = repo_root()
+    known = parsers(root / "cliff.toml")
+    groups = dict(known)
+
+    match = SUBJECT.match(subject)
+    if match and match.group("type") in groups:
+        return 0
+
+    print(f"\n  commit-msg: this subject would not reach the changelog.\n", file=sys.stderr)
+    print(f"    {subject}\n", file=sys.stderr)
+    if not match:
+        print("  Expected `type(scope): summary`, lower-case type, space after the colon.",
+              file=sys.stderr)
+    else:
+        print(f"  `{match.group('type')}` is not one of cliff.toml's commit_parsers, so"
+              f" filter_commits drops it.", file=sys.stderr)
+
+    print("\n  Types, and where each lands in CHANGELOG.md:\n", file=sys.stderr)
+    for name, group in known:
+        where = group if group else "(not in the changelog, deliberately)"
+        print(f"    {name + ':':<11} {where}", file=sys.stderr)
+    print("\n  Append `!` after the scope for a breaking change: feat(scan)!: ...",
+          file=sys.stderr)
+    print("  To commit anyway: git commit --no-verify\n", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

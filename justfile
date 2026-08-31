@@ -93,17 +93,76 @@ build-cli-wheel:
 check-polars-plugin:
     @cargo check --manifest-path crates/polars-plugin/Cargo.toml
 
-test-polars-plugin:
+# The venv `test-polars-plugin` builds into. A fresh clone has none, and maturin's
+# failure for a missing one ("could not determine version from interpreter name")
+# points nowhere near the cause. Idempotent, so `test-polars-plugin` can just call it.
+#
+# The polars pin is read from the package rather than written here: the extension
+# links polars-rust through pyo3-polars, so the installed Python polars has to match
+# the version it was built against, and two copies of that number would drift.
+# pytest-xdist is not optional -- pytest resolves the *parent* directory's
+# pyproject.toml as its config when this repo sits inside another, and that one
+# passes `-n`.
+setup-python:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -x .venv/bin/python ]; then
+      uv venv --python 3.12 .venv
+    fi
+    pin=$(awk -F'"' '/^dependencies = \[/{print $2}' crates/polars-plugin/pyproject.toml)
+    uv pip install --quiet --python .venv/bin/python "$pin" pytest pytest-xdist
+    printf 'python env ready: %s\n' "$(.venv/bin/python --version)"
+
+test-polars-plugin: setup-python
     @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml --features arrow,extension-module
     @.venv/bin/python -m pytest crates/polars-plugin/tests
 
 test-polars-plugin-rust:
     @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib
 
+# The R suites, which used to live only in ci.yml. They are the strongest evidence
+# the core still behaves, because several of their assertions compare against
+# `haven`, and their bundled fixtures are small enough to resolve to a single worker
+# -- so they exercise the inline scan that `cargo test` alone barely reaches.
+#
+# `R CMD INSTALL` compiles the binding against this working tree, through the
+# `[patch.crates-io]` in each package's `src/.cargo/config.toml`. It also installs
+# into your user R library, which is what CI does and is the point.
+test-r:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for pkg in r-plugin:fastsas r-convert-plugin:fastsasconvert; do
+      dir="crates/${pkg%%:*}"
+      name="${pkg##*:}"
+      printf '==> %s\n' "$name"
+      R CMD INSTALL "$dir" > /dev/null
+      ( cd "$dir/tests" && Rscript testthat.R )
+    done
+
 test-core:
     @cargo nextest run --release -p sas7bdat -p sas7bdat-cli
 
-test: test-core test-polars-plugin-rust test-polars-plugin
+test: test-core test-polars-plugin-rust test-polars-plugin test-r
+
+# Install the repository's git hooks. Currently one: a commit-msg check that
+# rejects a subject git-cliff would silently drop from the changelog.
+install-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    hooks="$(git rev-parse --git-path hooks)"
+    ln -sf "$(pwd)/scripts/commit-msg" "$hooks/commit-msg"
+    printf 'installed: %s/commit-msg -> scripts/commit-msg\n' "$hooks"
+
+# What is missing on this machine before anything else will make sense.
+doctor:
+    @python3 scripts/doctor.py
+
+# Plan or run a release, including everything it forces. Prints the plan and stops
+# unless --execute is passed; safe to re-run, since it works out where it got to.
+#   just release sas7bdat 0.9.0
+#   just release sas7bdat 0.9.0 --execute
+release crate version *flags:
+    @python3 scripts/release.py {{crate}} {{version}} {{flags}}
 
 # Bump one crate's version and everything coupled to it: the Python package's
 # pyproject.toml, the lockfiles that pin it -- two of which live outside the
