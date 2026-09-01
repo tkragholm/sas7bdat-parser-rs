@@ -431,6 +431,11 @@ fn sas_info(py: Python<'_>, path: &str, catalog_path: Option<&str>) -> PyResult<
     info.set_item("row_length_bytes", meta.row_len)?;
     info.set_item("page_count", meta.page_count)?;
     info.set_item("encoding", meta.encoding.clone())?;
+    info.set_item("compression", format!("{:?}", meta.compression))?;
+    // The ROW_SIZE subheader's own rows-per-page, which some writers leave at 0. That zero
+    // used to collapse a whole file into one decode chunk, so every thread but one idled;
+    // reporting it is how a delivery can be checked for the shape without decoding anything.
+    info.set_item("rows_per_page", ds.declared_rows_per_page())?;
     if let Ok(fs_meta) = std::fs::metadata(path) {
         info.set_item("size_bytes", fs_meta.len())?;
     }

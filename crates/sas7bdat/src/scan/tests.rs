@@ -2564,5 +2564,8 @@ fn a_declared_zero_rows_per_page_falls_back_to_the_average() {
     // to need `target_rows` pages, so an 826-page file becomes a single chunk and no worker
     // past the first has anything to take.
     assert_eq!(pages_per_batch(0, 4_096), 4_096);
-    assert_eq!(pages_per_batch(effective_rows_per_page(0, 84_355, 827), 4_096), 41);
+    assert_eq!(
+        pages_per_batch(effective_rows_per_page(0, 84_355, 827), 4_096),
+        41
+    );
 }
