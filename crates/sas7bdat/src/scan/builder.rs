@@ -75,11 +75,11 @@ const AUTO_MIN_PAGES_TO_PARALLELISE: usize = 16;
 /// `Threads(n)` is honoured as asked, clamped only to the pages that exist. A caller naming a
 /// number knows something this does not.
 ///
-/// **Known gap.** `topical` (827 pages, 84,355 rows, 106 of its 114 columns text) decodes
-/// 1.19x *faster* serially than on twelve threads, and no threshold here catches it: it is
-/// large by every metric. The suspected cause is per-chunk cost on a wide string table, since
-/// each chunk builds its own accumulator and its own string-interning dictionary. One
-/// measurement is not enough to encode a rule, so this deliberately does not try.
+/// There was a known gap here: `topical` decoded faster serially than on twelve threads, and
+/// the note said the suspected cause was per-chunk cost on a wide string table. That was
+/// wrong, and measuring it rather than believing it found the real cause in
+/// [`effective_rows_per_page`]: the file was being cut into a single chunk, so the threads had
+/// nothing to take. It now decodes 4.7x faster in parallel and no exception is needed.
 pub(super) fn resolved_parallel_workers(
     parallelism: Parallelism,
     work_items: usize,
@@ -117,10 +117,31 @@ fn balanced_chunk_size(
     by_oversubscribe.max(pages_per_batch(rows_per_page, target_rows))
 }
 
+/// Rows a page holds, for sizing a chunk.
+///
+/// `layout.rows_per_page` is the figure SAS declares in the `ROW_SIZE` subheader, and on some
+/// files it is **zero**: `topical` declares 0 while actually averaging 102 rows across its 827
+/// pages. [`pages_per_batch`] then divides by `max(1)` and answers "one batch needs
+/// `target_rows` pages", which for an 826-page file cut the entire scan into a single chunk.
+/// Twelve workers, one of them with anything to do, plus a channel, an ordering buffer and a
+/// collector thread for nothing -- which is the whole of why that file decoded 1.18x *slower*
+/// on twelve threads than on one, and why adding workers past the second changed nothing.
+///
+/// The declared value is kept where it exists, since it is SAS's own and a page's fill is
+/// uneven; the row-count average only stands in when there is no declared value at all.
+pub(super) fn effective_rows_per_page(declared: u64, row_count: u64, page_count: u64) -> u64 {
+    if declared > 0 {
+        return declared;
+    }
+    row_count.checked_div(page_count).unwrap_or(0).max(1)
+}
+
 /// Pages needed to fill one target batch. Each chunk decodes with its own accumulator and
 /// flushes at its end, so chunk size sets batch size. Sizing a chunk by bytes alone gives
 /// 136-row batches on a table with 4 rows per page, where per-batch overhead exceeds what
 /// the larger reads save.
+///
+/// Callers pass [`effective_rows_per_page`], not the raw declared figure.
 pub(super) fn pages_per_batch(rows_per_page: u64, target_rows: usize) -> usize {
     usize::try_from(
         u64::try_from(target_rows)
@@ -1410,6 +1431,11 @@ impl ScanBuilder<'_> {
 
         // Extent-sized chunks for streamed sources: the chunk IS the unit of I/O there, so it
         // is sized by the measured best read size rather than by worker count.
+        let rows_per_page = effective_rows_per_page(
+            self.ds.layout.rows_per_page,
+            self.ds.metadata().row_count,
+            u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX),
+        );
         let chunk_size = if mapped.is_some() {
             if workers == 1 {
                 // Chunks exist to give idle workers something to steal, and a chunk is also an
@@ -1418,20 +1444,13 @@ impl ScanBuilder<'_> {
                 // and throw away the string dictionary built up to that point.
                 page_count.max(1)
             } else {
-                balanced_chunk_size(
-                    page_count,
-                    workers,
-                    self.ds.layout.rows_per_page,
-                    plan.batch_row_capacity,
-                )
+                balanced_chunk_size(page_count, workers, rows_per_page, plan.batch_row_capacity)
             }
         } else {
             // Extent size is an I/O choice, but the chunk is also the batch boundary, so it
             // must still cover one batch — otherwise wide tables get tiny batches.
-            super::extent::pages_per_extent(plan.raw.page_size()).max(pages_per_batch(
-                self.ds.layout.rows_per_page,
-                plan.batch_row_capacity,
-            ))
+            super::extent::pages_per_extent(plan.raw.page_size())
+                .max(pages_per_batch(rows_per_page, plan.batch_row_capacity))
         };
         let chunks: Vec<&[crate::internal::PageDescriptor]> =
             descriptors.pages[window_pages].chunks(chunk_size).collect();

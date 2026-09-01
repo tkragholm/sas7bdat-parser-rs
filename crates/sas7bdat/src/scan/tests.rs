@@ -2545,3 +2545,24 @@ mod auto_grain {
         assert_eq!(resolved_parallel_workers(Parallelism::None, 827, 84_355), 1);
     }
 }
+
+/// A declared rows-per-page of zero, which is what `topical` carries and what cost that file
+/// a 4.7x parallel speedup by cutting an 826-page scan into one chunk.
+#[test]
+fn a_declared_zero_rows_per_page_falls_back_to_the_average() {
+    use crate::scan::builder::{effective_rows_per_page, pages_per_batch};
+
+    // Declared wins where it exists: it is SAS's own figure and page fill is uneven.
+    assert_eq!(effective_rows_per_page(234, 46_641, 140), 234);
+    // Absent, the row-count average stands in. topical: 84,355 rows over 827 pages.
+    assert_eq!(effective_rows_per_page(0, 84_355, 827), 102);
+    // Neither available: one page per batch-row rather than a division by zero.
+    assert_eq!(effective_rows_per_page(0, 0, 827), 1);
+    assert_eq!(effective_rows_per_page(0, 100, 0), 1);
+
+    // The consequence, which is the part that mattered: with the raw zero, one batch claims
+    // to need `target_rows` pages, so an 826-page file becomes a single chunk and no worker
+    // past the first has anything to take.
+    assert_eq!(pages_per_batch(0, 4_096), 4_096);
+    assert_eq!(pages_per_batch(effective_rows_per_page(0, 84_355, 827), 4_096), 41);
+}

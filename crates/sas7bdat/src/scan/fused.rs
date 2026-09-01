@@ -152,7 +152,13 @@ pub(super) fn plan_fused_stream<'a>(
     // The extent is both the read unit and the batch boundary, so it is sized by the measured
     // best read size but never below one batch's worth of pages.
     let pages_per_chunk = pages_per_extent(page_size).max(pages_per_batch(
-        layout.rows_per_page,
+        // Same fallback as the two-pass planner: a declared zero would size an extent at
+        // `target_rows` pages and collapse the scan to one chunk.
+        super::builder::effective_rows_per_page(
+            layout.rows_per_page,
+            builder.ds.metadata().row_count,
+            page_count,
+        ),
         plan.batch_row_capacity,
     ));
     let spans =

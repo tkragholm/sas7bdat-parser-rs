@@ -236,6 +236,14 @@ impl Dataset {
         self.columns().iter().find(|column| column.name() == name)
     }
 
+    /// The ROW_SIZE subheader's declared rows-per-page, which is 0 on some files.
+    /// Exposed for the scan planner's own diagnostics, not part of the stable surface.
+    #[must_use]
+    #[doc(hidden)]
+    pub fn declared_rows_per_page(&self) -> u64 {
+        self.layout.rows_per_page
+    }
+
     #[must_use]
     pub const fn projection(&self) -> ProjectionBuilder<'_> {
         ProjectionBuilder::new(self)

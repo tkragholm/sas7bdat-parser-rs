@@ -326,7 +326,7 @@ pub enum Parallelism {
     /// inline on the calling thread and still reaches the tiled fill.
     ///
     /// The thresholds and the evidence behind them are on `resolved_parallel_workers` in
-    /// `scan::builder`, including one file this policy is known to get wrong.
+    /// `scan::builder`.
     ///
     /// A caller running several scans at once should divide the machine between them with
     /// [`Parallelism::Threads`] instead.
