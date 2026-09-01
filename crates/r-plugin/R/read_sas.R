@@ -49,10 +49,13 @@
 #' @param io_backend How to read the file: `"auto"` (default) memory-maps local
 #'   files and reads network shares sequentially, `"mmap"` always memory-maps,
 #'   `"buffered"` always reads sequentially. See the "Network drives" section.
-#' @param threads Decode threads. `NULL` (default) uses every logical core. Set a
-#'   smaller number to leave the machine room for other work, or to bound memory:
-#'   in-flight batches scale with this. Read concurrency is capped separately by
-#'   the reader and is not affected.
+#' @param threads Decode threads. `NULL` (the default) lets the reader decide from
+#'   the file: it uses every logical core on a file with enough rows and pages to
+#'   repay the threads, and one otherwise. That is not a slower path for small
+#'   files, it is a faster one -- spawning twelve threads for a few thousand rows
+#'   costs more than it saves. Set a number to override, to leave the machine room
+#'   for other work, or to bound memory: in-flight batches scale with it. Read
+#'   concurrency is capped separately by the reader and is not affected.
 #' @return A tibble (or a base `data.frame` if the `tibble` package is not
 #'   installed).
 #' @export

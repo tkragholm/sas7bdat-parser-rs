@@ -508,10 +508,14 @@ fn read_impl(
     // Decode threads only. Read concurrency is capped separately by the core (four
     // in-flight reads), so raising this does not multiply requests against a share; what it
     // does scale is the memory held by in-flight batches.
-    let parallelism = threads.map_or_else(
-        || Parallelism::Threads(std::thread::available_parallelism().map_or(1, |n| n.get())),
-        Parallelism::Threads,
-    );
+    // `threads = NULL` defers to the core rather than taking every logical core, which is
+    // what it used to do. Unconditional threads is wrong at the small end: measured across
+    // the corpus, twelve of them decode `cars` 2.70x *slower* than one, and
+    // `date_format_time_loop` 1.75x slower, because the spawn and the per-chunk setup cost
+    // more than the work. `Parallelism::Auto` carries a gate calibrated on those
+    // measurements, and a single worker is not a lesser path -- it runs the same chunk decode
+    // inline and still reaches the tiled fill.
+    let parallelism = threads.map_or(Parallelism::Auto, Parallelism::Threads);
     let temporal = TemporalDecodeOptions::builder()
         .decode_dates(false)
         .decode_datetimes(false)

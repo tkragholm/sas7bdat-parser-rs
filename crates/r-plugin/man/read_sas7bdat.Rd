@@ -39,10 +39,13 @@ local files and reads network shares sequentially, \code{"mmap"} always
 memory-maps, \code{"buffered"} always reads sequentially. See the "Network
 drives" section.}
 
-\item{threads}{Decode threads. \code{NULL} (default) uses every logical core.
-Set a smaller number to leave the machine room for other work, or to bound
-memory: in-flight batches scale with this. Read concurrency is capped
-separately by the reader and is not affected.}
+\item{threads}{Decode threads. \code{NULL} (the default) lets the reader decide
+from the file: it uses every logical core on a file with enough rows and pages
+to repay the threads, and one otherwise. That is not a slower path for small
+files, it is a faster one -- spawning twelve threads for a few thousand rows
+costs more than it saves. Set a number to override, to leave the machine room
+for other work, or to bound memory: in-flight batches scale with it. Read
+concurrency is capped separately by the reader and is not affected.}
 }
 \value{
 A tibble (or a base \code{data.frame} if the \pkg{tibble} package is not

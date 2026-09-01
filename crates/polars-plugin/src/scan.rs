@@ -213,25 +213,6 @@ pub fn batch_reader_from_dataset(
     }
 }
 
-// Parallel "grain size": the minimum work one decode worker should be handed before
-// the fixed cost of spawning it (rayon task + per-chunk accumulator + the ordered
-// page-chunk merge) is worth paying. The grain is in WORK units, not wall-clock, so a
-// single conservative default holds across hardware: spawn/merge overhead is ~tens of
-// microseconds everywhere, and these grains keep each worker busy for well over a
-// millisecond regardless of CPU. This is the standard parallel-cutoff practice — scale
-// the worker COUNT to the file (cf. rayon `with_min_len`, TBB partitioner grain)
-// instead of tuning a per-machine byte threshold. Both can be overridden via env, but
-// the defaults need no tuning.
-//
-// Each worker should decode ≳ this many uncompressed bytes (row_count × row_len). At
-// typical decode throughput that is several ms of work — comfortably amortising setup.
-#[cfg(feature = "arrow")]
-const DEFAULT_MIN_BYTES_PER_WORKER: u64 = 4 * 1024 * 1024;
-// …and span ≳ this many pages, since page chunks are the unit of parallelism (no point
-// making 12 one-page chunks out of a 12-page file).
-#[cfg(feature = "arrow")]
-const DEFAULT_MIN_PAGES_PER_WORKER: u64 = 8;
-
 /// Whether to use the column-major page decode. It is markedly faster for wide all-numeric
 /// tables and falls back to row-major automatically when a scan can't use it (string/temporal
 /// columns, row limits, non-in-memory sources), so it is safe to leave on. On by default; set
@@ -244,71 +225,32 @@ fn column_major_decode() -> ColumnMajorDecode {
     }
 }
 
+/// Resolve the parallelism for one file's page decode.
+///
+/// The plugin used to compute its own worker count here, on the reasoning that `Auto` was a
+/// generic all-cores default while the plugin knew the workload. It did not: its grain rule
+/// counted *decoded bytes*, and bytes do not predict this. Timed across the corpus, that rule
+/// serialised `owner` (3.19x faster in parallel), `rmov` (2.32x) and `homimp` (3.86x) -- three
+/// of the register-shaped files it was written to help -- because a narrow table holds a lot
+/// of rows in few bytes. `homimp` decodes 46,641 rows out of 1.1 MB.
+///
+/// `Parallelism::Auto` now carries a gate calibrated on those measurements and counts rows
+/// rather than bytes, so there is one policy instead of two disagreeing ones. Deferring to it
+/// means the plugin improves whenever the core does.
+///
+/// `SAS7BDAT_SCAN_THREADS` still wins where it is set: the inter-file pool uses it to bound
+/// the total core budget across files, which is a fact about the caller that no per-file rule
+/// can know.
 #[cfg(feature = "arrow")]
-fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(default)
-}
-
-/// How many decode threads were requested (env `SAS7BDAT_SCAN_THREADS`, else all
-/// logical cores). The inter-file pool sets this per worker to keep the total core
-/// budget bounded; standalone scans get every core. This is the CAP — the grain-size
-/// rule below may hand out fewer for small files.
-#[cfg(feature = "arrow")]
-fn requested_scan_threads() -> usize {
-    std::env::var("SAS7BDAT_SCAN_THREADS")
+fn scan_parallelism() -> Parallelism {
+    match std::env::var("SAS7BDAT_SCAN_THREADS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|n| *n > 0)
-        .or_else(|| {
-            std::thread::available_parallelism()
-                .ok()
-                .map(std::num::NonZero::get)
-        })
-        .unwrap_or(1)
-}
-
-/// Resolve the parallelism for one file's page decode.
-///
-/// The crate's `Parallelism::Auto` now uses every core, but the plugin still resolves its
-/// own count: `Auto` is a generic default, and here we know the workload. Blindly
-/// fanning every file across all cores wastes
-/// effort on the many small yearly files in a register — the threads just fight over a
-/// near-empty file. Instead of a tuned threshold, we derive the worker COUNT from the
-/// file using a hardware-stable grain size: each worker must get at least one grain of
-/// work in BOTH dimensions (pages and decoded bytes), and the smallest of the three
-/// caps (requested threads, pages/grain, bytes/grain) wins. A small file collapses this
-/// to <2 → serial (one core, no coordination overhead) and the inter-file pool keeps
-/// the cores busy by running several such files at once; a large file scales up to the
-/// requested cap. All inputs are header-only metadata — no body decode.
-#[cfg(feature = "arrow")]
-fn scan_parallelism(ds: &Dataset) -> Parallelism {
-    let requested = requested_scan_threads();
-    if requested <= 1 {
-        return Parallelism::None;
-    }
-    let meta = ds.metadata();
-    let decode_bytes = meta.row_count.saturating_mul(u64::from(meta.row_len));
-    let min_bytes = env_u64(
-        "SAS7BDAT_SCAN_MIN_BYTES_PER_WORKER",
-        DEFAULT_MIN_BYTES_PER_WORKER,
-    );
-    let min_pages = env_u64(
-        "SAS7BDAT_SCAN_MIN_PAGES_PER_WORKER",
-        DEFAULT_MIN_PAGES_PER_WORKER,
-    );
-
-    // Hand each worker a full grain; the tightest constraint decides the count.
-    let workers = (requested as u64)
-        .min(meta.page_count / min_pages)
-        .min(decode_bytes / min_bytes);
-    if workers >= 2 {
-        Parallelism::Threads(usize::try_from(workers).unwrap_or(requested))
-    } else {
-        Parallelism::None
+    {
+        Some(1) => Parallelism::None,
+        Some(n) => Parallelism::Threads(n),
+        None => Parallelism::Auto,
     }
 }
 
@@ -326,7 +268,7 @@ fn run_scan(
     // cores; override with SAS7BDAT_SCAN_THREADS for tuning.
     let mut scan = ds
         .scan()
-        .with_parallelism(scan_parallelism(ds))
+        .with_parallelism(scan_parallelism())
         .with_column_major_decode(column_major_decode());
     if let Some(ref projection) = projection {
         scan = scan.with_projection(projection);
