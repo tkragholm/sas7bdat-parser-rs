@@ -1470,12 +1470,16 @@ impl ScanBuilder<'_> {
                 target_rows: plan.batch_row_capacity,
                 capacity_hint_rows: plan.capacity_hint_rows.div_ceil(workers).max(1),
                 row_len,
-                // Nothing else is decoding when a single worker runs the scan, so the batch
-                // may be materialised across the whole resolved budget rather than one thread.
-                materialize_threads: if workers == 1 {
-                    resolved_batch_materialize_threads(self.parallelism)
-                } else {
-                    1
+                // Nothing else is decoding when a single worker runs the scan, so the batch may
+                // be materialised across the whole resolved budget rather than one thread --
+                // except when it was `Auto` that chose the single worker. The grain gate
+                // declining means it judged the file too small to repay threads, and that
+                // judgement applies to materialising the batch as much as to decoding it.
+                // Fanning it out anyway measured 1.33x slower on a 5,000-row register extract.
+                materialize_threads: match (workers, self.parallelism) {
+                    (1, Parallelism::Auto) => 1,
+                    (1, requested) => resolved_batch_materialize_threads(requested),
+                    _ => 1,
                 },
                 // The column-major fill ignores row selection, so it only applies to whole-file
                 // scans; each worker additionally requires an all-staged-numeric plan.
