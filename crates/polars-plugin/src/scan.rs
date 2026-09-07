@@ -8,10 +8,10 @@
 //! stop.
 
 use crate::convert::{column_to_arrow, stream_type};
-use arrow_array::builder::LargeStringBuilder;
+use arrow_array::builder::StringViewBuilder;
 use arrow_array::{
-    Array, ArrayRef, Float64Array, Int32Array, Int64Array, LargeStringArray, RecordBatch,
-    RecordBatchReader,
+    Array, ArrayRef, Float64Array, Int32Array, Int64Array, RecordBatch, RecordBatchReader,
+    StringViewArray,
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use sas7bdat::{
@@ -49,7 +49,7 @@ fn stream_schema_from(core: &Schema, labels: &[Option<LabelSet>]) -> SchemaRef {
         .zip(labels)
         .map(|(field, label)| {
             let data_type = if label.is_some() {
-                DataType::LargeUtf8
+                DataType::Utf8View
             } else {
                 stream_type(field.data_type())
             };
@@ -288,7 +288,7 @@ fn run_scan(
 /// does not know is written as itself, which is what SAS prints for it.
 fn labelled(column: &ArrayRef, labels: &LabelSet) -> SasResult<ArrayRef> {
     let rows = column.len();
-    let mut out = LargeStringBuilder::with_capacity(rows, rows.saturating_mul(16));
+    let mut out = StringViewBuilder::with_capacity(rows);
     if let Some(values) = column.as_any().downcast_ref::<Float64Array>() {
         for row in 0..rows {
             if values.is_null(row) {
@@ -327,7 +327,7 @@ fn labelled(column: &ArrayRef, labels: &LabelSet) -> SasResult<ArrayRef> {
                 }
             }
         }
-    } else if let Some(values) = column.as_any().downcast_ref::<LargeStringArray>() {
+    } else if let Some(values) = column.as_any().downcast_ref::<StringViewArray>() {
         for row in 0..rows {
             if values.is_null(row) {
                 out.append_null();

@@ -9,9 +9,10 @@
 //! `into_arrow_array` builds every array through a builder, one value at a
 //! time, which is the difference between this and a read twice as slow.
 
+use arrow_array::builder::make_view;
 use arrow_array::{
     ArrayRef, Date32Array, DurationNanosecondArray, Float64Array, Int32Array, Int64Array,
-    LargeBinaryArray, LargeStringArray, TimestampMicrosecondArray,
+    LargeBinaryArray, StringViewArray, TimestampMicrosecondArray,
 };
 use arrow_buffer::{BooleanBuffer, Buffer, NullBuffer, OffsetBuffer, ScalarBuffer};
 use arrow_schema::{DataType, TimeUnit};
@@ -83,18 +84,7 @@ pub fn column_to_arrow(
             data,
             valid,
             dictionary_ids: _,
-        } => {
-            // Checked constructors: the offsets are validated for monotonicity and
-            // the bytes for UTF-8, one pass each, which is what makes this module
-            // need no `unsafe`. Large offsets and not views: polars converts either
-            // into its own layout on import, and measured on 7 September 2026 the
-            // view import was a third slower and no leaner.
-            let offsets = OffsetBuffer::new(ScalarBuffer::from(offsets.into_inner()));
-            let array =
-                LargeStringArray::try_new(offsets, Buffer::from_vec(data), nulls(valid, rows))
-                    .map_err(|err| Error::arrow(err.to_string()))?;
-            Arc::new(array)
-        }
+        } => Arc::new(string_view_array(&offsets.into_inner(), data, valid, rows)?),
         OwnedColumnBuffer::RawBytes {
             offsets,
             data,
@@ -107,6 +97,71 @@ pub fn column_to_arrow(
             Arc::new(array)
         }
     })
+}
+
+/// The scanner's strings as a `StringViewArray`, polars' own string layout:
+/// one 16-byte view per row, a string of twelve bytes or fewer inlined in it
+/// and a longer one pointing into the moved buffer.
+///
+/// Why views and not `LargeUtf8`: polars converts an imported `LargeUtf8`
+/// column into views anyway, and for a column with any string over twelve
+/// bytes it keeps the whole imported allocation alive behind the result, the
+/// offsets, the validity and the buffer's unused capacity included. Measured on
+/// a 1.7-million-row register file that was 134 MB retained on 44 MB of
+/// strings. A view array imports as it is, so only the views and a buffer
+/// shrunk to its contents remain.
+///
+/// Why unchecked: `StringViewArray::try_new` validates UTF-8 one string at a
+/// time, which measured a third of a full read. The buffer is validated as a
+/// whole instead, one pass, plus a check that every offset sits on a character
+/// boundary, which together are the same guarantee.
+fn string_view_array(
+    offsets: &[i64],
+    mut data: Vec<u8>,
+    valid: Option<Vec<u64>>,
+    rows: usize,
+) -> SasResult<StringViewArray> {
+    let text = std::str::from_utf8(&data).map_err(|err| Error::arrow(err.to_string()))?;
+    if offsets.len() != rows + 1 {
+        return Err(Error::arrow("string offsets do not match the row count"));
+    }
+    let end = usize::try_from(offsets[rows]).map_err(|_| Error::arrow("negative offset"))?;
+    if end > data.len() {
+        return Err(Error::arrow("string offsets run past their data"));
+    }
+    u32::try_from(end).map_err(|_| {
+        Error::unsupported("a string batch over 4 GB; ask for a smaller batch_size")
+    })?;
+    let mut views: Vec<u128> = Vec::with_capacity(rows);
+    let mut previous = 0usize;
+    for &offset in &offsets[1..] {
+        let offset = usize::try_from(offset).map_err(|_| Error::arrow("negative offset"))?;
+        if offset < previous || !text.is_char_boundary(offset) {
+            return Err(Error::arrow(
+                "string offsets are not monotone character boundaries",
+            ));
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        views.push(make_view(&data[previous..offset], 0, previous as u32));
+        previous = offset;
+    }
+    // The buffer keeps its contents and loses its slack; a consumer that keeps
+    // the array keeps this and nothing else.
+    data.truncate(end);
+    data.shrink_to_fit();
+    // SAFETY: every view was built by `make_view` from a slice of `data` at the
+    // offset it records, within `end <= data.len()`; `data` is valid UTF-8 as a
+    // whole and every string starts and ends on a character boundary, so every
+    // string is valid UTF-8; buffer index 0 is the one buffer passed.
+    #[allow(unsafe_code)]
+    let array = unsafe {
+        StringViewArray::new_unchecked(
+            ScalarBuffer::from(views),
+            vec![Buffer::from_vec(data)],
+            nulls(valid, rows),
+        )
+    };
+    Ok(array)
 }
 
 /// An `F64` buffer as the array `declared` names. A genuine float column moves
@@ -164,12 +219,11 @@ fn widened_f64(
     }
 }
 
-/// The type a stream declares for a core schema type: strings and bytes with
-/// 64-bit offsets, since that is what the scanner's offsets are and what the
-/// arrays above hold.
+/// The type a stream declares for a core schema type: strings as views, bytes
+/// with 64-bit offsets, which is what the arrays above hold.
 pub fn stream_type(declared: &DataType) -> DataType {
     match declared {
-        DataType::Utf8 => DataType::LargeUtf8,
+        DataType::Utf8 => DataType::Utf8View,
         DataType::Binary => DataType::LargeBinary,
         other => other.clone(),
     }
