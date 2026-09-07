@@ -76,7 +76,7 @@ pub fn compile_page_descriptors<R: Read + Seek>(
     reader: &mut R,
     layout: &LayoutPlan,
 ) -> Result<PageDescriptorTable> {
-    let (table, _) = compile_page_descriptors_inner::<R, false>(reader, layout)?;
+    let (table, _) = compile_page_descriptors_inner::<R, false>(reader, layout, None)?;
     Ok(table)
 }
 
@@ -84,7 +84,42 @@ pub fn compile_page_descriptors_in_memory(
     file_bytes: &[u8],
     layout: &LayoutPlan,
 ) -> Result<PageDescriptorTable> {
-    let (table, _) = compile_page_descriptors_inner_in_memory::<false>(file_bytes, layout)?;
+    let (table, _) = compile_page_descriptors_inner_in_memory::<false>(file_bytes, layout, None)?;
+    Ok(table)
+}
+
+/// Descriptors for the pages that hold the first `rows` rows, and no more.
+///
+/// A scan with a row limit needs only those, and on a large file on a
+/// network share the difference between this and the whole table is the
+/// difference between a peek and a read of the file. The table this returns
+/// covers fewer rows than the dataset declares, so it is for that scan and
+/// not for the dataset's cache.
+///
+/// # Errors
+///
+/// As [`compile_page_descriptors`].
+pub fn compile_page_descriptors_prefix<R: Read + Seek>(
+    reader: &mut R,
+    layout: &LayoutPlan,
+    rows: u64,
+) -> Result<PageDescriptorTable> {
+    let (table, _) = compile_page_descriptors_inner::<R, false>(reader, layout, Some(rows))?;
+    Ok(table)
+}
+
+/// [`compile_page_descriptors_prefix`] over a file already in memory.
+///
+/// # Errors
+///
+/// As [`compile_page_descriptors`].
+pub fn compile_page_descriptors_prefix_in_memory(
+    file_bytes: &[u8],
+    layout: &LayoutPlan,
+    rows: u64,
+) -> Result<PageDescriptorTable> {
+    let (table, _) =
+        compile_page_descriptors_inner_in_memory::<false>(file_bytes, layout, Some(rows))?;
     Ok(table)
 }
 
@@ -92,7 +127,7 @@ pub fn compile_page_descriptors_breakdown<R: Read + Seek>(
     reader: &mut R,
     layout: &LayoutPlan,
 ) -> Result<DescriptorBreakdown> {
-    let (_, breakdown) = compile_page_descriptors_inner::<R, true>(reader, layout)?;
+    let (_, breakdown) = compile_page_descriptors_inner::<R, true>(reader, layout, None)?;
     Ok(breakdown)
 }
 
@@ -100,8 +135,17 @@ pub fn compile_page_descriptors_breakdown_in_memory(
     file_bytes: &[u8],
     layout: &LayoutPlan,
 ) -> Result<DescriptorBreakdown> {
-    let (_, breakdown) = compile_page_descriptors_inner_in_memory::<true>(file_bytes, layout)?;
+    let (_, breakdown) =
+        compile_page_descriptors_inner_in_memory::<true>(file_bytes, layout, None)?;
     Ok(breakdown)
+}
+
+/// The row count at which a descriptor walk stops: the caller's, when it is
+/// below what the file declares, else the file's.
+fn stop_row(layout: &LayoutPlan, stop_after_rows: Option<u64>) -> u64 {
+    stop_after_rows
+        .filter(|&rows| rows < layout.total_rows)
+        .unwrap_or(layout.total_rows)
 }
 
 /// Reads the wall clock only when `PROFILE` is set. On the default open path
@@ -187,10 +231,14 @@ pub(crate) fn compile_page_descriptor(
     )
 }
 
+/// `stop_after_rows` ends the walk once that many rows are covered; `None`, or a
+/// value at or past the declared row count, walks every page.
 fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
     reader: &mut R,
     layout: &LayoutPlan,
+    stop_after_rows: Option<u64>,
 ) -> Result<(PageDescriptorTable, DescriptorBreakdown)> {
+    let stop = stop_row(layout, stop_after_rows);
     let header = &layout.header;
     if header.page_header_size > u32::from(header.page_size) {
         return Err(page_corruption(
@@ -252,7 +300,7 @@ fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
 
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);
-        if row_base >= layout.total_rows {
+        if row_base >= stop {
             break;
         }
     }
@@ -275,7 +323,9 @@ fn compile_page_descriptors_inner<R: Read + Seek, const PROFILE: bool>(
 fn compile_page_descriptors_inner_in_memory<const PROFILE: bool>(
     file_bytes: &[u8],
     layout: &LayoutPlan,
+    stop_after_rows: Option<u64>,
 ) -> Result<(PageDescriptorTable, DescriptorBreakdown)> {
+    let stop = stop_row(layout, stop_after_rows);
     let header = &layout.header;
     if header.page_header_size > u32::from(header.page_size) {
         return Err(page_corruption(
@@ -315,7 +365,7 @@ fn compile_page_descriptors_inner_in_memory<const PROFILE: bool>(
 
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);
-        if row_base >= layout.total_rows {
+        if row_base >= stop {
             break;
         }
     }

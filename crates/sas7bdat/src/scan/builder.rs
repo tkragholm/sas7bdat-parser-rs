@@ -1283,7 +1283,7 @@ impl ScanBuilder<'_> {
             Err(reason) => declined.push(SourceDeclined::OnePass(reason)),
         }
 
-        let descriptors = self.ds.descriptors()?;
+        let descriptors = self.ds.descriptors_covering(self.row_window().end())?;
         match self.plan_two_pass_stream(plan, descriptors.as_ref(), column_major)? {
             TwoPassDecision::Run(stream) => {
                 return Ok((two_pass_source(stream.workers), declined));
@@ -1528,7 +1528,7 @@ impl ScanBuilder<'_> {
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
-        let descriptors = self.ds.descriptors()?;
+        let descriptors = self.ds.descriptors_covering(self.row_window().end())?;
         let stream = match self.plan_two_pass_stream(plan, descriptors.as_ref(), column_major)? {
             TwoPassDecision::NotApplicable => return Ok(None),
             TwoPassDecision::NothingToScan { workers } => {

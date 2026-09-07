@@ -2569,3 +2569,52 @@ fn a_declared_zero_rows_per_page_falls_back_to_the_average() {
         41
     );
 }
+
+// ─── descriptors compiled only as far as a limited scan reads ───────────────
+
+#[test]
+fn a_prefix_of_descriptors_stops_at_the_rows_asked_for() {
+    use crate::pages::{
+        compile_page_descriptors_in_memory, compile_page_descriptors_prefix_in_memory,
+    };
+
+    let bytes = make_pages(); // two pages: rows ABCD, EFGH; then IJKL
+    let layout = simple_layout(64, 2, 4, 3);
+    let whole = compile_page_descriptors_in_memory(&bytes, &layout).expect("whole table");
+    assert_eq!(whole.pages.len(), 2);
+    assert_eq!(whole.total_candidate_rows, 3);
+
+    let one_row = compile_page_descriptors_prefix_in_memory(&bytes, &layout, 1).expect("prefix");
+    assert_eq!(one_row.pages.len(), 1, "the first page holds the first row");
+    assert_eq!(one_row.total_candidate_rows, 2);
+
+    // Asking for at least the file's rows is the whole table.
+    let all = compile_page_descriptors_prefix_in_memory(&bytes, &layout, 3).expect("prefix");
+    assert_eq!(all.pages.len(), 2);
+    let past = compile_page_descriptors_prefix_in_memory(&bytes, &layout, 99).expect("prefix");
+    assert_eq!(past.pages.len(), 2);
+}
+
+#[test]
+fn a_limited_scan_leaves_no_partial_table_in_the_cache() {
+    let bytes = Arc::<[u8]>::from(make_pages());
+    let ds = MockDatasetBuilder::new(bytes)
+        .with_column("txt", LogicalType::String, 4, 0)
+        .with_row_len(4)
+        .with_total_rows(3)
+        .build();
+    assert!(!ds.has_cached_descriptors());
+
+    let batches = ds.scan().limit(1).collect_batches().expect("limited scan");
+    let rows: usize = batches.iter().map(|batch| batch.row_count).sum();
+    assert_eq!(rows, 1);
+    assert!(
+        !ds.has_cached_descriptors(),
+        "a table walked for one row must not be served to the next scan as the whole file"
+    );
+
+    let batches = ds.scan().collect_batches().expect("whole scan");
+    let rows: usize = batches.iter().map(|batch| batch.row_count).sum();
+    assert_eq!(rows, 3);
+    assert!(ds.has_cached_descriptors());
+}

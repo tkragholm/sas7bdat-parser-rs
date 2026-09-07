@@ -9,6 +9,7 @@ use crate::{
     pages::{
         DescriptorBreakdown, compile_page_descriptors, compile_page_descriptors_breakdown,
         compile_page_descriptors_breakdown_in_memory, compile_page_descriptors_in_memory,
+        compile_page_descriptors_prefix, compile_page_descriptors_prefix_in_memory,
     },
     probe::probe_header,
     projection::{Projection, ProjectionBuilder},
@@ -480,6 +481,45 @@ impl Dataset {
     /// table isn't already sitting in the cache from an earlier scan.
     pub(crate) fn has_cached_descriptors(&self) -> bool {
         self.descriptors.lock().is_ok_and(|guard| guard.is_some())
+    }
+
+    /// The descriptors a scan that stops after `rows` needs: the cached table
+    /// when there is one, else a table walked only as far as those rows and
+    /// not cached, since a table covering part of the file must not be served
+    /// to the next scan as the whole. A peek on a fresh dataset thereby reads
+    /// the page headers of its first pages rather than of every page, which on
+    /// a large file on a network share is the whole cost of the peek.
+    pub(crate) fn descriptors_covering(&self, rows: u64) -> Result<Arc<PageDescriptorTable>> {
+        // A window of no rows still walks to the first page that holds one, so
+        // the validation a compressed file's raw scan runs on the table has a
+        // row to see.
+        let rows = rows.max(1);
+        if rows >= self.metadata.row_count {
+            return self.descriptors();
+        }
+        {
+            let guard = self
+                .descriptors
+                .lock()
+                .map_err(|_| Error::internal("descriptor cache poisoned"))?;
+            if let Some(descriptors) = guard.as_ref() {
+                return Ok(Arc::clone(descriptors));
+            }
+        }
+        let table = match &self.file.source {
+            FileSource::Bytes(bytes) => {
+                compile_page_descriptors_prefix_in_memory(bytes.as_ref(), &self.layout, rows)?
+            }
+            FileSource::Mmap(mmap) => {
+                compile_page_descriptors_prefix_in_memory(&mmap[..], &self.layout, rows)?
+            }
+            FileSource::Path(path) => {
+                let mut file =
+                    File::open(path).map_err(|err| Error::io_error_with_path(path, &err))?;
+                compile_page_descriptors_prefix(&mut file, &self.layout, rows)?
+            }
+        };
+        Ok(Arc::new(table))
     }
 
     pub(crate) fn descriptors(&self) -> Result<Arc<PageDescriptorTable>> {

@@ -26,7 +26,9 @@ pub(super) fn scan_row_bytes_with_plan<F>(
 where
     F: FnMut(RowIndex, &[u8]) -> Result<ControlFlow<()>>,
 {
-    let descriptors = builder.ds.descriptors()?;
+    let descriptors = builder
+        .ds
+        .descriptors_covering(builder.row_window().end())?;
     match &builder.ds.file.source {
         FileSource::Bytes(bytes) => {
             scan_row_bytes_in_memory(builder, plan, bytes.as_ref(), descriptors.as_ref(), f)
@@ -302,6 +304,11 @@ impl RowWindow {
         Self { start, end }
     }
 
+    /// The first row past the window, `u64::MAX` when it is unbounded.
+    pub(super) const fn end(self) -> u64 {
+        self.end
+    }
+
     const fn contains(self, row: RowIndex) -> bool {
         row.0 >= self.start && row.0 < self.end
     }
@@ -361,7 +368,9 @@ pub(super) struct RawScanPlan {
 
 impl RawScanPlan {
     pub(super) fn validate_builder(builder: &ScanBuilder<'_>) -> Result<()> {
-        let descriptors = builder.ds.descriptors()?;
+        let descriptors = builder
+            .ds
+            .descriptors_covering(builder.row_window().end())?;
         if builder.ds.layout.compression != crate::metadata::CompressionKind::None
             && builder.ds.metadata.row_count > 0
             && descriptors.total_candidate_rows == 0
