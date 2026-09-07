@@ -1453,7 +1453,9 @@ name = "sas7bdat-polars"
 version = "0.10.0"
 dependencies = [
  "arrow-array",
+ "arrow-buffer",
  "arrow-schema",
+ "bytemuck",
  "pyo3",
  "pyo3-build-config",
  "sas7bdat",

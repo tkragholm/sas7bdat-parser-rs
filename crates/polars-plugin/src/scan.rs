@@ -7,10 +7,11 @@
 //! drops the stream early closes the channel, and the next send tells the scan to
 //! stop.
 
-use arrow_array::builder::StringBuilder;
+use crate::convert::{column_to_arrow, stream_type};
+use arrow_array::builder::LargeStringBuilder;
 use arrow_array::{
-    Array, ArrayRef, Float64Array, Int32Array, Int64Array, RecordBatch, RecordBatchReader,
-    StringArray,
+    Array, ArrayRef, Float64Array, Int32Array, Int64Array, LargeStringArray, RecordBatch,
+    RecordBatchReader,
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use sas7bdat::{
@@ -18,6 +19,7 @@ use sas7bdat::{
     catalog::normalize_format_name,
 };
 use std::ops::ControlFlow;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, mpsc};
 use std::thread;
 
@@ -32,30 +34,31 @@ pub struct ScanSpec {
 }
 
 /// The Arrow schema a stream declares for `spec`: the core's schema for the
-/// projected columns, with every column that carries a value-label format
-/// re-typed to `Utf8`, since that is what its batches hold.
+/// projected columns, with strings and bytes at 64-bit offsets, and every column
+/// that carries a value-label format re-typed to a string, since that is what
+/// its batches hold.
 pub fn stream_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
     let core = core_schema(ds, spec)?;
-    let labels = label_sets(ds, &core);
-    if labels.iter().all(Option::is_none) {
-        return Ok(core);
-    }
+    Ok(stream_schema_from(&core, &label_sets(ds, &core)))
+}
+
+fn stream_schema_from(core: &Schema, labels: &[Option<LabelSet>]) -> SchemaRef {
     let fields = core
         .fields()
         .iter()
-        .zip(&labels)
+        .zip(labels)
         .map(|(field, label)| {
-            if label.is_some() {
-                Arc::new(
-                    Field::new(field.name(), DataType::Utf8, true)
-                        .with_metadata(field.metadata().clone()),
-                )
+            let data_type = if label.is_some() {
+                DataType::LargeUtf8
             } else {
-                Arc::clone(field)
-            }
+                stream_type(field.data_type())
+            };
+            Arc::new(
+                Field::new(field.name(), data_type, true).with_metadata(field.metadata().clone()),
+            )
         })
         .collect::<Vec<_>>();
-    Ok(Arc::new(Schema::new(fields)))
+    Arc::new(Schema::new(fields))
 }
 
 fn core_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
@@ -124,6 +127,39 @@ fn scan_parallelism() -> Parallelism {
     }
 }
 
+/// Rows per batch when the caller names none.
+///
+/// Two costs pull in opposite directions, measured on 7 September 2026 on a
+/// twelve-core machine. Every batch crossing into Python pays a fixed import
+/// price, about 70 microseconds, so a narrow 1.7-million-row register file at
+/// the core's own 4,096-row default made 430 batches and spent a third of a
+/// full read on them. And the core decodes batches in parallel, so a wide
+/// 84,000-row survey file at 65,536 rows made three batches, used three cores,
+/// and read three times slower than at 4,096. So: about 8 MB of decoded row
+/// bytes per batch, no more than would leave fewer than two batches per core,
+/// and between 4,096 and 32,768 rows. Every file measured sits within a few
+/// percent of its best size under that rule.
+fn default_batch_rows(ds: &Dataset, spec: &ScanSpec) -> usize {
+    const TARGET_BYTES: usize = 8 << 20;
+    let meta = ds.metadata();
+    let columns = spec
+        .columns
+        .as_ref()
+        .map_or(ds.columns().len(), Vec::len)
+        .max(1);
+    // Decoded width: the on-disk row where strings dominate, eight bytes a
+    // column where numerics do.
+    let width = usize::try_from(meta.row_len)
+        .unwrap_or(usize::MAX)
+        .max(columns * 8)
+        .max(1);
+    let by_bytes = TARGET_BYTES / width;
+    let cores = thread::available_parallelism().map_or(1, usize::from);
+    let rows = usize::try_from(meta.row_count).unwrap_or(usize::MAX);
+    let by_parallelism = rows / (2 * cores).max(1);
+    by_bytes.min(by_parallelism).clamp(1 << 12, 1 << 15)
+}
+
 /// A record-batch reader fed by a decode thread. Implements what an Arrow C
 /// stream needs: a schema, and batches until `None`.
 pub struct ScanReader {
@@ -148,17 +184,34 @@ impl ScanReader {
 
     /// Start the decode of `spec` on its own thread and return the reading end.
     pub fn start(ds: Arc<Dataset>, spec: ScanSpec) -> SasResult<Self> {
-        let schema = stream_schema(&ds, &spec)?;
-        let labels = label_sets(&ds, &schema);
+        let core = core_schema(&ds, &spec)?;
+        let labels = label_sets(&ds, &core);
+        let schema = stream_schema_from(&core, &labels);
         // Four batches of slack: enough that the decoder is not stalled by a
         // consumer doing a little work per batch, small enough that a stalled
         // consumer holds a handful of batches and not the file.
         let (tx, rx) = mpsc::sync_channel::<Result<RecordBatch, String>>(4);
         let stream_schema = Arc::clone(&schema);
         thread::spawn(move || {
-            if let Err(err) = run_scan(&ds, &spec, &stream_schema, &labels, &tx) {
-                let _ = tx.send(Err(err.to_string()));
-            }
+            // A panic on this thread would close the channel and end the stream
+            // early, which a consumer cannot tell from a short file. Turn it into
+            // an error the consumer sees.
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                run_scan(&ds, &spec, &core, &stream_schema, &labels, &tx)
+            }));
+            let message = match outcome {
+                Ok(Ok(())) => return,
+                Ok(Err(err)) => err.to_string(),
+                Err(panic) => format!(
+                    "the decode thread panicked: {}",
+                    panic
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                        .unwrap_or("no message")
+                ),
+            };
+            let _ = tx.send(Err(message));
         });
         Ok(Self { schema, rx })
     }
@@ -184,6 +237,7 @@ impl RecordBatchReader for ScanReader {
 fn run_scan(
     ds: &Dataset,
     spec: &ScanSpec,
+    core: &SchemaRef,
     stream_schema: &SchemaRef,
     labels: &[Option<LabelSet>],
     tx: &mpsc::SyncSender<Result<RecordBatch, String>>,
@@ -200,13 +254,27 @@ fn run_scan(
         scan = scan
             .limit(u64::try_from(n_rows).map_err(|_| Error::unsupported("row limit exceeds u64"))?);
     }
-    if let Some(batch_size) = spec.batch_size {
-        scan = scan.with_batch_hint(BatchHint::Rows(batch_size));
-    }
-    let core_schema = scan.arrow_schema()?;
+    scan = scan.with_batch_hint(BatchHint::Rows(
+        spec.batch_size
+            .unwrap_or_else(|| default_batch_rows(ds, spec)),
+    ));
     scan.visit_owned_batches(|batch| {
-        let batch = batch.into_arrow_record_batch(Arc::clone(&core_schema))?;
-        let batch = apply_labels(batch, stream_schema, labels)?;
+        let rows = batch.row_count;
+        let columns = batch
+            .columns
+            .into_iter()
+            .zip(core.fields())
+            .zip(labels)
+            .map(|((column, field), label)| {
+                let array = column_to_arrow(column, field.data_type(), rows)?;
+                match label {
+                    Some(label) => labelled(&array, label),
+                    None => Ok(array),
+                }
+            })
+            .collect::<SasResult<Vec<_>>>()?;
+        let batch = RecordBatch::try_new(Arc::clone(stream_schema), columns)
+            .map_err(|err| Error::arrow(err.to_string()))?;
         // The receiver is gone: the consumer released the stream. Stop decoding.
         if tx.send(Ok(batch)).is_err() {
             return Ok(ControlFlow::Break(()));
@@ -216,33 +284,11 @@ fn run_scan(
     Ok(())
 }
 
-/// Replace every labelled column's raw values with their labels, as `Utf8`.
-fn apply_labels(
-    batch: RecordBatch,
-    stream_schema: &SchemaRef,
-    labels: &[Option<LabelSet>],
-) -> SasResult<RecordBatch> {
-    if labels.iter().all(Option::is_none) {
-        return Ok(batch);
-    }
-    let columns = batch
-        .columns()
-        .iter()
-        .zip(labels)
-        .map(|(column, label)| match label {
-            Some(label) => labelled(column, label),
-            None => Ok(Arc::clone(column)),
-        })
-        .collect::<SasResult<Vec<_>>>()?;
-    RecordBatch::try_new(Arc::clone(stream_schema), columns)
-        .map_err(|err| Error::arrow(err.to_string()))
-}
-
-/// A `Utf8` array of the labels for `column`'s values. A value the label set
+/// A string array of the labels for `column`'s values. A value the label set
 /// does not know is written as itself, which is what SAS prints for it.
 fn labelled(column: &ArrayRef, labels: &LabelSet) -> SasResult<ArrayRef> {
     let rows = column.len();
-    let mut out = StringBuilder::with_capacity(rows, rows.saturating_mul(16));
+    let mut out = LargeStringBuilder::with_capacity(rows, rows.saturating_mul(16));
     if let Some(values) = column.as_any().downcast_ref::<Float64Array>() {
         for row in 0..rows {
             if values.is_null(row) {
@@ -281,7 +327,7 @@ fn labelled(column: &ArrayRef, labels: &LabelSet) -> SasResult<ArrayRef> {
                 }
             }
         }
-    } else if let Some(values) = column.as_any().downcast_ref::<StringArray>() {
+    } else if let Some(values) = column.as_any().downcast_ref::<LargeStringArray>() {
         for row in 0..rows {
             if values.is_null(row) {
                 out.append_null();

@@ -19,7 +19,9 @@ crate-type = ["cdylib", "rlib"]
 # wheel to one Python polars release at a time.
 [dependencies]
 arrow-array = { workspace = true, features = ["ffi"] }
+arrow-buffer = "59"
 arrow-schema = { workspace = true }
+bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 pyo3 = { workspace = true, features = ["abi3-py312"] }
 sas7bdat = { path = "../sas7bdat", features = ["arrow"] }
 

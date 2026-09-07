@@ -345,7 +345,15 @@ class SasDataset:
         n_rows: int | None = None,
         predicate: pl.Expr | None = None,
     ) -> pl.DataFrame:
-        df = pl.DataFrame(self.stream(columns, n_rows))
+        # Batch by batch rather than one stream: polars imports a whole stream
+        # after the decode instead of overlapping with it, and measured half
+        # again as slow on a register-shaped file. The concat keeps the chunks.
+        frames = [pl.DataFrame(batch) for batch in self._native.batches(
+            list(columns) if columns else None, n_rows, None
+        )]
+        if not frames:
+            return pl.DataFrame(self._native.schema_stream(list(columns) if columns else None))
+        df = pl.concat(frames, rechunk=False)
         return df if predicate is None else df.filter(predicate)
 
     def batch_reader(

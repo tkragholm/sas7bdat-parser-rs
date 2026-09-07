@@ -9,6 +9,7 @@
 //! constructors, which is what keeps this wheel independent of the polars
 //! release installed beside it.
 
+mod convert;
 mod scan;
 
 use arrow_array::RecordBatch;
