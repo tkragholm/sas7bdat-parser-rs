@@ -23,12 +23,19 @@ and no Python floor, so CLI-only users do not inherit this package's constraints
 
 ### Version constraints
 
-This wheel is tightly coupled to its build environment:
+This wheel is coupled to the `polars` package it runs beside:
 
-- **Polars is pinned to `1.41.*`.** The extension shares the Polars Rust ABI (via
-  `polars-ffi`) with the in-process `polars` package, so the installed `polars` must match
-  the version the wheel was built against. A mismatch is undefined behavior, not a graceful
-  error.
+- **Polars must be in the tested range**, `>=1.41,<1.45` for this release. The extension
+  hands Series to the in-process `polars` through pyo3-polars, which uses polars' private
+  `Series._export` and `Series._import` hooks. Those carry no stability promise, so a
+  polars the wheel was not built and tested against can fault rather than fail. The
+  package therefore checks the installed version at import and raises an `ImportError`
+  outside the range; `SAS7BDAT_POLARS_SKIP_VERSION_CHECK=1` overrides it. The range is
+  the set of releases the `compat` CI job installs the wheel against, and it moves only
+  when that job is green on the new bound.
+- **Filter pushdown is best effort.** A filter expression polars serialises in a format
+  this build cannot read is applied by polars after the scan, and the plugin warns once
+  per process when that happens, since the only other symptom is a slower scan.
 - **Built against the CPython stable ABI** (`abi3`, minimum 3.12), so a single `cp312-abi3`
   wheel runs on CPython 3.12 and newer.
 

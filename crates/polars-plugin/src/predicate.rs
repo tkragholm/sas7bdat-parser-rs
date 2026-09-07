@@ -90,8 +90,48 @@ pub fn predicate_from_python(
     let meta = predicate.getattr("meta").ok()?;
     let serialized = meta.call_method0("serialize").ok()?;
     let serialized: Vec<u8> = serialized.extract().ok()?;
-    let expr: Expr = from_slice(&serialized).ok()?;
+    let expr: Expr = match from_slice(&serialized) {
+        Ok(expr) => expr,
+        Err(err) => {
+            warn_expression_not_readable(py, &err.to_string());
+            return None;
+        }
+    };
     parse_predicate_expr(ds, &expr)
+}
+
+/// Set once the first unreadable expression has been reported, so a scan loop
+/// does not repeat the same warning per file.
+#[cfg(feature = "arrow")]
+static WARNED_EXPRESSION_NOT_READABLE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// A filter expression polars serialised in a format this build cannot read is
+/// the signature of a polars version the wheel was not built against. The scan
+/// still runs, decoding every row for polars to filter afterwards, so without a
+/// message the only symptom is a slower run.
+#[cfg(feature = "arrow")]
+fn warn_expression_not_readable(py: Python<'_>, detail: &str) {
+    use std::sync::atomic::Ordering;
+    if WARNED_EXPRESSION_NOT_READABLE.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let installed = PyModule::import(py, "polars")
+        .and_then(|m| m.getattr("__version__"))
+        .and_then(|v| v.extract::<String>())
+        .unwrap_or_else(|_| "unknown".to_owned());
+    let message = format!(
+        "sas7bdat_polars could not read the filter expression polars {installed} handed it \
+         ({detail}); this wheel was built against polars-rust {}. The scan decodes every \
+         row and polars filters afterwards, which is correct and slow. Install a polars \
+         this wheel is tested against, or a wheel built for this polars.",
+        polars::VERSION
+    );
+    let Ok(message) = std::ffi::CString::new(message) else {
+        return;
+    };
+    let category = py.get_type::<pyo3::exceptions::PyRuntimeWarning>();
+    let _ = PyErr::warn(py, category.as_any(), &message, 1);
 }
 
 #[cfg(feature = "arrow")]

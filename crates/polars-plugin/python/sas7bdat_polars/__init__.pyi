@@ -77,3 +77,11 @@ class BatchReader(Iterator[pl.DataFrame]):
     def __next__(self) -> pl.DataFrame: ...
 
 class SasIoSource: ...
+
+def polars_requirement() -> str | None:
+    """The polars specifier this installed wheel declares, read from its metadata."""
+
+def check_polars_version(
+    installed: str | None = ..., requirement: str | None = ...
+) -> None:
+    """Raise ``ImportError`` when the installed polars is outside the tested range."""

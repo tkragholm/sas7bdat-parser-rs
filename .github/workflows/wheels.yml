@@ -165,6 +165,66 @@ jobs:
           name: cli-wheels-macos-${{ matrix.target }}
           path: dist-cli/*.whl
 
+  # The polars range in crates/polars-plugin/pyproject.toml is a promise that the
+  # wheel was run against its ends, and this is where the promise is kept: the
+  # Linux wheel, installed under the oldest and the newest CPython the abi3 tag
+  # claims, against the lowest and the highest polars the range admits, running
+  # a file-backed round trip. A bound moves only with this job green on the new
+  # value. Both ends are read from pyproject.toml, so the range is written once.
+  compat:
+    name: compat-py${{ matrix.python }}-polars-${{ matrix.polars }}
+    runs-on: ubuntu-22.04
+    needs: [linux]
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13']
+        polars: [lowest, highest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+      - name: Resolve the polars to test against
+        id: polars
+        run: |
+          spec=$(python - <<'EOF'
+          import tomllib
+          with open("crates/polars-plugin/pyproject.toml", "rb") as f:
+              deps = tomllib.load(f)["project"]["dependencies"]
+          print(next(d[len("polars"):] for d in deps if d.startswith("polars")))
+          EOF
+          )
+          lowest=$(printf '%s' "$spec" | tr ',' '\n' | sed -n 's/^>=//p')
+          case "${{ matrix.polars }}" in
+            lowest)  echo "requirement=polars==$lowest" >> "$GITHUB_OUTPUT" ;;
+            highest) echo "requirement=polars$spec" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "range $spec, lowest $lowest"
+      - name: Install the wheel against that polars
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "${{ steps.polars.outputs.requirement }}" pytest
+          python -m pip install --no-deps dist/*.whl
+          python -c "import polars, sas7bdat_polars as sp; print('polars', polars.__version__, 'plugin', sp.__version__, 'core', sp.__core_version__)"
+      # The pandas SAS test corpus is BSD-3-Clause; one 5 KB file is enough to
+      # push Series of every kind the plugin emits through the boundary.
+      - name: Fetch the fixture
+        run: |
+          mkdir -p fixtures/raw_data/pandas
+          curl -sSfL -o fixtures/raw_data/pandas/airline.sas7bdat \
+            https://raw.githubusercontent.com/pandas-dev/pandas/v2.2.3/pandas/tests/io/sas/data/airline.sas7bdat
+      - name: Round trip
+        run: >
+          python -m pytest -p no:cacheprovider
+          crates/polars-plugin/tests/test_compat.py
+          crates/polars-plugin/tests/test_version_check.py
+          crates/polars-plugin/tests/test_smoke.py::test_public_api_contract_is_exposed
+
   # Publishes to PyPI via Trusted Publishing (OIDC) — no stored token. Runs only on a
   # v* tag, after every platform build succeeds. Requires a trusted publisher registered
   # on PyPI for owner=tkragholm, repo=sas7bdat-parser-rs, workflow=wheels.yml — one per
