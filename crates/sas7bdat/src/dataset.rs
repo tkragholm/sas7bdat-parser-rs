@@ -516,7 +516,7 @@ impl Dataset {
     /// "local" to. A caller that cares which side it landed on reads it here,
     /// without a decode.
     #[must_use]
-    pub const fn io_backend(&self) -> &'static str {
+    pub fn io_backend(&self) -> &'static str {
         match self.file.source {
             FileSource::Mmap(_) => "mmap",
             FileSource::Path(_) => "buffered",
