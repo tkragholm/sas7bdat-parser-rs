@@ -7,13 +7,14 @@
 //! drops the stream early closes the channel, and the next send tells the scan to
 //! stop.
 
-use crate::convert::{column_to_arrow, stream_type};
-use arrow_array::builder::StringViewBuilder;
+use arrow_array::builder::{StringViewBuilder, make_view};
 use arrow_array::{
     Array, ArrayRef, Float64Array, Int32Array, Int64Array, RecordBatch, RecordBatchReader,
-    StringViewArray,
+    StringArray, StringViewArray,
 };
+use arrow_buffer::{BooleanBuffer, Buffer, NullBuffer, ScalarBuffer};
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
+use sas7bdat::OwnedColumnBuffer;
 use sas7bdat::{
     BatchHint, ColumnMajorDecode, Dataset, Error, LabelSet, Parallelism, Result as SasResult,
     catalog::normalize_format_name,
@@ -34,9 +35,9 @@ pub struct ScanSpec {
 }
 
 /// The Arrow schema a stream declares for `spec`: the core's schema for the
-/// projected columns, with strings and bytes at 64-bit offsets, and every column
-/// that carries a value-label format re-typed to a string, since that is what
-/// its batches hold.
+/// projected columns, with strings as views (see [`string_views`]) and every
+/// column that carries a value-label format re-typed to a string, since that
+/// is what its batches hold.
 pub fn stream_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
     let core = core_schema(ds, spec)?;
     Ok(stream_schema_from(&core, &label_sets(ds, &core)))
@@ -48,10 +49,9 @@ fn stream_schema_from(core: &Schema, labels: &[Option<LabelSet>]) -> SchemaRef {
         .iter()
         .zip(labels)
         .map(|(field, label)| {
-            let data_type = if label.is_some() {
-                DataType::Utf8View
-            } else {
-                stream_type(field.data_type())
+            let data_type = match (label, field.data_type()) {
+                (Some(_), _) | (None, DataType::Utf8) => DataType::Utf8View,
+                (None, other) => other.clone(),
             };
             Arc::new(
                 Field::new(field.name(), data_type, true).with_metadata(field.metadata().clone()),
@@ -275,17 +275,28 @@ fn run_scan(
             .unwrap_or_else(|| default_batch_rows(ds, spec)),
     ));
     scan.visit_owned_batches(|batch| {
+        // The core moves a numeric or temporal buffer into its array; a string
+        // buffer becomes views here, in one pass over its bytes; a labelled
+        // column is rebuilt from its values to their labels.
         let rows = batch.row_count;
         let columns = batch
             .columns
             .into_iter()
             .zip(core.fields())
             .zip(labels)
-            .map(|((column, field), label)| {
-                let array = column_to_arrow(column, field.data_type(), rows)?;
-                match label {
-                    Some(label) => labelled(&array, label),
-                    None => Ok(array),
+            .map(|((column, field), label)| match (label, column) {
+                (
+                    None,
+                    OwnedColumnBuffer::Utf8 {
+                        offsets,
+                        data,
+                        valid,
+                        ..
+                    },
+                ) => string_views(&offsets.into_inner(), data, valid, rows),
+                (None, column) => column.into_arrow_array_as(field.data_type()),
+                (Some(label), column) => {
+                    labelled(&column.into_arrow_array_as(field.data_type())?, label)
                 }
             })
             .collect::<SasResult<Vec<_>>>()?;
@@ -298,6 +309,72 @@ fn run_scan(
         Ok(ControlFlow::Continue(()))
     })?;
     Ok(())
+}
+
+/// The scanner's strings as a `StringViewArray`, polars' own string layout:
+/// one 16-byte view per row, a string of twelve bytes or fewer inlined in it
+/// and a longer one pointing into the moved buffer.
+///
+/// Why views: polars converts an imported `Utf8` array into views anyway, and
+/// for a column with any string over twelve bytes it keeps the whole imported
+/// allocation alive behind the result, offsets and validity included: measured
+/// 7 September 2026, 74 MB more resident on a 1.7-million-row register file
+/// and a full read a quarter slower. Why from the scanner's buffer rather than
+/// from the core's `Utf8` array: that array's construction narrows and checks
+/// the offsets and validates the bytes, and views need one pass, not three.
+///
+/// The buffer is validated as UTF-8 as a whole and every offset checked to be
+/// a character boundary, which together are what a per-string check would
+/// establish; the array is then built unchecked, since arrow's checked
+/// constructor would repeat the per-string check.
+fn string_views(
+    offsets: &[i64],
+    mut data: Vec<u8>,
+    valid: Option<Vec<u64>>,
+    rows: usize,
+) -> SasResult<ArrayRef> {
+    if offsets.len() != rows + 1 {
+        return Err(Error::arrow("string offsets do not match the row count"));
+    }
+    let end = usize::try_from(offsets[rows]).map_err(|_| Error::arrow("negative offset"))?;
+    if end > data.len() {
+        return Err(Error::arrow("string offsets run past their data"));
+    }
+    u32::try_from(end).map_err(|_| {
+        Error::unsupported("a string batch over 4 GB; ask for a smaller batch_size")
+    })?;
+    // Cut to contents: the scanner sized the buffer for the column's full width.
+    data.truncate(end);
+    data.shrink_to_fit();
+    let text = std::str::from_utf8(&data).map_err(|err| Error::arrow(err.to_string()))?;
+    let mut views: Vec<u128> = Vec::with_capacity(rows);
+    let mut previous = 0usize;
+    for &offset in &offsets[1..] {
+        let offset = usize::try_from(offset).map_err(|_| Error::arrow("negative offset"))?;
+        if offset < previous || !text.is_char_boundary(offset) {
+            return Err(Error::arrow(
+                "string offsets are not monotone character boundaries",
+            ));
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        views.push(make_view(&data[previous..offset], 0, previous as u32));
+        previous = offset;
+    }
+    let nulls =
+        valid.map(|words| NullBuffer::new(BooleanBuffer::new(Buffer::from_vec(words), 0, rows)));
+    // SAFETY: every view was built by `make_view` from a slice of `data` at the
+    // offset it records, within `end <= data.len()`; `data` is valid UTF-8 as a
+    // whole and every string starts and ends on a character boundary, so every
+    // string is valid UTF-8; buffer index 0 is the one buffer passed.
+    #[allow(unsafe_code)]
+    let array = unsafe {
+        StringViewArray::new_unchecked(
+            ScalarBuffer::from(views),
+            vec![Buffer::from_vec(data)],
+            nulls,
+        )
+    };
+    Ok(Arc::new(array))
 }
 
 /// A string array of the labels for `column`'s values. A value the label set
@@ -343,7 +420,7 @@ fn labelled(column: &ArrayRef, labels: &LabelSet) -> SasResult<ArrayRef> {
                 }
             }
         }
-    } else if let Some(values) = column.as_any().downcast_ref::<StringViewArray>() {
+    } else if let Some(values) = column.as_any().downcast_ref::<StringArray>() {
         for row in 0..rows {
             if values.is_null(row) {
                 out.append_null();
