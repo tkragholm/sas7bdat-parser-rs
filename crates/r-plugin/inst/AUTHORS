@@ -39,15 +39,15 @@ cfg-if 1.0.4
   Licence: MIT OR Apache-2.0
   Authors: Alex Crichton <alex@alexcrichton.com>
 
-crossbeam-deque 0.8.7
+crossbeam-deque 0.8.8
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
-crossbeam-epoch 0.9.20
+crossbeam-epoch 0.9.21
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
-crossbeam-utils 0.8.22
+crossbeam-utils 0.8.23
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
@@ -155,7 +155,7 @@ simdutf8 0.1.5
   Licence: MIT OR Apache-2.0
   Authors: Hans Kratz <hans@appfour.com>
 
-syn 3.0.4
+syn 3.0.5
   Licence: MIT OR Apache-2.0
   Authors: David Tolnay <dtolnay@gmail.com>
 

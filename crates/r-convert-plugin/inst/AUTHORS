@@ -27,27 +27,27 @@ anyhow 1.0.104
   Licence: MIT OR Apache-2.0
   Authors: David Tolnay <dtolnay@gmail.com>
 
-arrow-array 59.2.0
+arrow-array 59.3.0
   Licence: Apache-2.0 AND MIT
   Authors: Apache Arrow <dev@arrow.apache.org>
 
-arrow-buffer 59.2.0
+arrow-buffer 59.3.0
   Licence: Apache-2.0
   Authors: Apache Arrow <dev@arrow.apache.org>
 
-arrow-data 59.2.0
+arrow-data 59.3.0
   Licence: Apache-2.0
   Authors: Apache Arrow <dev@arrow.apache.org>
 
-arrow-ipc 59.2.0
+arrow-ipc 59.3.0
   Licence: Apache-2.0
   Authors: Apache Arrow <dev@arrow.apache.org>
 
-arrow-schema 59.2.0
+arrow-schema 59.3.0
   Licence: Apache-2.0
   Authors: Apache Arrow <dev@arrow.apache.org>
 
-arrow-select 59.2.0
+arrow-select 59.3.0
   Licence: Apache-2.0
   Authors: Apache Arrow <dev@arrow.apache.org>
 
@@ -79,7 +79,7 @@ bytes 1.12.1
   Licence: MIT
   Authors: Carl Lerche <me@carllerche.com>; Sean McArthur <sean@seanmonstar.com>
 
-cc 1.4.4
+cc 1.4.5
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
@@ -103,15 +103,15 @@ core-foundation-sys 0.8.7
   Licence: MIT OR Apache-2.0
   Authors: The Servo Project Developers
 
-crossbeam-deque 0.8.7
+crossbeam-deque 0.8.8
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
-crossbeam-epoch 0.9.20
+crossbeam-epoch 0.9.21
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
-crossbeam-utils 0.8.22
+crossbeam-utils 0.8.23
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
@@ -147,7 +147,7 @@ fearless_simd 0.7.0
   Licence: Apache-2.0 OR MIT
   Authors: Raph Levien <raph.levien@gmail.com>
 
-find-msvc-tools 0.1.11
+find-msvc-tools 0.1.12
   Licence: MIT OR Apache-2.0
   Authors: (no authors field; see crate sources)
 
@@ -207,7 +207,7 @@ jobserver 0.1.35
   Licence: MIT OR Apache-2.0
   Authors: Alex Crichton <alex@alexcrichton.com>
 
-js-sys 0.3.104
+js-sys 0.3.105
   Licence: MIT OR Apache-2.0
   Authors: The wasm-bindgen Developers
 
@@ -259,7 +259,7 @@ once_cell 1.21.4
   Licence: MIT OR Apache-2.0
   Authors: Aleksey Kladov <aleksey.kladov@gmail.com>
 
-parquet 59.2.0
+parquet 59.3.0
   Licence: Apache-2.0
   Authors: Apache Arrow <dev@arrow.apache.org>
 
@@ -359,7 +359,7 @@ snap 1.1.2
   Licence: BSD-3-Clause
   Authors: Andrew Gallant <jamslam@gmail.com>
 
-syn 3.0.4
+syn 3.0.5
   Licence: MIT OR Apache-2.0
   Authors: David Tolnay <dtolnay@gmail.com>
 
@@ -391,19 +391,19 @@ wasip2 1.0.4+wasi-0.2.12
   Licence: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
   Authors: (no authors field; see crate sources)
 
-wasm-bindgen 0.2.127
+wasm-bindgen 0.2.128
   Licence: MIT OR Apache-2.0
   Authors: The wasm-bindgen Developers
 
-wasm-bindgen-macro 0.2.127
+wasm-bindgen-macro 0.2.128
   Licence: MIT OR Apache-2.0
   Authors: The wasm-bindgen Developers
 
-wasm-bindgen-macro-support 0.2.127
+wasm-bindgen-macro-support 0.2.128
   Licence: MIT OR Apache-2.0
   Authors: The wasm-bindgen Developers
 
-wasm-bindgen-shared 0.2.127
+wasm-bindgen-shared 0.2.128
   Licence: MIT OR Apache-2.0
   Authors: The wasm-bindgen Developers
 
@@ -451,11 +451,11 @@ zstd 0.13.3
   Licence: MIT
   Authors: Alexandre Bury <alexandre.bury@gmail.com>
 
-zstd-safe 7.2.4
-  Licence: MIT OR Apache-2.0
+zstd-safe 7.3.0
+  Licence: BSD-3-Clause
   Authors: Alexandre Bury <alexandre.bury@gmail.com>
 
-zstd-sys 2.0.16+zstd.1.5.7
-  Licence: MIT OR Apache-2.0
+zstd-sys 2.1.0+zstd.1.5.7
+  Licence: BSD-3-Clause
   Authors: Alexandre Bury <alexandre.bury@gmail.com>
 
