@@ -19,6 +19,7 @@ resolver = "2"
 [workspace.dependencies]
 anyhow = "1"
 arrow-array = "59"
+arrow-buffer = "59"
 arrow-schema = "59"
 bytemuck = { version = "1.4", features = ["derive"] }
 criterion = "0.8"

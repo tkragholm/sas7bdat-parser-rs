@@ -13,8 +13,11 @@ categories = ["parser-implementations", "science", "encoding"]
 
 [dependencies]
 arrow-array = { workspace = true, optional = true }
+arrow-buffer = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
-bytemuck = { workspace = true }
+# `extern_crate_alloc` for `cast_vec`: a `Vec<SasDate>` becomes the `Vec<i32>` an
+# Arrow buffer takes without a copy.
+bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 encoding_rs = { workspace = true }
 # Stable-Rust SIMD with runtime dispatch (feature = "simd"). Unlike `std::simd`,
 # which lowers to whatever target features were enabled at compile time, this
@@ -88,7 +91,7 @@ default = ["simd"]
 #   nightly-simd   std::simd — requires a nightly toolchain. Overrides `simd`.
 simd = ["dep:fearless_simd"]
 nightly-simd = []
-arrow = ["dep:arrow-array", "dep:arrow-schema"]
+arrow = ["dep:arrow-array", "dep:arrow-buffer", "dep:arrow-schema"]
 hotpath-profile = ["dep:hotpath"]
 # Exposes `test_utils` (synthetic dataset builders) for the `wide_table` benchmark.
 internal-bench = []

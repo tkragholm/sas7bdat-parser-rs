@@ -632,7 +632,9 @@ impl<'a> ScanBuilder<'a> {
         F: FnMut(RecordBatch) -> Result<ControlFlow<()>>,
     {
         let schema = self.arrow_schema()?;
-        self.visit_batches(|batch| {
+        // Owned batches: their conversion moves the buffers into the arrays,
+        // where a borrowed batch's has to copy every value.
+        self.visit_owned_batches(|batch| {
             let record_batch = batch.into_arrow_record_batch(schema.clone())?;
             f(record_batch)
         })

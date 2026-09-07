@@ -1387,6 +1387,7 @@ version = "0.9.1"
 dependencies = [
  "ahash",
  "arrow-array",
+ "arrow-buffer",
  "arrow-schema",
  "bytemuck",
  "cardinality-estimator",
@@ -1455,7 +1456,6 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-schema",
- "bytemuck",
  "pyo3",
  "pyo3-build-config",
  "sas7bdat",
