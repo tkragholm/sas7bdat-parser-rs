@@ -157,3 +157,47 @@ def test_the_backend_can_be_set_for_the_process(monkeypatch):
     monkeypatch.setenv("SAS7BDAT_IO_BACKEND", "tape")
     with pytest.raises(ValueError, match="io_backend"):
         sp.SasDataset(PEOPLE)
+
+
+def test_categorical_columns_cross_as_dictionaries():
+    plain = sp.read_sas(PEOPLE)
+    cat = sp.read_sas(PEOPLE, categorical=["GENDER"])
+    assert cat["GENDER"].dtype == pl.Categorical
+    assert cat["GENDER"].cast(pl.String).equals(plain["GENDER"])
+    assert cat.drop("GENDER").equals(plain.drop("GENDER"))
+    assert sp.SasDataset(PEOPLE).schema(categorical=["GENDER"])["GENDER"] == pl.Categorical
+    every = sp.read_sas(PEOPLE, categorical=True)
+    assert [name for name, dtype in every.schema.items() if dtype == pl.Categorical] == [
+        name for name, dtype in plain.schema.items() if dtype == pl.String
+    ]
+
+
+def test_categorical_batches_with_their_own_dictionaries_concatenate():
+    ds = sp.SasDataset(PEOPLE)
+    frames = list(ds.batch_reader(None, None, None, 2, ["GENDER"]))
+    assert len(frames) >= 2
+    together = pl.concat(frames, rechunk=False)
+    assert together["GENDER"].dtype == pl.Categorical
+    assert together["GENDER"].cast(pl.String).equals(sp.read_sas(PEOPLE)["GENDER"])
+
+
+def test_a_categorical_scan_projects_and_filters():
+    lf = sp.scan_sas(PEOPLE, categorical=["GENDER"])
+    assert lf.collect_schema()["GENDER"] == pl.Categorical
+    value = sp.read_sas(PEOPLE)["GENDER"][0]
+    df = lf.filter(pl.col("GENDER").cast(pl.String) == value).select("ID").collect()
+    assert df.columns == ["ID"]
+    assert df.height == sp.read_sas(PEOPLE).filter(pl.col("GENDER") == value).height
+
+
+def test_labels_can_be_categorical_too():
+    df = sp.read_sas(LABELLED, catalog_path=CATALOG, categorical=["SEXA"])
+    assert df["SEXA"].dtype == pl.Categorical
+    assert "Male" in df["SEXA"].cast(pl.String).to_list()
+
+
+def test_categorical_refuses_what_it_cannot_encode():
+    with pytest.raises(ValueError, match="does not have"):
+        sp.read_sas(PEOPLE, categorical=["NOPE"])
+    with pytest.raises(ValueError, match="only string"):
+        sp.read_sas(PEOPLE, categorical=["AGE"])

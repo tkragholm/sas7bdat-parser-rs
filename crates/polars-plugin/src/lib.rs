@@ -96,17 +96,19 @@ impl SasDataset {
     ///
     /// The stream decodes on its own thread from the moment a consumer asks for
     /// it, and stops if the consumer lets go of it early.
-    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None))]
+    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None, categorical=None))]
     fn stream(
         &self,
         columns: Option<Vec<String>>,
         n_rows: Option<usize>,
         batch_size: Option<usize>,
+        categorical: Option<Vec<String>>,
     ) -> PyResult<ArrowStream> {
         let spec = ScanSpec {
             columns,
             n_rows,
             batch_size,
+            categorical: categorical.unwrap_or_default(),
         };
         // Resolve the schema now so an unknown column name fails here, at the
         // call, rather than inside the consumer's import.
@@ -119,10 +121,15 @@ impl SasDataset {
 
     /// A stream with the file's schema and no rows: how a consumer learns the
     /// schema without a decode.
-    #[pyo3(signature = (columns=None))]
-    fn schema_stream(&self, columns: Option<Vec<String>>) -> PyResult<ArrowStream> {
+    #[pyo3(signature = (columns=None, categorical=None))]
+    fn schema_stream(
+        &self,
+        columns: Option<Vec<String>>,
+        categorical: Option<Vec<String>>,
+    ) -> PyResult<ArrowStream> {
         let spec = ScanSpec {
             columns,
+            categorical: categorical.unwrap_or_default(),
             ..ScanSpec::default()
         };
         let schema = scan::stream_schema(&self.ds, &spec).map_err(value_error)?;
@@ -131,17 +138,19 @@ impl SasDataset {
 
     /// The same rows as `stream`, one batch at a time, each batch its own
     /// single-batch stream. For a consumer that wants to work per batch.
-    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None))]
+    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None, categorical=None))]
     fn batches(
         &self,
         columns: Option<Vec<String>>,
         n_rows: Option<usize>,
         batch_size: Option<usize>,
+        categorical: Option<Vec<String>>,
     ) -> PyResult<BatchIterator> {
         let spec = ScanSpec {
             columns,
             n_rows,
             batch_size,
+            categorical: categorical.unwrap_or_default(),
         };
         let reader = ScanReader::start(Arc::clone(&self.ds), spec).map_err(value_error)?;
         Ok(BatchIterator {

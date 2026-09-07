@@ -36,12 +36,17 @@ class SasDataset:
     @property
     def column_names(self) -> list[str]: ...
     def info(self) -> dict[str, Any]: ...
-    def schema(self, columns: Sequence[str] | None = ...) -> pl.Schema: ...
+    def schema(
+        self,
+        columns: Sequence[str] | None = ...,
+        categorical: bool | Sequence[str] = ...,
+    ) -> pl.Schema: ...
     def stream(
         self,
         columns: Sequence[str] | None = ...,
         n_rows: int | None = ...,
         batch_size: int | None = ...,
+        categorical: bool | Sequence[str] = ...,
     ) -> ArrowStream: ...
     def __arrow_c_stream__(self, requested_schema: object = ...) -> object: ...
     def read(
@@ -49,6 +54,7 @@ class SasDataset:
         columns: Sequence[str] | None = ...,
         n_rows: int | None = ...,
         predicate: pl.Expr | None = ...,
+        categorical: bool | Sequence[str] = ...,
     ) -> pl.DataFrame: ...
     def batch_reader(
         self,
@@ -56,18 +62,23 @@ class SasDataset:
         predicate: pl.Expr | None = ...,
         n_rows: int | None = ...,
         batch_size: int | None = ...,
+        categorical: bool | Sequence[str] = ...,
     ) -> BatchReader: ...
     def scan_sas(
         self,
         columns: Sequence[str] | None = ...,
         n_rows: int | None = ...,
         predicate: pl.Expr | None = ...,
-        categorical: bool = ...,
+        categorical: bool | Sequence[str] = ...,
     ) -> pl.LazyFrame: ...
 
 class SasIoSource:
     def __init__(
-        self, dataset: SasDataset, columns: list[str] | None, n_rows: int | None
+        self,
+        dataset: SasDataset,
+        columns: list[str] | None,
+        n_rows: int | None,
+        categorical: list[str] | None = ...,
     ) -> None: ...
     def __call__(
         self,
@@ -93,7 +104,7 @@ def scan_sas(
     path: str | os.PathLike[str],
     catalog_path: str | os.PathLike[str] | None = ...,
     schema_overrides: Mapping[str, Any] | None = ...,
-    categorical: bool = ...,
+    categorical: bool | Sequence[str] = ...,
     columns: Sequence[str] | None = ...,
     n_rows: int | None = ...,
     predicate: pl.Expr | None = ...,
@@ -109,6 +120,7 @@ def read_sas(
     catalog_path: str | os.PathLike[str] | None = ...,
     schema_overrides: Mapping[str, Any] | None = ...,
     io_backend: str | None = ...,
+    categorical: bool | Sequence[str] = ...,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a DataFrame."""
 
@@ -121,6 +133,7 @@ def batch_reader(
     catalog_path: str | os.PathLike[str] | None = ...,
     schema_overrides: Mapping[str, Any] | None = ...,
     io_backend: str | None = ...,
+    categorical: bool | Sequence[str] = ...,
 ) -> BatchReader:
     """Iterate a file one DataFrame per decoded batch."""
 

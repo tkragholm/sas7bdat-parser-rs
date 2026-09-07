@@ -18,6 +18,7 @@ crate-type = ["cdylib", "rlib"]
 # crossed into Python through pyo3-polars' private export hooks, which tied the
 # wheel to one Python polars release at a time.
 [dependencies]
+ahash = "0.8"
 arrow-array = { workspace = true, features = ["ffi"] }
 arrow-buffer = { workspace = true }
 arrow-schema = { workspace = true }

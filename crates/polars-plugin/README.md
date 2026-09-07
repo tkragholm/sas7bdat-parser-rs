@@ -112,8 +112,10 @@ sp.scan_threads()        # -> effective count
 # sets it for every dataset that does not name one.
 df = sp.read_sas("bef2020.sas7bdat", columns=["PNR"], io_backend="buffered")
 
-# Return character columns as Categorical (low-cardinality category codes).
-lf = sp.scan_sas("survey.sas7bdat", categorical=True)
+# Hand named string columns over dictionary-encoded, which polars reads as
+# Categorical: a 32-bit code per row and each distinct value once per batch.
+lf = sp.scan_sas("lpr_diag.sas7bdat", categorical=["C_DIAGTYPE", "C_PATTYPE"])
+df = sp.read_sas("survey.sas7bdat", categorical=True)   # every string column
 
 # SAS stores every numeric column as a float. Declare integer-coded columns
 # (registry/category codes) explicitly to get Int64 out instead of Float64:
@@ -123,12 +125,14 @@ lf = sp.scan_sas(
 )
 ```
 
-`categorical=True` casts every character column to `Categorical` in the lazy plan
-(via Polars' own cast, equivalent to
-`sp.scan_sas(path).with_columns(pl.col(pl.String).cast(pl.Categorical))`). The
-benefit is **downstream**: group-by / join / sort on these columns run on `u32`
-codes. It is *not* a read or memory win; only enable it when you'll group/join on
-the string columns.
+`categorical` is done by the reader, not by a cast afterwards: the column crosses as
+an Arrow dictionary array, polars imports the codes and the values as they are and
+unifies the batches' dictionaries on its side. A polars `String` holds sixteen bytes
+per value plus the bytes of any value over twelve; a `Categorical` holds four per row
+plus each distinct value once. Right for codes and labels, wrong for identifiers,
+where the dictionary is as large as the data and the codes come on top. Value labels
+from a catalog can be categorical too. Group-by, join and sort on these columns then
+run on the codes.
 
 `schema_overrides` is applied at schema time, so the lazy schema and the collected
 frame always agree, and the same override map yields the same dtypes for every file

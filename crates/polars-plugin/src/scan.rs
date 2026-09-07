@@ -8,9 +8,10 @@
 //! stop.
 
 use arrow_array::builder::{StringViewBuilder, make_view};
+use arrow_array::types::Int32Type;
 use arrow_array::{
-    Array, ArrayRef, Float64Array, Int32Array, Int64Array, RecordBatch, RecordBatchReader,
-    StringArray, StringViewArray,
+    Array, ArrayRef, DictionaryArray, Float64Array, Int32Array, Int64Array, RecordBatch,
+    RecordBatchReader, StringArray, StringViewArray,
 };
 use arrow_buffer::{BooleanBuffer, Buffer, NullBuffer, ScalarBuffer};
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
@@ -19,6 +20,7 @@ use sas7bdat::{
     BatchHint, ColumnMajorDecode, Dataset, Error, LabelSet, Parallelism, Result as SasResult,
     catalog::normalize_format_name,
 };
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, mpsc};
@@ -32,6 +34,9 @@ pub struct ScanSpec {
     pub columns: Option<Vec<String>>,
     pub n_rows: Option<usize>,
     pub batch_size: Option<usize>,
+    /// String columns to hand over dictionary-encoded, which polars reads as
+    /// `Categorical`: a code per row and the distinct values once per batch.
+    pub categorical: Vec<String>,
 }
 
 /// The Arrow schema a stream declares for `spec`: the core's schema for the
@@ -40,16 +45,40 @@ pub struct ScanSpec {
 /// is what its batches hold.
 pub fn stream_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
     let core = core_schema(ds, spec)?;
-    Ok(stream_schema_from(&core, &label_sets(ds, &core)))
+    let labels = label_sets(ds, &core);
+    stream_schema_from(&core, &labels, &spec.categorical)
 }
 
-fn stream_schema_from(core: &Schema, labels: &[Option<LabelSet>]) -> SchemaRef {
+/// Arrow's spelling of what polars reads as `Categorical`.
+fn dictionary_type() -> DataType {
+    DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8))
+}
+
+fn stream_schema_from(
+    core: &Schema,
+    labels: &[Option<LabelSet>],
+    categorical: &[String],
+) -> SasResult<SchemaRef> {
+    for name in categorical {
+        let Some((index, _)) = core.column_with_name(name) else {
+            return Err(Error::unsupported(format!(
+                "categorical names a column the scan does not have: {name}"
+            )));
+        };
+        if labels[index].is_none() && core.field(index).data_type() != &DataType::Utf8 {
+            return Err(Error::unsupported(format!(
+                "categorical on {name}, a {} column; only string and labelled columns",
+                core.field(index).data_type()
+            )));
+        }
+    }
     let fields = core
         .fields()
         .iter()
         .zip(labels)
         .map(|(field, label)| {
             let data_type = match (label, field.data_type()) {
+                _ if categorical.contains(field.name()) => dictionary_type(),
                 (Some(_), _) | (None, DataType::Utf8) => DataType::Utf8View,
                 (None, other) => other.clone(),
             };
@@ -58,7 +87,7 @@ fn stream_schema_from(core: &Schema, labels: &[Option<LabelSet>]) -> SchemaRef {
             )
         })
         .collect::<Vec<_>>();
-    Arc::new(Schema::new(fields))
+    Ok(Arc::new(Schema::new(fields)))
 }
 
 fn core_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
@@ -202,7 +231,7 @@ impl ScanReader {
     pub fn start(ds: Arc<Dataset>, spec: ScanSpec) -> SasResult<Self> {
         let core = core_schema(&ds, &spec)?;
         let labels = label_sets(&ds, &core);
-        let schema = stream_schema_from(&core, &labels);
+        let schema = stream_schema_from(&core, &labels, &spec.categorical)?;
         // Two batches of slack: enough that the decoder is not stalled by a
         // consumer doing a little work per batch, and the smallest number that
         // measured no slower than four.
@@ -274,29 +303,61 @@ fn run_scan(
         spec.batch_size
             .unwrap_or_else(|| default_batch_rows(ds, spec)),
     ));
+    // One interner per categorical column for the whole scan, so a value keeps
+    // its code from batch to batch and each batch's dictionary extends the last.
+    let mut interners: HashMap<String, Interner> = spec
+        .categorical
+        .iter()
+        .map(|name| (name.clone(), Interner::default()))
+        .collect();
     scan.visit_owned_batches(|batch| {
         // The core moves a numeric or temporal buffer into its array; a string
         // buffer becomes views here, in one pass over its bytes; a labelled
-        // column is rebuilt from its values to their labels.
+        // column is rebuilt from its values to their labels; a categorical
+        // column becomes codes against its interner's dictionary.
         let rows = batch.row_count;
         let columns = batch
             .columns
             .into_iter()
             .zip(core.fields())
             .zip(labels)
-            .map(|((column, field), label)| match (label, column) {
-                (
-                    None,
-                    OwnedColumnBuffer::Utf8 {
-                        offsets,
-                        data,
-                        valid,
-                        ..
-                    },
-                ) => string_views(&offsets.into_inner(), data, valid, rows),
-                (None, column) => column.into_arrow_array_as(field.data_type()),
-                (Some(label), column) => {
-                    labelled(&column.into_arrow_array_as(field.data_type())?, label)
+            .map(|((column, field), label)| {
+                let interner = interners.get_mut(field.name());
+                match (label, column, interner) {
+                    (
+                        None,
+                        OwnedColumnBuffer::Utf8 {
+                            offsets,
+                            data,
+                            valid,
+                            ..
+                        },
+                        Some(interner),
+                    ) => interner.encode_buffer(&offsets.into_inner(), &data, valid, rows),
+                    (
+                        None,
+                        OwnedColumnBuffer::Utf8 {
+                            offsets,
+                            data,
+                            valid,
+                            ..
+                        },
+                        None,
+                    ) => string_views(&offsets.into_inner(), data, valid, rows),
+                    (None, column, _) => column.into_arrow_array_as(field.data_type()),
+                    (Some(label), column, interner) => {
+                        let labels =
+                            labelled(&column.into_arrow_array_as(field.data_type())?, label)?;
+                        match interner {
+                            Some(interner) => interner.encode_views(
+                                labels
+                                    .as_any()
+                                    .downcast_ref::<StringViewArray>()
+                                    .ok_or_else(|| Error::arrow("labels are not a string array"))?,
+                            ),
+                            None => Ok(labels),
+                        }
+                    }
                 }
             })
             .collect::<SasResult<Vec<_>>>()?;
@@ -375,6 +436,102 @@ fn string_views(
         )
     };
     Ok(Arc::new(array))
+}
+
+/// The dictionary behind one categorical column, kept for the whole scan.
+///
+/// A value gets a code the first time it is seen and keeps it, so every
+/// batch's dictionary is the previous one extended and polars has nothing to
+/// reconcile between batches. SAS category columns are often one byte wide, and
+/// for those a 257-entry table stands in for the hash map: no hashing at all on
+/// the common case, which is where arrow's generic dictionary builder spent
+/// ten nanoseconds a row.
+#[derive(Default)]
+struct Interner {
+    /// Code per one-byte value, index 256 for the empty string; `-1` unseen.
+    byte_codes: Option<Box<[i32; 257]>>,
+    longer: HashMap<Box<[u8]>, i32, ahash::RandomState>,
+    /// Every distinct value once, in code order.
+    values: Vec<String>,
+}
+
+impl Interner {
+    fn code(&mut self, bytes: &[u8]) -> SasResult<i32> {
+        if bytes.len() <= 1 {
+            let slot = bytes.first().map_or(256, |byte| usize::from(*byte));
+            if let Some(table) = &self.byte_codes
+                && table[slot] >= 0
+            {
+                return Ok(table[slot]);
+            }
+            let code = self.push(bytes)?;
+            self.byte_codes.get_or_insert_with(|| Box::new([-1; 257]))[slot] = code;
+            return Ok(code);
+        }
+        if let Some(&code) = self.longer.get(bytes) {
+            return Ok(code);
+        }
+        let code = self.push(bytes)?;
+        self.longer.insert(bytes.into(), code);
+        Ok(code)
+    }
+
+    fn push(&mut self, bytes: &[u8]) -> SasResult<i32> {
+        let code = i32::try_from(self.values.len()).map_err(|_| {
+            Error::unsupported("a categorical column with over 2^31 distinct values")
+        })?;
+        let text = std::str::from_utf8(bytes).map_err(|err| Error::arrow(err.to_string()))?;
+        self.values.push(text.to_owned());
+        Ok(code)
+    }
+
+    fn finish(&self, keys: Vec<i32>, nulls: Option<NullBuffer>) -> SasResult<ArrayRef> {
+        let keys = Int32Array::new(ScalarBuffer::from(keys), nulls);
+        let values = StringArray::from_iter_values(self.values.iter().map(String::as_str));
+        DictionaryArray::<Int32Type>::try_new(keys, Arc::new(values))
+            .map(|array| Arc::new(array) as ArrayRef)
+            .map_err(|err| Error::arrow(err.to_string()))
+    }
+
+    /// Codes for a scanner string buffer.
+    fn encode_buffer(
+        &mut self,
+        offsets: &[i64],
+        data: &[u8],
+        valid: Option<Vec<u64>>,
+        rows: usize,
+    ) -> SasResult<ArrayRef> {
+        if offsets.len() != rows + 1 {
+            return Err(Error::arrow("string offsets do not match the row count"));
+        }
+        let nulls = valid
+            .map(|words| NullBuffer::new(BooleanBuffer::new(Buffer::from_vec(words), 0, rows)));
+        let mut keys = Vec::with_capacity(rows);
+        let mut previous = 0usize;
+        for (row, &offset) in offsets[1..].iter().enumerate() {
+            let offset = usize::try_from(offset).map_err(|_| Error::arrow("negative offset"))?;
+            let bytes = data
+                .get(previous..offset)
+                .ok_or_else(|| Error::arrow("string offsets run past their data"))?;
+            let valid = nulls.as_ref().is_none_or(|nulls| nulls.is_valid(row));
+            keys.push(if valid { self.code(bytes)? } else { 0 });
+            previous = offset;
+        }
+        self.finish(keys, nulls)
+    }
+
+    /// Codes for an already-built string array, which is what a labelled
+    /// column is by the time it is categorical.
+    fn encode_views(&mut self, strings: &StringViewArray) -> SasResult<ArrayRef> {
+        let mut keys = Vec::with_capacity(strings.len());
+        for value in strings {
+            keys.push(match value {
+                Some(text) => self.code(text.as_bytes())?,
+                None => 0,
+            });
+        }
+        self.finish(keys, strings.nulls().cloned())
+    }
 }
 
 /// A string array of the labels for `column`'s values. A value the label set

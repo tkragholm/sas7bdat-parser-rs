@@ -301,6 +301,13 @@ class SasDataset:
     while the dataset lives; ``"buffered"`` holds a bounded window instead, at
     the price of slower peeks and single-column reads. ``SAS7BDAT_IO_BACKEND``
     sets it for every dataset that does not name one.
+
+    ``categorical``, on every read, names string columns to hand over
+    dictionary-encoded, which polars reads as ``Categorical``: a 32-bit code per
+    row and each distinct value once per batch, against sixteen bytes per row
+    for a ``String``. ``True`` means every string column; a sequence names them.
+    Right for codes and labels, wrong for identifiers, where the dictionary is
+    as large as the data.
     """
 
     def __init__(
@@ -326,25 +333,41 @@ class SasDataset:
         """Header-level facts: row and column counts, encoding, compression."""
         return dict(self._native.info())
 
-    def schema(self, columns: Sequence[str] | None = None) -> pl.Schema:
+    def _categorical(
+        self, columns: list[str] | None, categorical: bool | Sequence[str]
+    ) -> list[str] | None:
+        if categorical is True:
+            plain = pl.DataFrame(self._native.schema_stream(columns)).schema
+            return [name for name, dtype in plain.items() if dtype == pl.String]
+        if not categorical:
+            return None
+        return list(categorical)
+
+    def schema(
+        self,
+        columns: Sequence[str] | None = None,
+        categorical: bool | Sequence[str] = False,
+    ) -> pl.Schema:
         """The polars schema of ``columns`` (or every column), from the header alone."""
-        stream = self._native.schema_stream(list(columns) if columns else None)
-        return pl.DataFrame(stream).schema
+        columns = list(columns) if columns else None
+        names = self._categorical(columns, categorical)
+        return pl.DataFrame(self._native.schema_stream(columns, names)).schema
 
     def stream(
         self,
         columns: Sequence[str] | None = None,
         n_rows: int | None = None,
         batch_size: int | None = None,
+        categorical: bool | Sequence[str] = False,
     ) -> ArrowStream:
         """An Arrow C stream of the rows: give it to anything that imports
         ``__arrow_c_stream__``."""
-        return self._native.stream(
-            list(columns) if columns else None, n_rows, batch_size
-        )
+        columns = list(columns) if columns else None
+        names = self._categorical(columns, categorical)
+        return self._native.stream(columns, n_rows, batch_size, names)
 
     def __arrow_c_stream__(self, requested_schema: object = None) -> object:
-        return self._native.stream(None, None, None).__arrow_c_stream__(
+        return self._native.stream(None, None, None, None).__arrow_c_stream__(
             requested_schema
         )
 
@@ -353,15 +376,19 @@ class SasDataset:
         columns: Sequence[str] | None = None,
         n_rows: int | None = None,
         predicate: pl.Expr | None = None,
+        categorical: bool | Sequence[str] = False,
     ) -> pl.DataFrame:
+        columns = list(columns) if columns else None
+        names = self._categorical(columns, categorical)
         # Batch by batch rather than one stream: polars imports a whole stream
         # after the decode instead of overlapping with it, and measured half
         # again as slow on a register-shaped file. The concat keeps the chunks.
-        frames = [pl.DataFrame(batch) for batch in self._native.batches(
-            list(columns) if columns else None, n_rows, None
-        )]
+        frames = [
+            pl.DataFrame(batch)
+            for batch in self._native.batches(columns, n_rows, None, names)
+        ]
         if not frames:
-            return pl.DataFrame(self._native.schema_stream(list(columns) if columns else None))
+            return pl.DataFrame(self._native.schema_stream(columns, names))
         df = pl.concat(frames, rechunk=False)
         return df if predicate is None else df.filter(predicate)
 
@@ -371,10 +398,11 @@ class SasDataset:
         predicate: pl.Expr | None = None,
         n_rows: int | None = None,
         batch_size: int | None = None,
+        categorical: bool | Sequence[str] = False,
     ) -> BatchReader:
-        batches = self._native.batches(
-            list(with_columns) if with_columns else None, n_rows, batch_size
-        )
+        columns = list(with_columns) if with_columns else None
+        names = self._categorical(columns, categorical)
+        batches = self._native.batches(columns, n_rows, batch_size, names)
         return BatchReader(batches, predicate)
 
     def scan_sas(
@@ -382,21 +410,20 @@ class SasDataset:
         columns: Sequence[str] | None = None,
         n_rows: int | None = None,
         predicate: pl.Expr | None = None,
-        categorical: bool = False,
+        categorical: bool | Sequence[str] = False,
     ) -> pl.LazyFrame:
         """A lazy frame over the file. Projection and a row limit reach the
         decoder; a filter is applied per batch by polars."""
         columns = list(columns) if columns else None
+        names = self._categorical(columns, categorical) or []
         lf = register_io_source(
-            io_source=SasIoSource(self, columns, n_rows),
-            schema=self.schema(columns),
+            io_source=SasIoSource(self, columns, n_rows, names),
+            schema=self.schema(columns, names),
             validate_schema=False,
             is_pure=True,
         )
         if predicate is not None:
             lf = lf.filter(predicate)
-        if categorical:
-            lf = lf.with_columns(pl.col(pl.String).cast(pl.Categorical))
         return lf
 
 
@@ -409,11 +436,16 @@ class SasIoSource:
     """
 
     def __init__(
-        self, dataset: SasDataset, columns: list[str] | None, n_rows: int | None
+        self,
+        dataset: SasDataset,
+        columns: list[str] | None,
+        n_rows: int | None,
+        categorical: list[str] | None = None,
     ) -> None:
         self._dataset = dataset
         self._columns = columns
         self._n_rows = n_rows
+        self._categorical = categorical or []
 
     def __call__(
         self,
@@ -425,7 +457,11 @@ class SasIoSource:
         columns = with_columns if with_columns is not None else self._columns
         limits = [n for n in (n_rows, self._n_rows) if n is not None]
         limit = min(limits) if limits else None
-        return self._dataset.batch_reader(columns, predicate, limit, batch_size)
+        # Only the categorical columns the plan still asks for.
+        names = [
+            name for name in self._categorical if columns is None or name in columns
+        ]
+        return self._dataset.batch_reader(columns, predicate, limit, batch_size, names)
 
 
 # ─── module-level API ─────────────────────────────────────────────────────────
@@ -456,7 +492,7 @@ def scan_sas(
     path: str | os.PathLike[str],
     catalog_path: str | os.PathLike[str] | None = None,
     schema_overrides: Mapping[str, Any] | None = None,
-    categorical: bool = False,
+    categorical: bool | Sequence[str] = False,
     columns: Sequence[str] | None = None,
     n_rows: int | None = None,
     predicate: pl.Expr | None = None,
@@ -481,10 +517,11 @@ def read_sas(
     catalog_path: str | os.PathLike[str] | None = None,
     schema_overrides: Mapping[str, Any] | None = None,
     io_backend: str | None = None,
+    categorical: bool | Sequence[str] = False,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a ``pl.DataFrame``."""
     return SasDataset(path, catalog_path, schema_overrides, io_backend).read(
-        columns, n_rows, predicate
+        columns, n_rows, predicate, categorical
     )
 
 
@@ -497,10 +534,11 @@ def batch_reader(
     catalog_path: str | os.PathLike[str] | None = None,
     schema_overrides: Mapping[str, Any] | None = None,
     io_backend: str | None = None,
+    categorical: bool | Sequence[str] = False,
 ) -> BatchReader:
     """Iterate a file one ``pl.DataFrame`` per decoded batch."""
     return SasDataset(path, catalog_path, schema_overrides, io_backend).batch_reader(
-        with_columns, predicate, n_rows, batch_size
+        with_columns, predicate, n_rows, batch_size, categorical
     )
 
 
