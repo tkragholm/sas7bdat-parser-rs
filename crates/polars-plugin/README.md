@@ -103,6 +103,15 @@ The rules:
 sp.set_scan_threads(8)   # cap decode threads; set_scan_threads(0) resets to all cores
 sp.scan_threads()        # -> effective count
 
+# Read through a bounded buffer instead of mapping the file. A mapped file counts
+# every page it touches against the process's resident set while the dataset
+# lives: on a 128 MB file that was 405 MB peak against 301 MB buffered, and on a
+# multi-gigabyte register file it is the difference between a working set the
+# size of the file and one the size of the result. The price is slower peeks
+# (`head`) and single-column reads; full reads are within noise. `SAS7BDAT_IO_BACKEND`
+# sets it for every dataset that does not name one.
+df = sp.read_sas("bef2020.sas7bdat", columns=["PNR"], io_backend="buffered")
+
 # Return character columns as Categorical (low-cardinality category codes).
 lf = sp.scan_sas("survey.sas7bdat", categorical=True)
 

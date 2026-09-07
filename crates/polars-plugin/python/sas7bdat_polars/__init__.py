@@ -294,6 +294,13 @@ class SasDataset:
     Opening parses the header and the optional format catalog once and applies
     ``schema_overrides`` (``{column: pl.Int64}`` and the like) at schema time,
     so every scan and every batch agree on the dtypes.
+
+    ``io_backend`` is how the file is read: ``"auto"`` (the default: map a local
+    file, read a network path sequentially), ``"mmap"``, or ``"buffered"``. A
+    mapped file counts every page it touches against the process's resident set
+    while the dataset lives; ``"buffered"`` holds a bounded window instead, at
+    the price of slower peeks and single-column reads. ``SAS7BDAT_IO_BACKEND``
+    sets it for every dataset that does not name one.
     """
 
     def __init__(
@@ -425,12 +432,16 @@ class SasIoSource:
 
 
 def sas_info(
-    path: str | os.PathLike[str], catalog_path: str | os.PathLike[str] | None = None
+    path: str | os.PathLike[str],
+    catalog_path: str | os.PathLike[str] | None = None,
+    io_backend: str | None = None,
 ) -> dict[str, Any]:
     """Header-level facts about a file: ``n_rows``, ``n_columns``, ``encoding``,
     ``compression``, ``rows_per_page``, ``size_bytes``. No rows are decoded."""
     return dict(
-        _native_sas_info(str(path), None if catalog_path is None else str(catalog_path))
+        _native_sas_info(
+            str(path), None if catalog_path is None else str(catalog_path), io_backend
+        )
     )
 
 
@@ -449,6 +460,7 @@ def scan_sas(
     columns: Sequence[str] | None = None,
     n_rows: int | None = None,
     predicate: pl.Expr | None = None,
+    io_backend: str | None = None,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file into a ``pl.LazyFrame``.
 
@@ -456,7 +468,7 @@ def scan_sas(
     ``n_rows`` to bound the read. ``schema_overrides`` re-types columns at schema
     time, e.g. ``{"ID": pl.Int64}`` for an integer-coded numeric column.
     """
-    return SasDataset(path, catalog_path, schema_overrides).scan_sas(
+    return SasDataset(path, catalog_path, schema_overrides, io_backend).scan_sas(
         columns, n_rows, predicate, categorical
     )
 
@@ -468,9 +480,10 @@ def read_sas(
     predicate: pl.Expr | None = None,
     catalog_path: str | os.PathLike[str] | None = None,
     schema_overrides: Mapping[str, Any] | None = None,
+    io_backend: str | None = None,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a ``pl.DataFrame``."""
-    return SasDataset(path, catalog_path, schema_overrides).read(
+    return SasDataset(path, catalog_path, schema_overrides, io_backend).read(
         columns, n_rows, predicate
     )
 
@@ -483,9 +496,10 @@ def batch_reader(
     batch_size: int | None = None,
     catalog_path: str | os.PathLike[str] | None = None,
     schema_overrides: Mapping[str, Any] | None = None,
+    io_backend: str | None = None,
 ) -> BatchReader:
     """Iterate a file one ``pl.DataFrame`` per decoded batch."""
-    return SasDataset(path, catalog_path, schema_overrides).batch_reader(
+    return SasDataset(path, catalog_path, schema_overrides, io_backend).batch_reader(
         with_columns, predicate, n_rows, batch_size
     )
 

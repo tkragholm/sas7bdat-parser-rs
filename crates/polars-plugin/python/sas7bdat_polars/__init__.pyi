@@ -31,6 +31,7 @@ class SasDataset:
         path: str | os.PathLike[str],
         catalog_path: str | os.PathLike[str] | None = ...,
         schema_overrides: Mapping[str, Any] | None = ...,
+        io_backend: str | None = ...,
     ) -> None: ...
     @property
     def column_names(self) -> list[str]: ...
@@ -77,7 +78,9 @@ class SasIoSource:
     ) -> Iterator[pl.DataFrame]: ...
 
 def sas_info(
-    path: str | os.PathLike[str], catalog_path: str | os.PathLike[str] | None = ...
+    path: str | os.PathLike[str],
+    catalog_path: str | os.PathLike[str] | None = ...,
+    io_backend: str | None = ...,
 ) -> dict[str, Any]:
     """Header-level facts about a file; no rows are decoded."""
 
@@ -94,6 +97,7 @@ def scan_sas(
     columns: Sequence[str] | None = ...,
     n_rows: int | None = ...,
     predicate: pl.Expr | None = ...,
+    io_backend: str | None = ...,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file. Pass ``columns`` to project at the reader."""
 
@@ -104,6 +108,7 @@ def read_sas(
     predicate: pl.Expr | None = ...,
     catalog_path: str | os.PathLike[str] | None = ...,
     schema_overrides: Mapping[str, Any] | None = ...,
+    io_backend: str | None = ...,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a DataFrame."""
 
@@ -115,6 +120,7 @@ def batch_reader(
     batch_size: int | None = ...,
     catalog_path: str | os.PathLike[str] | None = ...,
     schema_overrides: Mapping[str, Any] | None = ...,
+    io_backend: str | None = ...,
 ) -> BatchReader:
     """Iterate a file one DataFrame per decoded batch."""
 

@@ -134,3 +134,20 @@ def test_pyarrow_reads_the_same_stream_when_present():
     table = pa.table(sp.SasDataset(PEOPLE))
     assert table.num_rows == 5
     assert table.column_names == sp.SasDataset(PEOPLE).column_names
+
+
+def test_a_buffered_read_is_the_mapped_read():
+    mapped = sp.read_sas(LABELLED, catalog_path=CATALOG, io_backend="mmap")
+    buffered = sp.read_sas(LABELLED, catalog_path=CATALOG, io_backend="buffered")
+    assert buffered.equals(mapped)
+    assert sp.sas_info(PEOPLE, io_backend="buffered") == sp.sas_info(PEOPLE)
+    with pytest.raises(ValueError, match="io_backend"):
+        sp.SasDataset(PEOPLE, io_backend="tape")
+
+
+def test_the_backend_can_be_set_for_the_process(monkeypatch):
+    monkeypatch.setenv("SAS7BDAT_IO_BACKEND", "buffered")
+    assert sp.read_sas(PEOPLE).equals(sp.read_sas(PEOPLE, io_backend="mmap"))
+    monkeypatch.setenv("SAS7BDAT_IO_BACKEND", "tape")
+    with pytest.raises(ValueError, match="io_backend"):
+        sp.SasDataset(PEOPLE)
