@@ -508,6 +508,22 @@ impl Dataset {
         Ok((layout, metadata))
     }
 
+    /// How the file's bytes are reached: `"mmap"` for a memory map, `"buffered"`
+    /// for sequential reads of a path, `"bytes"` for an in-memory buffer.
+    ///
+    /// `Auto` decides between the first two by probing whether the path is on a
+    /// network share, and a share can be presented in ways the probe answers
+    /// "local" to. A caller that cares which side it landed on reads it here,
+    /// without a decode.
+    #[must_use]
+    pub const fn io_backend(&self) -> &'static str {
+        match self.file.source {
+            FileSource::Mmap(_) => "mmap",
+            FileSource::Path(_) => "buffered",
+            FileSource::Bytes(_) => "bytes",
+        }
+    }
+
     fn from_buffered_file(path: &Path, mut file: File, options: OpenOptions) -> Result<Self> {
         let (layout, metadata) = Self::parse_from_reader(&mut file).map_err(|mut err| {
             if let Error::Io(ref mut io_err) = err {
