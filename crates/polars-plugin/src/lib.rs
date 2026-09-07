@@ -17,7 +17,7 @@ use arrow_array::ffi_stream::FFI_ArrowArrayStream;
 use pyo3::exceptions::{PyRuntimeError, PyStopIteration, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyDict};
-use sas7bdat::{Dataset, LogicalType};
+use sas7bdat::{Dataset, IoBackendPreference, LogicalType, OpenOptions};
 use scan::{ScanReader, ScanSpec};
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -48,14 +48,18 @@ struct SasDataset {
 #[pymethods]
 impl SasDataset {
     #[new]
-    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None))]
+    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None))]
     fn open(
         py: Python<'_>,
         path: &str,
         catalog_path: Option<&str>,
         schema_overrides: Option<HashMap<String, String>>,
+        io_backend: Option<&str>,
     ) -> PyResult<Self> {
-        let mut ds = py.detach(|| Dataset::open(path)).map_err(value_error)?;
+        let options = open_options(io_backend)?;
+        let mut ds = py
+            .detach(|| Dataset::open_with(path, options))
+            .map_err(value_error)?;
         if let Some(catalog) = catalog_path {
             ds.attach_catalog(catalog).map_err(value_error)?;
         }
@@ -145,6 +149,33 @@ impl SasDataset {
             reader: Mutex::new(reader),
         })
     }
+}
+
+/// How the file is read: `auto` (the default: map a local file, read a network
+/// path sequentially), `mmap`, or `buffered`. From the argument, else from
+/// `SAS7BDAT_IO_BACKEND`. A mapped file counts every page it touches against
+/// the process's resident set for as long as the map lives; a buffered read
+/// holds a bounded window, which on a multi-gigabyte register file is the
+/// difference between a working set the size of the file and one the size of
+/// the result.
+fn open_options(io_backend: Option<&str>) -> PyResult<OpenOptions> {
+    let named = match io_backend {
+        Some(name) => Some(name.to_owned()),
+        None => std::env::var("SAS7BDAT_IO_BACKEND").ok(),
+    };
+    let preference = match named
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        None => IoBackendPreference::Auto,
+        Some(name) => name.parse::<IoBackendPreference>().map_err(|_| {
+            PyValueError::new_err(format!(
+                "unknown io_backend {name:?}; one of auto, mmap, buffered"
+            ))
+        })?,
+    };
+    Ok(OpenOptions::builder().io_backend(preference).build())
 }
 
 fn logical_type_from_name(name: &str) -> PyResult<LogicalType> {
@@ -294,13 +325,17 @@ impl BatchIterator {
 
 /// Header-level facts about a file, without opening a dataset object.
 #[pyfunction]
-#[pyo3(signature = (path, catalog_path=None))]
+#[pyo3(signature = (path, catalog_path=None, io_backend=None))]
 fn sas_info<'py>(
     py: Python<'py>,
     path: &str,
     catalog_path: Option<&str>,
+    io_backend: Option<&str>,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let mut ds = py.detach(|| Dataset::open(path)).map_err(value_error)?;
+    let options = open_options(io_backend)?;
+    let mut ds = py
+        .detach(|| Dataset::open_with(path, options))
+        .map_err(value_error)?;
     if let Some(catalog) = catalog_path {
         ds.attach_catalog(catalog).map_err(value_error)?;
     }

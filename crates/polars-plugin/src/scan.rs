@@ -127,20 +127,36 @@ fn scan_parallelism() -> Parallelism {
     }
 }
 
+/// The decode workers a scan will use: the override, else every core.
+fn scan_workers() -> usize {
+    match scan_parallelism() {
+        Parallelism::None => 1,
+        Parallelism::Threads(threads) => threads,
+        Parallelism::Auto => thread::available_parallelism().map_or(1, usize::from),
+    }
+}
+
 /// Rows per batch when the caller names none.
 ///
-/// Two costs pull in opposite directions, measured on 7 September 2026 on a
-/// twelve-core machine. Every batch crossing into Python pays a fixed import
-/// price, about 70 microseconds, so a narrow 1.7-million-row register file at
-/// the core's own 4,096-row default made 430 batches and spent a third of a
-/// full read on them. And the core decodes batches in parallel, so a wide
-/// 84,000-row survey file at 65,536 rows made three batches, used three cores,
-/// and read three times slower than at 4,096. So: about 8 MB of decoded row
-/// bytes per batch, no more than would leave fewer than two batches per core,
-/// and between 4,096 and 32,768 rows. Every file measured sits within a few
-/// percent of its best size under that rule.
+/// Three costs, measured on 7 September 2026 on a twelve-core machine. Every
+/// batch crossing into Python pays a fixed import price, about 70
+/// microseconds, so a narrow 1.7-million-row register file at the core's own
+/// 4,096-row default made 430 batches and spent a third of a full read on
+/// them. The core decodes batches in parallel, one per worker, so a wide
+/// 84,000-row survey file at 65,536 rows a batch used three cores and read
+/// three times slower. And each worker holds the batch it is decoding, so
+/// memory in flight is workers times batch bytes: at 8 MB a batch the
+/// twelve workers held 114 MB over a single one, and the analysis server has
+/// ninety-six.
+///
+/// So: a budget of 64 MB of decoded rows in flight, shared out per worker and
+/// never below 1 MB a batch; no fewer than two batches per core; and between
+/// 4,096 and 32,768 rows. On twelve cores that is the size every file
+/// measured was within a few percent of its best at; on ninety-six it is
+/// smaller batches and a bounded footprint.
 fn default_batch_rows(ds: &Dataset, spec: &ScanSpec) -> usize {
-    const TARGET_BYTES: usize = 8 << 20;
+    const IN_FLIGHT_BYTES: usize = 64 << 20;
+    const MIN_BATCH_BYTES: usize = 1 << 20;
     let meta = ds.metadata();
     let columns = spec
         .columns
@@ -153,10 +169,10 @@ fn default_batch_rows(ds: &Dataset, spec: &ScanSpec) -> usize {
         .unwrap_or(usize::MAX)
         .max(columns * 8)
         .max(1);
-    let by_bytes = TARGET_BYTES / width;
-    let cores = thread::available_parallelism().map_or(1, usize::from);
+    let workers = scan_workers().max(1);
+    let by_bytes = (IN_FLIGHT_BYTES / workers).max(MIN_BATCH_BYTES) / width;
     let rows = usize::try_from(meta.row_count).unwrap_or(usize::MAX);
-    let by_parallelism = rows / (2 * cores).max(1);
+    let by_parallelism = rows / (2 * workers);
     by_bytes.min(by_parallelism).clamp(1 << 12, 1 << 15)
 }
 
@@ -187,10 +203,10 @@ impl ScanReader {
         let core = core_schema(&ds, &spec)?;
         let labels = label_sets(&ds, &core);
         let schema = stream_schema_from(&core, &labels);
-        // Four batches of slack: enough that the decoder is not stalled by a
-        // consumer doing a little work per batch, small enough that a stalled
-        // consumer holds a handful of batches and not the file.
-        let (tx, rx) = mpsc::sync_channel::<Result<RecordBatch, String>>(4);
+        // Two batches of slack: enough that the decoder is not stalled by a
+        // consumer doing a little work per batch, and the smallest number that
+        // measured no slower than four.
+        let (tx, rx) = mpsc::sync_channel::<Result<RecordBatch, String>>(2);
         let stream_schema = Arc::clone(&schema);
         thread::spawn(move || {
             // A panic on this thread would close the channel and end the stream

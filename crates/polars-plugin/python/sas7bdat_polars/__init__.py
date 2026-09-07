@@ -301,12 +301,14 @@ class SasDataset:
         path: str | os.PathLike[str],
         catalog_path: str | os.PathLike[str] | None = None,
         schema_overrides: Mapping[str, Any] | None = None,
+        io_backend: str | None = None,
     ) -> None:
         self.path = str(path)
         self._native = _NativeDataset(
             self.path,
             None if catalog_path is None else str(catalog_path),
             _override_names(schema_overrides),
+            io_backend,
         )
 
     @property
