@@ -255,6 +255,20 @@ bench-plugins-single fixture="fixtures/ahs2013n.sas7bdat" columns="CONTROL,DEGRE
     @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml
     @scripts/bench_plugins.py --fixture {{fixture}} --columns {{columns}} --repeat {{repeat}} --batch-rows {{batch_rows}} --limit {{limit}}
 
+# The Python reader against another build of itself, each in its own
+# interpreter, and where a read's memory goes. `old` is any interpreter with a
+# sas7bdat-polars installed, for instance a venv with the published wheel:
+#   uv venv /tmp/old && uv pip install --python /tmp/old/bin/python sas7bdat-polars==0.9.2
+# Files are any .sas7bdat; the tracked extdata fixtures are too small to say
+# anything, so point it at a register-shaped file or a generated delivery.
+bench-reader old files:
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml --features extension-module
+    @python3 scripts/bench_reader.py compare old={{old}} new=.venv/bin/python $(for f in {{files}}; do printf -- '--file %s ' "$f"; done)
+
+bench-reader-memory file:
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml --features extension-module
+    @python3 scripts/bench_reader.py memory .venv/bin/python {{file}}
+
 bench-compare fixture="fixtures/raw_data/other/cars.sas7bdat" mode="both" repeat="3" batch_rows="4096":
     @python3 scripts/compare_simd_vs_old.py --fixture {{fixture}} --mode {{mode}} --repeat {{repeat}} --batch-rows {{batch_rows}}
 

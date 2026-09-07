@@ -422,52 +422,85 @@ def run_plugin_warm_batch_reader(
     }
 
 
+def _steady(
+    fixture: str, columns: list[str], repeat: int, batch_rows: int, limit: int, run
+) -> dict[str, object]:
+    """Time `run(dataset)` once to prime, then `repeat` times; `run` returns
+    (rows, batches). The shape every plugin measure below reports."""
+    import sas7bdat_polars as sp  # noqa: E402
+
+    ds = sp.SasDataset(fixture)
+    prime_start = time.perf_counter_ns()
+    prime_rows, _ = run(ds)
+    prime_elapsed = time.perf_counter_ns() - prime_start
+    start = time.perf_counter_ns()
+    rows_last = batches_last = 0
+    for _ in range(repeat):
+        rows_last, batches_last = run(ds)
+    elapsed_total = time.perf_counter_ns() - start
+    elapsed_avg = elapsed_total // repeat
+    seconds = elapsed_avg / 1_000_000_000.0
+    return {
+        "fixture": fixture,
+        "columns": columns,
+        "repeat": repeat,
+        "batch_rows": batch_rows,
+        "limit": None if limit <= 0 else limit,
+        "priming_ns": prime_elapsed,
+        "priming_rows": prime_rows,
+        "steady_elapsed_ns_total": elapsed_total,
+        "steady_elapsed_ns_avg": elapsed_avg,
+        "rows_last": rows_last,
+        "batches_last": batches_last,
+        "rows_per_second": rows_last / seconds if seconds > 0.0 else 0.0,
+        "batches_per_second": batches_last / seconds if seconds > 0.0 else 0.0,
+    }
+
+
 def run_plugin_inner_batch_to_dataframe(
     fixture: str, columns: list[str], repeat: int, batch_rows: int, limit: int
 ) -> dict[str, object]:
-    import sas7bdat_polars as sp  # noqa: E402
+    """Decode and convert to Arrow on the Rust side, nothing crossing into
+    Python: the batches are pulled and dropped. What the extension costs
+    before polars sees anything."""
 
-    result = sp.benchmark_batch_to_dataframe(
-        fixture,
-        columns,
-        limit if limit > 0 else None,
-        batch_rows,
-        repeat,
-    )
-    result["columns"] = columns
-    return result
+    def run(ds):
+        batches = 0
+        for _ in ds._native.batches(columns, limit if limit > 0 else None, batch_rows, None):
+            batches += 1
+        total = ds.info()["n_rows"]
+        return (min(total, limit) if limit > 0 else total), batches
+
+    return _steady(fixture, columns, repeat, batch_rows, limit, run)
 
 
 def run_plugin_inner_dataframe_to_python(
     fixture: str, columns: list[str], repeat: int, batch_rows: int, limit: int
 ) -> dict[str, object]:
-    import sas7bdat_polars as sp  # noqa: E402
+    """The crossing: every batch imported into a polars DataFrame and dropped.
+    The difference from the measure above is what the Arrow C stream costs."""
 
-    result = sp.benchmark_dataframe_to_python(
-        fixture,
-        columns,
-        limit if limit > 0 else None,
-        batch_rows,
-        repeat,
-    )
-    result["columns"] = columns
-    return result
+    def run(ds):
+        rows = batches = 0
+        for batch in ds._native.batches(columns, limit if limit > 0 else None, batch_rows, None):
+            batches += 1
+            rows += pl.DataFrame(batch).height
+        return rows, batches
+
+    return _steady(fixture, columns, repeat, batch_rows, limit, run)
 
 
 def run_plugin_inner_scan_to_dataframes(
     fixture: str, columns: list[str], repeat: int, batch_rows: int, limit: int
 ) -> dict[str, object]:
-    import sas7bdat_polars as sp  # noqa: E402
+    """One stream, imported whole by polars: the eager read without the
+    per-batch Python loop."""
 
-    result = sp.benchmark_scan_to_dataframes(
-        fixture,
-        columns,
-        limit if limit > 0 else None,
-        batch_rows,
-        repeat,
-    )
-    result["columns"] = columns
-    return result
+    def run(ds):
+        df = pl.DataFrame(ds._native.stream(columns, limit if limit > 0 else None, batch_rows, None))
+        return df.height, df.n_chunks()
+
+    return _steady(fixture, columns, repeat, batch_rows, limit, run)
 
 
 def run_plugin_cold_lazy_collect(
