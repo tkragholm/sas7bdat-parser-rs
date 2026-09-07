@@ -140,7 +140,13 @@ def test_a_buffered_read_is_the_mapped_read():
     mapped = sp.read_sas(LABELLED, catalog_path=CATALOG, io_backend="mmap")
     buffered = sp.read_sas(LABELLED, catalog_path=CATALOG, io_backend="buffered")
     assert buffered.equals(mapped)
-    assert sp.sas_info(PEOPLE, io_backend="buffered") == sp.sas_info(PEOPLE)
+    buffered_info = sp.sas_info(PEOPLE, io_backend="buffered")
+    mapped_info = sp.sas_info(PEOPLE, io_backend="mmap")
+    assert buffered_info.pop("io_backend") == "buffered"
+    assert mapped_info.pop("io_backend") == "mmap"
+    assert buffered_info == mapped_info
+    # `auto` maps a local file; a network share would answer "buffered" here.
+    assert sp.sas_info(PEOPLE)["io_backend"] == "mmap"
     with pytest.raises(ValueError, match="io_backend"):
         sp.SasDataset(PEOPLE, io_backend="tape")
 

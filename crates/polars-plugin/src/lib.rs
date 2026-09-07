@@ -210,6 +210,9 @@ fn info_dict<'py>(py: Python<'py>, ds: &Dataset, path: &str) -> PyResult<Bound<'
     // Reporting it is how a delivery can be checked for the shape without
     // decoding anything.
     info.set_item("rows_per_page", ds.declared_rows_per_page())?;
+    // Which side `auto` landed on: a mapped share is the slow case the probe
+    // exists to avoid, and the only way to know it was avoided is to ask.
+    info.set_item("io_backend", ds.io_backend())?;
     if let Ok(fs_meta) = std::fs::metadata(path) {
         info.set_item("size_bytes", fs_meta.len())?;
     }
