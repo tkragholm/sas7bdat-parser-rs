@@ -246,6 +246,7 @@ jobs:
         run: >
           python -m pytest -p no:cacheprovider
           crates/polars-plugin/tests/test_compat.py
+          crates/polars-plugin/tests/test_arrow_stream.py
           crates/polars-plugin/tests/test_version_check.py
           crates/polars-plugin/tests/test_smoke.py::test_public_api_contract_is_exposed
 

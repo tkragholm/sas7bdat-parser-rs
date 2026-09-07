@@ -534,10 +534,9 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       # Fails on vulnerabilities; "unmaintained" advisories stay non-fatal warnings.
-      # RUSTSEC-2026-0176/0177 (pyo3 < 0.29) are ignored: the fix requires pyo3 0.29,
-      # which is blocked upstream by pyo3-polars 0.27 (no 0.29-compatible release yet),
-      # and we don't call the affected `PyCFunction::new_closure` API. Remove these
-      # ignores once pyo3-polars supports pyo3 0.29.
+      # RUSTSEC-2026-0176/0177 (pyo3 < 0.29) are ignored: the fix is pyo3 0.29, a
+      # workspace-wide bump not yet made, and we don't call the affected
+      # `PyCFunction::new_closure` API. Remove these ignores with that bump.
       # RUSTSEC-2026-0194/0195 (quick-xml < 0.41) are ignored: quick-xml enters the
       # lockfile only through object_store, an optional polars cloud-IO dependency
       # that no workspace feature activates (`cargo tree -i quick-xml` finds no

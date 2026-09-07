@@ -15,7 +15,7 @@ def test_public_api_contract_is_exposed():
     # The reader is on its own version line, so this is not derivable from
     # __version__ and is the only way a caller can tell which core it has.
     assert re.fullmatch(r"\d+\.\d+\.\d+", sp.__core_version__), sp.__core_version__
-    assert sp.PLUGIN_CONTRACT_VERSION == "sas7bdat_polars.v2"
+    assert sp.PLUGIN_CONTRACT_VERSION == "sas7bdat_polars.v3"
     assert callable(sp.scan_sas)
     assert callable(sp.schema_for_file)
     assert callable(sp.batch_reader)

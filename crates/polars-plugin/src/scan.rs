@@ -1,223 +1,107 @@
-#[cfg(feature = "arrow")]
-use super::Dataset;
-#[cfg(feature = "arrow")]
-use super::convert::{build_polars_schema, owned_batch_to_dataframe, polars_dtype, py_err};
-#[cfg(feature = "arrow")]
-use super::predicate::{PredicateExpr, append_unique_columns, filter_dataframe, prepare_predicate};
-#[cfg(feature = "arrow")]
-use super::{BatchReader, ReaderMessage, SasIoSource};
-#[cfg(feature = "arrow")]
-use arrow_schema::{
-    DataType as ArrowSchemaDataType, Field as ArrowSchemaField, Schema as ArrowSchema,
-    TimeUnit as ArrowSchemaTimeUnit,
-};
-#[cfg(feature = "arrow")]
-use polars::frame::DataFrame;
-#[cfg(feature = "arrow")]
-use pyo3::{
-    prelude::*,
-    types::{PyDict, PyModule},
-};
-#[cfg(feature = "arrow")]
-use sas7bdat::{
-    BatchHint, ColumnMajorDecode, Error, LabelSet, LogicalType, Parallelism, Projection,
-    Result as SasResult, catalog::normalize_format_name,
-};
-#[cfg(feature = "arrow")]
-use std::{
-    sync::{Arc, Mutex, mpsc},
-    thread,
-};
+//! One scan, one decode thread, one Arrow record-batch reader.
+//!
+//! The core decodes pages across its own thread pool and delivers batches to a
+//! visitor; a C stream is pulled by its consumer. The two meet at a bounded
+//! channel: the visitor sends, the reader receives, and back-pressure from a slow
+//! consumer stalls the decode rather than buffering the file. A consumer that
+//! drops the stream early closes the channel, and the next send tells the scan to
+//! stop.
 
-#[cfg(feature = "arrow")]
-pub struct BatchReaderRequest {
-    pub full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
-    pub with_columns: Option<Vec<String>>,
-    pub predicate: Option<Py<PyAny>>,
+use arrow_array::builder::StringBuilder;
+use arrow_array::{
+    Array, ArrayRef, Float64Array, Int32Array, Int64Array, RecordBatch, RecordBatchReader,
+    StringArray,
+};
+use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
+use sas7bdat::{
+    BatchHint, ColumnMajorDecode, Dataset, Error, LabelSet, Parallelism, Result as SasResult,
+    catalog::normalize_format_name,
+};
+use std::ops::ControlFlow;
+use std::sync::{Arc, mpsc};
+use std::thread;
+
+/// What one stream decodes.
+#[derive(Clone, Debug, Default)]
+pub struct ScanSpec {
+    /// Source column names to decode, in the order they should come out. `None`
+    /// is every column.
+    pub columns: Option<Vec<String>>,
     pub n_rows: Option<usize>,
     pub batch_size: Option<usize>,
-    pub coalesce: bool,
 }
 
-#[cfg(feature = "arrow")]
-pub fn full_arrow_schema_for_dataset(ds: &Dataset) -> SasResult<Arc<ArrowSchema>> {
-    let label_sets = &ds.metadata().label_sets;
-    let fields = ds
-        .columns()
+/// The Arrow schema a stream declares for `spec`: the core's schema for the
+/// projected columns, with every column that carries a value-label format
+/// re-typed to `Utf8`, since that is what its batches hold.
+pub fn stream_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
+    let core = core_schema(ds, spec)?;
+    let labels = label_sets(ds, &core);
+    if labels.iter().all(Option::is_none) {
+        return Ok(core);
+    }
+    let fields = core
+        .fields()
         .iter()
-        .map(|column| {
-            let raw_dt = arrow_data_type_for_logical_type(column.logical_type);
-            let dt = if label_sets.is_empty() {
-                raw_dt
+        .zip(&labels)
+        .map(|(field, label)| {
+            if label.is_some() {
+                Arc::new(
+                    Field::new(field.name(), DataType::Utf8, true)
+                        .with_metadata(field.metadata().clone()),
+                )
             } else {
-                column
-                    .format
-                    .as_deref()
-                    .map(normalize_format_name)
-                    .filter(|norm| label_sets.contains_key(norm.as_str()))
-                    .map_or(raw_dt, |_| ArrowSchemaDataType::Utf8)
-            };
-            Ok(ArrowSchemaField::new(column.name.clone(), dt, true))
+                Arc::clone(field)
+            }
         })
-        .collect::<SasResult<Vec<_>>>()?;
-    Ok(Arc::new(ArrowSchema::new(fields)))
+        .collect::<Vec<_>>();
+    Ok(Arc::new(Schema::new(fields)))
 }
 
-#[cfg(feature = "arrow")]
-pub fn full_polars_schema_for_dataset(
-    ds: &Dataset,
-) -> SasResult<Arc<polars_arrow::datatypes::ArrowSchema>> {
-    let schema = full_arrow_schema_for_dataset(ds)?;
-    Ok(Arc::new(build_polars_schema(schema.as_ref())?))
+fn core_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
+    let projection = projection(ds, spec)?;
+    let mut scan = ds.scan();
+    if let Some(ref projection) = projection {
+        scan = scan.with_projection(projection);
+    }
+    scan.arrow_schema()
 }
 
-#[cfg(feature = "arrow")]
-const fn arrow_data_type_for_logical_type(logical_type: LogicalType) -> ArrowSchemaDataType {
-    match logical_type {
-        LogicalType::Integer => ArrowSchemaDataType::Int64,
-        LogicalType::Float => ArrowSchemaDataType::Float64,
-        LogicalType::String => ArrowSchemaDataType::Utf8,
-        LogicalType::Date => ArrowSchemaDataType::Date32,
-        // Microseconds, not Seconds: Polars has no Second time unit, so a
-        // Timestamp(Second) batch is materialized as Datetime('ms') while the
-        // declared schema says Datetime('us') — the two disagree and Polars
-        // refuses to stack the batches (SchemaError: ms != us). Emitting µs
-        // keeps the declared schema and the materialized batches identical.
-        LogicalType::DateTime => {
-            ArrowSchemaDataType::Timestamp(ArrowSchemaTimeUnit::Microsecond, None)
-        }
-        // Duration (pl.Duration), not Time64 (pl.Time): SAS TIME is a signed count of seconds
-        // since midnight and is not confined to [0, 24h). Matches the core Arrow schema — see
-        // `scan::plan::arrow_data_type` in the sas7bdat crate.
-        LogicalType::Time => ArrowSchemaDataType::Duration(ArrowSchemaTimeUnit::Nanosecond),
-        LogicalType::Bytes => ArrowSchemaDataType::Binary,
+fn projection(ds: &Dataset, spec: &ScanSpec) -> SasResult<Option<sas7bdat::Projection>> {
+    match spec.columns.as_deref() {
+        None | Some([]) => Ok(None),
+        Some(columns) => ds.projection().columns(columns.to_vec()).build().map(Some),
     }
 }
 
-#[cfg(feature = "arrow")]
-struct ScanRequest {
-    full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
-    with_columns: Option<Vec<String>>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-    coalesce: bool,
-}
-
-#[cfg(feature = "arrow")]
-fn build_label_mapping_for_columns(ds: &Dataset, column_names: &[&str]) -> Vec<Option<LabelSet>> {
+/// The value-label set behind each field of `schema`, by the SAS format the
+/// column carries, where the dataset has a catalog attached.
+fn label_sets(ds: &Dataset, schema: &Schema) -> Vec<Option<LabelSet>> {
     let label_sets = &ds.metadata().label_sets;
     if label_sets.is_empty() {
-        return Vec::new();
+        return vec![None; schema.fields().len()];
     }
-    // Index columns by name once (first occurrence wins, matching the prior
-    // `find`) instead of rescanning every column for each requested name.
-    let mut by_name: std::collections::HashMap<&str, _> =
-        std::collections::HashMap::with_capacity(ds.columns().len());
-    for col in ds.columns() {
-        by_name.entry(col.name.as_str()).or_insert(col);
+    let mut by_name = std::collections::HashMap::with_capacity(ds.columns().len());
+    for column in ds.columns() {
+        by_name.entry(column.name.as_str()).or_insert(column);
     }
-    column_names
+    schema
+        .fields()
         .iter()
-        .map(|name| {
+        .map(|field| {
             by_name
-                .get(name)
-                .and_then(|col| col.format.as_deref())
+                .get(field.name().as_str())
+                .and_then(|column| column.format.as_deref())
                 .map(normalize_format_name)
-                .and_then(|norm| label_sets.get(&norm))
+                .and_then(|format| label_sets.get(&format))
                 .cloned()
         })
         .collect()
 }
 
-#[cfg(feature = "arrow")]
-pub fn schema_for_dataset(py: Python<'_>, ds: &Dataset) -> PyResult<Py<PyAny>> {
-    let schema = full_arrow_schema_for_dataset(ds).map_err(py_err)?;
-    schema_from_arrow_schema(py, &schema)
-}
-
-#[cfg(feature = "arrow")]
-pub fn schema_from_arrow_schema(py: Python<'_>, schema: &ArrowSchema) -> PyResult<Py<PyAny>> {
-    let polars = PyModule::import(py, "polars")?;
-    let dict = PyDict::new(py);
-    for field in schema.fields() {
-        dict.set_item(field.name(), polars_dtype(&polars, field.data_type())?)?;
-    }
-    Ok(polars.getattr("Schema")?.call1((dict,))?.unbind())
-}
-
-#[cfg(feature = "arrow")]
-pub fn register_io_source(
-    py: Python<'_>,
-    ds: Arc<Dataset>,
-    full_schema: Option<Arc<polars_arrow::datatypes::ArrowSchema>>,
-    schema: Py<PyAny>,
-) -> PyResult<Py<PyAny>> {
-    let full_schema = if let Some(full_schema) = full_schema {
-        full_schema
-    } else {
-        full_polars_schema_for_dataset(ds.as_ref()).map_err(py_err)?
-    };
-    let io_source = Py::new(py, SasIoSource { ds, full_schema })?;
-    let register_io_source =
-        PyModule::import(py, "polars.io.plugins")?.getattr("register_io_source")?;
-    let kwargs = PyDict::new(py);
-    kwargs.set_item("io_source", io_source)?;
-    kwargs.set_item("schema", schema)?;
-    kwargs.set_item("validate_schema", false)?;
-    kwargs.set_item("is_pure", true)?;
-    Ok(register_io_source.call((), Some(&kwargs))?.unbind())
-}
-
-#[cfg(feature = "arrow")]
-pub fn batch_reader_from_dataset(
-    py: Python<'_>,
-    ds: &Arc<Dataset>,
-    request: BatchReaderRequest,
-) -> BatchReader {
-    let (tx, rx) = mpsc::sync_channel::<ReaderMessage>(4);
-    let ds = Arc::clone(ds);
-    let (rust_predicate, python_predicate) = prepare_predicate(py, ds.as_ref(), request.predicate);
-    let with_columns = match (
-        request.with_columns,
-        rust_predicate.as_ref(),
-        python_predicate.is_some(),
-    ) {
-        (Some(with_columns), Some(predicate), _) => {
-            let mut merged = with_columns;
-            let mut predicate_columns = Vec::new();
-            predicate.collect_columns(&mut predicate_columns);
-            append_unique_columns(&mut merged, &predicate_columns);
-            Some(merged)
-        }
-        (_, None, true) => None,
-        (with_columns, _, _) => with_columns,
-    };
-    let scan_request = ScanRequest {
-        full_schema: request.full_schema,
-        with_columns,
-        n_rows: request.n_rows,
-        batch_size: request.batch_size,
-        coalesce: request.coalesce,
-    };
-
-    thread::spawn(move || {
-        let result = run_scan(&ds, &scan_request, rust_predicate.as_ref(), &tx);
-        if let Err(err) = result {
-            let _ = tx.send(ReaderMessage::Error(err.to_string()));
-        }
-    });
-
-    BatchReader {
-        rx: Mutex::new(rx),
-        predicate: python_predicate,
-    }
-}
-
-/// Whether to use the column-major page decode. It is markedly faster for wide all-numeric
-/// tables and falls back to row-major automatically when a scan can't use it (string/temporal
-/// columns, row limits, non-in-memory sources), so it is safe to leave on. On by default; set
-/// `SAS7BDAT_COLUMN_MAJOR=0` (or `off`/`false`) to force the row-major path.
-#[cfg(feature = "arrow")]
+/// Whether to use the column-major page decode. Markedly faster for wide
+/// all-numeric tables and falls back to row-major on its own when a scan cannot
+/// use it, so it is safe to leave on. `SAS7BDAT_COLUMN_MAJOR=0` forces row-major.
 fn column_major_decode() -> ColumnMajorDecode {
     match std::env::var("SAS7BDAT_COLUMN_MAJOR").ok().as_deref() {
         Some("0" | "off" | "false" | "OFF" | "FALSE") => ColumnMajorDecode::Off,
@@ -225,47 +109,86 @@ fn column_major_decode() -> ColumnMajorDecode {
     }
 }
 
-/// Resolve the parallelism for one file's page decode.
-///
-/// The plugin used to compute its own worker count here, on the reasoning that `Auto` was a
-/// generic all-cores default while the plugin knew the workload. It did not: its grain rule
-/// counted *decoded bytes*, and bytes do not predict this. Timed across the corpus, that rule
-/// serialised `owner` (3.19x faster in parallel), `rmov` (2.32x) and `homimp` (3.86x) -- three
-/// of the register-shaped files it was written to help -- because a narrow table holds a lot
-/// of rows in few bytes. `homimp` decodes 46,641 rows out of 1.1 MB.
-///
-/// `Parallelism::Auto` now carries a gate calibrated on those measurements and counts rows
-/// rather than bytes, so there is one policy instead of two disagreeing ones. Deferring to it
-/// means the plugin improves whenever the core does.
-///
-/// `SAS7BDAT_SCAN_THREADS` still wins where it is set: the inter-file pool uses it to bound
-/// the total core budget across files, which is a fact about the caller that no per-file rule
-/// can know.
-#[cfg(feature = "arrow")]
+/// The decode parallelism for one file. `Parallelism::Auto` carries the core's
+/// calibrated gate; `SAS7BDAT_SCAN_THREADS` overrides it, which is how a caller
+/// reading many files at once bounds the total core budget.
 fn scan_parallelism() -> Parallelism {
     match std::env::var("SAS7BDAT_SCAN_THREADS")
         .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|n| *n > 0)
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|threads| *threads > 0)
     {
         Some(1) => Parallelism::None,
-        Some(n) => Parallelism::Threads(n),
+        Some(threads) => Parallelism::Threads(threads),
         None => Parallelism::Auto,
     }
 }
 
-#[cfg(feature = "arrow")]
+/// A record-batch reader fed by a decode thread. Implements what an Arrow C
+/// stream needs: a schema, and batches until `None`.
+pub struct ScanReader {
+    schema: SchemaRef,
+    rx: mpsc::Receiver<Result<RecordBatch, String>>,
+}
+
+impl ScanReader {
+    /// A reader with a schema and no batches: what a schema-only stream is.
+    pub fn empty(schema: SchemaRef) -> Self {
+        let (_tx, rx) = mpsc::sync_channel(1);
+        Self { schema, rx }
+    }
+
+    /// A reader over exactly one batch.
+    pub fn single(batch: RecordBatch) -> Self {
+        let schema = batch.schema();
+        let (tx, rx) = mpsc::sync_channel(1);
+        let _ = tx.send(Ok(batch));
+        Self { schema, rx }
+    }
+
+    /// Start the decode of `spec` on its own thread and return the reading end.
+    pub fn start(ds: Arc<Dataset>, spec: ScanSpec) -> SasResult<Self> {
+        let schema = stream_schema(&ds, &spec)?;
+        let labels = label_sets(&ds, &schema);
+        // Four batches of slack: enough that the decoder is not stalled by a
+        // consumer doing a little work per batch, small enough that a stalled
+        // consumer holds a handful of batches and not the file.
+        let (tx, rx) = mpsc::sync_channel::<Result<RecordBatch, String>>(4);
+        let stream_schema = Arc::clone(&schema);
+        thread::spawn(move || {
+            if let Err(err) = run_scan(&ds, &spec, &stream_schema, &labels, &tx) {
+                let _ = tx.send(Err(err.to_string()));
+            }
+        });
+        Ok(Self { schema, rx })
+    }
+}
+
+impl Iterator for ScanReader {
+    type Item = Result<RecordBatch, ArrowError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // A closed channel is the end of the stream, whether the decode finished
+        // or its thread is gone.
+        let message = self.rx.recv().ok()?;
+        Some(message.map_err(|text| ArrowError::ExternalError(text.into())))
+    }
+}
+
+impl RecordBatchReader for ScanReader {
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+}
+
 fn run_scan(
     ds: &Dataset,
-    request: &ScanRequest,
-    predicate: Option<&PredicateExpr>,
-    tx: &mpsc::SyncSender<ReaderMessage>,
+    spec: &ScanSpec,
+    stream_schema: &SchemaRef,
+    labels: &[Option<LabelSet>],
+    tx: &mpsc::SyncSender<Result<RecordBatch, String>>,
 ) -> SasResult<()> {
-    let projection = build_projection(ds, request.with_columns.clone())?;
-    // Decode pages across threads. Threads(n) engages the parallel page-streaming path
-    // (ScanBuilder::try_stream_batches_parallel) with a count derived from the file, rather
-    // than accepting Parallelism::Auto's generic all-cores default. Defaults to all logical
-    // cores; override with SAS7BDAT_SCAN_THREADS for tuning.
+    let projection = projection(ds, spec)?;
     let mut scan = ds
         .scan()
         .with_parallelism(scan_parallelism())
@@ -273,106 +196,105 @@ fn run_scan(
     if let Some(ref projection) = projection {
         scan = scan.with_projection(projection);
     }
-    if let Some(n_rows) = request.n_rows {
+    if let Some(n_rows) = spec.n_rows {
         scan = scan
             .limit(u64::try_from(n_rows).map_err(|_| Error::unsupported("row limit exceeds u64"))?);
     }
-    if let Some(batch_size) = request.batch_size {
+    if let Some(batch_size) = spec.batch_size {
         scan = scan.with_batch_hint(BatchHint::Rows(batch_size));
     }
-
-    let pl_schema = resolve_polars_schema(
-        request.full_schema.as_ref(),
-        request.with_columns.as_deref(),
-        &scan,
-    )?;
-
-    let projected_names: Vec<&str> = request.with_columns.as_deref().map_or_else(
-        || ds.columns().iter().map(|c| c.name.as_str()).collect(),
-        |names| names.iter().map(String::as_str).collect(),
-    );
-    let label_mapping = build_label_mapping_for_columns(ds, &projected_names);
-
-    if request.coalesce {
-        let mut combined: Option<DataFrame> = None;
-        scan.visit_owned_batches(|batch| {
-            let mut df = owned_batch_to_dataframe(batch, Arc::clone(&pl_schema), &label_mapping)
-                .map_err(|e| Error::io(e.to_string()))?;
-            if let Some(predicate) = predicate {
-                df = filter_dataframe(&df, predicate)?;
-            }
-            if df.height() == 0 {
-                return Ok(std::ops::ControlFlow::Continue(()));
-            }
-            if let Some(existing) = combined.as_mut() {
-                existing
-                    .vstack_mut(&df)
-                    .map_err(|e| Error::io(e.to_string()))?;
-            } else {
-                combined = Some(df);
-            }
-            Ok(std::ops::ControlFlow::Continue(()))
-        })?;
-        if let Some(combined) = combined {
-            let _ = tx.send(ReaderMessage::Batch(combined));
+    let core_schema = scan.arrow_schema()?;
+    scan.visit_owned_batches(|batch| {
+        let batch = batch.into_arrow_record_batch(Arc::clone(&core_schema))?;
+        let batch = apply_labels(batch, stream_schema, labels)?;
+        // The receiver is gone: the consumer released the stream. Stop decoding.
+        if tx.send(Ok(batch)).is_err() {
+            return Ok(ControlFlow::Break(()));
         }
-    } else {
-        scan.visit_owned_batches(|batch| {
-            let mut df = owned_batch_to_dataframe(batch, Arc::clone(&pl_schema), &label_mapping)
-                .map_err(|e| Error::io(e.to_string()))?;
-            if let Some(predicate) = predicate {
-                df = filter_dataframe(&df, predicate)?;
-            }
-            if df.height() == 0 {
-                return Ok(std::ops::ControlFlow::Continue(()));
-            }
-            tx.send(ReaderMessage::Batch(df))
-                .map_err(|err| Error::io(err.to_string()))?;
-            Ok(std::ops::ControlFlow::Continue(()))
-        })?;
-    }
+        Ok(ControlFlow::Continue(()))
+    })?;
     Ok(())
 }
 
-#[cfg(feature = "arrow")]
-fn resolve_polars_schema(
-    full_schema: Option<&Arc<polars_arrow::datatypes::ArrowSchema>>,
-    projection_columns: Option<&[String]>,
-    scan: &sas7bdat::ScanBuilder<'_>,
-) -> SasResult<Arc<polars_arrow::datatypes::ArrowSchema>> {
-    match (projection_columns, full_schema) {
-        (None, Some(full_schema)) => Ok(Arc::clone(full_schema)),
-        (Some(columns), Some(full_schema)) if !columns.is_empty() => {
-            let fields = columns
-                .iter()
-                .map(|name| {
-                    full_schema.get(name).cloned().ok_or_else(|| {
-                        Error::arrow(format!("missing projected column in cached schema: {name}"))
-                    })
-                })
-                .collect::<SasResult<Vec<_>>>()?;
-            Ok(Arc::new(
-                polars_arrow::datatypes::ArrowSchema::from_iter_check_duplicates(fields)
-                    .map_err(|err| Error::arrow(err.to_string()))?,
-            ))
-        }
-        _ => {
-            let arrow_schema = scan.arrow_schema()?;
-            Ok(Arc::new(build_polars_schema(&arrow_schema)?))
-        }
+/// Replace every labelled column's raw values with their labels, as `Utf8`.
+fn apply_labels(
+    batch: RecordBatch,
+    stream_schema: &SchemaRef,
+    labels: &[Option<LabelSet>],
+) -> SasResult<RecordBatch> {
+    if labels.iter().all(Option::is_none) {
+        return Ok(batch);
     }
+    let columns = batch
+        .columns()
+        .iter()
+        .zip(labels)
+        .map(|(column, label)| match label {
+            Some(label) => labelled(column, label),
+            None => Ok(Arc::clone(column)),
+        })
+        .collect::<SasResult<Vec<_>>>()?;
+    RecordBatch::try_new(Arc::clone(stream_schema), columns)
+        .map_err(|err| Error::arrow(err.to_string()))
 }
 
-#[cfg(feature = "arrow")]
-fn build_projection(
-    ds: &Dataset,
-    with_columns: Option<Vec<String>>,
-) -> SasResult<Option<Projection>> {
-    let Some(with_columns) = with_columns else {
-        return Ok(None);
-    };
-    if with_columns.is_empty() {
-        return Ok(None);
+/// A `Utf8` array of the labels for `column`'s values. A value the label set
+/// does not know is written as itself, which is what SAS prints for it.
+fn labelled(column: &ArrayRef, labels: &LabelSet) -> SasResult<ArrayRef> {
+    let rows = column.len();
+    let mut out = StringBuilder::with_capacity(rows, rows.saturating_mul(16));
+    if let Some(values) = column.as_any().downcast_ref::<Float64Array>() {
+        for row in 0..rows {
+            if values.is_null(row) {
+                out.append_null();
+            } else {
+                let value = values.value(row);
+                match labels.lookup_numeric(value) {
+                    Some(label) => out.append_value(label),
+                    None => out.append_value(value.to_string()),
+                }
+            }
+        }
+    } else if let Some(values) = column.as_any().downcast_ref::<Int64Array>() {
+        for row in 0..rows {
+            if values.is_null(row) {
+                out.append_null();
+            } else {
+                let value = values.value(row);
+                // SAS categorical codes are small integers; exact as f64 for |v| <= 2^53.
+                #[allow(clippy::cast_precision_loss)]
+                match labels.lookup_numeric(value as f64) {
+                    Some(label) => out.append_value(label),
+                    None => out.append_value(value.to_string()),
+                }
+            }
+        }
+    } else if let Some(values) = column.as_any().downcast_ref::<Int32Array>() {
+        for row in 0..rows {
+            if values.is_null(row) {
+                out.append_null();
+            } else {
+                let value = values.value(row);
+                match labels.lookup_numeric(f64::from(value)) {
+                    Some(label) => out.append_value(label),
+                    None => out.append_value(value.to_string()),
+                }
+            }
+        }
+    } else if let Some(values) = column.as_any().downcast_ref::<StringArray>() {
+        for row in 0..rows {
+            if values.is_null(row) {
+                out.append_null();
+            } else {
+                let value = values.value(row);
+                out.append_value(labels.lookup_string(value).unwrap_or(value));
+            }
+        }
+    } else {
+        return Err(Error::unsupported(format!(
+            "a value-label format on a {} column",
+            column.data_type()
+        )));
     }
-    ds.projection().columns(with_columns).build().map(Some)
+    Ok(Arc::new(out.finish()))
 }

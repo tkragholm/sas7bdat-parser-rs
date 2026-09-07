@@ -1,6 +1,6 @@
 [package]
 name = "sas7bdat-polars"
-version = "0.9.3"
+version = "0.10.0"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -9,23 +9,24 @@ publish = false
 name = "sas7bdat_polars"
 crate-type = ["cdylib", "rlib"]
 
+# No polars in this graph, on purpose. The extension hands every batch to Python
+# as an Arrow C stream behind the PyCapsule Interface (`__arrow_c_stream__`),
+# which polars, pyarrow, pandas and duckdb all consume through Arrow's C Data
+# Interface, an ABI Arrow versions and nobody else does. The polars-facing API
+# (`scan_sas`, `read_sas`, ...) is Python, in `python/sas7bdat_polars/`, built on
+# polars' public constructors. Until 0.9 this crate linked polars-rust and
+# crossed into Python through pyo3-polars' private export hooks, which tied the
+# wheel to one Python polars release at a time.
 [dependencies]
-arrow-schema = { workspace = true, optional = true }
-bytemuck = { workspace = true }
-polars = { workspace = true }
-polars-arrow = { workspace = true }
-polars-plan = { workspace = true }
+arrow-array = { workspace = true, features = ["ffi"] }
+arrow-schema = { workspace = true }
 pyo3 = { workspace = true, features = ["abi3-py312"] }
-pyo3-polars = { workspace = true }
-rmp-serde = { workspace = true }
 sas7bdat = { path = "../sas7bdat", features = ["arrow"] }
 
 [build-dependencies]
 pyo3-build-config = { workspace = true }
 
 [features]
-default = ["arrow"]
-arrow = ["dep:arrow-schema", "sas7bdat/arrow"]
 extension-module = ["pyo3/extension-module"]
 
 [lints]

@@ -97,10 +97,8 @@ check-polars-plugin:
 # failure for a missing one ("could not determine version from interpreter name")
 # points nowhere near the cause. Idempotent, so `test-polars-plugin` can just call it.
 #
-# The polars range is read from the package rather than written here: the
-# extension links polars-rust through pyo3-polars, so the installed Python polars
-# has to be one the wheel is tested against, and two copies of that range would
-# drift. `uv pip install` resolves the range to its newest admitted release.
+# The polars floor is read from the package rather than written here, so there
+# is one copy of it. `uv pip install` resolves it to the newest release.
 #
 # Create the venv the Polars plugin tests build into. Idempotent.
 setup-python:
@@ -114,11 +112,11 @@ setup-python:
     printf 'python env ready: %s\n' "$(.venv/bin/python --version)"
 
 test-polars-plugin: setup-python
-    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml --features arrow,extension-module
+    @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml --features extension-module
     @.venv/bin/python -m pytest crates/polars-plugin/tests
 
 test-polars-plugin-rust:
-    @cargo test -p sas7bdat-polars --no-default-features --features arrow --lib
+    @cargo test -p sas7bdat-polars --lib
 
 # The R suites, which used to live only in ci.yml. They are the strongest evidence
 # the core still behaves, because several of their assertions compare against

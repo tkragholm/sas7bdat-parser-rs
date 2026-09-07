@@ -1,90 +1,49 @@
-mod convert;
-mod predicate;
+//! The compiled half of `sas7bdat_polars`: a SAS7BDAT dataset that hands its
+//! rows to Python as Arrow C streams.
+//!
+//! Nothing here knows about polars. A stream object exposes
+//! `__arrow_c_stream__`, the Arrow `PyCapsule` Interface, and whatever consumes
+//! that (polars, pyarrow, pandas, duckdb) imports the batches through Arrow's C
+//! Data Interface with no copy of the primitive buffers. The polars-facing API is
+//! the pure-Python layer in `python/sas7bdat_polars/`, built on polars' public
+//! constructors, which is what keeps this wheel independent of the polars
+//! release installed beside it.
+
 mod scan;
 
-#[cfg(feature = "arrow")]
-use crate::scan::BatchReaderRequest;
-#[cfg(feature = "arrow")]
-use std::{
-    convert::TryFrom,
-    hint::black_box,
-    sync::{Arc, Mutex, mpsc},
-    time::Instant,
-};
+use arrow_array::RecordBatch;
+use arrow_array::ffi_stream::FFI_ArrowArrayStream;
+use pyo3::exceptions::{PyRuntimeError, PyStopIteration, PyValueError};
+use pyo3::prelude::*;
+use pyo3::types::{PyCapsule, PyDict};
+use sas7bdat::{Dataset, LogicalType};
+use scan::{ScanReader, ScanSpec};
+use std::collections::HashMap;
+use std::ffi::CString;
+use std::sync::{Arc, Mutex};
 
-#[cfg(feature = "arrow")]
-use arrow_schema::Schema as ArrowSchema;
-#[cfg(feature = "arrow")]
-use polars::frame::DataFrame;
-#[cfg(feature = "arrow")]
-use pyo3::{
-    IntoPyObjectExt,
-    exceptions::{PyRuntimeError, PyStopIteration, PyValueError},
-    prelude::*,
-    types::{PyDict, PyModule},
-};
-#[cfg(feature = "arrow")]
-use pyo3_polars::types::PyDataFrame;
-#[cfg(feature = "arrow")]
-use sas7bdat::{BatchHint, Dataset, Error, OwnedColumnarBatch, Projection};
+/// v3: every batch crosses as an Arrow C stream; `schema_overrides` values are
+/// type names; the polars API is the Python layer. v2 added `columns=` and
+/// `schema_overrides=` on `scan_sas`, which the layer keeps.
+const PLUGIN_CONTRACT_VERSION: &str = "sas7bdat_polars.v3";
 
-// v2: scan_sas/SasDataset/batch_reader accept schema_overrides={name: polars dtype}.
-#[cfg(feature = "arrow")]
-const PLUGIN_CONTRACT_VERSION: &str = "sas7bdat_polars.v2";
+/// The capsule name the Arrow `PyCapsule` Interface specifies for a stream.
+const STREAM_CAPSULE_NAME: &str = "arrow_array_stream";
 
-// ─── message types ────────────────────────────────────────────────────────────
-
-#[cfg(feature = "arrow")]
-enum ReaderMessage {
-    Batch(DataFrame),
-    Error(String),
-}
-
-#[cfg(feature = "arrow")]
-struct PreparedWarmBatches {
-    batches: Vec<OwnedColumnarBatch>,
-    schema: Arc<polars_arrow::datatypes::ArrowSchema>,
-    dataset_open_ns: u128,
-    batch_prep_ns: u128,
-    rows: usize,
-}
-
-#[cfg(feature = "arrow")]
-struct BatchBenchmarkStats {
-    dataset_open_ns: u128,
-    batch_prep_ns: u128,
-    priming_ns: u128,
-    steady_elapsed_ns_total: u128,
-    steady_elapsed_ns_avg: u128,
-    steady_projection_ns_avg: u128,
-    steady_schema_ns_avg: u128,
-    steady_visit_ns_avg: u128,
-    rows_last: usize,
-    batches_last: usize,
-}
-
-#[cfg(feature = "arrow")]
-struct ScanToDataframesStats {
-    projection_ns: u128,
-    schema_ns: u128,
-    visit_ns: u128,
-    rows: usize,
-    batches: usize,
+fn value_error(err: impl std::fmt::Display) -> PyErr {
+    PyValueError::new_err(err.to_string())
 }
 
 // ─── SasDataset ───────────────────────────────────────────────────────────────
 
-/// A pre-opened SAS7BDAT dataset. Opening once lets repeated scans reuse the
-/// parsed metadata instead of paying the open cost every time.
-#[cfg(feature = "arrow")]
-#[pyclass]
+/// An opened SAS7BDAT file: parsed metadata, an optional format catalog, and
+/// any schema overrides, reused by every stream taken from it.
+#[pyclass(frozen)]
 struct SasDataset {
     ds: Arc<Dataset>,
-    arrow_schema: Arc<ArrowSchema>,
-    polars_schema: Arc<polars_arrow::datatypes::ArrowSchema>,
+    path: String,
 }
 
-#[cfg(feature = "arrow")]
 #[pymethods]
 impl SasDataset {
     #[new]
@@ -93,336 +52,119 @@ impl SasDataset {
         py: Python<'_>,
         path: &str,
         catalog_path: Option<&str>,
-        schema_overrides: Option<&Bound<'_, PyDict>>,
+        schema_overrides: Option<HashMap<String, String>>,
     ) -> PyResult<Self> {
-        let mut ds = py
-            .detach(|| Dataset::open(path))
-            .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        if let Some(cat) = catalog_path {
-            ds.attach_catalog(cat).map_err(convert::py_err)?;
+        let mut ds = py.detach(|| Dataset::open(path)).map_err(value_error)?;
+        if let Some(catalog) = catalog_path {
+            ds.attach_catalog(catalog).map_err(value_error)?;
         }
-        apply_schema_overrides(&mut ds, schema_overrides)?;
-        let arrow_schema = scan::full_arrow_schema_for_dataset(&ds).map_err(convert::py_err)?;
-        let polars_schema = scan::full_polars_schema_for_dataset(&ds).map_err(convert::py_err)?;
+        if let Some(overrides) = schema_overrides {
+            let parsed = overrides
+                .into_iter()
+                .map(|(name, type_name)| Ok((name, logical_type_from_name(&type_name)?)))
+                .collect::<PyResult<Vec<_>>>()?;
+            ds.apply_schema_overrides(parsed).map_err(value_error)?;
+        }
         Ok(Self {
             ds: Arc::new(ds),
-            arrow_schema,
-            polars_schema,
+            path: path.to_owned(),
         })
     }
 
-    fn schema(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        scan::schema_from_arrow_schema(py, self.arrow_schema.as_ref())
+    /// The source column names, in file order.
+    #[getter]
+    fn column_names(&self) -> Vec<String> {
+        self.ds
+            .columns()
+            .iter()
+            .map(|column| column.name.clone())
+            .collect()
     }
 
-    fn batch_reader(
+    /// Header-level facts about the file: row and column counts, encoding,
+    /// compression, page layout. No rows are decoded.
+    fn info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        info_dict(py, &self.ds, &self.path)
+    }
+
+    /// A stream of the file's rows, as `columns` in that order (or every column),
+    /// at most `n_rows` of them, in batches of about `batch_size` rows.
+    ///
+    /// The stream decodes on its own thread from the moment a consumer asks for
+    /// it, and stops if the consumer lets go of it early.
+    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None))]
+    fn stream(
         &self,
-        py: Python<'_>,
-        with_columns: Option<Vec<String>>,
-        predicate: Option<Py<PyAny>>,
+        columns: Option<Vec<String>>,
         n_rows: Option<usize>,
         batch_size: Option<usize>,
-    ) -> BatchReader {
-        scan::batch_reader_from_dataset(
-            py,
-            &self.ds,
-            BatchReaderRequest {
-                full_schema: Some(Arc::clone(&self.polars_schema)),
-                with_columns,
-                predicate,
-                n_rows,
-                batch_size,
-                coalesce: false,
-            },
-        )
-    }
-
-    fn scan_sas(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let schema = scan::schema_from_arrow_schema(py, self.arrow_schema.as_ref())?;
-        scan::register_io_source(
-            py,
-            Arc::clone(&self.ds),
-            Some(Arc::clone(&self.polars_schema)),
-            schema,
-        )
-    }
-}
-
-// ─── SasIoSource ──────────────────────────────────────────────────────────────
-
-#[cfg(feature = "arrow")]
-#[pyclass]
-struct SasIoSource {
-    ds: Arc<Dataset>,
-    full_schema: Arc<polars_arrow::datatypes::ArrowSchema>,
-}
-
-#[cfg(feature = "arrow")]
-#[pymethods]
-impl SasIoSource {
-    fn __call__(
-        &self,
-        py: Python<'_>,
-        with_columns: Option<Vec<String>>,
-        predicate: Option<Py<PyAny>>,
-        n_rows: Option<usize>,
-        batch_size: Option<usize>,
-    ) -> BatchReader {
-        scan::batch_reader_from_dataset(
-            py,
-            &self.ds,
-            BatchReaderRequest {
-                full_schema: Some(Arc::clone(&self.full_schema)),
-                with_columns,
-                predicate,
-                n_rows,
-                batch_size,
-                coalesce: false,
-            },
-        )
-    }
-}
-
-// ─── BatchReader ──────────────────────────────────────────────────────────────
-
-// `mpsc::Receiver<T>` is `Send` but `!Sync`, and `pyo3 >= 0.21` requires
-// `#[pyclass]` types to be `Send + Sync` (it enforces this at runtime since
-// 0.27). Wrapping the receiver in a `Mutex` makes the whole struct `Sync`
-// without forcing the `unsendable` runtime check, which used to abort whenever
-// Polars's lazy executor created the reader on a worker thread and then pulled
-// batches from the main thread (the GIL still serialises access on the Python
-// side, so there is no real concurrent consumer to contend with the mutex).
-#[cfg(feature = "arrow")]
-#[pyclass]
-struct BatchReader {
-    rx: Mutex<mpsc::Receiver<ReaderMessage>>,
-    predicate: Option<Py<PyAny>>,
-}
-
-#[cfg(feature = "arrow")]
-const _: fn() = || {
-    const fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<BatchReader>();
-};
-
-#[cfg(feature = "arrow")]
-#[pymethods]
-impl BatchReader {
-    const fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
-        slf
-    }
-
-    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        loop {
-            // `&mut self` gives us unique access, so `get_mut` is infallible-by-construction
-            // and avoids touching the mutex's atomic at all (`MutexGuard` is never produced,
-            // so the mutex can never be poisoned either).
-            let rx = slf
-                .rx
-                .get_mut()
-                .expect("BatchReader mutex is never poisoned: only ever accessed via get_mut");
-            let message = py
-                .detach(move || rx.recv())
-                .map_err(|_| PyStopIteration::new_err("end of stream"))?;
-
-            match message {
-                ReaderMessage::Batch(df) => {
-                    let py_df = PyDataFrame(df).into_py_any(py)?;
-                    if let Some(predicate) = &slf.predicate {
-                        let filtered = py_df
-                            .bind(py)
-                            .call_method1("filter", (predicate.bind(py),))?;
-                        if filtered.call_method0("is_empty")?.extract::<bool>()? {
-                            continue;
-                        }
-                        return Ok(filtered.unbind());
-                    }
-                    return Ok(py_df);
-                }
-                ReaderMessage::Error(message) => return Err(PyRuntimeError::new_err(message)),
-            }
-        }
-    }
-}
-
-// ─── public Python functions ──────────────────────────────────────────────────
-
-#[cfg(feature = "arrow")]
-#[pyfunction]
-fn schema_for_file(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
-    let ds = py
-        .detach(|| Dataset::open(path))
-        .map_err(|err| PyValueError::new_err(err.to_string()))?;
-    scan::schema_for_dataset(py, &ds)
-}
-
-/// Open a SAS7BDAT file as an iterator of Polars `DataFrame` batches.
-///
-/// A lower-level building block for streaming a file that does not fit in memory;
-/// most callers want `read_sas` (eager) or `scan_sas` (lazy) instead. Pass
-/// `with_columns` to decode only the columns you need.
-///
-/// Args:
-///     path: Path to the `.sas7bdat` file.
-///     `with_columns`: Read only these columns (recommended).
-///     predicate: Optional Polars expression applied per batch.
-///     `n_rows`: Read at most this many rows.
-///     `batch_size`: Rows per yielded batch.
-///     `catalog_path`: Optional `.sas7bcat` value-label catalog.
-///     `schema_overrides`: Optional ``{column: polars dtype}`` map.
-#[cfg(feature = "arrow")]
-#[pyfunction]
-#[pyo3(signature = (path, with_columns=None, predicate=None, n_rows=None, batch_size=None, catalog_path=None, schema_overrides=None))]
-#[allow(clippy::too_many_arguments)]
-fn batch_reader(
-    py: Python<'_>,
-    path: &str,
-    with_columns: Option<Vec<String>>,
-    predicate: Option<Py<PyAny>>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-    catalog_path: Option<&str>,
-    schema_overrides: Option<&Bound<'_, PyDict>>,
-) -> PyResult<BatchReader> {
-    let mut ds = py
-        .detach(|| Dataset::open(path))
-        .map_err(|err| PyValueError::new_err(err.to_string()))?;
-    if let Some(cat) = catalog_path {
-        ds.attach_catalog(cat).map_err(convert::py_err)?;
-    }
-    apply_schema_overrides(&mut ds, schema_overrides)?;
-    let ds = Arc::new(ds);
-    Ok(scan::batch_reader_from_dataset(
-        py,
-        &ds,
-        BatchReaderRequest {
-            full_schema: None,
-            with_columns,
-            predicate,
+    ) -> PyResult<ArrowStream> {
+        let spec = ScanSpec {
+            columns,
             n_rows,
             batch_size,
-            coalesce: false,
-        },
-    ))
+        };
+        // Resolve the schema now so an unknown column name fails here, at the
+        // call, rather than inside the consumer's import.
+        scan::stream_schema(&self.ds, &spec).map_err(value_error)?;
+        Ok(ArrowStream::new(StreamSource::Scan {
+            ds: Arc::clone(&self.ds),
+            spec,
+        }))
+    }
+
+    /// A stream with the file's schema and no rows: how a consumer learns the
+    /// schema without a decode.
+    #[pyo3(signature = (columns=None))]
+    fn schema_stream(&self, columns: Option<Vec<String>>) -> PyResult<ArrowStream> {
+        let spec = ScanSpec {
+            columns,
+            ..ScanSpec::default()
+        };
+        let schema = scan::stream_schema(&self.ds, &spec).map_err(value_error)?;
+        Ok(ArrowStream::new(StreamSource::Schema(schema)))
+    }
+
+    /// The same rows as `stream`, one batch at a time, each batch its own
+    /// single-batch stream. For a consumer that wants to work per batch.
+    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None))]
+    fn batches(
+        &self,
+        columns: Option<Vec<String>>,
+        n_rows: Option<usize>,
+        batch_size: Option<usize>,
+    ) -> PyResult<BatchIterator> {
+        let spec = ScanSpec {
+            columns,
+            n_rows,
+            batch_size,
+        };
+        let reader = ScanReader::start(Arc::clone(&self.ds), spec).map_err(value_error)?;
+        Ok(BatchIterator {
+            reader: Mutex::new(reader),
+        })
+    }
 }
 
-#[cfg(feature = "arrow")]
-/// Lazily scan a SAS7BDAT file into a Polars `LazyFrame`.
-///
-/// Args:
-///     path: Path to the `.sas7bdat` file.
-///     `catalog_path`: Optional `.sas7bcat` value-label catalog to hydrate.
-///     `schema_overrides`: Optional ``{column: polars dtype}`` map applied at schema
-///         time (e.g. integer-coded columns cast to a smaller dtype).
-///     categorical: If ``True``, cast every character column to ``Categorical`` in
-///         the lazy plan. This speeds up downstream group-by/join/sort (~10-15x) but
-///         is not a read or memory win — Polars' ``String`` is already compact — so
-///         enable it only when grouping/joining on the string columns.
-///     columns: Read only these columns. **Strongly recommended** — SAS7BDAT is
-///         wide and row-oriented, so selecting the columns you need is the single
-///         biggest speed-up (decode one column, not all of them). Equivalent to
-///         ``.select(columns)`` but applied at the source.
-///     `n_rows`: Read at most this many rows (``.head(n_rows)``); the reader stops
-///         after the first pages, which bounds I/O on large files.
-///
-/// Performance: prefer `read_sas` for a one-shot eager read, always pass
-/// `columns`, and let the reader parallelise (env `SAS7BDAT_SCAN_THREADS`) — do
-/// not throttle Polars' own thread pool, which does not control the decoder.
-#[pyfunction]
-#[pyo3(signature = (path, catalog_path=None, schema_overrides=None, categorical=false, columns=None, n_rows=None))]
-fn scan_sas(
-    py: Python<'_>,
-    path: &str,
-    catalog_path: Option<&str>,
-    schema_overrides: Option<&Bound<'_, PyDict>>,
-    categorical: bool,
-    columns: Option<Vec<String>>,
-    n_rows: Option<usize>,
-) -> PyResult<Py<PyAny>> {
-    let mut ds = py
-        .detach(|| Dataset::open(path))
-        .map_err(|err| PyValueError::new_err(err.to_string()))?;
-    if let Some(cat) = catalog_path {
-        ds.attach_catalog(cat).map_err(convert::py_err)?;
-    }
-    apply_schema_overrides(&mut ds, schema_overrides)?;
-    let ds = Arc::new(ds);
-    let schema = scan::schema_for_dataset(py, &ds)?;
-    let mut lf = scan::register_io_source(py, ds, None, schema)?;
-    if columns.is_some() || n_rows.is_some() {
-        let mut bound = lf.bind(py).clone();
-        if let Some(cols) = columns {
-            bound = bound.call_method1("select", (cols,))?;
+fn logical_type_from_name(name: &str) -> PyResult<LogicalType> {
+    Ok(match name.trim().to_ascii_lowercase().as_str() {
+        "int64" | "integer" | "int" => LogicalType::Integer,
+        "float64" | "float" | "double" => LogicalType::Float,
+        "date" => LogicalType::Date,
+        "datetime" | "timestamp" => LogicalType::DateTime,
+        "time" | "duration" => LogicalType::Time,
+        "string" | "utf8" | "str" => LogicalType::String,
+        "binary" | "bytes" => LogicalType::Bytes,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unsupported schema override type {other:?}; one of int64, float64, date, \
+                 datetime, time, string, binary"
+            )));
         }
-        if let Some(n) = n_rows {
-            bound = bound.call_method1("head", (n,))?;
-        }
-        lf = bound.unbind();
-    }
-    if categorical {
-        return cast_strings_to_categorical(py, &lf);
-    }
-    Ok(lf)
+    })
 }
 
-/// Read a SAS7BDAT file eagerly into a Polars `DataFrame`.
-///
-/// The ergonomic, hard-to-misuse entry point: projection is baked in and the read
-/// uses the in-memory engine (never the streaming engine, which cannot move the
-/// reader across threads). Prefer this over ``scan_sas(...).collect()``.
-///
-/// Args:
-///     path: Path to the `.sas7bdat` file.
-///     columns: Read only these columns (recommended — see `scan_sas`).
-///     `n_rows`: Read at most this many rows.
-///     predicate: Optional Polars expression to filter rows (``.filter(predicate)``).
-///     `catalog_path`: Optional `.sas7bcat` value-label catalog.
-///     `schema_overrides`: Optional ``{column: polars dtype}`` map.
-///
-/// Returns:
-///     A Polars `DataFrame`.
-#[pyfunction]
-#[pyo3(signature = (path, columns=None, n_rows=None, predicate=None, catalog_path=None, schema_overrides=None))]
-fn read_sas(
-    py: Python<'_>,
-    path: &str,
-    columns: Option<Vec<String>>,
-    n_rows: Option<usize>,
-    predicate: Option<Py<PyAny>>,
-    catalog_path: Option<&str>,
-    schema_overrides: Option<&Bound<'_, PyDict>>,
-) -> PyResult<Py<PyAny>> {
-    let lf = scan_sas(
-        py,
-        path,
-        catalog_path,
-        schema_overrides,
-        false,
-        columns,
-        n_rows,
-    )?;
-    let mut bound = lf.bind(py).clone();
-    if let Some(pred) = predicate {
-        bound = bound.call_method1("filter", (pred,))?;
-    }
-    let df = bound.call_method0("collect")?;
-    Ok(df.unbind())
-}
-
-/// Return header-only metadata for a SAS7BDAT file, without decoding the body.
-///
-/// Returns a dict with ``path``, ``n_rows``, ``n_columns``, ``row_length_bytes``,
-/// ``page_count``, ``encoding`` and ``size_bytes`` — cheap enough to call over a
-/// whole directory tree.
-#[pyfunction]
-#[pyo3(signature = (path, catalog_path=None))]
-fn sas_info(py: Python<'_>, path: &str, catalog_path: Option<&str>) -> PyResult<Py<PyAny>> {
-    let mut ds = py
-        .detach(|| Dataset::open(path))
-        .map_err(|err| PyValueError::new_err(err.to_string()))?;
-    if let Some(cat) = catalog_path {
-        ds.attach_catalog(cat).map_err(convert::py_err)?;
-    }
+fn info_dict<'py>(py: Python<'py>, ds: &Dataset, path: &str) -> PyResult<Bound<'py, PyDict>> {
     let meta = ds.metadata();
     let info = PyDict::new(py);
     info.set_item("path", path)?;
@@ -432,475 +174,148 @@ fn sas_info(py: Python<'_>, path: &str, catalog_path: Option<&str>) -> PyResult<
     info.set_item("page_count", meta.page_count)?;
     info.set_item("encoding", meta.encoding.clone())?;
     info.set_item("compression", format!("{:?}", meta.compression))?;
-    // The ROW_SIZE subheader's own rows-per-page, which some writers leave at 0. That zero
-    // used to collapse a whole file into one decode chunk, so every thread but one idled;
-    // reporting it is how a delivery can be checked for the shape without decoding anything.
+    // The ROW_SIZE subheader's own rows-per-page, which some writers leave at 0.
+    // Reporting it is how a delivery can be checked for the shape without
+    // decoding anything.
     info.set_item("rows_per_page", ds.declared_rows_per_page())?;
     if let Ok(fs_meta) = std::fs::metadata(path) {
         info.set_item("size_bytes", fs_meta.len())?;
     }
-    Ok(info.into_any().unbind())
+    Ok(info)
 }
 
-/// Append `with_columns(pl.col(pl.String).cast(pl.Categorical))` to the lazy plan
-/// so string columns materialize as `Categorical`. We use Polars' own cast (fast
-/// and version-stable) rather than emitting a dictionary array ourselves: for
-/// Polars the win is downstream (group-by/join), not the read, and its `String`
-/// type is already compact, so a direct dictionary build wouldn't beat the cast.
-fn cast_strings_to_categorical(py: Python<'_>, lf: &Py<PyAny>) -> PyResult<Py<PyAny>> {
-    let polars = PyModule::import(py, "polars")?;
-    let string_ty = polars.getattr("String")?;
-    let categorical_ty = polars.getattr("Categorical")?;
-    let expr = polars
-        .getattr("col")?
-        .call1((string_ty,))?
-        .call_method1("cast", (categorical_ty,))?;
-    let out = lf.bind(py).call_method1("with_columns", (expr,))?;
-    Ok(out.unbind())
+// ─── ArrowStream ──────────────────────────────────────────────────────────────
+
+enum StreamSource {
+    Scan { ds: Arc<Dataset>, spec: ScanSpec },
+    Schema(arrow_schema::SchemaRef),
+    Batch(RecordBatch),
 }
 
-/// Apply user-requested `{column: polars dtype}` overrides to a freshly opened
-/// dataset. Declared at schema time, so the lazy schema and every materialized
-/// batch agree; a file whose values violate an Integer override fails the scan
-/// instead of silently flapping the dtype back to Float64.
-#[cfg(feature = "arrow")]
-fn apply_schema_overrides(
-    ds: &mut Dataset,
-    schema_overrides: Option<&Bound<'_, PyDict>>,
-) -> PyResult<()> {
-    let overrides = convert::schema_overrides_from_pydict(schema_overrides)?;
-    if !overrides.is_empty() {
-        ds.apply_schema_overrides(overrides)
-            .map_err(convert::py_err)?;
+/// An object a consumer imports through `__arrow_c_stream__`. Consumable once:
+/// the decode behind a scan cannot be rewound, and the interface says a second
+/// call may fail.
+#[pyclass(frozen)]
+struct ArrowStream {
+    source: Mutex<Option<StreamSource>>,
+}
+
+impl ArrowStream {
+    fn new(source: StreamSource) -> Self {
+        Self {
+            source: Mutex::new(Some(source)),
+        }
     }
-    Ok(())
 }
 
-#[cfg(feature = "arrow")]
-#[pyfunction]
-fn benchmark_batch_to_dataframe(
-    py: Python<'_>,
-    path: &str,
-    with_columns: Option<Vec<String>>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-    repeat: usize,
-) -> PyResult<Py<PyAny>> {
-    let prepared = prepare_warm_batches(path, with_columns, n_rows, batch_size)?;
-    let dataset_open_ns = prepared.dataset_open_ns;
-    let batch_prep_ns = prepared.batch_prep_ns;
-    let priming_rows = prepared.rows;
-    let batch_count = prepared.batches.len();
-    let priming_ns = py.detach({
-        let schema = Arc::clone(&prepared.schema);
-        let batches = prepared.batches.clone();
-        move || -> PyResult<u128> {
-            let start = Instant::now();
-            for batch in batches {
-                let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema), &[])
-                    .map_err(convert::py_err)?;
-                black_box(df.height());
-                black_box(df.width());
-            }
-            Ok(start.elapsed().as_nanos())
-        }
-    })?;
-    let stats = py.detach({
-        let schema = Arc::clone(&prepared.schema);
-        let batches = prepared.batches;
-        move || -> PyResult<BatchBenchmarkStats> {
-            let mut elapsed_total = 0u128;
-            let mut rows_last = 0usize;
-            for _ in 0..repeat {
-                let start = Instant::now();
-                let mut rows = 0usize;
-                for batch in batches.iter().cloned() {
-                    let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema), &[])
-                        .map_err(convert::py_err)?;
-                    rows += df.height();
-                    black_box(df.width());
-                }
-                elapsed_total += start.elapsed().as_nanos();
-                rows_last = rows;
-            }
-            Ok(BatchBenchmarkStats {
-                dataset_open_ns,
-                batch_prep_ns,
-                priming_ns,
-                steady_elapsed_ns_total: elapsed_total,
-                steady_elapsed_ns_avg: elapsed_total / repeat.max(1) as u128,
-                steady_projection_ns_avg: 0,
-                steady_schema_ns_avg: 0,
-                steady_visit_ns_avg: 0,
-                rows_last,
-                batches_last: batch_count,
-            })
-        }
-    })?;
-    batch_benchmark_dict(py, path, repeat, batch_size, n_rows, &stats, priming_rows)
-}
+/// `FFI_ArrowArrayStream` holds raw pointers and so is not `Send`, and a capsule's
+/// payload must be. The pointers are to the boxed `ScanReader` this crate made,
+/// which is `Send`, and to the C callbacks arrow-array installed; nothing in it
+/// is tied to the thread that built it.
+// The field is read through the capsule's pointer by the consumer's C code, which
+// rustc cannot see.
+#[allow(dead_code)]
+struct SendStream(FFI_ArrowArrayStream);
 
-#[cfg(feature = "arrow")]
-#[pyfunction]
-fn benchmark_scan_to_dataframes(
-    py: Python<'_>,
-    path: &str,
-    with_columns: Option<Vec<String>>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-    repeat: usize,
-) -> PyResult<Py<PyAny>> {
-    let open_start = Instant::now();
-    let ds = Arc::new(Dataset::open(path).map_err(convert::py_err)?);
-    let dataset_open_ns = open_start.elapsed().as_nanos();
-    let projection_columns = with_columns.clone();
-    let projection = build_projection(ds.as_ref(), with_columns)?;
-    let full_schema = scan::full_polars_schema_for_dataset(ds.as_ref()).map_err(convert::py_err)?;
+// SAFETY: see the type's doc comment. The private data is a `Box<dyn
+// RecordBatchReader + Send>` created by `FFI_ArrowArrayStream::new`, and the
+// callbacks are arrow-array's, so moving the struct between threads moves
+// nothing thread-affine.
+#[allow(unsafe_code)]
+unsafe impl Send for SendStream {}
 
-    let priming_start = Instant::now();
-    let priming_stats = run_scan_to_dataframes_once(
-        ds.as_ref(),
-        &full_schema,
-        projection_columns.as_deref(),
-        projection.as_ref(),
-        n_rows,
-        batch_size,
-    )
-    .map_err(convert::py_err)?;
-    let priming_ns = priming_start.elapsed().as_nanos();
-
-    let stats = py.detach({
-        let ds = Arc::clone(&ds);
-        let full_schema = Arc::clone(&full_schema);
-        move || -> PyResult<BatchBenchmarkStats> {
-            let mut elapsed_total = 0u128;
-            let mut projection_total = 0u128;
-            let mut schema_total = 0u128;
-            let mut visit_total = 0u128;
-            let mut rows_last = 0usize;
-            for _ in 0..repeat {
-                let run = run_scan_to_dataframes_once(
-                    ds.as_ref(),
-                    &full_schema,
-                    projection_columns.as_deref(),
-                    projection.as_ref(),
-                    n_rows,
-                    batch_size,
+#[pymethods]
+impl ArrowStream {
+    /// The Arrow `PyCapsule` Interface entry point. `requested_schema` is accepted
+    /// and not applied: the interface allows that, and projection is chosen when
+    /// the stream is made.
+    #[pyo3(signature = (requested_schema=None))]
+    fn __arrow_c_stream__<'py>(
+        &self,
+        py: Python<'py>,
+        requested_schema: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyCapsule>> {
+        let _ = requested_schema;
+        let source = self
+            .source
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("stream state poisoned"))?
+            .take()
+            .ok_or_else(|| {
+                PyRuntimeError::new_err(
+                    "this stream was already consumed; take a new one from the dataset",
                 )
-                .map_err(convert::py_err)?;
-                elapsed_total += run.projection_ns + run.schema_ns + run.visit_ns;
-                projection_total += run.projection_ns;
-                schema_total += run.schema_ns;
-                visit_total += run.visit_ns;
-                rows_last = run.rows;
-            }
-            Ok(BatchBenchmarkStats {
-                dataset_open_ns,
-                batch_prep_ns: 0,
-                priming_ns,
-                steady_elapsed_ns_total: elapsed_total,
-                steady_elapsed_ns_avg: elapsed_total / repeat.max(1) as u128,
-                steady_projection_ns_avg: projection_total / repeat.max(1) as u128,
-                steady_schema_ns_avg: schema_total / repeat.max(1) as u128,
-                steady_visit_ns_avg: visit_total / repeat.max(1) as u128,
-                rows_last,
-                batches_last: priming_stats.batches,
-            })
-        }
-    })?;
-    batch_benchmark_dict(
-        py,
-        path,
-        repeat,
-        batch_size,
-        n_rows,
-        &stats,
-        priming_stats.rows,
-    )
+            })?;
+        let reader = match source {
+            StreamSource::Scan { ds, spec } => ScanReader::start(ds, spec).map_err(value_error)?,
+            StreamSource::Schema(schema) => ScanReader::empty(schema),
+            StreamSource::Batch(batch) => ScanReader::single(batch),
+        };
+        let stream = FFI_ArrowArrayStream::new(Box::new(reader));
+        let name = CString::new(STREAM_CAPSULE_NAME).expect("capsule name has no NUL");
+        PyCapsule::new(py, SendStream(stream), Some(name))
+    }
 }
 
-#[cfg(feature = "arrow")]
+// ─── BatchIterator ────────────────────────────────────────────────────────────
+
+/// Iterates a scan batch by batch, yielding each as a single-batch stream. The
+/// receiver is `Send` but not `Sync`, and pyo3 wants both, hence the mutex; it
+/// is only ever reached through `&mut self`.
+#[pyclass]
+struct BatchIterator {
+    reader: Mutex<ScanReader>,
+}
+
+#[pymethods]
+impl BatchIterator {
+    const fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<ArrowStream> {
+        let reader = slf
+            .reader
+            .get_mut()
+            .map_err(|_| PyRuntimeError::new_err("batch iterator poisoned"))?;
+        // The decode thread does not need the GIL, and the consumer may be
+        // another Python thread that does.
+        let next = py.detach(move || reader.next());
+        match next {
+            None => Err(PyStopIteration::new_err("end of stream")),
+            Some(Err(err)) => Err(PyRuntimeError::new_err(err.to_string())),
+            Some(Ok(batch)) => Ok(ArrowStream::new(StreamSource::Batch(batch))),
+        }
+    }
+}
+
+// ─── module ───────────────────────────────────────────────────────────────────
+
+/// Header-level facts about a file, without opening a dataset object.
 #[pyfunction]
-fn benchmark_dataframe_to_python(
-    py: Python<'_>,
+#[pyo3(signature = (path, catalog_path=None))]
+fn sas_info<'py>(
+    py: Python<'py>,
     path: &str,
-    with_columns: Option<Vec<String>>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-    repeat: usize,
-) -> PyResult<Py<PyAny>> {
-    let prepared = prepare_warm_batches(path, with_columns, n_rows, batch_size)?;
-    let dataset_open_ns = prepared.dataset_open_ns;
-    let batch_prep_ns = prepared.batch_prep_ns;
-    let priming_rows = prepared.rows;
-    let dataframes = py.detach({
-        let schema = Arc::clone(&prepared.schema);
-        let batches = prepared.batches;
-        move || -> PyResult<Vec<DataFrame>> {
-            batches
-                .into_iter()
-                .map(|batch| {
-                    convert::owned_batch_to_dataframe(batch, Arc::clone(&schema), &[])
-                        .map_err(convert::py_err)
-                })
-                .collect()
-        }
-    })?;
-    let batch_count = dataframes.len();
-    let priming_start = Instant::now();
-    for df in &dataframes {
-        let py_df = PyDataFrame(df.clone()).into_py_any(py)?;
-        black_box(py_df);
+    catalog_path: Option<&str>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let mut ds = py.detach(|| Dataset::open(path)).map_err(value_error)?;
+    if let Some(catalog) = catalog_path {
+        ds.attach_catalog(catalog).map_err(value_error)?;
     }
-    let priming_ns = priming_start.elapsed().as_nanos();
-
-    let mut elapsed_total = 0u128;
-    let mut rows_last = 0usize;
-    for _ in 0..repeat {
-        let start = Instant::now();
-        let mut rows = 0usize;
-        for df in &dataframes {
-            rows += df.height();
-            let py_df = PyDataFrame(df.clone()).into_py_any(py)?;
-            black_box(py_df);
-        }
-        elapsed_total += start.elapsed().as_nanos();
-        rows_last = rows;
-    }
-    let stats = BatchBenchmarkStats {
-        dataset_open_ns,
-        batch_prep_ns,
-        priming_ns,
-        steady_elapsed_ns_total: elapsed_total,
-        steady_elapsed_ns_avg: elapsed_total / repeat.max(1) as u128,
-        steady_projection_ns_avg: 0,
-        steady_schema_ns_avg: 0,
-        steady_visit_ns_avg: 0,
-        rows_last,
-        batches_last: batch_count,
-    };
-    batch_benchmark_dict(py, path, repeat, batch_size, n_rows, &stats, priming_rows)
+    info_dict(py, &ds, path)
 }
 
-#[cfg(feature = "arrow")]
-fn prepare_warm_batches(
-    path: &str,
-    with_columns: Option<Vec<String>>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-) -> PyResult<PreparedWarmBatches> {
-    let open_start = Instant::now();
-    let ds = Dataset::open(path).map_err(convert::py_err)?;
-    let dataset_open_ns = open_start.elapsed().as_nanos();
-    let projection_columns = with_columns.clone();
-    let projection = build_projection(&ds, with_columns)?;
-    let prep_start = Instant::now();
-    let mut scan = ds.scan();
-    if let Some(ref projection) = projection {
-        scan = scan.with_projection(projection);
-    }
-    if let Some(n_rows) = n_rows {
-        scan = scan
-            .limit(u64::try_from(n_rows).map_err(|_| convert::py_err("row limit exceeds u64"))?);
-    }
-    if let Some(batch_size) = batch_size {
-        scan = scan.with_batch_hint(BatchHint::Rows(batch_size));
-    }
-    let full_schema = scan::full_polars_schema_for_dataset(&ds).map_err(convert::py_err)?;
-    let schema =
-        resolve_polars_schema_from_full(&full_schema, projection_columns.as_deref(), &scan)
-            .map_err(convert::py_err)?;
-    let batches = scan.collect_batches().map_err(convert::py_err)?;
-    let rows = batches.iter().map(|batch| batch.row_count).sum();
-    let batch_prep_ns = prep_start.elapsed().as_nanos();
-    Ok(PreparedWarmBatches {
-        batches,
-        schema,
-        dataset_open_ns,
-        batch_prep_ns,
-        rows,
-    })
-}
-
-#[cfg(feature = "arrow")]
-fn build_projection(
-    ds: &Dataset,
-    with_columns: Option<Vec<String>>,
-) -> PyResult<Option<Projection>> {
-    match with_columns {
-        Some(columns) if !columns.is_empty() => ds
-            .projection()
-            .columns(columns)
-            .build()
-            .map(Some)
-            .map_err(convert::py_err),
-        _ => Ok(None),
-    }
-}
-
-#[cfg(feature = "arrow")]
-fn run_scan_to_dataframes_once(
-    ds: &Dataset,
-    full_schema: &Arc<polars_arrow::datatypes::ArrowSchema>,
-    projection_columns: Option<&[String]>,
-    projection: Option<&Projection>,
-    n_rows: Option<usize>,
-    batch_size: Option<usize>,
-) -> Result<ScanToDataframesStats, Error> {
-    let projection_start = Instant::now();
-    let mut scan = ds.scan();
-    if let Some(projection) = projection {
-        scan = scan.with_projection(projection);
-    }
-    if let Some(n_rows) = n_rows {
-        scan = scan
-            .limit(u64::try_from(n_rows).map_err(|_| Error::unsupported("row limit exceeds u64"))?);
-    }
-    if let Some(batch_size) = batch_size {
-        scan = scan.with_batch_hint(BatchHint::Rows(batch_size));
-    }
-    let projection_ns = projection_start.elapsed().as_nanos();
-
-    let schema_start = Instant::now();
-    let schema = resolve_polars_schema_from_full(full_schema, projection_columns, &scan)?;
-    let schema_ns = schema_start.elapsed().as_nanos();
-
-    let visit_start = Instant::now();
-    let mut rows = 0usize;
-    let mut batches = 0usize;
-    scan.visit_owned_batches(|batch| {
-        let df = convert::owned_batch_to_dataframe(batch, Arc::clone(&schema), &[])?;
-        rows += df.height();
-        batches += 1;
-        black_box(df.width());
-        Ok(std::ops::ControlFlow::Continue(()))
-    })?;
-    let visit_ns = visit_start.elapsed().as_nanos();
-    Ok(ScanToDataframesStats {
-        projection_ns,
-        schema_ns,
-        visit_ns,
-        rows,
-        batches,
-    })
-}
-
-#[cfg(feature = "arrow")]
-fn resolve_polars_schema_from_full(
-    full_schema: &Arc<polars_arrow::datatypes::ArrowSchema>,
-    projection_columns: Option<&[String]>,
-    scan: &sas7bdat::ScanBuilder<'_>,
-) -> Result<Arc<polars_arrow::datatypes::ArrowSchema>, Error> {
-    let cached = match projection_columns {
-        None | Some([]) => Some(Arc::clone(full_schema)),
-        Some(columns) => {
-            let fields = columns
-                .iter()
-                .map(|name| {
-                    full_schema.get(name).cloned().ok_or_else(|| {
-                        Error::arrow(format!("missing projected column in cached schema: {name}"))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>();
-            match fields {
-                Ok(fields) => Some(Arc::new(
-                    polars_arrow::datatypes::ArrowSchema::from_iter_check_duplicates(fields)
-                        .map_err(|err| Error::arrow(err.to_string()))?,
-                )),
-                Err(_) => None,
-            }
-        }
-    };
-    match cached {
-        Some(schema) => Ok(schema),
-        None => Ok(Arc::new(convert::build_polars_schema(
-            scan.arrow_schema()?.as_ref(),
-        )?)),
-    }
-}
-
-#[cfg(feature = "arrow")]
-#[allow(clippy::cast_precision_loss)]
-fn batch_benchmark_dict(
-    py: Python<'_>,
-    path: &str,
-    repeat: usize,
-    batch_size: Option<usize>,
-    n_rows: Option<usize>,
-    stats: &BatchBenchmarkStats,
-    priming_rows: usize,
-) -> PyResult<Py<PyAny>> {
-    let seconds = stats.steady_elapsed_ns_avg as f64 / 1_000_000_000.0;
-    let rows_per_second = if seconds > 0.0 {
-        stats.rows_last as f64 / seconds
-    } else {
-        0.0
-    };
-    let batches_per_second = if seconds > 0.0 {
-        stats.batches_last as f64 / seconds
-    } else {
-        0.0
-    };
-    let dict = PyDict::new(py);
-    dict.set_item("fixture", path)?;
-    dict.set_item("repeat", repeat)?;
-    dict.set_item("batch_rows", batch_size)?;
-    dict.set_item("limit", n_rows)?;
-    dict.set_item("dataset_open_ns", stats.dataset_open_ns)?;
-    dict.set_item("batch_prep_ns", stats.batch_prep_ns)?;
-    dict.set_item("priming_ns", stats.priming_ns)?;
-    dict.set_item("priming_rows", priming_rows)?;
-    dict.set_item("steady_elapsed_ns_total", stats.steady_elapsed_ns_total)?;
-    dict.set_item("steady_elapsed_ns_avg", stats.steady_elapsed_ns_avg)?;
-    dict.set_item("steady_projection_ns_avg", stats.steady_projection_ns_avg)?;
-    dict.set_item("steady_schema_ns_avg", stats.steady_schema_ns_avg)?;
-    dict.set_item("steady_visit_ns_avg", stats.steady_visit_ns_avg)?;
-    dict.set_item("rows_last", stats.rows_last)?;
-    dict.set_item("batches_last", stats.batches_last)?;
-    dict.set_item("rows_per_second", rows_per_second)?;
-    dict.set_item("batches_per_second", batches_per_second)?;
-    Ok(dict.unbind().into_any())
-}
-
-#[cfg(all(feature = "arrow", feature = "extension-module"))]
-/// Thin, fast Polars IO plugin for SAS7BDAT files.
-///
-/// Quick start:
-///     >>> import sas7bdat_polars as sp
-///     >>> df = sp.read_sas("data.sas7bdat", columns=["ID", "DATE"])   # eager, projected
-///     >>> lf = sp.scan_sas("data.sas7bdat", columns=["ID"])           # lazy
-///     >>> sp.sas_info("data.sas7bdat")                                # header-only metadata
-///
-/// Always pass ``columns`` — SAS7BDAT is wide and row-oriented, so projecting is
-/// the biggest speed-up. The reader parallelises its own decode across cores (env
-/// ``SAS7BDAT_SCAN_THREADS``); the Polars thread pool does not control it.
 #[pymodule]
-fn sas7bdat_polars(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    register_module(m)
-}
-
-/// Registers the SAS7BDAT Polars plugin module.
-///
-/// # Errors
-///
-/// Returns a Python error if any class or function registration fails.
-#[cfg(feature = "arrow")]
-pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn sas7bdat_polars(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     // The wheel's version and the reader's are separate lines that look alike;
-    // this is the only way a caller can tell which core it actually has.
+    // this is the only way a caller can tell which core it has.
     m.add("__core_version__", sas7bdat::VERSION)?;
     m.add("PLUGIN_CONTRACT_VERSION", PLUGIN_CONTRACT_VERSION)?;
     m.add_class::<SasDataset>()?;
-    m.add_class::<SasIoSource>()?;
-    m.add_class::<BatchReader>()?;
-    m.add_function(wrap_pyfunction!(schema_for_file, m)?)?;
-    m.add_function(wrap_pyfunction!(batch_reader, m)?)?;
-    m.add_function(wrap_pyfunction!(scan_sas, m)?)?;
-    m.add_function(wrap_pyfunction!(read_sas, m)?)?;
+    m.add_class::<ArrowStream>()?;
+    m.add_class::<BatchIterator>()?;
     m.add_function(wrap_pyfunction!(sas_info, m)?)?;
-    m.add_function(wrap_pyfunction!(benchmark_batch_to_dataframe, m)?)?;
-    m.add_function(wrap_pyfunction!(benchmark_scan_to_dataframes, m)?)?;
-    m.add_function(wrap_pyfunction!(benchmark_dataframe_to_python, m)?)?;
     Ok(())
 }

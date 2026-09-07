@@ -4,29 +4,27 @@ build-backend = "maturin"
 
 [project]
 name = "sas7bdat-polars"
-version = "0.9.3"
-description = "Thin Polars IO plugin for the sas7bdat crate"
+version = "0.10.0"
+description = "SAS7BDAT files as Arrow streams, with a Polars API on top"
 readme = "README.md"
 # Built against the CPython stable ABI (abi3, floor 3.12), so one cp312-abi3 wheel runs on 3.12+.
 requires-python = ">=3.12"
-# The polars range is the set of releases this wheel is TESTED against, not a
-# guess at compatibility. The extension links polars-rust through pyo3-polars
-# and hands Series to the installed Python polars through its private
-# `_export`/`_import` hooks, which carry no stability promise: a mismatch there
-# is a memory fault, not an exception. So the package refuses to import outside
-# this range (see `python/sas7bdat_polars/__init__.py`), and the `compat` job in
-# `.github/workflows/wheels.yml` installs the built wheel against the lowest and
-# the highest release in it. Move a bound only with that job green on the new
-# value. The range is read from this file by the import check and by the CI
-# job, so it is written nowhere else.
-dependencies = ["polars>=1.41,<1.45"]
+# A floor and no ceiling. The compiled extension does not link polars: it hands
+# every batch to Python as an Arrow C stream behind `__arrow_c_stream__`, and
+# the polars API in `python/sas7bdat_polars/` is built on polars' public
+# constructors (`pl.DataFrame(stream)`, `polars.io.plugins.register_io_source`).
+# The floor is the oldest release the `compat` job in
+# `.github/workflows/wheels.yml` runs the wheel against; the same job runs the
+# newest release polars has published, so a new polars that breaks the public
+# API shows there rather than on a user. The import-time check in `__init__.py`
+# reads this specifier from the installed metadata, so it is written once.
+dependencies = ["polars>=1.41"]
 
 [project.optional-dependencies]
 test = ["pytest"]
 # `pip install "sas7bdat-polars[cli]"` also installs the standalone `sas7bdat`
 # command. It is a separate distribution on purpose: that wheel is a plain
-# binary (`py3-none-<platform>`) with no polars pin and no Python floor, so
-# CLI-only users are not dragged onto this package's `polars==1.41.*`.
+# binary (`py3-none-<platform>`) with no polars requirement and no Python floor.
 cli = ["sas7bdat-cli>=0.8.0"]
 
 [tool.maturin]
@@ -35,6 +33,5 @@ manifest-path = "Cargo.toml"
 features = ["extension-module"]
 locked = true
 # Mixed layout: the compiled extension is placed inside the `sas7bdat_polars`
-# package (as a submodule) and the hand-written `__init__.py` re-exports it and
-# adds the Python-side ergonomics (read_sas cookbook, set_scan_threads, .pyi).
+# package (as a submodule) and the hand-written `__init__.py` is the API.
 python-source = "python"

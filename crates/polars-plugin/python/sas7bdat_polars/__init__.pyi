@@ -1,5 +1,6 @@
-"""Type stubs for the sas7bdat_polars Polars IO plugin."""
+"""Type stubs for sas7bdat_polars."""
 
+import os
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
@@ -9,61 +10,45 @@ __version__: str
 __core_version__: str
 PLUGIN_CONTRACT_VERSION: str
 
-def read_sas(
-    path: str,
-    columns: Sequence[str] | None = ...,
-    n_rows: int | None = ...,
-    predicate: pl.Expr | None = ...,
-    catalog_path: str | None = ...,
-    schema_overrides: Mapping[str, Any] | None = ...,
-) -> pl.DataFrame:
-    """Read a SAS7BDAT file eagerly into a DataFrame. Pass ``columns`` to project."""
+class ArrowStream:
+    """An Arrow C stream, importable once through ``__arrow_c_stream__``."""
 
-def scan_sas(
-    path: str,
-    catalog_path: str | None = ...,
-    schema_overrides: Mapping[str, Any] | None = ...,
-    categorical: bool = ...,
-    columns: Sequence[str] | None = ...,
-    n_rows: int | None = ...,
-) -> pl.LazyFrame:
-    """Lazily scan a SAS7BDAT file into a LazyFrame. Pass ``columns`` to project."""
+    def __arrow_c_stream__(self, requested_schema: object = ...) -> object: ...
 
-def sas_info(path: str, catalog_path: str | None = ...) -> dict[str, Any]:
-    """Header-only metadata: path, n_rows, n_columns, row_length_bytes, page_count,
-    encoding, size_bytes. Does not decode the body."""
+class BatchIterator(Iterator[ArrowStream]):
+    def __iter__(self) -> BatchIterator: ...
+    def __next__(self) -> ArrowStream: ...
 
-def schema_for_file(path: str) -> pl.Schema:
-    """Return the Polars schema of a SAS7BDAT file without decoding the body."""
-
-def batch_reader(
-    path: str,
-    with_columns: Sequence[str] | None = ...,
-    predicate: pl.Expr | None = ...,
-    n_rows: int | None = ...,
-    batch_size: int | None = ...,
-    catalog_path: str | None = ...,
-    schema_overrides: Mapping[str, Any] | None = ...,
-) -> BatchReader:
-    """Iterate a SAS7BDAT file as DataFrame batches (low-level; prefer read_sas)."""
-
-def scan_threads() -> int:
-    """Number of decode threads the reader will use (env override, else all cores)."""
-
-def set_scan_threads(n: int) -> None:
-    """Cap the reader's decode-thread pool (``0`` resets to all cores)."""
+class BatchReader(Iterator[pl.DataFrame]):
+    def __init__(self, batches: BatchIterator, predicate: pl.Expr | None) -> None: ...
+    def __iter__(self) -> BatchReader: ...
+    def __next__(self) -> pl.DataFrame: ...
 
 class SasDataset:
-    """A SAS7BDAT file opened once, reusable for schema/scan/batch reads."""
-
+    path: str
     def __init__(
         self,
-        path: str,
-        catalog_path: str | None = ...,
+        path: str | os.PathLike[str],
+        catalog_path: str | os.PathLike[str] | None = ...,
         schema_overrides: Mapping[str, Any] | None = ...,
     ) -> None: ...
-    def schema(self) -> pl.Schema: ...
-    def scan_sas(self) -> pl.LazyFrame: ...
+    @property
+    def column_names(self) -> list[str]: ...
+    def info(self) -> dict[str, Any]: ...
+    def schema(self, columns: Sequence[str] | None = ...) -> pl.Schema: ...
+    def stream(
+        self,
+        columns: Sequence[str] | None = ...,
+        n_rows: int | None = ...,
+        batch_size: int | None = ...,
+    ) -> ArrowStream: ...
+    def __arrow_c_stream__(self, requested_schema: object = ...) -> object: ...
+    def read(
+        self,
+        columns: Sequence[str] | None = ...,
+        n_rows: int | None = ...,
+        predicate: pl.Expr | None = ...,
+    ) -> pl.DataFrame: ...
     def batch_reader(
         self,
         with_columns: Sequence[str] | None = ...,
@@ -71,12 +56,73 @@ class SasDataset:
         n_rows: int | None = ...,
         batch_size: int | None = ...,
     ) -> BatchReader: ...
+    def scan_sas(
+        self,
+        columns: Sequence[str] | None = ...,
+        n_rows: int | None = ...,
+        predicate: pl.Expr | None = ...,
+        categorical: bool = ...,
+    ) -> pl.LazyFrame: ...
 
-class BatchReader(Iterator[pl.DataFrame]):
-    def __iter__(self) -> BatchReader: ...
-    def __next__(self) -> pl.DataFrame: ...
+class SasIoSource:
+    def __init__(
+        self, dataset: SasDataset, columns: list[str] | None, n_rows: int | None
+    ) -> None: ...
+    def __call__(
+        self,
+        with_columns: list[str] | None,
+        predicate: pl.Expr | None,
+        n_rows: int | None,
+        batch_size: int | None,
+    ) -> Iterator[pl.DataFrame]: ...
 
-class SasIoSource: ...
+def sas_info(
+    path: str | os.PathLike[str], catalog_path: str | os.PathLike[str] | None = ...
+) -> dict[str, Any]:
+    """Header-level facts about a file; no rows are decoded."""
+
+def schema_for_file(
+    path: str | os.PathLike[str], catalog_path: str | os.PathLike[str] | None = ...
+) -> pl.Schema:
+    """A file's polars schema from its header."""
+
+def scan_sas(
+    path: str | os.PathLike[str],
+    catalog_path: str | os.PathLike[str] | None = ...,
+    schema_overrides: Mapping[str, Any] | None = ...,
+    categorical: bool = ...,
+    columns: Sequence[str] | None = ...,
+    n_rows: int | None = ...,
+    predicate: pl.Expr | None = ...,
+) -> pl.LazyFrame:
+    """Lazily scan a SAS7BDAT file. Pass ``columns`` to project at the reader."""
+
+def read_sas(
+    path: str | os.PathLike[str],
+    columns: Sequence[str] | None = ...,
+    n_rows: int | None = ...,
+    predicate: pl.Expr | None = ...,
+    catalog_path: str | os.PathLike[str] | None = ...,
+    schema_overrides: Mapping[str, Any] | None = ...,
+) -> pl.DataFrame:
+    """Read a SAS7BDAT file eagerly into a DataFrame."""
+
+def batch_reader(
+    path: str | os.PathLike[str],
+    with_columns: Sequence[str] | None = ...,
+    predicate: pl.Expr | None = ...,
+    n_rows: int | None = ...,
+    batch_size: int | None = ...,
+    catalog_path: str | os.PathLike[str] | None = ...,
+    schema_overrides: Mapping[str, Any] | None = ...,
+) -> BatchReader:
+    """Iterate a file one DataFrame per decoded batch."""
+
+def scan_threads() -> int:
+    """Decode threads the reader will use."""
+
+def set_scan_threads(n: int) -> None:
+    """Cap the reader's decode-thread pool; ``0`` resets."""
 
 def polars_requirement() -> str | None:
     """The polars specifier this installed wheel declares, read from its metadata."""
