@@ -17,7 +17,11 @@ jobs:
     name: test + lint
     runs-on: ubuntu-latest
     steps:
+      # Full history and tags: check-versions.sh compares each crate against the
+      # tag of the version it claims, which a depth-1 clone cannot see.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       # PyO3 needs a Python to link the polars plugin's test binary (abi3-py312).
       - uses: actions/setup-python@v6

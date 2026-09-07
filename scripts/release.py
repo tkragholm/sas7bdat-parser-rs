@@ -21,6 +21,11 @@ itself whether it has happened, so resuming is just running it again.
     just release sas7bdat 0.9.0                      # plan only, changes nothing
     just release sas7bdat 0.9.0 --execute            # local work, and push main
     just release sas7bdat 0.9.0 --execute --publish  # also push tags (irreversible)
+    just release polars-plugin 0.9.3 --execute --publish   # the PyPI wheel: tag v0.9.3
+
+The two PyPI distributions (`polars-plugin` and `sas7bdat-cli`) release through the
+same sequence with a `v<version>` tag, which `wheels.yml` builds and uploads. They
+publish nothing to crates.io, so no inst/AUTHORS step follows them.
 
 `--execute` stops at each human gate rather than guessing past it: the changelog
 prose is yours to write, and a tag push uploads to crates.io permanently, so it
@@ -106,7 +111,9 @@ def requirement(manifest: Path, dep: str) -> str | None:
 
 def published_workspace_crates() -> dict[str, Path]:
     """Workspace crates that go to crates.io, by package name."""
-    meta = json.loads(run(["cargo", "metadata", "--format-version", "1", "--no-deps"]).stdout)
+    meta = json.loads(
+        run(["cargo", "metadata", "--format-version", "1", "--no-deps"]).stdout
+    )
     out = {}
     for package in meta["packages"]:
         if package.get("publish") == []:
@@ -115,8 +122,33 @@ def published_workspace_crates() -> dict[str, Path]:
     return out
 
 
+#: The two distributions that go to PyPI rather than crates.io. They are workspace
+#: crates with `publish = false`, released by a `v<version>` tag that `wheels.yml`
+#: turns into wheels and uploads; a tag whose version matches only one of them
+#: publishes that one and leaves the other alone.
+WHEELS = {"sas7bdat-polars", "sas7bdat-cli"}
+
+
+def tag_for(move: Move) -> str:
+    return f"v{move.target}" if move.name in WHEELS else f"{move.name}-v{move.target}"
+
+
 def is_published(name: str, version: str) -> bool:
-    """Whether crates.io already carries this exact version, via the sparse index."""
+    """Whether the registry already carries this exact version.
+
+    crates.io through the sparse index; PyPI through its JSON API for the wheels.
+    """
+    if name in WHEELS:
+        url = f"https://pypi.org/pypi/{name}/{version}/json"
+        try:
+            with urllib.request.urlopen(url, timeout=20) as response:
+                return response.status == 200
+        except urllib.error.HTTPError as err:
+            if err.code == 404:
+                return False
+            raise
+        except (urllib.error.URLError, TimeoutError):
+            return False
     lowered = name.lower()
     if len(lowered) >= 4:
         prefix = f"{lowered[:2]}/{lowered[2:4]}"
@@ -143,6 +175,7 @@ def is_published(name: str, version: str) -> bool:
 @dataclass
 class Move:
     """One crate's version moving, and why."""
+
     name: str
     manifest: Path
     current: str
@@ -191,8 +224,15 @@ def build_plan(crate: str, version: str) -> Plan:
             # boundary is itself a breaking release.
             current = read_version(other)
             target = minor_bump(current)
-            moves.append(Move(owner, other, current, target,
-                              f'requires {dep} "{req}", which no longer matches'))
+            moves.append(
+                Move(
+                    owner,
+                    other,
+                    current,
+                    target,
+                    f'requires {dep} "{req}", which no longer matches',
+                )
+            )
             seen.add(owner)
             queue.append((owner, target))
 
@@ -200,6 +240,7 @@ def build_plan(crate: str, version: str) -> Plan:
 
 
 # --------------------------------------------------------------------------- steps
+
 
 def changelog_of(move: Move) -> Path | None:
     path = move.manifest.parent / "CHANGELOG.md"
@@ -211,8 +252,11 @@ def changelog_written(move: Move) -> bool:
     if changelog is None:
         return True
     text = changelog.read_text()
-    match = re.search(rf"^## \[{re.escape(move.target)}\][^\n]*\n(.*?)(?=^## \[|\Z)",
-                      text, re.MULTILINE | re.DOTALL)
+    match = re.search(
+        rf"^## \[{re.escape(move.target)}\][^\n]*\n(.*?)(?=^## \[|\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
     return bool(match and match.group(1).strip())
 
 
@@ -234,7 +278,12 @@ def tag_exists(tag: str) -> bool:
 
 def authors_current() -> bool:
     """Only knowable by vendoring, which needs every crate published first."""
-    return run(["git", "diff", "--quiet", "--", "crates/*/inst/AUTHORS"], check=False).returncode == 0
+    return (
+        run(
+            ["git", "diff", "--quiet", "--", "crates/*/inst/AUTHORS"], check=False
+        ).returncode
+        == 0
+    )
 
 
 def describe(plan: Plan, publish_state: dict[str, bool]) -> int:
@@ -242,37 +291,68 @@ def describe(plan: Plan, publish_state: dict[str, bool]) -> int:
     steps: list[tuple[bool, str, str]] = []
 
     for move in plan.moves:
-        steps.append((read_version(move.manifest) == move.target,
-                      f"bump {move.name} {move.current} -> {move.target}",
-                      "" if move.because == "asked for" else move.because))
+        steps.append(
+            (
+                read_version(move.manifest) == move.target,
+                f"bump {move.name} {move.current} -> {move.target}",
+                "" if move.because == "asked for" else move.because,
+            )
+        )
 
     for path, dep, req, wanted in plan.requirement_edits:
         rel = path.relative_to(ROOT)
-        steps.append((requirement(path, dep) == wanted,
-                      f'{rel}: {dep} "{req}" -> "{wanted}"', ""))
+        steps.append(
+            (
+                requirement(path, dep) == wanted,
+                f'{rel}: {dep} "{req}" -> "{wanted}"',
+                "",
+            )
+        )
 
-    steps.append((versions_moved(plan) and couplings_green(),
-                  "regenerate lockfiles, check-versions.sh green", ""))
+    steps.append(
+        (
+            versions_moved(plan) and couplings_green(),
+            "regenerate lockfiles, check-versions.sh green",
+            "",
+        )
+    )
 
     for move in plan.moves:
         if changelog_of(move) is not None:
-            steps.append((changelog_written(move),
-                          f"write CHANGELOG [{move.target}] for {move.name}",
-                          "yours to write; this only opens the section"))
+            steps.append(
+                (
+                    changelog_written(move),
+                    f"write CHANGELOG [{move.target}] for {move.name}",
+                    "yours to write; this only opens the section",
+                )
+            )
 
     steps.append((versions_moved(plan) and tree_clean(), "commit the release", ""))
 
     for move in plan.publish_order:
-        tag = f"{move.name}-v{move.target}"
+        tag = tag_for(move)
         done = publish_state.get(move.name, False)
-        steps.append((done, f"tag + push {tag}",
-                      "" if done else "uploads to crates.io; needs --publish"))
+        where = "PyPI" if move.name in WHEELS else "crates.io"
+        steps.append(
+            (
+                done,
+                f"tag + push {tag}",
+                "" if done else f"uploads to {where}; needs --publish",
+            )
+        )
 
-    steps.append((all(publish_state.values()) and authors_current(),
-                  "regenerate inst/AUTHORS, commit, push",
-                  "impossible before the crates are up; this is the CI gate"))
+    if any(m.name not in WHEELS for m in plan.moves):
+        steps.append(
+            (
+                all(publish_state.values()) and authors_current(),
+                "regenerate inst/AUTHORS with --refresh, commit, push",
+                "impossible before the crates are up; this is the CI gate",
+            )
+        )
 
-    first_open = next((i for i, (done, _, _) in enumerate(steps) if not done), len(steps))
+    first_open = next(
+        (i for i, (done, _, _) in enumerate(steps) if not done), len(steps)
+    )
     for i, (done, what, why) in enumerate(steps):
         marker = TICK if done else (NEXT if i == first_open else TODO)
         line = f"{marker}{i + 1:>2}. {what}"
@@ -288,17 +368,25 @@ def do_bumps(plan: Plan) -> None:
             if not target.is_file():
                 continue
             text = target.read_text()
-            target.write_text(re.sub(r'^(version = )"[^"]+"', rf'\1"{move.target}"',
-                                     text, count=1, flags=re.MULTILINE))
+            target.write_text(
+                re.sub(
+                    r'^(version = )"[^"]+"',
+                    rf'\1"{move.target}"',
+                    text,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+            )
         print(f"  bumped {move.name} -> {move.target}")
 
 
 def do_requirements(plan: Plan) -> None:
     for path, dep, req, wanted in plan.requirement_edits:
         text = path.read_text()
-        pattern = re.compile(rf'(^{re.escape(dep)} = .*?version = ")({re.escape(req)})(")',
-                             re.MULTILINE)
-        updated, count = pattern.subn(rf'\g<1>{wanted}\g<3>', text)
+        pattern = re.compile(
+            rf'(^{re.escape(dep)} = .*?version = ")({re.escape(req)})(")', re.MULTILINE
+        )
+        updated, count = pattern.subn(rf"\g<1>{wanted}\g<3>", text)
         if count:
             path.write_text(updated)
             print(f'  {path.relative_to(ROOT)}: {dep} -> "{wanted}"')
@@ -319,19 +407,26 @@ def do_changelog_sections(plan: Plan) -> None:
             continue
         today = time.strftime("%Y-%m-%d")
         text = changelog.read_text().replace(
-            "## [Unreleased]\n", f"## [Unreleased]\n\n## [{move.target}] - {today}\n", 1)
+            "## [Unreleased]\n", f"## [Unreleased]\n\n## [{move.target}] - {today}\n", 1
+        )
         changelog.write_text(text)
         print(f"  opened [{move.target}] in {changelog.relative_to(ROOT)}")
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("crate")
     ap.add_argument("version")
-    ap.add_argument("--execute", action="store_true", help="do the local work and push main")
-    ap.add_argument("--publish", action="store_true",
-                    help="also push release tags, which uploads to crates.io permanently")
+    ap.add_argument(
+        "--execute", action="store_true", help="do the local work and push main"
+    )
+    ap.add_argument(
+        "--publish",
+        action="store_true",
+        help="also push release tags, which uploads to crates.io permanently",
+    )
     args = ap.parse_args()
 
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
@@ -341,7 +436,9 @@ def main() -> int:
 
     print(f"\nRelease {args.crate} {args.version}")
     if len(plan.moves) > 1:
-        forced = ", ".join(f"{m.name} {m.current} -> {m.target}" for m in plan.moves[1:])
+        forced = ", ".join(
+            f"{m.name} {m.current} -> {m.target}" for m in plan.moves[1:]
+        )
         print(f"This forces: {forced}")
     print()
 
@@ -366,12 +463,16 @@ def main() -> int:
 
     unwritten = [m.name for m in plan.moves if not changelog_written(m)]
     if unwritten:
-        print(f"\n  Stopped: the changelog section for {', '.join(unwritten)} is empty.")
+        print(
+            f"\n  Stopped: the changelog section for {', '.join(unwritten)} is empty."
+        )
         print("  Write it, commit, then run this again.\n")
         return 0
 
     if not tree_clean():
-        print("\n  Stopped: uncommitted changes. Review them, commit, then run this again.")
+        print(
+            "\n  Stopped: uncommitted changes. Review them, commit, then run this again."
+        )
         print("  Suggested subject:")
         moved = ", ".join(f"{m.name} {m.target}" for m in plan.moves)
         print(f"    chore(release): {moved}\n")
@@ -382,27 +483,40 @@ def main() -> int:
         return 0
 
     for move in plan.publish_order:
-        tag = f"{move.name}-v{move.target}"
+        tag = tag_for(move)
         if publish_state.get(move.name):
             continue
+        where = "PyPI" if move.name in WHEELS else "crates.io"
+        workflow = "wheels" if move.name in WHEELS else "release-crate"
         print(f"\n==> {tag}")
         run(["just", "release-preflight", move.name])
         if not tag_exists(tag):
             run(["git", "tag", "-a", tag, "-m", f"{move.name} {move.target}"])
         run(["git", "push", "origin", tag])
-        print("  waiting for crates.io ...")
-        for _ in range(60):
+        print(f"  waiting for {where} ...")
+        # The wheels build on four platforms before they upload, which is longer
+        # than a crate's single job.
+        for _ in range(120 if move.name in WHEELS else 60):
             if is_published(move.name, move.target):
                 print(f"  {move.name} {move.target} is live")
                 break
             time.sleep(20)
         else:
-            raise SystemExit(f"{tag} pushed but {move.name} {move.target} has not appeared; "
-                             "check the release-crate workflow, then run this again")
+            raise SystemExit(
+                f"{tag} pushed but {move.name} {move.target} has not appeared; "
+                f"check the {workflow} workflow, then run this again"
+            )
+
+    if all(m.name in WHEELS for m in plan.moves):
+        return 0
 
     print("\n==> inst/AUTHORS")
-    for package in sorted(p.parent.name for p in (ROOT / "crates").glob("*/inst/AUTHORS")):
-        run(["./scripts/vendor-r-package.sh", package])
+    # `--refresh`: the vendored set is pinned by a committed lock, and a crate
+    # release is exactly the moment it should move.
+    for package in sorted(
+        p.parent.name for p in (ROOT / "crates").glob("*/inst/AUTHORS")
+    ):
+        run(["./scripts/vendor-r-package.sh", package, "--refresh"])
     if authors_current():
         print("  already current")
     else:

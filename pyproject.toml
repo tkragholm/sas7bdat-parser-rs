@@ -16,6 +16,16 @@ classifiers = [
   "Operating System :: Microsoft :: Windows",
 ]
 
+# pytest walks UP from the tests it is given until it finds a file with this
+# table, and takes that directory as rootdir and that table as configuration.
+# This repository is checked out inside another project's tree (the register
+# pipeline vendors it under `checkouts/`), whose pyproject asks for xdist workers
+# and a timeout plugin; without a table here, the plugin's tests inherited both
+# and printed "unknown config option" on every run. Present, this table ends the
+# walk at this directory, whatever is above it.
+[tool.pytest.ini_options]
+testpaths = ["crates/polars-plugin/tests"]
+
 [tool.maturin]
 bindings = "bin"
 manifest-path = "crates/sas7bdat-cli/Cargo.toml"

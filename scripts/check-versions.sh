@@ -132,6 +132,38 @@ for dir in polars-plugin sas7bdat-cli; do
   fi
 done
 
+# A crate whose files changed since the tag of the version its manifest claims is
+# two codes under one number: the published one and this one. It went unnoticed for
+# 27 commits once (v0.9.2 tagged 24 August 2026, manifests still 0.9.2 in September,
+# the scan path rewritten in between). A bump is what says the code moved; this
+# says when the bump is owed. The Python packages share the `v<version>` tag scheme
+# and crates.io crates use `<name>-v<version>`, which is what the prefixes are.
+released_code() {
+  local dir="$1" prefix="$2"
+  local v tag
+  v="$(crate_version "$dir")"
+  tag="${prefix}${v}"
+  if ! git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null 2>&1; then
+    printf '  ok %-46s %s has no tag %s yet: an unreleased bump\n' "crates/$dir" "$v" "$tag"
+  elif git diff --quiet "$tag" HEAD -- "crates/$dir"; then
+    printf '  ok %-46s %s is what %s tagged\n' "crates/$dir" "$v" "$tag"
+  else
+    echo "  ✗  crates/$dir changed since $tag and still claims $v; bump it (just bump $dir <next>)" >&2
+    status=1
+  fi
+}
+
+echo
+echo "Crate versions vs the code their tags released:"
+if [ -z "$(git tag --list 'v*' 'sas7bdat-v*' 2>/dev/null)" ]; then
+  echo "  ?  no release tags in this clone (shallow checkout?); nothing to compare against"
+else
+  released_code sas7bdat         sas7bdat-v
+  released_code sas7bdat-convert sas7bdat-convert-v
+  released_code polars-plugin    v
+  released_code sas7bdat-cli     v
+fi
+
 if [ $status -ne 0 ]; then
   cat >&2 <<'MSG'
 

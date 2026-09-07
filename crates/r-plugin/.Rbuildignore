@@ -6,3 +6,4 @@
 ^src/rust/\.cargo$
 ^cran-comments\.md$
 ^src/Makevars$
+^src/rust/vendor\.lock$

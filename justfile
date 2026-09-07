@@ -97,12 +97,10 @@ check-polars-plugin:
 # failure for a missing one ("could not determine version from interpreter name")
 # points nowhere near the cause. Idempotent, so `test-polars-plugin` can just call it.
 #
-# The polars pin is read from the package rather than written here: the extension
-# links polars-rust through pyo3-polars, so the installed Python polars has to match
-# the version it was built against, and two copies of that number would drift.
-# pytest-xdist is not optional -- pytest resolves the *parent* directory's
-# pyproject.toml as its config when this repo sits inside another, and that one
-# passes `-n`.
+# The polars range is read from the package rather than written here: the
+# extension links polars-rust through pyo3-polars, so the installed Python polars
+# has to be one the wheel is tested against, and two copies of that range would
+# drift. `uv pip install` resolves the range to its newest admitted release.
 #
 # Create the venv the Polars plugin tests build into. Idempotent.
 setup-python:
@@ -112,7 +110,7 @@ setup-python:
       uv venv --python 3.12 .venv
     fi
     pin=$(awk -F'"' '/^dependencies = \[/{print $2}' crates/polars-plugin/pyproject.toml)
-    uv pip install --quiet --python .venv/bin/python "$pin" pytest pytest-xdist
+    uv pip install --quiet --python .venv/bin/python "$pin" pytest
     printf 'python env ready: %s\n' "$(.venv/bin/python --version)"
 
 test-polars-plugin: setup-python

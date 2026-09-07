@@ -6,16 +6,23 @@
 # `src/Makevars` unpacks and builds against with `--offline`.
 #
 # Run this before `R CMD build`, not during it — vendoring needs the network, which
-# is exactly what a CRAN build does not have. The output is deliberately not
-# committed: it is a release artefact, regenerated whenever the dependency graph
-# moves.
+# is exactly what a CRAN build does not have. The tarball is deliberately not
+# committed: it is a release artefact, regenerated from the committed lock.
 #
 # The tarball carries `Cargo.lock` alongside `vendor/`, so the lockfile and the
 # vendored sources can never disagree. That matters because the lockfile in the
 # repository is resolved *with* `src/.cargo/config.toml`'s `[patch.crates-io]`
 # applied, so it records `sas7bdat` and `sas7bdat-convert` as path entries with no
-# source. A tarball has no patch and must resolve the published crates instead, so
-# the lock is regenerated here against crates.io rather than copied.
+# source. A tarball has no patch and must resolve the published crates instead.
+#
+# That resolution is committed, as `src/rust/vendor.lock`, and reused: the vendored
+# set, and so `inst/AUTHORS`, then change only when someone asks. Before it was
+# committed every run resolved afresh against crates.io, and the CI check that
+# `inst/AUTHORS` is current went red whenever any transitive crate published a
+# patch release, with nothing in the package changed. Pass `--refresh` to resolve
+# again and rewrite the lock (after a core release, or to pick up dependency
+# updates on purpose); a manifest that has moved past the committed lock fails
+# with cargo's own message and the same advice.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -31,15 +38,22 @@ case "$pkg" in
 esac
 
 verify=1
-[ "${2:-}" = "--no-verify" ] && verify=0
+refresh=0
+for flag in "${@:2}"; do
+  case "$flag" in
+    --no-verify) verify=0 ;;
+    --refresh) refresh=1 ;;
+    *) echo "unknown flag: $flag (--no-verify, --refresh)" >&2; exit 2 ;;
+  esac
+done
 
 crate_dir="$repo/crates/$pkg/src/rust"
 [ -f "$crate_dir/Cargo.toml" ] || { echo "no manifest at $crate_dir" >&2; exit 1; }
+vendor_lock="$crate_dir/vendor.lock"
 
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
 
-echo "==> resolving $pkg against crates.io (no [patch] applied)"
 # Staged outside the repository on purpose: anywhere inside it, cargo would walk up
 # and find `src/.cargo/config.toml`, re-apply the patch, and vendor this working tree
 # instead of the published crates — the opposite of what a tarball needs.
@@ -48,8 +62,20 @@ mkdir -p "$staging/src"
 cp -R "$crate_dir/src/." "$staging/src/"
 
 cd "$staging"
-echo "==> vendoring"
-cargo vendor vendor > /dev/null
+if [ "$refresh" -eq 0 ] && [ -f "$vendor_lock" ]; then
+  echo "==> vendoring $pkg from the committed src/rust/vendor.lock"
+  cp "$vendor_lock" Cargo.lock
+  if ! cargo vendor --locked vendor > /dev/null; then
+    echo "  the committed vendor.lock no longer satisfies Cargo.toml;" >&2
+    echo "  run: scripts/vendor-r-package.sh $pkg --refresh" >&2
+    exit 1
+  fi
+else
+  echo "==> resolving $pkg against crates.io (no [patch] applied) and vendoring"
+  cargo vendor vendor > /dev/null
+  cp Cargo.lock "$vendor_lock"
+  echo "  wrote crates/$pkg/src/rust/vendor.lock; commit it with inst/AUTHORS"
+fi
 
 echo "==> pruning"
 before=$(du -sm vendor | cut -f1)
