@@ -15,6 +15,32 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-11
+
+### Added
+
+- **`Dataset::io_backend`** names how a file's bytes are reached: `"mmap"` for a memory
+  map, `"buffered"` for sequential reads of a path, `"bytes"` for an in-memory buffer.
+  `Auto` decides between the first two by probing whether the path is on a network share,
+  and a share can be presented in ways the probe answers "local" to, so a caller that
+  cares which side it landed on can read it here without a decode.
+
+### Changed
+
+- **`Parallelism::Auto` is grain-aware.** Small files stop paying for threads, and when
+  `Auto` declines them the materialise does not fan out either.
+
+- **An owned batch moves its buffers into Arrow** rather than copying every value across.
+
+- **A scan with a row limit compiles page descriptors only as far as it reads.** A table
+  that covers part of the file is not cached, since it must not be served to the next scan
+  as the whole. On a large file on a network share, the page headers a peek no longer reads
+  are the whole cost of the peek.
+
+### Fixed
+
+- **A declared zero rows-per-page collapsed a whole file into one chunk.**
+
 ## [0.9.0] - 2026-08-31
 
 Five correctness fixes, four of which change what a scan returns for files that were
@@ -589,7 +615,8 @@ different implementation with a `dataset`/`parser`/`cell` module layout and a bu
      `v0.7.0` in particular was a wheel release in July, unrelated to 0.7.0 here.
      `sas7bdat-v0.5.0` was never created, so 0.5.0 has no release to link to. -->
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.9.0...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.9.1...HEAD
+[0.9.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.1
 [0.9.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.0
 [0.8.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.8.1
 [0.8.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.8.0
