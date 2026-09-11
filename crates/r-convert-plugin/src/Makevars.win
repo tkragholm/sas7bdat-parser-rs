@@ -73,7 +73,7 @@ $(STATLIB): FORCE
 	mkdir -p "$(LIBGCC_MOCK)"
 	touch "$(LIBGCC_MOCK)/libgcc_eh.a"
 	cd rust && rustup target add $(TARGET) || true
-	if [ -f rust/vendor.tar.xz ]; then \
+	if [ ! -d .cargo ] && [ -f rust/vendor.tar.xz ]; then \
 	  tar -xf rust/vendor.tar.xz -C rust && \
 	  mkdir -p rust/.cargo && \
 	  printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > rust/.cargo/config.toml; \

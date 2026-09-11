@@ -39,9 +39,15 @@ $(SHLIB): $(STATLIB)
 #
 # The vendor step is what makes an offline build possible. CRAN builds with no
 # network, so a released tarball carries every dependency's source in
-# `rust/vendor.tar.xz` (see `scripts/vendor-r-package.sh`). When that file is present
-# it is unpacked and cargo resolves from it without reaching the network; when it is
-# absent — any build from the repository — cargo resolves normally.
+# `rust/vendor.tar.xz` (see `scripts/vendor-r-package.sh`). A tarball build unpacks
+# it and cargo resolves from it without reaching the network.
+#
+# A build from the repository resolves normally, even with a tarball sitting in the
+# tree from a release run. `src/.cargo` decides which this is: `.Rbuildignore` strips
+# it, so it is present here and never in a tarball, and its `[patch.crates-io]` points
+# at the working-tree core. Taking the tarball as well would put two copies of the
+# core in one graph, which fails at the binding's own type boundary rather than
+# anywhere that names the cause.
 #
 # The two restrictions below apply only on the vendored path, which is exactly the
 # path a released tarball takes, and they are both CRAN requirements:
@@ -60,7 +66,7 @@ $(STATLIB): FORCE
 	# reported prior to compilation" unless the toolchain identifies itself in the
 	# install log. CRAN wants this on record for every Rust package.
 	rustc --version && cargo --version
-	if [ -f rust/vendor.tar.xz ]; then \
+	if [ ! -d .cargo ] && [ -f rust/vendor.tar.xz ]; then \
 	  tar -xf rust/vendor.tar.xz -C rust && \
 	  mkdir -p rust/.cargo && \
 	  printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > rust/.cargo/config.toml; \
