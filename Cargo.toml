@@ -47,14 +47,10 @@ parquet = { version = "59", default-features = false, features = [
     "zstd",
     "simdutf8",
 ] }
-polars = "0.54"
-polars-arrow = "0.54"
-polars-plan = { version = "0.54", features = ["serde"] }
 # generate-import-lib synthesizes pythonXX.lib so Windows wheels can be cross-compiled without a Windows Python install.
-pyo3 = { version = "0.28", features = ["generate-import-lib"] }
+pyo3 = { version = "0.29", features = ["generate-import-lib"] }
 # Keep in lockstep with pyo3 — provides the build.rs extension-module linker args.
-pyo3-build-config = "0.28"
-pyo3-polars = "0.27.0"
+pyo3-build-config = "0.29"
 rayon = "1"
 rmp-serde = "1"
 serde = { version = "1.0.130", features = ["derive"] }
@@ -79,8 +75,8 @@ pedantic = { level = "warn", priority = -1 }
 # metadata, badly named features.
 cargo = { level = "warn", priority = -1 }
 # The one member of `cargo` that is pure noise here: every instance is a duplicate
-# version deep inside the polars/pyo3 tree (foldhash, getrandom, hashbrown, rand,
-# windows-*), which no change on our side can resolve.
+# version deep in the dependency tree (getrandom, hashbrown, syn, unicode-width),
+# which no change on our side can resolve.
 multiple_crate_versions = "allow"
 
 [profile.release]

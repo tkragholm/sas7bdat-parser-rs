@@ -2,9 +2,10 @@
 
 This is what the `compat` job in `.github/workflows/wheels.yml` runs against the
 lowest and the highest polars the package declares, on CPython 3.12 and 3.13.
-Every Series the plugin hands to polars crosses pyo3-polars' private export
-hooks, so a polars the wheel was not built against fails here first, as a
-crash or a wrong value, rather than on a register file.
+Every batch reaches polars as an Arrow C stream through the PyCapsule
+interface, an ABI that tracks Arrow rather than polars, so a polars outside the
+declared range fails here first, as a crash or a wrong value, rather than on a
+register file.
 
 The fixture is `airline.sas7bdat` from the pandas SAS test corpus (BSD-3-Clause),
 5 KB, 32 rows, six numeric columns: `fixtures/raw_data/pandas/airline.sas7bdat`

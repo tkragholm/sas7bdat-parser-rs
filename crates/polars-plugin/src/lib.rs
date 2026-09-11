@@ -19,7 +19,7 @@ use pyo3::types::{PyCapsule, PyDict};
 use sas7bdat::{Dataset, IoBackendPreference, LogicalType, OpenOptions};
 use scan::{ScanReader, ScanSpec};
 use std::collections::HashMap;
-use std::ffi::CString;
+use std::ffi::CStr;
 use std::sync::{Arc, Mutex};
 
 /// v3: every batch crosses as an Arrow C stream; `schema_overrides` values are
@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 const PLUGIN_CONTRACT_VERSION: &str = "sas7bdat_polars.v3";
 
 /// The capsule name the Arrow `PyCapsule` Interface specifies for a stream.
-const STREAM_CAPSULE_NAME: &str = "arrow_array_stream";
+const STREAM_CAPSULE_NAME: &CStr = c"arrow_array_stream";
 
 fn value_error(err: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(err.to_string())
@@ -295,8 +295,7 @@ impl ArrowStream {
             StreamSource::Batch(batch) => ScanReader::single(batch),
         };
         let stream = FFI_ArrowArrayStream::new(Box::new(reader));
-        let name = CString::new(STREAM_CAPSULE_NAME).expect("capsule name has no NUL");
-        PyCapsule::new(py, SendStream(stream), Some(name))
+        PyCapsule::new_with_value(py, SendStream(stream), STREAM_CAPSULE_NAME)
     }
 }
 
