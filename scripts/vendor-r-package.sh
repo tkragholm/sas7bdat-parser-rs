@@ -32,7 +32,7 @@ pkg="${1:-}"
 case "$pkg" in
   r-plugin | r-convert-plugin) ;;
   *)
-    echo "usage: $0 <r-plugin|r-convert-plugin> [--no-verify]" >&2
+    echo "usage: $0 <r-plugin|r-convert-plugin> [--no-verify] [--refresh]" >&2
     exit 2
     ;;
 esac

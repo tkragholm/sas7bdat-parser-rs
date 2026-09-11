@@ -514,7 +514,7 @@ def main() -> int:
     # `--refresh`: the vendored set is pinned by a committed lock, and a crate
     # release is exactly the moment it should move.
     for package in sorted(
-        p.parent.name for p in (ROOT / "crates").glob("*/inst/AUTHORS")
+        p.parent.parent.name for p in (ROOT / "crates").glob("*/inst/AUTHORS")
     ):
         run(["./scripts/vendor-r-package.sh", package, "--refresh"])
     if authors_current():
