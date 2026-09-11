@@ -41,9 +41,14 @@ jobs:
     name: check tag
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    # The publish jobs below gate on these, so each one runs only for its own tag.
+    outputs:
+      polars: ${{ steps.versions.outputs.polars }}
+      cli: ${{ steps.versions.outputs.cli }}
     steps:
       - uses: actions/checkout@v6
       - name: Tag must match a package version
+        id: versions
         run: |
           tag="${GITHUB_REF_NAME#v}"
           polars=$(awk -F'"' '/^version = /{print $2; exit}' crates/polars-plugin/Cargo.toml)
@@ -53,6 +58,8 @@ jobs:
             echo "::error::tag v$tag matches neither package; nothing would publish and the run would still be green"
             exit 1
           fi
+          echo "polars=$polars" >> "$GITHUB_OUTPUT"
+          echo "cli=$cli" >> "$GITHUB_OUTPUT"
 
   linux:
     name: linux-${{ matrix.target }}
@@ -255,13 +262,16 @@ jobs:
   # on PyPI for owner=tkragholm, repo=sas7bdat-parser-rs, workflow=wheels.yml — one per
   # project (sas7bdat-polars and sas7bdat-cli each need their own).
   #
-  # --check-url skips files already on PyPI, so tagging a release that bumps only one of
-  # the two packages leaves the other alone instead of failing on a duplicate upload.
+  # Each publish job runs only for its own package's tag. `--check-url` alone is not
+  # enough: it skips a file already on PyPI only when the hashes match, and two runs
+  # do not build byte-identical wheels. Releasing the two packages in sequence meant
+  # the second tag rebuilt both and failed on a hash mismatch for the one already up,
+  # which is how v0.9.3 went red after v0.10.0 had published both.
   release:
     name: publish-pypi
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [linux, windows, macos]
+    if: ${{ github.ref_name == format('v{0}', needs.check-tag.outputs.polars) }}
+    needs: [check-tag, linux, windows, macos]
     permissions:
       # Mints the OIDC token PyPI Trusted Publishing exchanges for a short-lived upload token.
       id-token: write
@@ -279,8 +289,8 @@ jobs:
   release-cli:
     name: publish-pypi-cli
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [linux, windows, macos]
+    if: ${{ github.ref_name == format('v{0}', needs.check-tag.outputs.cli) }}
+    needs: [check-tag, linux, windows, macos]
     permissions:
       id-token: write
     steps:
