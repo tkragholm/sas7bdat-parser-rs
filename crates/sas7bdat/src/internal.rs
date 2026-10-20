@@ -33,6 +33,23 @@ pub struct LayoutPlan {
     pub rows_per_page: u64,
 }
 
+impl LayoutPlan {
+    /// The row count a page walk stops at.
+    ///
+    /// Normally the declared total, which a mix page needs: it does not record how many of
+    /// its row slots are filled. A declared total of exactly `u32::MAX` is a writer's
+    /// saturated counter rather than a count, so the walk follows the page headers to the
+    /// last data page instead of dropping whatever lies beyond it.
+    #[must_use]
+    pub fn walk_row_limit(&self) -> u64 {
+        if self.total_rows == u64::from(u32::MAX) {
+            u64::MAX
+        } else {
+            self.total_rows
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PageDescriptorTable {
     pub pages: Box<[PageDescriptor]>,

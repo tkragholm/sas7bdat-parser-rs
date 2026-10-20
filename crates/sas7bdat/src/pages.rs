@@ -144,8 +144,8 @@ pub fn compile_page_descriptors_breakdown_in_memory(
 /// below what the file declares, else the file's.
 fn stop_row(layout: &LayoutPlan, stop_after_rows: Option<u64>) -> u64 {
     stop_after_rows
-        .filter(|&rows| rows < layout.total_rows)
-        .unwrap_or(layout.total_rows)
+        .filter(|&rows| rows < layout.walk_row_limit())
+        .unwrap_or(layout.walk_row_limit())
 }
 
 /// Reads the wall clock only when `PROFILE` is set. On the default open path
@@ -492,7 +492,7 @@ fn classify_descriptor(
         ));
     }
 
-    let remaining_rows = layout.total_rows.saturating_sub(row_base);
+    let remaining_rows = layout.walk_row_limit().saturating_sub(row_base);
     if remaining_rows == 0 {
         return Ok(empty_page_descriptor(
             page_index,
@@ -1188,6 +1188,51 @@ mod tests {
         assert_eq!(second.row_count, 1);
         assert_eq!(second.data_start, crate::types::ByteOffset(24));
         assert_eq!(second.row_span_count, 0);
+    }
+
+    /// Three data pages of two rows each, which carry their own row counts.
+    fn three_full_data_pages() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let pages: [[&[u8]; 2]; 3] = [[b"ABCD", b"EFGH"], [b"IJKL", b"MNOP"], [b"QRST", b"UVWX"]];
+        for rows in pages {
+            bytes.extend(make_page(SAS_PAGE_TYPE_DATA, 2, 0, &rows, 64));
+        }
+        bytes
+    }
+
+    #[test]
+    fn a_declared_total_below_the_pages_stops_the_walk() {
+        let layout = simple_layout(64, 3, 4, 3);
+        let mut cursor = Cursor::new(three_full_data_pages());
+        let descriptors = compile_page_descriptors(&mut cursor, &layout).expect("descriptors");
+        assert_eq!(descriptors.total_candidate_rows, 3);
+    }
+
+    /// A two-row data page starting one row before the declared total.
+    fn rows_from_a_page_straddling(declared_total: u64) -> u32 {
+        let layout = simple_layout(64, 1, 4, declared_total);
+        let page = make_page(SAS_PAGE_TYPE_DATA, 2, 0, &[b"ABCD", b"EFGH"], 64);
+        let inputs = DescriptorInputs {
+            page_index: 0,
+            page_type: SAS_PAGE_TYPE_DATA,
+            page_row_count: 2,
+            subheader_count: 0,
+            row_base: declared_total - 1,
+        };
+        classify_descriptor(&layout, &page, inputs, &mut Vec::new())
+            .expect("descriptor")
+            .row_count
+    }
+
+    #[test]
+    fn a_declared_total_caps_the_page_that_reaches_it() {
+        assert_eq!(rows_from_a_page_straddling(1_000), 1);
+    }
+
+    #[test]
+    fn a_saturated_declared_total_does_not_cap_the_page_that_reaches_it() {
+        // `laboratorieproevesvar` declares exactly u32::MAX rows in a 251 GB file.
+        assert_eq!(rows_from_a_page_straddling(u64::from(u32::MAX)), 2);
     }
 
     #[test]

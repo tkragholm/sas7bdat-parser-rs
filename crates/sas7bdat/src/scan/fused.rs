@@ -498,7 +498,7 @@ fn compile_extent_descriptors(
         )?;
         row_base = row_base.saturating_add(u64::from(descriptor.row_count));
         descriptors.push(descriptor);
-        if row_base >= ctx.layout.total_rows {
+        if row_base >= ctx.layout.walk_row_limit() {
             reached_last_row = true;
             break;
         }
