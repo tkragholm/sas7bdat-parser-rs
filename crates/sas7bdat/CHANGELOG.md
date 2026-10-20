@@ -15,6 +15,17 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-20
+
+### Fixed
+
+- **A buffered whole-file scan could deadlock.** A reader claimed the next extent before
+  it had a buffer, and the scan holds extents that arrive early, with their buffers, until
+  the one before them arrives. When the reader holding that one lost the race for a
+  buffer, the pool drained into held extents and every thread waited. Readers now take a
+  buffer first. Memory-mapped scans were not affected. `Auto` picks buffered reads for a
+  path it recognises as a network share.
+
 ## [0.9.1] - 2026-09-11
 
 ### Added
