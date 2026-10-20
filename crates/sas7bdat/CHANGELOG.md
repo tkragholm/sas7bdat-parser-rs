@@ -15,6 +15,22 @@ earlier are written by hand.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-20
+
+### Fixed
+
+- **A saturated row count no longer truncates a scan.** The page walk stopped at the row
+  count the header declares. A file declaring exactly `u32::MAX` rows has a saturated
+  counter rather than a count, and any rows beyond it were dropped while the scan reported
+  success. At that value the walk now follows the page headers to the last data page.
+  `DatasetMetadata::row_count` still reports what the header says.
+
+- **Unassigned windows-1252 bytes no longer become U+FFFD.** A text column one character
+  wide in a compressed file decoded 0x81, 0x8D, 0x8F, 0x90 and 0x9D to the replacement
+  character, or failed under strict validation, where every wider column decoded them to
+  the C1 control characters of the same number. Both now decode them as `encoding_rs`
+  does, so the byte is kept and reads the same in any column.
+
 ## [0.9.2] - 2026-10-20
 
 ### Fixed
