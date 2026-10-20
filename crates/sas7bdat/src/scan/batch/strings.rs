@@ -130,13 +130,7 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                     StringDecodeKernel::EncodedStrict | StringDecodeKernel::EncodedLenient
                 )
             {
-                append_windows_1252_single_byte_utf8(
-                    offsets,
-                    data,
-                    valid,
-                    byte,
-                    matches!(row_plan.string_kernel, StringDecodeKernel::EncodedStrict),
-                )?;
+                append_windows_1252_single_byte_utf8(offsets, data, valid, byte)?;
                 push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 return Ok(true);
             }
@@ -226,78 +220,68 @@ fn append_windows_1252_single_byte_utf8(
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
     byte: u8,
-    strict: bool,
 ) -> Result<()> {
     let mut encoded = [0_u8; 3];
-    let len = encode_windows_1252_single_byte_utf8(byte, strict, &mut encoded)?;
+    let len = encode_windows_1252_single_byte_utf8(byte, &mut encoded);
     push_variable_valid(offsets, data, valid, &encoded[..len])
 }
 
-const WINDOWS_1252_REPLACEMENT_UTF8: [u8; 3] = [0xEF, 0xBF, 0xBD];
-
-fn strict_windows_1252_decode_error() -> Error {
-    Error::Decode(crate::error::DecodeError {
-        message: "string decode failed under strict validation".to_owned(),
-    })
-}
-
-const fn windows_1252_special_case(byte: u8) -> Option<[u8; 3]> {
+/// The UTF-8 for a byte in windows-1252's 0x80-0x9F window, or `[0, 0, 0]` for a byte
+/// outside it.
+///
+/// The five bytes windows-1252 leaves unassigned, 0x81, 0x8D, 0x8F, 0x90 and 0x9D, decode
+/// to the C1 control characters of the same number, as `encoding_rs` decodes them in every
+/// wider column. A replacement character would lose which byte it was, and the same byte
+/// would read differently in a one-character column from any other.
+const fn windows_1252_special_case(byte: u8) -> [u8; 3] {
     match byte {
-        0x80 => Some([0xE2, 0x82, 0xAC]),
-        0x81 | 0x8D | 0x8F | 0x90 | 0x9D => None,
-        0x82 => Some([0xE2, 0x80, 0x9A]),
-        0x83 => Some([0xC6, 0x92, 0]),
-        0x84 => Some([0xE2, 0x80, 0x9E]),
-        0x85 => Some([0xE2, 0x80, 0xA6]),
-        0x86 => Some([0xE2, 0x80, 0xA0]),
-        0x87 => Some([0xE2, 0x80, 0xA1]),
-        0x88 => Some([0xCB, 0x86, 0]),
-        0x89 => Some([0xE2, 0x80, 0xB0]),
-        0x8A => Some([0xC5, 0xA0, 0]),
-        0x8B => Some([0xE2, 0x80, 0xB9]),
-        0x8C => Some([0xC5, 0x92, 0]),
-        0x8E => Some([0xC5, 0xBD, 0]),
-        0x91 => Some([0xE2, 0x80, 0x98]),
-        0x92 => Some([0xE2, 0x80, 0x99]),
-        0x93 => Some([0xE2, 0x80, 0x9C]),
-        0x94 => Some([0xE2, 0x80, 0x9D]),
-        0x95 => Some([0xE2, 0x80, 0xA2]),
-        0x96 => Some([0xE2, 0x80, 0x93]),
-        0x97 => Some([0xE2, 0x80, 0x94]),
-        0x98 => Some([0xCB, 0x9C, 0]),
-        0x99 => Some([0xE2, 0x84, 0xA2]),
-        0x9A => Some([0xC5, 0xA1, 0]),
-        0x9B => Some([0xE2, 0x80, 0xBA]),
-        0x9C => Some([0xC5, 0x93, 0]),
-        0x9E => Some([0xC5, 0xBE, 0]),
-        0x9F => Some([0xC5, 0xB8, 0]),
-        _ => Some([0, 0, 0]),
+        0x80 => [0xE2, 0x82, 0xAC],
+        0x81 | 0x8D | 0x8F | 0x90 | 0x9D => [0xC2, byte, 0],
+        0x82 => [0xE2, 0x80, 0x9A],
+        0x83 => [0xC6, 0x92, 0],
+        0x84 => [0xE2, 0x80, 0x9E],
+        0x85 => [0xE2, 0x80, 0xA6],
+        0x86 => [0xE2, 0x80, 0xA0],
+        0x87 => [0xE2, 0x80, 0xA1],
+        0x88 => [0xCB, 0x86, 0],
+        0x89 => [0xE2, 0x80, 0xB0],
+        0x8A => [0xC5, 0xA0, 0],
+        0x8B => [0xE2, 0x80, 0xB9],
+        0x8C => [0xC5, 0x92, 0],
+        0x8E => [0xC5, 0xBD, 0],
+        0x91 => [0xE2, 0x80, 0x98],
+        0x92 => [0xE2, 0x80, 0x99],
+        0x93 => [0xE2, 0x80, 0x9C],
+        0x94 => [0xE2, 0x80, 0x9D],
+        0x95 => [0xE2, 0x80, 0xA2],
+        0x96 => [0xE2, 0x80, 0x93],
+        0x97 => [0xE2, 0x80, 0x94],
+        0x98 => [0xCB, 0x9C, 0],
+        0x99 => [0xE2, 0x84, 0xA2],
+        0x9A => [0xC5, 0xA1, 0],
+        0x9B => [0xE2, 0x80, 0xBA],
+        0x9C => [0xC5, 0x93, 0],
+        0x9E => [0xC5, 0xBE, 0],
+        0x9F => [0xC5, 0xB8, 0],
+        _ => [0, 0, 0],
     }
 }
 
-fn encode_windows_1252_single_byte_utf8(
-    byte: u8,
-    strict: bool,
-    out: &mut [u8; 3],
-) -> Result<usize> {
-    if let Some(encoded) = windows_1252_special_case(byte) {
-        if encoded != [0, 0, 0] {
-            *out = encoded;
-            return Ok(if encoded[2] == 0 { 2 } else { 3 });
-        }
-    } else if strict {
-        return Err(strict_windows_1252_decode_error());
-    } else {
-        *out = WINDOWS_1252_REPLACEMENT_UTF8;
-        return Ok(3);
+/// One non-ASCII windows-1252 byte as UTF-8, and how many bytes of `out` that is.
+///
+/// Every byte has a character, so nothing fails, strict or lenient.
+fn encode_windows_1252_single_byte_utf8(byte: u8, out: &mut [u8; 3]) -> usize {
+    let encoded = windows_1252_special_case(byte);
+    if encoded != [0, 0, 0] {
+        *out = encoded;
+        return if encoded[2] == 0 { 2 } else { 3 };
     }
-
     if (0xA0..=0xBF).contains(&byte) {
         *out = [0xC2, byte, 0];
     } else {
         *out = [0xC3, byte - 64, 0];
     }
-    Ok(2)
+    2
 }
 
 #[inline]
@@ -472,13 +456,12 @@ pub(super) fn append_direct_utf8_owned_batch_column(
 
 #[cfg(test)]
 mod windows_1252_tests {
-    use super::{WINDOWS_1252_REPLACEMENT_UTF8, encode_windows_1252_single_byte_utf8};
+    use super::encode_windows_1252_single_byte_utf8;
 
     /// Encode a single windows-1252 byte and return the produced UTF-8 bytes.
-    fn enc(byte: u8, strict: bool) -> Vec<u8> {
+    fn enc(byte: u8) -> Vec<u8> {
         let mut out = [0_u8; 3];
-        let len = encode_windows_1252_single_byte_utf8(byte, strict, &mut out)
-            .expect("lenient encode should not fail");
+        let len = encode_windows_1252_single_byte_utf8(byte, &mut out);
         out[..len].to_vec()
     }
 
@@ -486,40 +469,40 @@ mod windows_1252_tests {
     fn special_cases_match_their_unicode_codepoints() {
         // Cross-check the lookup table against Rust string literals (an independent
         // oracle): the 0x80-0x9F window holds the windows-1252 "smart punctuation".
-        assert_eq!(enc(0x80, false), "€".as_bytes()); // 3-byte
-        assert_eq!(enc(0x82, false), "‚".as_bytes());
-        assert_eq!(enc(0x83, false), "ƒ".as_bytes()); // 2-byte
-        assert_eq!(enc(0x8A, false), "Š".as_bytes());
-        assert_eq!(enc(0x8C, false), "Œ".as_bytes());
-        assert_eq!(enc(0x95, false), "•".as_bytes());
-        assert_eq!(enc(0x99, false), "™".as_bytes());
-        assert_eq!(enc(0x9F, false), "Ÿ".as_bytes());
+        assert_eq!(enc(0x80), "€".as_bytes()); // 3-byte
+        assert_eq!(enc(0x82), "‚".as_bytes());
+        assert_eq!(enc(0x83), "ƒ".as_bytes()); // 2-byte
+        assert_eq!(enc(0x8A), "Š".as_bytes());
+        assert_eq!(enc(0x8C), "Œ".as_bytes());
+        assert_eq!(enc(0x95), "•".as_bytes());
+        assert_eq!(enc(0x99), "™".as_bytes());
+        assert_eq!(enc(0x9F), "Ÿ".as_bytes());
     }
 
     #[test]
     fn high_ranges_map_to_latin1() {
         // 0xA0..=0xBF take the [0xC2, byte, 0] branch; 0xC0..=0xFF take [0xC3, byte-64, 0].
-        assert_eq!(enc(0xA0, false), "\u{00A0}".as_bytes()); // non-breaking space
-        assert_eq!(enc(0xBF, false), "¿".as_bytes());
-        assert_eq!(enc(0xC0, false), "À".as_bytes());
-        assert_eq!(enc(0xE9, false), "é".as_bytes());
-        assert_eq!(enc(0xFF, false), "ÿ".as_bytes());
+        assert_eq!(enc(0xA0), "\u{00A0}".as_bytes()); // non-breaking space
+        assert_eq!(enc(0xBF), "¿".as_bytes());
+        assert_eq!(enc(0xC0), "À".as_bytes());
+        assert_eq!(enc(0xE9), "é".as_bytes());
+        assert_eq!(enc(0xFF), "ÿ".as_bytes());
     }
 
+    /// A one-character column is decoded here and every wider column by `encoding_rs`,
+    /// so a byte has to read the same either way. The five bytes windows-1252 leaves
+    /// unassigned are where they used to differ: a replacement character here, a C1
+    /// control character there.
     #[test]
-    fn undefined_bytes_replace_when_lenient_and_error_when_strict() {
-        for byte in [0x81_u8, 0x8D, 0x8F, 0x90, 0x9D] {
-            assert_eq!(
-                enc(byte, false),
-                WINDOWS_1252_REPLACEMENT_UTF8,
-                "byte {byte:#x} should become U+FFFD when lenient",
-            );
-            let mut out = [0_u8; 3];
-            assert!(
-                encode_windows_1252_single_byte_utf8(byte, true, &mut out).is_err(),
-                "byte {byte:#x} should error under strict validation",
-            );
+    fn every_high_byte_reads_as_encoding_rs_reads_it() {
+        for byte in 0x80_u8..=0xFF {
+            let source = [byte];
+            let (expected, _, had_errors) = encoding_rs::WINDOWS_1252.decode(&source);
+            assert!(!had_errors, "encoding_rs decodes {byte:#x} without error");
+            assert_eq!(enc(byte), expected.as_bytes(), "byte {byte:#x}");
         }
+        assert_eq!(enc(0x81), "\u{81}".as_bytes());
+        assert_eq!(enc(0x9D), "\u{9D}".as_bytes());
     }
 
     #[test]
@@ -527,7 +510,7 @@ mod windows_1252_tests {
         // Exercises every arm of the special-case match plus both range branches:
         // each high byte must decode to a single, valid UTF-8 scalar.
         for byte in 0x80_u8..=0xFF {
-            let out = enc(byte, false);
+            let out = enc(byte);
             let text = std::str::from_utf8(&out)
                 .unwrap_or_else(|_| panic!("byte {byte:#x} produced invalid UTF-8"));
             assert_eq!(

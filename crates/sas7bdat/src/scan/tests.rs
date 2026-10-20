@@ -1194,8 +1194,11 @@ fn collect_batches_decodes_windows1252_single_byte_compressed_row() {
     }
 }
 
+/// Strict validation fails on a byte the encoding cannot decode. windows-1252 decodes
+/// every byte, the five it leaves unassigned to the C1 control characters of the same
+/// number, so strict reads them as a wider column does rather than failing.
 #[test]
-fn collect_batches_windows1252_single_byte_strict_rejects_undefined() {
+fn collect_batches_windows1252_single_byte_strict_reads_unassigned_as_c1() {
     let bytes = Arc::<[u8]>::from(make_compressed_page(&[0xC1u8, 0x81], 64, 4));
     let ds = MockDatasetBuilder::new(bytes)
         .with_column("txt", LogicalType::String, 1, 0)
@@ -1206,15 +1209,18 @@ fn collect_batches_windows1252_single_byte_strict_rejects_undefined() {
         .with_encoding(Some("WINDOWS-1252".to_owned()))
         .build();
 
-    let err = ScanBuilder::new(&ds)
+    let batches = ScanBuilder::new(&ds)
         .with_string_options(crate::StringDecodeOptions {
             utf8_validation: crate::Utf8ValidationMode::Strict,
             ..crate::StringDecodeOptions::default()
         })
         .with_batch_hint(crate::BatchHint::Rows(1))
         .collect_batches()
-        .expect_err("strict windows-1252 should fail on undefined byte");
-    assert!(err.to_string().contains("strict validation"));
+        .expect("strict windows-1252 decodes an unassigned byte");
+    match &batches[0].columns[0] {
+        OwnedColumnBuffer::Utf8 { data, .. } => assert_eq!(data, "\u{81}".as_bytes()),
+        other => panic!("unexpected utf8 batch column: {other:?}"),
+    }
 }
 
 fn make_pages() -> Vec<u8> {
@@ -2356,6 +2362,17 @@ mod row_window {
 /// `encoding`. Used to build the shape a SAS export takes when its encoding label and
 /// its actual bytes disagree.
 fn make_text_dataset(text: &[u8], width: usize, encoding: Option<&str>) -> crate::dataset::Dataset {
+    make_text_dataset_compressed(text, width, encoding, CompressionKind::None)
+}
+
+/// As [`make_text_dataset`], declaring `compression`. A compressed layout is what turns
+/// on the decode path for one-character text columns.
+fn make_text_dataset_compressed(
+    text: &[u8],
+    width: usize,
+    encoding: Option<&str>,
+    compression: CompressionKind,
+) -> crate::dataset::Dataset {
     let mut cell = vec![b' '; width];
     cell[..text.len()].copy_from_slice(text);
     let mut row = 1.5_f64.to_le_bytes().to_vec();
@@ -2372,6 +2389,7 @@ fn make_text_dataset(text: &[u8], width: usize, encoding: Option<&str>) -> crate
         )
         .with_row_len(8 + width)
         .with_encoding(encoding.map(str::to_owned))
+        .with_compression(compression)
         .build()
 }
 
@@ -2466,6 +2484,28 @@ fn a_mis_declared_utf8_cell_decodes_to_its_real_text() {
         let (row_path, batch_path) = scanned_text(&ds);
         assert_eq!(row_path, text, "row path");
         assert_eq!(batch_path, text, "batch path");
+    }
+}
+
+/// A byte windows-1252 leaves unassigned reads as the C1 control character of the same
+/// number, in a one-character column as in a wider one, and never as U+FFFD.
+#[test]
+fn an_unassigned_windows_1252_byte_reads_the_same_in_any_column_width() {
+    for byte in [0x81_u8, 0x8D, 0x8F, 0x90, 0x9D] {
+        let expected = char::from(byte).to_string();
+        for (width, compression) in [
+            (1, CompressionKind::None),
+            (1, CompressionKind::Row),
+            (16, CompressionKind::None),
+            (16, CompressionKind::Row),
+        ] {
+            let ds =
+                make_text_dataset_compressed(&[byte], width, Some("WINDOWS-1252"), compression);
+            let (row_path, batch_path) = scanned_text(&ds);
+            let case = format!("byte {byte:#x}, width {width}, {compression:?}");
+            assert_eq!(row_path, expected, "{case}, rows");
+            assert_eq!(batch_path, expected, "{case}, batches");
+        }
     }
 }
 
