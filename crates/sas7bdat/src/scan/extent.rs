@@ -144,16 +144,20 @@ pub(super) fn spawn_readers<'scope>(
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
-                let idx = next_chunk_idx.fetch_add(1, Ordering::Relaxed);
-                if idx >= spans.len() {
-                    break;
-                }
-                let (offset, len) = spans[idx];
+                // The buffer is taken before the extent is claimed. A consumer that needs
+                // extents in order holds every later one, and its buffer, until the earliest
+                // arrives. A reader that claimed the earliest and then waited for a buffer
+                // would wait on buffers that only come back once it has delivered.
                 let mut bytes = recycle_rx
                     .lock()
                     .ok()
                     .and_then(|rx| rx.recv().ok())
                     .unwrap_or_default();
+                let idx = next_chunk_idx.fetch_add(1, Ordering::Relaxed);
+                if idx >= spans.len() {
+                    break;
+                }
+                let (offset, len) = spans[idx];
                 // Grow only, then trim: `read_exact` overwrites every byte, so a recycled
                 // buffer needs no clearing, and clearing it would memset each extent twice.
                 if bytes.len() < len {
@@ -200,7 +204,11 @@ pub(super) const fn pages_per_extent(page_size: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{EXTENT_BYTES, MAX_READ_CONCURRENCY, pages_per_extent, plan_spans_from_geometry};
+    use super::{
+        Arc, AtomicBool, AtomicUsize, EXTENT_BYTES, Error, Extent, ExtentStream,
+        MAX_READ_CONCURRENCY, ReadPlan, pages_per_extent, plan_spans_from_geometry, spawn_readers,
+        sync_channel,
+    };
 
     #[test]
     fn geometry_spans_tile_the_pages_exactly() {
@@ -250,5 +258,73 @@ mod tests {
     #[test]
     fn concurrency_stays_within_the_measured_peak() {
         assert!((1..=8).contains(&MAX_READ_CONCURRENCY));
+    }
+
+    /// Read every extent of `path` and consume them strictly in order, returning a buffer
+    /// only once its extent has been consumed, as the fused scan's parse stage does.
+    /// Returns the bytes seen, in order.
+    fn read_in_order(path: &std::path::Path, spans: &[(u64, usize)], readers: usize) -> Vec<u8> {
+        let next_chunk_idx = AtomicUsize::new(0);
+        let stop = Arc::new(AtomicBool::new(false));
+        let (error_tx, _error_rx) = sync_channel::<Error>(readers);
+        std::thread::scope(|scope| {
+            let ExtentStream { extents, recycle } = spawn_readers(
+                scope,
+                ReadPlan {
+                    path,
+                    spans,
+                    next_chunk_idx: &next_chunk_idx,
+                },
+                &stop,
+                readers,
+                &error_tx,
+            );
+            let mut pending = std::collections::HashMap::new();
+            let mut out = Vec::new();
+            for next in 0..spans.len() {
+                let extent = loop {
+                    if let Some(extent) = pending.remove(&next) {
+                        break extent;
+                    }
+                    let extent: Extent = extents.recv().expect("every extent arrives");
+                    pending.insert(extent.chunk_idx, extent);
+                };
+                out.extend_from_slice(&extent.bytes);
+                let _ = recycle.send(extent.bytes);
+            }
+            drop(recycle);
+            out
+        })
+    }
+
+    /// Extents arrive out of order and are held until the gap before them fills, each
+    /// holding a pooled buffer. A reader that claimed the gap's extent must not then wait
+    /// for a buffer, or the pool drains into held extents and nothing is ever returned.
+    #[test]
+    fn an_in_order_consumer_never_starves_the_reader_it_waits_for() {
+        let dir = std::env::temp_dir().join(format!("sas7bdat-extent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("pages.bin");
+        let data: Vec<u8> = (0..512 * 1024u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &data).expect("write");
+        let spans = plan_spans_from_geometry(0, 512, 1024, 1).expect("spans");
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker_path = path.clone();
+        std::thread::spawn(move || {
+            for _ in 0..200 {
+                let seen = read_in_order(&worker_path, &spans, MAX_READ_CONCURRENCY);
+                if done_tx.send(seen == data).is_err() {
+                    return;
+                }
+            }
+        });
+        for round in 0..200 {
+            let intact = done_rx
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .unwrap_or_else(|_| panic!("round {round} stalled: the readers deadlocked"));
+            assert!(intact, "round {round} read the bytes out of order");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
