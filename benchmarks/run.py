@@ -8,6 +8,10 @@ interleaved, in an order that rotates each repetition, so drift on the machine
 spreads over all of them. Each file is read twice before its runs so that every
 tool starts from a warm page cache.
 
+Every finished run is appended to runs.jsonl at once. Stopped with Ctrl-C or
+SIGTERM, the run in progress is discarded and the command to continue is printed;
+`--resume` then skips what is recorded, with the first session's plan.
+
 Per run it records the read time measured inside the process (excluding
 interpreter start-up and imports), the wall time of the whole process, and its
 peak resident memory (see measure.py). After the runs it compares each reader's
@@ -34,6 +38,7 @@ import json
 import os
 import platform
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -232,6 +237,34 @@ def warm(path: Path) -> None:
                 pass
 
 
+def _run_group(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
+    """Run cmd in its own process group, and kill the whole group if interrupted.
+
+    A reader can start processes of its own (Rscript starts R, pyreadstat workers),
+    so killing only the direct child could leave one running into the next
+    measurement.
+    """
+    popen = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             start_new_session=not WINDOWS)
+    try:
+        out, err = popen.communicate(timeout=timeout)
+    except BaseException:
+        if WINDOWS:
+            popen.kill()
+        else:
+            try:
+                os.killpg(popen.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        popen.wait()
+        raise
+    return subprocess.CompletedProcess(cmd, popen.returncode, out, err)
+
+
+def _stop(signum, frame):
+    raise KeyboardInterrupt
+
+
 def run_one(tool: str, path: Path, scratch: Path) -> dict:
     group, build = TOOLS[tool]
     if tool == "sas7bdat-cli-csv":
@@ -253,13 +286,7 @@ def run_one(tool: str, path: Path, scratch: Path) -> dict:
         cmd = build(path)
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
     others, _ = other_cpu()
-    proc = subprocess.run(
-        [sys.executable, str(MEASURE), *cmd],
-        capture_output=True,
-        text=True,
-        timeout=1800,
-        check=False,
-    )
+    proc = _run_group([sys.executable, str(MEASURE), *cmd], timeout=1800)
     lines = proc.stdout.strip().splitlines()
     measured = json.loads(lines.pop()[len("MEASURE "):]) if lines and lines[-1].startswith(
         "MEASURE ") else {"wall_s": None, "peak_rss_bytes": None, "returncode": proc.returncode}
@@ -417,94 +444,133 @@ def summarise(rows: list[dict], files: list[str], tools: list[str]) -> str:
     return "\n".join(lines)
 
 
+#: Environment fields that must not change between the sessions of one run.
+STABLE = ("commit", "dirty", "machine", "cpu", "cores", "rustc", "python_packages", "r",
+          "readstat")
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def append_jsonl(path: Path, record: dict) -> None:
+    with path.open("a") as fh:
+        fh.write(json.dumps(record) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reps", type=int, default=10)
     ap.add_argument("--files", default=",".join(FILES))
     ap.add_argument("--tools", default=",".join(TOOLS))
     ap.add_argument("--out", type=Path)
+    ap.add_argument("--resume", action="store_true",
+                    help="continue the run in --out, with its first session's files, "
+                         "tools and repetitions, skipping the runs already recorded")
+    ap.add_argument("--allow-changed-env", action="store_true",
+                    help="resume even if the commit, versions or machine have changed")
     ap.add_argument("--skip-sha", action="store_true")
     ap.add_argument("--max-other-cpu", type=float, default=50.0,
                     help="refuse to start when other processes use more CPU than this "
                          "(percent of one core)")
     args = ap.parse_args()
-    files = args.files.split(",")
-    tools = args.tools.split(",")
+    signal.signal(signal.SIGTERM, _stop)
+
+    out_dir = args.out or ROOT / "benchmarks" / "results" / dt.date.today().isoformat()
+    sessions_path = out_dir / "sessions.jsonl"
+    runs_path = out_dir / "runs.jsonl"
+    sessions = read_jsonl(sessions_path)
+    if args.resume:
+        if not sessions:
+            sys.exit(f"nothing to resume in {out_dir}")
+        first = sessions[0]["plan"]
+        files, tools, reps = first["files"], first["tools"], first["reps"]
+    else:
+        if sessions:
+            sys.exit(f"{out_dir} already holds a run; pass --resume, or choose another --out")
+        files, tools, reps = args.files.split(","), args.tools.split(","), args.reps
 
     for f in files:
         path = DATA / FILES[f][0]
         if not path.exists():
-            sys.exit(f"missing {path}; see benchmarks/README.md")
+            sys.exit(f"missing {path}; run benchmarks/fetch.py")
         if not args.skip_sha and sha256(path) != FILES[f][1]:
             sys.exit(f"checksum mismatch for {path}")
 
-    out_dir = args.out or ROOT / "benchmarks" / "results" / dt.date.today().isoformat()
     build_rust()
     if "readstat-c" in tools:
         build_readstat_c()
+    env = environment(files)
+    if sessions and not args.allow_changed_env:
+        before = sessions[0]["environment"]
+        changed = [k for k in STABLE if before.get(k) != env.get(k)]
+        if changed:
+            sys.exit("the environment has changed since the first session ("
+                     + ", ".join(changed) + "); pass --allow-changed-env to resume anyway")
     total, busiest = other_cpu()
     if total > args.max_other_cpu:
         sys.exit(f"other processes use {total:.0f}% CPU (busiest: {busiest}); "
                  "close them, or pass --max-other-cpu")
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "environment.json").write_text(json.dumps(environment(files), indent=2))
+    session = len(sessions) + 1
+    append_jsonl(sessions_path, {"session": session,
+                                 "plan": {"files": files, "tools": tools, "reps": reps},
+                                 "environment": env})
+    (out_dir / "environment.json").write_text(json.dumps(env, indent=2))
 
-    rows: list[dict] = []
-    with tempfile.TemporaryDirectory() as tmp:
-        scratch = Path(tmp)
-        for f in files:
-            path = DATA / FILES[f][0]
-            warm(path)
-            for rep in range(args.reps):
-                order = tools[rep % len(tools) :] + tools[: rep % len(tools)]
-                for t in order:
+    done = {(r["file"], r["rep"], r["tool"]) for r in read_jsonl(runs_path)}
+    remaining = sum(1 for f in files for rep in range(reps) for t in tools
+                    if (f, rep, t) not in done)
+    print(f"session {session}: {remaining} of {len(files) * reps * len(tools)} runs to do",
+          flush=True)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp)
+            for f in files:
+                path = DATA / FILES[f][0]
+                todo = [(rep, t) for rep in range(reps)
+                        for t in tools[rep % len(tools):] + tools[:rep % len(tools)]
+                        if (f, rep, t) not in done]
+                if not todo:
+                    continue
+                warm(path)
+                for rep, t in todo:
                     row = run_one(t, path, scratch)
-                    row.update(file=f, rep=rep)
-                    rows.append(row)
-                    status = (
-                        f"{row['read_s']:.3f}s"
-                        if row["ok"]
-                        else f"FAILED {row.get('error')}"
-                    )
-                    print(f"{f} rep {rep + 1}/{args.reps} {t}: {status}", flush=True)
+                    row.update(file=f, rep=rep, session=session,
+                               at=dt.datetime.now().astimezone().isoformat(timespec="seconds"))
+                    append_jsonl(runs_path, row)
+                    status = (f"{row['read_s']:.3f}s" if row["ok"]
+                              else f"FAILED {row.get('error')}")
+                    print(f"{f} rep {rep + 1}/{reps} {t}: {status}", flush=True)
+    except KeyboardInterrupt:
+        sys.exit(f"\nstopped; continue with: benchmarks/run.py --out {out_dir} --resume")
 
-    fields = [
-        "file",
-        "rep",
-        "tool",
-        "group",
-        "ok",
-        "read_s",
-        "wall_s",
-        "peak_rss_mb",
-        "rows",
-        "cols",
-        "load1",
-        "other_cpu",
-    ]
+    rows = read_jsonl(runs_path)
+    fields = ["file", "rep", "tool", "group", "ok", "read_s", "wall_s", "peak_rss_mb",
+              "rows", "cols", "load1", "other_cpu", "session", "at"]
     with (out_dir / "runs.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 
-    report = [
-        "# Correctness",
-        "",
-        "Each reader's first run, compared with the Rust core's (`sas7bdat-core`).",
-        "",
-    ]
+    report = ["# Correctness", "",
+              "Each reader's first successful run, compared with the Rust core's "
+              "(`sas7bdat-core`).", ""]
     for f in files:
-        ref = next(
-            r
-            for r in rows
-            if r["file"] == f and r["tool"] == "sas7bdat-core" and r["ok"]
-        )
+        ref = next((r for r in rows if r["file"] == f and r["tool"] == "sas7bdat-core"
+                    and r["ok"]), None)
+        if ref is None:
+            report.append(f"- {f}: no successful sas7bdat-core run to compare against")
+            continue
         for t in tools:
             if t == "sas7bdat-core":
                 continue
-            other = next(
-                (r for r in rows if r["file"] == f and r["tool"] == t and r["ok"]), None
-            )
+            other = next((r for r in rows if r["file"] == f and r["tool"] == t and r["ok"]),
+                         None)
             if other is None:
                 report.append(f"- {f} / {t}: no successful run")
                 continue
@@ -514,7 +580,15 @@ def main() -> None:
             verdict = "; ".join(mismatches) if mismatches else "match"
             report.append(f"- {f} / {t}: {verdict} {notes}".rstrip())
     (out_dir / "correctness.md").write_text("\n".join(report) + "\n")
-    (out_dir / "summary.md").write_text(summarise(rows, files, tools) + "\n")
+
+    n_sessions = len({r["session"] for r in rows})
+    header = (f"{reps} repetitions per tool and file, recorded in {n_sessions} "
+              f"session{'s' if n_sessions > 1 else ''}; see sessions.jsonl.\n\n")
+    complete = all(any(r["file"] == f and r["rep"] == rep and r["tool"] == t for r in rows)
+                   for f in files for rep in range(reps) for t in tools)
+    if not complete:
+        header = "Incomplete: some runs are missing. " + header
+    (out_dir / "summary.md").write_text(header + summarise(rows, files, tools) + "\n")
     print((out_dir / "summary.md").read_text())
 
 
