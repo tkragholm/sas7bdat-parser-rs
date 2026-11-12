@@ -474,6 +474,8 @@ def main() -> None:
     ap.add_argument("--allow-changed-env", action="store_true",
                     help="resume even if the commit, versions or machine have changed")
     ap.add_argument("--skip-sha", action="store_true")
+    ap.add_argument("--wait-idle", type=float, default=15.0,
+                    help="minutes to wait for other processes to settle before giving up")
     ap.add_argument("--max-other-cpu", type=float, default=50.0,
                     help="refuse to start when other processes use more CPU than this "
                          "(percent of one core)")
@@ -511,10 +513,19 @@ def main() -> None:
         if changed:
             sys.exit("the environment has changed since the first session ("
                      + ", ".join(changed) + "); pass --allow-changed-env to resume anyway")
-    total, busiest = other_cpu()
-    if total > args.max_other_cpu:
-        sys.exit(f"other processes use {total:.0f}% CPU (busiest: {busiest}); "
-                 "close them, or pass --max-other-cpu")
+    deadline = time.monotonic() + 60 * args.wait_idle
+    calm = 0
+    while calm < 3:
+        total, busiest = other_cpu()
+        calm = calm + 1 if total <= args.max_other_cpu else 0
+        if calm < 3:
+            if time.monotonic() > deadline:
+                sys.exit(f"other processes use {total:.0f}% CPU (busiest: {busiest}); "
+                         "close them, or raise --max-other-cpu or --wait-idle")
+            if calm == 0:
+                print(f"waiting for the machine to settle: other processes use "
+                      f"{total:.0f}% CPU (busiest: {busiest})", flush=True)
+            time.sleep(15)
     out_dir.mkdir(parents=True, exist_ok=True)
     session = len(sessions) + 1
     append_jsonl(sessions_path, {"session": session,
