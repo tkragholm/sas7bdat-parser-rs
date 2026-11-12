@@ -14,7 +14,7 @@ SIGTERM, the run in progress is discarded and the command to continue is printed
 
 Per run it records the read time measured inside the process (excluding
 interpreter start-up and imports), the wall time of the whole process, and its
-peak resident memory (see measure.py). After the runs it compares each reader's
+peak memory as footprint and as resident set (see measure.py for why both). After the runs it compares each reader's
 checksum (rows, columns, per-column sums and string lengths) with the Rust
 core's, so a fast but wrong reader shows up.
 
@@ -292,9 +292,11 @@ def run_one(tool: str, path: Path, scratch: Path, checksum: bool = False) -> dic
     proc = _run_group([sys.executable, str(MEASURE), *cmd], timeout=1800, env=env)
     lines = proc.stdout.strip().splitlines()
     measured = json.loads(lines.pop()[len("MEASURE "):]) if lines and lines[-1].startswith(
-        "MEASURE ") else {"wall_s": None, "peak_rss_bytes": None, "returncode": proc.returncode}
+        "MEASURE ") else {"wall_s": None, "peak_rss_bytes": None, "peak_footprint_bytes": None,
+           "returncode": proc.returncode}
     wall = measured["wall_s"]
     peak = measured["peak_rss_bytes"]
+    footprint = measured.get("peak_footprint_bytes")
     ok = proc.returncode == 0 and measured["returncode"] == 0
     row = {
         "tool": tool,
@@ -303,6 +305,7 @@ def run_one(tool: str, path: Path, scratch: Path, checksum: bool = False) -> dic
         "load1": load,
         "other_cpu": others,
         "peak_rss_mb": peak / 1e6 if peak is not None else None,
+        "peak_footprint_mb": footprint / 1e6 if footprint is not None else None,
         "ok": ok,
         "read_s": None,
         "rows": None,
@@ -424,15 +427,16 @@ def environment(files: list[str]) -> dict:
 
 def summarise(rows: list[dict], files: list[str], tools: list[str]) -> str:
     lines = [
-        "| File | Tool | Read, median (s) | IQR (s) | Process (s) | Peak RSS (MB) | MB/s |",
-        "|---|---|---:|---:|---:|---:|---:|",
+        "| File | Tool | Read, median (s) | IQR (s) | Process (s) | Peak footprint (MB) "
+        "| Peak RSS (MB) | MB/s |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for f in files:
         size = (DATA / FILES[f][0]).stat().st_size / 1e6
         for t in tools:
             runs = [r for r in rows if r["file"] == f and r["tool"] == t and r["ok"]]
             if not runs:
-                lines.append(f"| {f} | {t} | failed | | | | |")
+                lines.append(f"| {f} | {t} | failed | | | | | |")
                 continue
             reads = sorted(r["read_s"] for r in runs)
             q = statistics.quantiles(reads, n=4) if len(reads) > 1 else [reads[0]] * 3
@@ -442,9 +446,11 @@ def summarise(rows: list[dict], files: list[str], tools: list[str]) -> str:
             wall = statistics.median(r["wall_s"] for r in clean)
             rss = [r["peak_rss_mb"] for r in clean if r["peak_rss_mb"] is not None]
             rss_cell = f"{statistics.median(rss):.0f}" if rss else "n/a"
+            fps = [r["peak_footprint_mb"] for r in clean if r.get("peak_footprint_mb") is not None]
+            fp_cell = f"{statistics.median(fps):.0f}" if fps else "n/a"
             lines.append(
                 f"| {f} | {t} | {med:.3f} | {q[2] - q[0]:.3f} | {wall:.3f} | "
-                f"{rss_cell} | {size / med:.0f} |"
+                f"{fp_cell} | {rss_cell} | {size / med:.0f} |"
             )
     return "\n".join(lines)
 
@@ -569,7 +575,7 @@ def main() -> None:
         sys.exit(f"\nstopped; continue with: benchmarks/run.py --out {out_dir} --resume")
 
     rows = read_jsonl(runs_path)
-    fields = ["file", "rep", "tool", "group", "ok", "read_s", "wall_s", "peak_rss_mb",
+    fields = ["file", "rep", "tool", "group", "ok", "read_s", "wall_s", "peak_footprint_mb", "peak_rss_mb",
               "rows", "cols", "load1", "other_cpu", "checksummed", "session", "at"]
     with (out_dir / "runs.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
