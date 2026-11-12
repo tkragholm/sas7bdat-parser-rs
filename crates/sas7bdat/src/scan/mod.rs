@@ -308,6 +308,9 @@ struct ScanStats {
     pub batch_direct_utf8_owned_interned_hits: u64,
     pub batch_direct_utf8_owned_seen_once_promotions: u64,
     pub batch_fallback_cells: u64,
+    /// Most batches the ordered collector held at once, waiting for an earlier chunk. Not
+    /// merged across workers; the collector sets it.
+    pub reorder_peak_batches: u64,
     pub path: ScanPath,
 }
 
@@ -376,5 +379,8 @@ pub struct ScanProgress {
 /// A boxed progress callback registered via [`ScanBuilder::with_progress`].
 pub type ScanProgressObserver = Arc<dyn Fn(ScanProgress) + Send + Sync + 'static>;
 
+mod gate;
+#[cfg(test)]
+mod ordering_tests;
 #[cfg(test)]
 mod tests;

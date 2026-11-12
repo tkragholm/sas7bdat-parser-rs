@@ -30,6 +30,9 @@ pub struct MockDatasetBuilder {
     pub compression: CompressionKind,
     pub encoding: Option<String>,
     pub bytes: Arc<[u8]>,
+    /// Where the scan reads from. `None` serves `bytes` from memory; a path or a map lets a
+    /// test reach the buffered and memory-mapped pipelines with the same contents.
+    pub source: Option<FileSource>,
 }
 
 impl MockDatasetBuilder {
@@ -44,7 +47,15 @@ impl MockDatasetBuilder {
             compression: CompressionKind::None,
             encoding: Some("UTF-8".to_owned()),
             bytes,
+            source: None,
         }
+    }
+
+    /// Read from `source` instead of from `bytes` in memory. `source` must hold the same
+    /// bytes; `bytes` still sizes the layout.
+    pub fn with_source(mut self, source: FileSource) -> Self {
+        self.source = Some(source);
+        self
     }
 
     pub fn with_column(
@@ -132,7 +143,9 @@ impl MockDatasetBuilder {
 
         Dataset {
             file: Arc::new(FileInner {
-                source: FileSource::Bytes(Arc::clone(&self.bytes)),
+                source: self
+                    .source
+                    .unwrap_or_else(|| FileSource::Bytes(Arc::clone(&self.bytes))),
                 options: OpenOptions::default(),
             }),
             metadata: Arc::new(DatasetMetadata {

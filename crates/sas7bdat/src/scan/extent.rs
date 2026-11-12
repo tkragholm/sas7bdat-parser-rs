@@ -22,7 +22,7 @@ use std::{
     path::Path,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender, sync_channel},
     },
 };
@@ -91,7 +91,7 @@ pub(super) fn plan_spans_from_geometry(
     Some(spans)
 }
 
-/// Spawn `readers` threads that fill extents for the chunks pulled from `next_chunk_idx`.
+/// Spawn `readers` threads that fill extents for the chunks they claim from `gate`.
 ///
 /// Each reader owns a file handle, so seeks are independent rather than serialized behind a
 /// shared cursor. Returns the receiving end and the recycle channel; both close when the
@@ -101,7 +101,8 @@ pub(super) struct ReadPlan<'scope> {
     pub path: &'scope Path,
     /// One (offset, length) per extent; its length is the extent count.
     pub spans: &'scope [(u64, usize)],
-    pub next_chunk_idx: &'scope AtomicUsize,
+    /// Hands out chunk indices, in order and within the ordered-delivery window.
+    pub gate: &'scope super::gate::ChunkGate,
 }
 
 pub(super) fn spawn_readers<'scope>(
@@ -111,11 +112,7 @@ pub(super) fn spawn_readers<'scope>(
     readers: usize,
     error_slot: &SyncSender<Error>,
 ) -> ExtentStream {
-    let ReadPlan {
-        path,
-        spans,
-        next_chunk_idx,
-    } = plan;
+    let ReadPlan { path, spans, gate } = plan;
     let readers = readers.clamp(1, MAX_READ_CONCURRENCY);
     // One in-flight extent per reader plus one queued each, so a reader never blocks waiting
     // for a decoder that is mid-batch, and memory stays at 2 * readers * EXTENT_BYTES.
@@ -133,6 +130,7 @@ pub(super) fn spawn_readers<'scope>(
         let error_slot = error_slot.clone();
         let stop = Arc::clone(stop);
         scope.spawn(move || {
+            let _release = super::gate::CloseOnUnwind::new(gate, Some(stop.as_ref()));
             let mut file = match File::open(path) {
                 Ok(file) => file,
                 Err(err) => {
@@ -153,7 +151,12 @@ pub(super) fn spawn_readers<'scope>(
                     .ok()
                     .and_then(|rx| rx.recv().ok())
                     .unwrap_or_default();
-                let idx = next_chunk_idx.fetch_add(1, Ordering::Relaxed);
+                // A claim can wait for ordered delivery to catch up. That is safe while holding
+                // a buffer: whenever a claim waits, the chunk delivery needs next has already
+                // been claimed, and it was claimed with a buffer of its own.
+                let Some(idx) = gate.claim(&[stop.as_ref()]) else {
+                    break;
+                };
                 if idx >= spans.len() {
                     break;
                 }
@@ -170,6 +173,8 @@ pub(super) fn spawn_readers<'scope>(
                 {
                     let _ = error_slot.send(Error::io_error_with_path(path, &err));
                     stop.store(true, Ordering::Relaxed);
+                    // The failed chunk will never be delivered, so no claim may wait for it.
+                    gate.close();
                     break;
                 }
                 if extent_tx
@@ -205,9 +210,8 @@ pub(super) const fn pages_per_extent(page_size: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        Arc, AtomicBool, AtomicUsize, EXTENT_BYTES, Error, Extent, ExtentStream,
-        MAX_READ_CONCURRENCY, ReadPlan, pages_per_extent, plan_spans_from_geometry, spawn_readers,
-        sync_channel,
+        Arc, AtomicBool, EXTENT_BYTES, Error, Extent, ExtentStream, MAX_READ_CONCURRENCY, ReadPlan,
+        pages_per_extent, plan_spans_from_geometry, spawn_readers, sync_channel,
     };
 
     #[test]
@@ -261,10 +265,15 @@ mod tests {
     }
 
     /// Read every extent of `path` and consume them strictly in order, returning a buffer
-    /// only once its extent has been consumed, as the fused scan's parse stage does.
-    /// Returns the bytes seen, in order.
-    fn read_in_order(path: &std::path::Path, spans: &[(u64, usize)], readers: usize) -> Vec<u8> {
-        let next_chunk_idx = AtomicUsize::new(0);
+    /// only once its extent has been consumed, as the fused scan's parse stage does, and
+    /// advancing the gate as an ordered collector does. Returns the bytes seen, in order.
+    fn read_in_order(
+        path: &std::path::Path,
+        spans: &[(u64, usize)],
+        readers: usize,
+        window: Option<usize>,
+    ) -> Vec<u8> {
+        let gate = crate::scan::gate::ChunkGate::new(spans.len(), window);
         let stop = Arc::new(AtomicBool::new(false));
         let (error_tx, _error_rx) = sync_channel::<Error>(readers);
         std::thread::scope(|scope| {
@@ -273,7 +282,7 @@ mod tests {
                 ReadPlan {
                     path,
                     spans,
-                    next_chunk_idx: &next_chunk_idx,
+                    gate: &gate,
                 },
                 &stop,
                 readers,
@@ -291,6 +300,7 @@ mod tests {
                 };
                 out.extend_from_slice(&extent.bytes);
                 let _ = recycle.send(extent.bytes);
+                gate.advance(next + 1);
             }
             drop(recycle);
             out
@@ -311,9 +321,13 @@ mod tests {
 
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let worker_path = path.clone();
+        // No window, then the tightest windows ordered delivery can use: a claim that waits
+        // while its reader holds a buffer must not starve the reader of the gap either.
+        let windows = [None, Some(1), Some(2), Some(8)];
         std::thread::spawn(move || {
-            for _ in 0..200 {
-                let seen = read_in_order(&worker_path, &spans, MAX_READ_CONCURRENCY);
+            for round in 0..200 {
+                let window = windows[round % windows.len()];
+                let seen = read_in_order(&worker_path, &spans, MAX_READ_CONCURRENCY, window);
                 if done_tx.send(seen == data).is_err() {
                     return;
                 }

@@ -15,7 +15,7 @@ use std::{
     collections::VecDeque,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc::{SyncSender, sync_channel},
     },
     time::Instant,
@@ -93,26 +93,6 @@ pub(super) fn resolved_parallel_workers(
     }
 }
 
-/// Chunks cut per worker. Cutting several chunks per worker (instead of exactly one) gives the
-/// scheduler slack to steal work and balance uneven chunks — compressed pages, partial last
-/// pages, and varying page fill all make a static `pages / workers` split tail-bound on the
-/// slowest chunk.
-const CHUNK_OVERSUBSCRIBE: usize = 4;
-
-/// Pages per parallel chunk. Targets ~[`CHUNK_OVERSUBSCRIBE`] chunks per worker for stealing
-/// slack, but never smaller than the pages needed to fill one target batch — so finer chunking
-/// doesn't shred the file into a swarm of undersized tail batches or per-chunk accumulator churn.
-fn balanced_chunk_size(
-    page_count: usize,
-    workers: usize,
-    rows_per_page: u64,
-    target_rows: usize,
-) -> usize {
-    let target_chunks = workers.saturating_mul(CHUNK_OVERSUBSCRIBE).max(1);
-    let by_oversubscribe = page_count.div_ceil(target_chunks).max(1);
-    by_oversubscribe.max(pages_per_batch(rows_per_page, target_rows))
-}
-
 /// Rows a page holds, for sizing a chunk.
 ///
 /// `layout.rows_per_page` is the figure SAS declares in the `ROW_SIZE` subheader, and on some
@@ -123,13 +103,21 @@ fn balanced_chunk_size(
 /// collector thread for nothing -- which is the whole of why that file decoded 1.18x *slower*
 /// on twelve threads than on one, and why adding workers past the second changed nothing.
 ///
-/// The declared value is kept where it exists, since it is SAS's own and a page's fill is
-/// uneven; the row-count average only stands in when there is no declared value at all.
+/// On a compressed file the declared value understates instead. It is the count for
+/// uncompressed rows, while a compressed page holds several times as many: `ahs2013n` declares
+/// 2 and averages 4, `ahs2013_household` declares 2 and averages about 15. Chunks sized from the
+/// declared value then hold several batches each, and a chunk's finished batches wait for the
+/// rest of it before an ordered scan can deliver them.
+///
+/// The larger of the declared value and the row-count average is used. On an uncompressed file
+/// the average over data pages is at most the declared value, since only the last page and
+/// mixed pages hold fewer rows, so the declared value stands there.
 pub(super) fn effective_rows_per_page(declared: u64, row_count: u64, page_count: u64) -> u64 {
-    if declared > 0 {
-        return declared;
-    }
-    row_count.checked_div(page_count).unwrap_or(0).max(1)
+    row_count
+        .checked_div(page_count)
+        .unwrap_or(0)
+        .max(declared)
+        .max(1)
 }
 
 /// Pages needed to fill one target batch. Each chunk decodes with its own accumulator and
@@ -146,6 +134,30 @@ pub(super) fn pages_per_batch(rows_per_page: u64, target_rows: usize) -> usize {
     )
     .unwrap_or(1)
     .max(1)
+}
+
+/// Consecutive runs of `pages` holding at most `target_rows` rows each. A page that alone holds
+/// more is a run of its own. A page without rows never starts a run of its own.
+pub(super) fn chunks_by_rows(
+    pages: &[crate::internal::PageDescriptor],
+    target_rows: usize,
+) -> Vec<&[crate::internal::PageDescriptor]> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut rows = 0usize;
+    for (i, page) in pages.iter().enumerate() {
+        let page_rows = usize::try_from(page.row_count).unwrap_or(usize::MAX);
+        if rows > 0 && rows.saturating_add(page_rows) > target_rows {
+            chunks.push(&pages[start..i]);
+            start = i;
+            rows = 0;
+        }
+        rows = rows.saturating_add(page_rows);
+    }
+    if start < pages.len() {
+        chunks.push(&pages[start..]);
+    }
+    chunks
 }
 
 /// Delivers buffered batches to `f` in strict chunk order, starting at
@@ -257,31 +269,46 @@ impl ProgressReport<'_> {
 pub(super) fn collect_streamed_batches<F>(
     rx: std::sync::mpsc::Receiver<StreamedBatchMessage>,
     ordering: OrderingMode,
+    gate: &super::gate::ChunkGate,
     chunk_count: usize,
     stop: &AtomicBool,
     progress: ProgressReport<'_>,
     f: &mut F,
-) -> Result<(u64, u64)>
+) -> Result<Delivered>
 where
     F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
 {
-    let outcome = deliver_streamed_batches(rx, ordering, chunk_count, stop, progress, f);
+    // A panic in the callback skips the close below.
+    let _release = super::gate::CloseOnUnwind::new(gate, Some(stop));
+    let outcome = deliver_streamed_batches(rx, ordering, gate, chunk_count, stop, progress, f);
     // Any exit that isn't the end of the stream leaves producers still working. They see the
     // dropped receiver soon enough, but not while parked inside a blocking send.
     if outcome.is_err() {
         stop.store(true, Ordering::Relaxed);
     }
+    // No more chunks will be delivered, so no claimer may keep waiting for one.
+    gate.close();
     outcome
+}
+
+/// What the collector handed to the caller.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Delivered {
+    pub batches: u64,
+    pub rows: u64,
+    /// Most batches held at once in the reorder buffer, waiting for an earlier chunk.
+    pub reorder_peak: u64,
 }
 
 fn deliver_streamed_batches<F>(
     rx: std::sync::mpsc::Receiver<StreamedBatchMessage>,
     ordering: OrderingMode,
+    gate: &super::gate::ChunkGate,
     chunk_count: usize,
     stop: &AtomicBool,
     progress: ProgressReport<'_>,
     f: &mut F,
-) -> Result<(u64, u64)>
+) -> Result<Delivered>
 where
     F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
 {
@@ -292,6 +319,8 @@ where
     let mut next_chunk = 0usize;
     let mut delivered_batches = 0u64;
     let mut delivered_rows = 0u64;
+    let mut held = 0u64;
+    let mut reorder_peak = 0u64;
 
     for message in rx {
         match message {
@@ -306,7 +335,10 @@ where
                     }
                 } else {
                     buffered[chunk_idx].push_back(batch);
-                    if drain_ordered_batches(
+                    held += 1;
+                    reorder_peak = reorder_peak.max(held);
+                    let before = delivered_batches;
+                    let flow = drain_ordered_batches(
                         &mut buffered,
                         &finished,
                         &mut next_chunk,
@@ -314,9 +346,10 @@ where
                         &mut delivered_batches,
                         &mut delivered_rows,
                         f,
-                    )?
-                    .is_break()
-                    {
+                    )?;
+                    held -= delivered_batches - before;
+                    gate.advance(next_chunk);
+                    if flow.is_break() {
                         stop.store(true, Ordering::Relaxed);
                         break;
                     }
@@ -325,8 +358,9 @@ where
             }
             StreamedBatchMessage::Finished { chunk_idx } => {
                 finished[chunk_idx] = true;
-                if matches!(ordering, OrderingMode::Stable)
-                    && drain_ordered_batches(
+                if matches!(ordering, OrderingMode::Stable) {
+                    let before = delivered_batches;
+                    let flow = drain_ordered_batches(
                         &mut buffered,
                         &finished,
                         &mut next_chunk,
@@ -334,11 +368,13 @@ where
                         &mut delivered_batches,
                         &mut delivered_rows,
                         f,
-                    )?
-                    .is_break()
-                {
-                    stop.store(true, Ordering::Relaxed);
-                    break;
+                    )?;
+                    held -= delivered_batches - before;
+                    gate.advance(next_chunk);
+                    if flow.is_break() {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
                 }
                 // A chunk finishing can release batches that arrived out of order, including
                 // the last ones in the file, so this is not only a batch-message concern.
@@ -351,7 +387,11 @@ where
         }
     }
 
-    Ok((delivered_batches, delivered_rows))
+    Ok(Delivered {
+        batches: delivered_batches,
+        rows: delivered_rows,
+        reorder_peak,
+    })
 }
 
 /// Configures and runs a scan over a [`Dataset`]. Get one from [`Dataset::scan`].
@@ -392,6 +432,29 @@ pub struct ScanBuilder<'a> {
     pub(crate) row_selection: RowSelection,
     pub(crate) column_major: ColumnMajorDecode,
     pub(crate) progress: Option<ScanProgressObserver>,
+    /// Test hook; see [`DescriptorChunkContext::slow_chunk`].
+    #[cfg(test)]
+    pub(crate) slow_chunk: Option<(usize, std::time::Duration)>,
+    /// Test hook: pages per read extent, so a small file still splits into many chunks on the
+    /// buffered and fused pipelines.
+    #[cfg(test)]
+    pub(crate) extent_pages: Option<usize>,
+    /// Test hook; see [`DescriptorChunkContext::panic_chunk`].
+    #[cfg(test)]
+    pub(crate) panic_chunk: Option<usize>,
+}
+
+impl ScanBuilder<'_> {
+    /// Pages per read extent for this scan's page size.
+    // `self` carries only the test override.
+    #[cfg_attr(not(test), allow(clippy::unused_self))]
+    pub(super) fn pages_per_extent(&self, page_size: usize) -> usize {
+        #[cfg(test)]
+        if let Some(pages) = self.extent_pages {
+            return pages.max(1);
+        }
+        super::extent::pages_per_extent(page_size)
+    }
 }
 
 impl<'a> ScanBuilder<'a> {
@@ -412,6 +475,12 @@ impl<'a> ScanBuilder<'a> {
             // and it falls back to row-major automatically whenever its preconditions don't hold.
             column_major: ColumnMajorDecode::On,
             progress: None,
+            #[cfg(test)]
+            slow_chunk: None,
+            #[cfg(test)]
+            extent_pages: None,
+            #[cfg(test)]
+            panic_chunk: None,
         }
     }
 
@@ -1046,6 +1115,13 @@ pub(super) struct DescriptorChunkContext<'a> {
     /// decoded in parallel, since the cores are already spoken for; the resolved budget when a
     /// single worker runs the whole scan.
     pub materialize_threads: usize,
+    /// Test hook: hold this chunk back for a while before decoding it, to make chunks finish
+    /// out of order on demand.
+    #[cfg(test)]
+    pub slow_chunk: Option<(usize, std::time::Duration)>,
+    /// Test hook: panic while decoding this chunk, to test that a dying worker ends the scan.
+    #[cfg(test)]
+    pub panic_chunk: Option<usize>,
 }
 
 pub(super) enum StreamedBatchMessage {
@@ -1129,6 +1205,17 @@ pub(super) fn stream_batches_for_descriptor_chunk(
     tx: &SyncSender<StreamedBatchMessage>,
     stop: &AtomicBool,
 ) -> ScanStats {
+    #[cfg(test)]
+    if let Some((slow, pause)) = context.slow_chunk
+        && slow == chunk_idx
+    {
+        std::thread::sleep(pause);
+    }
+    #[cfg(test)]
+    assert!(
+        context.panic_chunk != Some(chunk_idx),
+        "test hook: worker panics in chunk {chunk_idx}"
+    );
     let result = decode_descriptor_chunk(
         window,
         descriptor_table,
@@ -1283,7 +1370,7 @@ impl ScanBuilder<'_> {
         })
     }
 
-    fn scan_batches<F>(&self, f: &mut F) -> Result<ScanStats>
+    pub(super) fn scan_batches<F>(&self, f: &mut F) -> Result<ScanStats>
     where
         F: FnMut(OwnedColumnarBatch) -> Result<ControlFlow<()>>,
     {
@@ -1496,31 +1583,39 @@ impl ScanBuilder<'_> {
             return Ok(TwoPassDecision::NothingToScan { workers });
         }
 
-        // Extent-sized chunks for streamed sources: the chunk IS the unit of I/O there, so it
-        // is sized by the measured best read size rather than by worker count.
-        let rows_per_page = effective_rows_per_page(
-            self.ds.layout.rows_per_page,
-            self.ds.metadata().row_count,
-            u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX),
-        );
-        let chunk_size = if mapped.is_some() {
+        let pages = &descriptors.pages[window_pages];
+        let chunks: Vec<&[crate::internal::PageDescriptor]> = if mapped.is_some() {
             if workers == 1 {
                 // Chunks exist to give idle workers something to steal, and a chunk is also an
                 // accumulator and a batch boundary. With one worker there is nothing to
                 // balance, so cutting the file up would only add a partial batch per boundary
                 // and throw away the string dictionary built up to that point.
-                page_count.max(1)
+                pages.chunks(page_count.max(1)).collect()
             } else {
-                balanced_chunk_size(page_count, workers, rows_per_page, plan.batch_row_capacity)
+                // One batch per chunk. A chunk's batches can only be delivered once every
+                // earlier chunk is, so a chunk of several batches holds the finished ones back
+                // while the worker decodes the rest, and the claim window bounds chunks, not
+                // bytes. A batch-sized chunk keeps both small; the many chunks it makes are
+                // also the stealing slack that uneven pages need. The chunks are cut by the
+                // descriptors' row counts, so a chunk never runs a few rows past one batch
+                // and ends in a batch of those few rows.
+                chunks_by_rows(pages, plan.batch_row_capacity)
             }
         } else {
-            // Extent size is an I/O choice, but the chunk is also the batch boundary, so it
-            // must still cover one batch — otherwise wide tables get tiny batches.
-            super::extent::pages_per_extent(plan.raw.page_size())
-                .max(pages_per_batch(rows_per_page, plan.batch_row_capacity))
+            // Extent-sized chunks for streamed sources: the chunk is the unit of I/O there, so
+            // it is sized by the measured best read size rather than by worker count. The chunk
+            // is also the batch boundary, so it must still cover one batch, otherwise wide
+            // tables get tiny batches.
+            let rows_per_page = effective_rows_per_page(
+                self.ds.layout.rows_per_page,
+                self.ds.metadata().row_count,
+                u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX),
+            );
+            let chunk_size = self
+                .pages_per_extent(plan.raw.page_size())
+                .max(pages_per_batch(rows_per_page, plan.batch_row_capacity));
+            pages.chunks(chunk_size).collect()
         };
-        let chunks: Vec<&[crate::internal::PageDescriptor]> =
-            descriptors.pages[window_pages].chunks(chunk_size).collect();
         // Byte span per chunk, precomputed so the reader threads do no descriptor work: each
         // is one contiguous read covering that chunk's pages. Empty for mapped sources.
         let spans: Vec<(u64, usize)> = if mapped.is_some() {
@@ -1551,6 +1646,10 @@ impl ScanBuilder<'_> {
                 .unwrap_or(u64::MAX)
                 .saturating_mul(u64::try_from(plan.raw.page_size()).unwrap_or(0)),
             context: DescriptorChunkContext {
+                #[cfg(test)]
+                slow_chunk: self.slow_chunk,
+                #[cfg(test)]
+                panic_chunk: self.panic_chunk,
                 raw_plan: &plan.raw,
                 batch_plan: &plan.batch,
                 target_rows: plan.batch_row_capacity,
@@ -1626,7 +1725,11 @@ impl ScanBuilder<'_> {
         let chunk_count = chunks.len();
         let spans = &spans;
         // Declared outside `thread::scope` so the shared references satisfy the `'scope` bound.
-        let next_chunk_idx = AtomicUsize::new(0);
+        let gate = super::gate::ChunkGate::new(
+            chunk_count,
+            matches!(self.ordering, OrderingMode::Stable)
+                .then(|| super::gate::ordered_window(workers)),
+        );
         let descriptor_table = descriptors.as_ref();
         let counters = ProgressCounters::default();
         let counters = &counters;
@@ -1641,29 +1744,27 @@ impl ScanBuilder<'_> {
             let channel_bound = workers.saturating_mul(2).max(1);
             let (tx, rx) = sync_channel(channel_bound);
             let stop = Arc::new(AtomicBool::new(false));
-            let next_chunk_idx = &next_chunk_idx;
+            let gate = &gate;
             let chunks = &chunks;
             let mut handles = Vec::with_capacity(workers);
 
             let (io_err_tx, io_err_rx) = sync_channel::<Error>(workers.max(1));
 
             if let Some(file_bytes) = mapped {
-                // A fixed pool of `workers` threads pulls chunk indices from a shared counter,
-                // so `chunk_count` can exceed `workers` (giving stealing slack to balance
-                // uneven chunks) without spawning more threads than the resolved core budget.
-                // Batches stay tagged with their chunk index, so ordered delivery is unaffected.
+                // A fixed pool of `workers` threads claims chunk indices from the gate, so
+                // `chunk_count` can exceed `workers` (giving stealing slack to balance uneven
+                // chunks) without spawning more threads than the resolved core budget. Batches
+                // stay tagged with their chunk index for ordered delivery, and the gate keeps
+                // claims within a window of it.
                 let window = super::raw::PageWindow::whole_file(file_bytes);
                 for _ in 0..workers {
                     let tx = tx.clone();
                     let stop = stop.clone();
                     let context = &context;
                     handles.push(scope.spawn(move || {
+                        let _release = super::gate::CloseOnUnwind::new(gate, Some(stop.as_ref()));
                         let mut worker_stats = ScanStats::default();
-                        loop {
-                            let idx = next_chunk_idx.fetch_add(1, Ordering::Relaxed);
-                            if idx >= chunk_count {
-                                break;
-                            }
+                        while let Some(idx) = gate.claim(&[stop.as_ref()]) {
                             let chunk_stats = stream_batches_for_descriptor_chunk(
                                 window,
                                 descriptor_table,
@@ -1686,11 +1787,7 @@ impl ScanBuilder<'_> {
                 // cores.
                 let stream = super::extent::spawn_readers(
                     scope,
-                    super::extent::ReadPlan {
-                        path,
-                        spans,
-                        next_chunk_idx,
-                    },
+                    super::extent::ReadPlan { path, spans, gate },
                     &stop,
                     workers,
                     &io_err_tx,
@@ -1704,6 +1801,7 @@ impl ScanBuilder<'_> {
                     let extents = Arc::clone(&extents);
                     let recycle = recycle.clone();
                     handles.push(scope.spawn(move || {
+                        let _release = super::gate::CloseOnUnwind::new(gate, Some(stop.as_ref()));
                         let mut worker_stats = ScanStats::default();
                         loop {
                             if stop.load(Ordering::Relaxed) {
@@ -1742,9 +1840,10 @@ impl ScanBuilder<'_> {
             drop(tx);
             drop(io_err_tx);
 
-            let (delivered_batches, delivered_rows) = match collect_streamed_batches(
+            let delivered = match collect_streamed_batches(
                 rx,
                 self.ordering,
+                gate,
                 chunk_count,
                 stop.as_ref(),
                 progress,
@@ -1771,8 +1870,9 @@ impl ScanBuilder<'_> {
             if let Ok(err) = io_err_rx.try_recv() {
                 return Err(err);
             }
-            total.decode_batches = delivered_batches;
-            total.rows_emitted = delivered_rows;
+            total.decode_batches = delivered.batches;
+            total.rows_emitted = delivered.rows;
+            total.reorder_peak_batches = delivered.reorder_peak;
             Ok(total)
         })?;
         let mut total_stats = total_stats;

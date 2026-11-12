@@ -13,6 +13,15 @@ New entries are drafted from the Conventional Commits history with
 hand.
 
 ## [Unreleased]
+
+### Changed
+
+- An ordered parallel scan claims a chunk only while it is at most twice the number of decode threads ahead of the next chunk to deliver. A slow chunk no longer lets the other threads fill memory with every batch behind it. Memory-mapped scans split the file into chunks of one batch each, cut by the row counts of the pages, so uneven page fill no longer leaves a short extra batch at the end of a chunk.
+
+### Fixed
+
+- Parallel scans of compressed files sized their chunks from the declared rows per page, which counts uncompressed rows. A chunk then held several batches, and a file could have fewer chunks than decode threads. The larger of the declared figure and the file's average is used now for read extents, and memory-mapped chunks are cut by row count.
+
 ## [0.9.3] - 2026-10-20
 
 ### Fixed

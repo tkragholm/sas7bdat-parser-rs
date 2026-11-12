@@ -26,7 +26,7 @@ use super::{
         collect_streamed_batches, merge_scan_stats, pages_per_batch, resolved_parallel_workers,
         stream_batches_for_descriptor_chunk,
     },
-    extent::{Extent, ExtentStream, ReadPlan, pages_per_extent, plan_spans_from_geometry},
+    extent::{Extent, ExtentStream, ReadPlan, plan_spans_from_geometry},
     plan::ScanPlan,
     raw::PageWindow,
 };
@@ -35,7 +35,7 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender, sync_channel},
     },
 };
@@ -151,8 +151,8 @@ pub(super) fn plan_fused_stream<'a>(
 
     // The extent is both the read unit and the batch boundary, so it is sized by the measured
     // best read size but never below one batch's worth of pages.
-    let pages_per_chunk = pages_per_extent(page_size).max(pages_per_batch(
-        // Same fallback as the two-pass planner: a declared zero would size an extent at
+    let pages_per_chunk = builder.pages_per_extent(page_size).max(pages_per_batch(
+        // Same rule as the two-pass planner: a declared zero would size an extent at
         // `target_rows` pages and collapse the scan to one chunk.
         super::builder::effective_rows_per_page(
             layout.rows_per_page,
@@ -214,6 +214,10 @@ where
         observer: builder.progress.as_ref(),
         total_pages: page_count,
         decode: DescriptorChunkContext {
+            #[cfg(test)]
+            slow_chunk: builder.slow_chunk,
+            #[cfg(test)]
+            panic_chunk: builder.panic_chunk,
             raw_plan: &plan.raw,
             batch_plan: &plan.batch,
             target_rows: plan.batch_row_capacity,
@@ -260,7 +264,11 @@ where
 {
     let workers = run.workers;
     // Declared outside `thread::scope` so the shared references satisfy the `'scope` bound.
-    let next_chunk_idx = AtomicUsize::new(0);
+    let gate = super::gate::ChunkGate::new(
+        run.parse.chunk_count,
+        matches!(run.ordering, super::OrderingMode::Stable)
+            .then(|| super::gate::ordered_window(workers)),
+    );
     let counters = ProgressCounters::default();
     let counters = &counters;
     let progress = ProgressReport {
@@ -286,7 +294,7 @@ where
             ReadPlan {
                 path: run.path,
                 spans: run.spans,
-                next_chunk_idx: &next_chunk_idx,
+                gate: &gate,
             },
             &read_stop,
             workers,
@@ -300,7 +308,11 @@ where
             let tx = tx.clone();
             let stop = Arc::clone(&stop);
             let parse = &run.parse;
-            scope.spawn(move || parse_extents_in_order(parse, &extents, &parsed_tx, &tx, &stop))
+            let gate = &gate;
+            scope.spawn(move || {
+                let _release = super::gate::CloseOnUnwind::new(gate, Some(stop.as_ref()));
+                parse_extents_in_order(parse, &extents, &parsed_tx, &tx, &stop)
+            })
         };
 
         let parsed_rx = Arc::new(Mutex::new(parsed_rx));
@@ -311,7 +323,9 @@ where
             let parsed_rx = Arc::clone(&parsed_rx);
             let recycle = recycle.clone();
             let decode = &run.decode;
+            let gate = &gate;
             handles.push(scope.spawn(move || {
+                let _release = super::gate::CloseOnUnwind::new(gate, Some(stop.as_ref()));
                 let mut worker_stats = ScanStats::default();
                 loop {
                     if stop.load(Ordering::Relaxed) {
@@ -351,6 +365,7 @@ where
         let collected = collect_streamed_batches(
             rx,
             run.ordering,
+            &gate,
             run.parse.chunk_count,
             stop.as_ref(),
             progress,
@@ -365,7 +380,7 @@ where
 /// The parse stage is joined first: the decode workers only see their channel close once it
 /// drops the sending end.
 fn join_stages(
-    collected: Result<(u64, u64)>,
+    collected: Result<super::builder::Delivered>,
     parse_handle: std::thread::ScopedJoinHandle<'_, u64>,
     handles: Vec<std::thread::ScopedJoinHandle<'_, ScanStats>>,
     io_err_rx: &Receiver<Error>,
@@ -373,8 +388,8 @@ fn join_stages(
     let candidate_rows = parse_handle
         .join()
         .map_err(|_| Error::internal("fused descriptor stage panicked"))?;
-    let (delivered_batches, delivered_rows) = match collected {
-        Ok(counts) => counts,
+    let delivered = match collected {
+        Ok(delivered) => delivered,
         Err(err) => {
             for handle in handles {
                 let _ = handle.join();
@@ -395,8 +410,9 @@ fn join_stages(
     if let Ok(err) = io_err_rx.try_recv() {
         return Err(err);
     }
-    total.decode_batches = delivered_batches;
-    total.rows_emitted = delivered_rows;
+    total.decode_batches = delivered.batches;
+    total.rows_emitted = delivered.rows;
+    total.reorder_peak_batches = delivered.reorder_peak;
     Ok((total, candidate_rows))
 }
 

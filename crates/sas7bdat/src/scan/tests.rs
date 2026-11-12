@@ -2586,13 +2586,19 @@ mod auto_grain {
 }
 
 /// A declared rows-per-page of zero, which is what `topical` carries and what cost that file
-/// a 4.7x parallel speedup by cutting an 826-page scan into one chunk.
+/// a 4.7x parallel speedup by cutting an 826-page scan into one chunk, and a declared figure
+/// below what compressed pages hold.
 #[test]
-fn a_declared_zero_rows_per_page_falls_back_to_the_average() {
+fn rows_per_page_is_the_larger_of_declared_and_average() {
     use crate::scan::builder::{effective_rows_per_page, pages_per_batch};
 
-    // Declared wins where it exists: it is SAS's own figure and page fill is uneven.
-    assert_eq!(effective_rows_per_page(234, 46_641, 140), 234);
+    // Uncompressed: mixed and last pages hold fewer rows, so the average is lower and the
+    // declared figure stands.
+    assert_eq!(effective_rows_per_page(234, 30_000, 140), 234);
+    // Compressed: the declared figure is for uncompressed rows. ahs2013_household declares 2
+    // and holds 70,044 rows on 4,673 data pages.
+    assert_eq!(effective_rows_per_page(2, 70_044, 4_673), 14);
+    assert_eq!(effective_rows_per_page(234, 46_641, 140), 333);
     // Absent, the row-count average stands in. topical: 84,355 rows over 827 pages.
     assert_eq!(effective_rows_per_page(0, 84_355, 827), 102);
     // Neither available: one page per batch-row rather than a division by zero.
@@ -2607,6 +2613,36 @@ fn a_declared_zero_rows_per_page_falls_back_to_the_average() {
         pages_per_batch(effective_rows_per_page(0, 84_355, 827), 4_096),
         41
     );
+}
+
+/// Memory-mapped chunks are cut by the descriptors' row counts, so uneven page fill never
+/// leaves a chunk a few rows past one batch.
+#[test]
+fn chunks_by_rows_keep_each_chunk_within_one_batch() {
+    use crate::internal::PageDescriptor;
+    use crate::scan::builder::chunks_by_rows;
+
+    let pages: Vec<PageDescriptor> = [3u32, 5, 2, 0, 4, 9, 1, 1]
+        .iter()
+        .map(|&row_count| PageDescriptor {
+            row_count,
+            ..PageDescriptor::default()
+        })
+        .collect();
+    let rows = |chunks: &[&[PageDescriptor]]| -> Vec<u32> {
+        chunks
+            .iter()
+            .map(|c| c.iter().map(|p| p.row_count).sum())
+            .collect()
+    };
+    // The 9-row page is over the target and stands alone; every other chunk is within it.
+    assert_eq!(rows(&chunks_by_rows(&pages, 8)), vec![8, 6, 9, 2]);
+    // Every page is covered once, in order.
+    let chunks = chunks_by_rows(&pages, 8);
+    assert_eq!(chunks.iter().map(|c| c.len()).sum::<usize>(), pages.len());
+    assert_eq!(rows(&chunks_by_rows(&pages, 1)), vec![3, 5, 2, 4, 9, 1, 1]);
+    assert_eq!(rows(&chunks_by_rows(&pages, 100)), vec![25]);
+    assert!(chunks_by_rows(&[], 8).is_empty());
 }
 
 // ─── descriptors compiled only as far as a limited scan reads ───────────────

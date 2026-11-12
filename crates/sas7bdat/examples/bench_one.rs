@@ -132,7 +132,10 @@ fn main() {
         "{{\"tool\":\"sas7bdat-core\",\"seconds\":{seconds:.6},\"rows\":{rows},\"cols\":{},\"io_backend\":\"{}\",\"heap_bytes\":{},\"batches\":{},\"checksum\":{checksum}}}",
         names.len(),
         ds.io_backend(),
-        batches.iter().map(sas7bdat::OwnedColumnarBatch::heap_bytes).sum::<usize>(),
+        batches
+            .iter()
+            .map(sas7bdat::OwnedColumnarBatch::heap_bytes)
+            .sum::<usize>(),
         batches.len()
     );
     println!("{out}");
