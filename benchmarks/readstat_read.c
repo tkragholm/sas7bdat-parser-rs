@@ -7,7 +7,7 @@
  * ReadStat delivers values through callbacks. This program stores every value
  * the way a columnar reader would: numbers as doubles in one array per column,
  * strings copied into one array per column. The timed region is the parse,
- * storing included. The checksum is computed afterwards and matches the other
+ * storing included. With BENCH_CHECKSUM=1 a checksum is computed afterwards, matching the other
  * readers: numeric columns give their sum and missing count, string columns the
  * total UTF-8 length after removing trailing spaces.
  *
@@ -106,8 +106,14 @@ int main(int argc, char **argv) {
     }
     double seconds = (double)(b.tv_sec - a.tv_sec) + (double)(b.tv_nsec - a.tv_nsec) / 1e9;
 
-    printf("{\"tool\":\"readstat-c\",\"seconds\":%.6f,\"rows\":%ld,\"cols\":%d,\"checksum\":{",
+    printf("{\"tool\":\"readstat-c\",\"seconds\":%.6f,\"rows\":%ld,\"cols\":%d,\"checksum\":",
            seconds, t.nrows, t.ncols);
+    const char *want = getenv("BENCH_CHECKSUM");
+    if (!want || strcmp(want, "1") != 0) {
+        printf("null}\n");
+        return 0;
+    }
+    putchar('{');
     for (int i = 0; i < t.ncols; i++) {
         column *c = &t.cols[i];
         if (i) putchar(',');

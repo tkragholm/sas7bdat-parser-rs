@@ -3,7 +3,7 @@
 Usage: read_py.py <tool> <path>
 
 The timed region is the read call alone: imports happen first, and the checksum
-is computed after the clock stops. The checksum is per column: for numeric
+is computed after the clock stops, and only when BENCH_CHECKSUM=1. The checksum is per column: for numeric
 columns the sum and the number of missing values, for string columns the total
 UTF-8 length after removing trailing spaces. run.py compares it across readers.
 """
@@ -119,7 +119,7 @@ def main() -> None:
                 "seconds": seconds,
                 "rows": rows,
                 "cols": cols,
-                "checksum": checksum(df),
+                "checksum": checksum(df) if os.environ.get("BENCH_CHECKSUM") == "1" else None,
             }
         )
     )

@@ -4,8 +4,8 @@
 //! Usage: `bench_one <path> [threads]`. Without `threads` the scan uses the
 //! default parallelism; `1` reads on one thread.
 //!
-//! The timed region is opening the file and collecting every batch. The checksum is
-//! computed afterwards and matches `benchmarks/read_py.py`: numeric columns give their
+//! The timed region is opening the file and collecting every batch. With
+//! `BENCH_CHECKSUM=1` a checksum is computed afterwards, matching `benchmarks/read_py.py`: numeric columns give their
 //! sum and missing count, string columns the total UTF-8 length after removing trailing
 //! spaces. Date, datetime and time columns are left out.
 #![allow(clippy::cast_precision_loss)]
@@ -94,31 +94,34 @@ fn main() {
     let seconds = start.elapsed().as_secs_f64();
 
     let names: Vec<&str> = ds.columns().iter().map(|c| c.name.trim_end()).collect();
-    let mut sums: Vec<Option<Sum>> = names.iter().map(|_| None).collect();
-    let mut rows = 0usize;
-    for b in &batches {
-        rows += b.row_count;
-        for (col, acc) in b.columns.iter().zip(sums.iter_mut()) {
-            add(col, acc);
+    let rows: usize = batches.iter().map(|b| b.row_count).sum();
+    let checksum = if std::env::var("BENCH_CHECKSUM").is_ok_and(|v| v == "1") {
+        let mut sums: Vec<Option<Sum>> = names.iter().map(|_| None).collect();
+        for b in &batches {
+            for (col, acc) in b.columns.iter().zip(sums.iter_mut()) {
+                add(col, acc);
+            }
         }
-    }
-
-    let mut checksum = String::new();
-    for (name, sum) in names.iter().zip(&sums) {
-        let entry = match sum {
-            Some(Sum::Num(s, n)) => format!("\"{name}\":[\"num\",{s:e},{n}]"),
-            Some(Sum::Str(t)) => format!("\"{name}\":[\"str\",{t}]"),
-            None => continue,
-        };
-        if !checksum.is_empty() {
-            checksum.push(',');
+        let mut entries = String::new();
+        for (name, sum) in names.iter().zip(&sums) {
+            let entry = match sum {
+                Some(Sum::Num(s, n)) => format!("\"{name}\":[\"num\",{s:e},{n}]"),
+                Some(Sum::Str(t)) => format!("\"{name}\":[\"str\",{t}]"),
+                None => continue,
+            };
+            if !entries.is_empty() {
+                entries.push(',');
+            }
+            entries.push_str(&entry);
         }
-        checksum.push_str(&entry);
-    }
+        format!("{{{entries}}}")
+    } else {
+        "null".to_owned()
+    };
     let mut out = String::new();
     let _ = write!(
         out,
-        "{{\"tool\":\"sas7bdat-core\",\"seconds\":{seconds:.6},\"rows\":{rows},\"cols\":{},\"checksum\":{{{checksum}}}}}",
+        "{{\"tool\":\"sas7bdat-core\",\"seconds\":{seconds:.6},\"rows\":{rows},\"cols\":{},\"checksum\":{checksum}}}",
         names.len()
     );
     println!("{out}");

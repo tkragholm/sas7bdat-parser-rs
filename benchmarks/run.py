@@ -237,7 +237,8 @@ def warm(path: Path) -> None:
                 pass
 
 
-def _run_group(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
+def _run_group(cmd: list[str], timeout: float,
+               env: dict | None = None) -> subprocess.CompletedProcess:
     """Run cmd in its own process group, and kill the whole group if interrupted.
 
     A reader can start processes of its own (Rscript starts R, pyreadstat workers),
@@ -245,6 +246,7 @@ def _run_group(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
     measurement.
     """
     popen = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             env=env,
                              start_new_session=not WINDOWS)
     try:
         out, err = popen.communicate(timeout=timeout)
@@ -265,7 +267,7 @@ def _stop(signum, frame):
     raise KeyboardInterrupt
 
 
-def run_one(tool: str, path: Path, scratch: Path) -> dict:
+def run_one(tool: str, path: Path, scratch: Path, checksum: bool = False) -> dict:
     group, build = TOOLS[tool]
     if tool == "sas7bdat-cli-csv":
         out = scratch / "ours.csv"
@@ -286,7 +288,8 @@ def run_one(tool: str, path: Path, scratch: Path) -> dict:
         cmd = build(path)
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
     others, _ = other_cpu()
-    proc = _run_group([sys.executable, str(MEASURE), *cmd], timeout=1800)
+    env = dict(os.environ, BENCH_CHECKSUM="1" if checksum else "0")
+    proc = _run_group([sys.executable, str(MEASURE), *cmd], timeout=1800, env=env)
     lines = proc.stdout.strip().splitlines()
     measured = json.loads(lines.pop()[len("MEASURE "):]) if lines and lines[-1].startswith(
         "MEASURE ") else {"wall_s": None, "peak_rss_bytes": None, "returncode": proc.returncode}
@@ -434,8 +437,10 @@ def summarise(rows: list[dict], files: list[str], tools: list[str]) -> str:
             reads = sorted(r["read_s"] for r in runs)
             q = statistics.quantiles(reads, n=4) if len(reads) > 1 else [reads[0]] * 3
             med = statistics.median(reads)
-            wall = statistics.median(r["wall_s"] for r in runs)
-            rss = [r["peak_rss_mb"] for r in runs if r["peak_rss_mb"] is not None]
+            # Process time and memory from the runs that did not compute a checksum.
+            clean = [r for r in runs if not r.get("checksummed")] or runs
+            wall = statistics.median(r["wall_s"] for r in clean)
+            rss = [r["peak_rss_mb"] for r in clean if r["peak_rss_mb"] is not None]
             rss_cell = f"{statistics.median(rss):.0f}" if rss else "n/a"
             lines.append(
                 f"| {f} | {t} | {med:.3f} | {q[2] - q[0]:.3f} | {wall:.3f} | "
@@ -519,7 +524,7 @@ def main() -> None:
         total, busiest = other_cpu()
         calm = calm + 1 if total <= args.max_other_cpu else 0
         if calm < 3:
-            if time.monotonic() > deadline:
+            if calm == 0 and time.monotonic() > deadline:
                 sys.exit(f"other processes use {total:.0f}% CPU (busiest: {busiest}); "
                          "close them, or raise --max-other-cpu or --wait-idle")
             if calm == 0:
@@ -550,7 +555,10 @@ def main() -> None:
                     continue
                 warm(path)
                 for rep, t in todo:
-                    row = run_one(t, path, scratch)
+                    # Only the first repetition computes the checksum, so the other
+                    # nine measure process time and peak memory without it.
+                    row = run_one(t, path, scratch, checksum=rep == 0)
+                    row["checksummed"] = rep == 0
                     row.update(file=f, rep=rep, session=session,
                                at=dt.datetime.now().astimezone().isoformat(timespec="seconds"))
                     append_jsonl(runs_path, row)
@@ -562,7 +570,7 @@ def main() -> None:
 
     rows = read_jsonl(runs_path)
     fields = ["file", "rep", "tool", "group", "ok", "read_s", "wall_s", "peak_rss_mb",
-              "rows", "cols", "load1", "other_cpu", "session", "at"]
+              "rows", "cols", "load1", "other_cpu", "checksummed", "session", "at"]
     with (out_dir / "runs.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
@@ -573,15 +581,15 @@ def main() -> None:
               "(`sas7bdat-core`).", ""]
     for f in files:
         ref = next((r for r in rows if r["file"] == f and r["tool"] == "sas7bdat-core"
-                    and r["ok"]), None)
+                    and r["ok"] and r.get("checksum") is not None), None)
         if ref is None:
             report.append(f"- {f}: no successful sas7bdat-core run to compare against")
             continue
         for t in tools:
             if t == "sas7bdat-core":
                 continue
-            other = next((r for r in rows if r["file"] == f and r["tool"] == t and r["ok"]),
-                         None)
+            other = next((r for r in rows if r["file"] == f and r["tool"] == t and r["ok"]
+                          and (r.get("checksum") is not None or r["group"] == "csv")), None)
             if other is None:
                 report.append(f"- {f} / {t}: no successful run")
                 continue
@@ -594,7 +602,9 @@ def main() -> None:
 
     n_sessions = len({r["session"] for r in rows})
     header = (f"{reps} repetitions per tool and file, recorded in {n_sessions} "
-              f"session{'s' if n_sessions > 1 else ''}; see sessions.jsonl.\n\n")
+              f"session{'s' if n_sessions > 1 else ''}; see sessions.jsonl. Read time is the "
+              "median of all repetitions; process time and peak memory are from the "
+              "repetitions that did not compute the correctness checksum.\n\n")
     complete = all(any(r["file"] == f and r["rep"] == rep and r["tool"] == t for r in rows)
                    for f in files for rep in range(reps) for t in tools)
     if not complete:
