@@ -19,23 +19,17 @@ CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --t
 # resolves the published crate instead. `rust/` is also where the vendored
 # dependencies land, so everything cargo reads stays in one place.
 #
-# There is deliberately no `rust-toolchain.toml` in this package. It used to pin an
-# exact nightly, because the core needed `#![feature(portable_simd)]`; since the core
-# moved to `fearless_simd` it builds on stable, and the pin became both unnecessary
-# and actively harmful — rustup would try to *download* the pinned toolchain, which a
-# CRAN build machine cannot do. With no pin, a tarball uses whatever rustc is
-# installed, and inside the repository the root pin still applies.
+# There is deliberately no `rust-toolchain.toml` in this package. A pin would make
+# rustup try to download the pinned toolchain, which a CRAN build machine cannot do.
+# Without one, a tarball uses whatever rustc is installed, and inside the repository
+# the root pin still applies.
 
 $(SHLIB): $(STATLIB)
 
-# FORCE, not a bare rule. Without it make treats an existing `libfastsas.a` as up
-# to date — it has no prerequisites, so nothing tells make the Rust sources
-# changed — and silently links the stale archive. That is invisible for a staged
-# or tarball install (which always starts from an empty target dir) but wrong for
-# the in-place `R CMD INSTALL --no-staged-install crates/r-plugin` this repo uses
-# for local development: every edit under src/rust would be ignored until someone
-# ran `make clean`. Cargo already does its own up-to-date check, and a no-op
-# `cargo build` costs milliseconds, so deferring to it is both correct and cheap.
+# FORCE, not a bare rule. A rule with no prerequisites leaves an existing
+# `libfastsas.a` looking up to date, so make would link a stale archive after an
+# edit under `src/rust` in an in-place `R CMD INSTALL --no-staged-install`.
+# Cargo does its own up-to-date check, and a no-op `cargo build` costs milliseconds.
 #
 # The vendor step is what makes an offline build possible. CRAN builds with no
 # network, so a released tarball carries every dependency's source in

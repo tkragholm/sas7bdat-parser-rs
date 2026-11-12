@@ -16,10 +16,9 @@
 # source. A tarball has no patch and must resolve the published crates instead.
 #
 # That resolution is committed, as `src/rust/vendor.lock`, and reused: the vendored
-# set, and so `inst/AUTHORS`, then change only when someone asks. Before it was
-# committed every run resolved afresh against crates.io, and the CI check that
-# `inst/AUTHORS` is current went red whenever any transitive crate published a
-# patch release, with nothing in the package changed. Pass `--refresh` to resolve
+# set, and so `inst/AUTHORS`, then change only when someone asks. Resolving afresh
+# on every run would turn the CI check that `inst/AUTHORS` is current red whenever
+# any transitive crate published a patch release. Pass `--refresh` to resolve
 # again and rewrite the lock (after a core release, or to pick up dependency
 # updates on purpose); a manifest that has moved past the committed lock fails
 # with cargo's own message and the same advice.
@@ -56,7 +55,7 @@ trap 'rm -rf "$staging"' EXIT
 
 # Staged outside the repository on purpose: anywhere inside it, cargo would walk up
 # and find `src/.cargo/config.toml`, re-apply the patch, and vendor this working tree
-# instead of the published crates — the opposite of what a tarball needs.
+# instead of the published crates, which is the opposite of what a tarball needs.
 cp "$crate_dir/Cargo.toml" "$staging/Cargo.toml"
 mkdir -p "$staging/src"
 cp -R "$crate_dir/src/." "$staging/src/"
@@ -111,14 +110,14 @@ echo "  $(grep -c '^  Licence:' "$repo/crates/$pkg/inst/AUTHORS") crates listed"
 echo "==> packing"
 # `Cargo.lock` rides along so the offline build resolves exactly what was verified.
 #
-# COPYFILE_DISABLE is load-bearing on macOS. Every file here carries a
+# COPYFILE_DISABLE is required on macOS. Every file here carries a
 # `com.apple.provenance` xattr, and macOS's bsdtar stores xattrs as AppleDouble
-# members — which its *own* `tar tf` then hides, because it merges them back on read.
-# So the archive looks clean on the machine that made it, and unpacks on Linux with a
-# `._`-prefixed junk file beside every real one: 4195 of them, last measured. That is
-# not cosmetic. `zstd-sys`'s build script compiles every `.c` it finds in the zstd
-# source tree, finds `._debug.c`, and dies on `stray '\5' in program`. A release cut
-# from a Mac would fail on every CRAN build machine and pass every local test.
+# members, which its own `tar tf` hides because it merges them back on read. The
+# archive looks clean on the machine that made it, and unpacks on Linux with a
+# `._`-prefixed junk file beside every real one (4195 of them). `zstd-sys`'s build
+# script compiles every `.c` it finds in the zstd source tree, finds `._debug.c`,
+# and fails on `stray '\5' in program`. Without the variable, a release cut from a
+# Mac fails on every CRAN build machine and passes every local test.
 COPYFILE_DISABLE=1 tar cf - vendor Cargo.lock | xz -9e -T0 > "$crate_dir/vendor.tar.xz"
 
 # Verified by reading the raw member names out of the stream rather than with

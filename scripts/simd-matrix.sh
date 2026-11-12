@@ -73,11 +73,10 @@ for cpu in "${CPUS[@]}"; do
 done
 
 echo
-# Stamp the CPU into the table. GitHub's runner pool is heterogeneous — sweeps of
-# this repo have landed on EPYC 7763 (no AVX-512), EPYC 9V74 and Xeon Platinum 8573C
-# — and which one you get changes the answer. Only compare figures *within* one
-# table; comparing a number here against a number from another run compares CPUs as
-# much as code.
+# Stamp the CPU into the table. GitHub's runner pool is heterogeneous (AVX-512 and
+# AVX2-only parts both occur), and which one you get changes the answer. Only compare
+# figures within one table; comparing a number here against a number from another
+# run compares CPUs as much as code.
 cpu=$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null \
       || sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)
 echo "=== throughput, GiB/s (higher is better) — $cpu ==="

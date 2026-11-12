@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Report what is missing on this machine before it wastes an afternoon.
 
-Every check here exists because its absence cost real time once, and because the
-symptom pointed somewhere else:
+Every check here covers a gap whose symptom points somewhere else:
 
   * No `.venv`, and maturin says "could not determine version from interpreter name".
   * `fixtures/ahs2013n.sas7bdat` absent, and 26 plugin tests skip. Nothing else says so.
   * R packages never installed, so `just test-r` looks like a compile failure.
   * The version couplings drift, and the first sign is a `--locked` lockfile error in
     CI pointing nowhere near the version that moved.
-  * CI on main has been red since a release, and nobody looks until the next one.
+  * CI on main is red after a release, and nobody looks until the next one.
 
 Read-only. It never installs or edits anything; each finding names the command that
 would fix it.

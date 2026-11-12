@@ -247,10 +247,9 @@ DATETIME_FIXTURE = (
 
 
 def test_datetime_columns_are_microsecond_and_stack_across_batches(tmp_path):
-    # Regression: datetime columns were declared Datetime('us') but materialized as
-    # Datetime('ms') (Timestamp(Second) -> ms), so the declared and actual units
-    # disagreed and Polars refused to stack batches with a SchemaError. Sub-second
-    # values were additionally widened to a raw-seconds F64 and decoded as garbage.
+    # Datetime columns must be declared and materialized as Datetime('us'). If the
+    # two units disagree, Polars refuses to stack batches with a SchemaError.
+    # Sub-second values must stay datetimes rather than a raw-seconds F64.
     import datetime as dt
 
     if not DATETIME_FIXTURE.exists():
@@ -272,7 +271,7 @@ def test_datetime_columns_are_microsecond_and_stack_across_batches(tmp_path):
     # Exact value (cross-checked against pyreadstat / ReadStat), incl. sub-second.
     assert df["DATETIME"][0] == dt.datetime(2013, 3, 17, 19, 53, 1, 321000)
 
-    # The exact pipeline path that used to raise SchemaError("ms" != "us").
+    # Stacking two scans and sinking them needs equal declared and actual units.
     out = tmp_path / "concat.parquet"
     pl.concat(
         [sp.scan_sas(str(DATETIME_FIXTURE)), sp.scan_sas(str(DATETIME_FIXTURE))],

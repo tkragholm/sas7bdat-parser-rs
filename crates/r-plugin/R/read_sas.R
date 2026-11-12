@@ -97,10 +97,6 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
 #' @export
 read_sas <- read_sas7bdat
 
-# Validate before crossing into Rust, so the message names the argument the
-# caller actually passed. `path.expand()` reports every bad value as "invalid
-# 'path' argument" regardless of which argument it came from, which made a bad
-# `catalog` look like a bad `path`.
 # `threads` reaches Rust as an integer, so reject the values R would otherwise
 # coerce silently: 0, negatives, fractions and NA all mean something the reader
 # cannot act on.
@@ -116,6 +112,9 @@ check_threads <- function(value) {
   as.integer(value)
 }
 
+# Validate before crossing into Rust, so the message names the argument the
+# caller actually passed. `path.expand()` reports every bad value as "invalid
+# 'path' argument" regardless of which argument it came from.
 check_path <- function(value, arg) {
   if (!is.character(value) || length(value) != 1L || is.na(value)) {
     stop("`", arg, "` must be a single file path, not ",

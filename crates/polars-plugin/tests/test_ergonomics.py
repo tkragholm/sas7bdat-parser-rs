@@ -44,7 +44,7 @@ def test_scan_sas_columns_and_n_rows(some_columns):
 
 
 def test_scan_sas_backward_compatible():
-    # The pre-existing positional call must still return a full LazyFrame.
+    # The positional call returns a full LazyFrame.
     lf = sp.scan_sas(str(FIXTURE))
     assert isinstance(lf, pl.LazyFrame)
     assert lf.collect_schema().len() > 3

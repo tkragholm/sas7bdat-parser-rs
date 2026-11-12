@@ -5,7 +5,7 @@
 //! what a failure should look like to a human. Callers that want those things get
 //! them through [`ConvertObserver`] and by rendering the returned outcomes.
 //!
-//! Two properties matter more than the API shape and are easy to lose in a rewrite:
+//! Two properties matter more than the API shape:
 //!
 //! * **No output is written in place.** Each file is converted to a staging path and
 //!   moved over the destination only once it is complete, so an interrupted run

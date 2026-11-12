@@ -1,9 +1,9 @@
 """Make a fixture-shaped hole in this suite impossible to mistake for a pass.
 
 Most tests here open with `assert FIXTURE.exists()` against a corpus file that is
-not in git (see `fixtures/README.md`). Without it they do not fail for any reason
-to do with the plugin, and 21 of 24 failing on a missing path reads, at a glance,
-like the plugin is broken. Skipping them silently is worse: `3 passed` looks green.
+not in git (see `fixtures/README.md`). Without it they fail for a reason that has
+nothing to do with the plugin, which reads at a glance like the plugin is broken.
+Skipping them silently is worse: `3 passed` looks green.
 
 So: skip them with the reason attached, and print a banner naming the file and the
 count. `just doctor` reports the same gap before you get here.

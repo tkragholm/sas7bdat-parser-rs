@@ -125,7 +125,7 @@ fn closest_column(name: &str, dataset: &Dataset) -> Option<String> {
         .map(|column| column.name.trim_end().to_owned())
         .filter_map(|column| {
             let distance = levenshtein(&target, &column.to_ascii_lowercase());
-            // Only suggest when the names are genuinely close.
+            // Only suggest when the names are close.
             let threshold = (column.chars().count() / 2).max(2);
             (distance <= threshold).then_some((distance, column))
         })

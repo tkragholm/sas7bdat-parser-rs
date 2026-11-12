@@ -10,9 +10,9 @@
 # and `sas7bdat-polars` are `publish = false` and ship as wheels instead.
 #
 # Publishing is irreversible: crates.io has no unpublish, only `cargo yank`, which
-# hides a version without removing it. Everything below is arranged around that —
-# the version is cross-checked against the tag, the suite has to pass on the tagged
-# commit, and a dry run has to package and compile before the real upload.
+# hides a version without removing it. So the version is cross-checked against the
+# tag, the suite has to pass on the tagged commit, and a dry run has to package
+# and compile before the real upload.
 name: release-crate
 
 on:
@@ -90,9 +90,9 @@ jobs:
       # have settings, so the first upload is always by hand — and the tag that
       # records it would otherwise land as a permanent red run.
       #
-      # What this gives up: a genuinely mistaken re-tag now passes quietly instead of
-      # loudly. It cannot publish anything wrong either way — crates.io rejects a
-      # duplicate version regardless — so the cost is a missing signal, not a missing
+      # What this gives up: a mistaken re-tag passes quietly instead of loudly. It
+      # cannot publish anything wrong either way, because crates.io rejects a
+      # duplicate version regardless. The cost is a missing signal, not a missing
       # safeguard.
       #
       # Queried against the sparse index rather than the REST API: the index is a
@@ -138,10 +138,9 @@ jobs:
       # short-lived publishing token. Without it the auth step cannot run.
       id-token: write
       # `write`, not `read`: the last step drafts a GitHub release, which the API
-      # refuses with `403 Resource not accessible by integration` under `read`. That
-      # failed *after* 0.8.0 had already gone to crates.io — the upload is the
-      # irreversible part and it had succeeded, so the red run was only a missing
-      # draft, but it made a successful publish look like a failed one.
+      # refuses with `403 Resource not accessible by integration` under `read`. The
+      # crate is already on crates.io by then, so a refusal would only make a
+      # successful publish look like a failed one.
       contents: write
     steps:
       - uses: actions/checkout@v6
@@ -149,18 +148,18 @@ jobs:
       - name: Show toolchain
         run: rustup show && cargo --version
 
-      # `save-if: false` is about the *post* step, not the cache. `cargo publish
+      # `save-if: false` is about the post step, not the cache. `cargo publish
       # --dry-run` below leaves an unpacked copy of the crate at
       # `target/package/<crate>-<version>/`, and rust-cache's cleanup walks the target
-      # tree treating each subdirectory as a build profile -- so it takes that copy's
-      # `tests/` for one and looks for `tests/target` and `tests/trybuild`, trybuild's
-      # output directories, which this crate has never had. Its guard around that is
+      # tree treating each subdirectory as a build profile. It takes that copy's
+      # `tests/` for one and looks for `tests/target` and `tests/trybuild`, which this
+      # crate does not have. Its guard around that is
       # `try { cleanTargetDir(..) } catch {}` with no `await`, so the rejection escapes
-      # a synchronous catch and Actions renders it at failure level. The 0.8.1 release
-      # published cleanly and still carried four red annotations.
+      # a synchronous catch and Actions renders it as a failure-level annotation on an
+      # otherwise green run.
       #
       # Skipping the save returns before any of that cleanup runs. The restore still
-      # happens, and saving a tag build's target directory was worth little anyway:
+      # happens, and saving a tag build's target directory is worth little because
       # this job runs once per release.
       - uses: Swatinem/rust-cache@v2
         with:
@@ -184,12 +183,11 @@ jobs:
       - name: Package and verify
         run: cargo publish --dry-run --locked -p ${{ needs.check.outputs.crate }}
 
-      # `**` matters: cargo used to leave the archive in `target/package/`, and now
-      # writes it to `target/package/tmp-crate/`. A glob pinned to the old location
-      # silently matched nothing, and because this step runs before the upload — so
-      # that the artifact survives a failed publish — `if-no-files-found: error`
-      # turned that into a failed release rather than a missing attachment. Keep the
-      # recursive glob so it works either way.
+      # `**` is needed because cargo versions differ in where they leave the archive:
+      # `target/package/` or `target/package/tmp-crate/`. A glob pinned to one location
+      # would match nothing, and because this step runs before the upload (so that the
+      # artifact survives a failed publish), `if-no-files-found: error` would fail the
+      # release. The recursive glob works for both.
       - name: Upload the packaged crate as a build artifact
         uses: actions/upload-artifact@v6
         with:

@@ -18,11 +18,9 @@ classifiers = [
 
 # pytest walks UP from the tests it is given until it finds a file with this
 # table, and takes that directory as rootdir and that table as configuration.
-# This repository is checked out inside another project's tree (the register
-# pipeline vendors it under `checkouts/`), whose pyproject asks for xdist workers
-# and a timeout plugin; without a table here, the plugin's tests inherited both
-# and printed "unknown config option" on every run. Present, this table ends the
-# walk at this directory, whatever is above it.
+# A checkout nested inside another project's tree would otherwise pick up that
+# project's pytest configuration. This table ends the walk at this directory,
+# whatever is above it.
 [tool.pytest.ini_options]
 testpaths = ["crates/polars-plugin/tests"]
 
@@ -30,8 +28,8 @@ testpaths = ["crates/polars-plugin/tests"]
 bindings = "bin"
 manifest-path = "crates/sas7bdat-cli/Cargo.toml"
 # maturin has no `--bin` filter: a `bindings = "bin"` build packages every binary
-# the cargo build produced. (`cargo-extra-args` is not a maturin 1.x key — it was
-# accepted silently and ignored, so this wheel used to ship all four binaries.)
+# the cargo build produced. `cargo-extra-args` is not a maturin 1.x key and is
+# ignored silently.
 # The single binary is selected through the crate's feature gates instead.
 no-default-features = true
 features = ["dir-mapper"]

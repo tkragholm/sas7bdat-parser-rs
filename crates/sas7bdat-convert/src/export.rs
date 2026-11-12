@@ -115,11 +115,11 @@ const MIN_ROWS_TO_SAMPLE: u64 = CARDINALITY_SAMPLE_ROWS * 4;
 /// losers being survey data, where categorical codes are stored as doubles and the dictionary
 /// is doing exactly its job.
 ///
-/// So the decision is per column and, more importantly, asymmetric. The two ways to be wrong
+/// So the decision is per column and asymmetric. The two ways to be wrong
 /// are not equally bad:
 ///
 /// - Leaving the dictionary on for a column that turns out to be high-cardinality costs what
-///   the current code already costs. Parquet spills and falls back. No regression.
+///   what an unsampled conversion costs. Parquet spills and falls back.
 /// - Turning it off for a column that is really low-cardinality throws away the compression
 ///   that made those 6 fixtures smaller. That is the expensive mistake.
 ///
@@ -128,7 +128,7 @@ const MIN_ROWS_TO_SAMPLE: u64 = CARDINALITY_SAMPLE_ROWS * 4;
 /// a sample and still be low-cardinality. The converse does not hold: a low ratio in the
 /// first rows says nothing, because the file may be sorted or clustered. So the rule only
 /// ever fires on the direction the evidence supports, and every uncertain column keeps
-/// today's behaviour.
+/// its dictionary.
 fn high_cardinality_columns(dataset: &Dataset, options: &ScanOptions<'_>) -> Vec<String> {
     if dataset.metadata().row_count < MIN_ROWS_TO_SAMPLE {
         return Vec::new();
@@ -173,7 +173,7 @@ fn high_cardinality_columns(dataset: &Dataset, options: &ScanOptions<'_>) -> Vec
         });
 
     // A failed sample is not a failed conversion: fall back to leaving every dictionary on,
-    // which is what the converter did before this existed.
+    // which is the same as not sampling.
     if scanned.is_err() || rows == 0 {
         return Vec::new();
     }
@@ -197,12 +197,12 @@ fn high_cardinality_columns(dataset: &Dataset, options: &ScanOptions<'_>) -> Vec
 /// Hash of one cell's value, or `None` for null.
 ///
 /// A hash rather than the value itself: keying a `HashSet` on the cell would allocate a
-/// `String` for every string cell, and at millions of sampled cells that allocation was the
-/// sampler's dominant cost. Hashing reads the bytes in place.
+/// `String` for every string cell, and at millions of sampled cells that allocation would
+/// dominate the sampler's cost. Hashing reads the bytes in place.
 ///
 /// A collision merges two distinct values into one, which can only lower a column's distinct
 /// count and so only make the check *less* likely to fire. That is the safe direction: the
-/// cost of missing a high-cardinality column is today's behaviour, while wrongly firing on a
+/// cost of missing a high-cardinality column is a spill and fallback, while wrongly firing on a
 /// low-cardinality one would throw away real compression.
 ///
 /// Floats are hashed by their bits, which is what the dictionary itself keys on.
@@ -388,7 +388,7 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         )?;
         // No Arrow conversion here on purpose. This closure runs on the scan's collector
         // thread -- the single thread that sees every batch in file order -- so work placed
-        // here is serial however wide the rest of the pipeline is. The conversion now happens
+        // here is serial however wide the rest of the pipeline is. The conversion happens
         // inside the encode task; see `parquet_pipeline::convert_batches`.
         let stats = scan.visit_owned_batches(|batch| {
             pipeline
@@ -403,7 +403,7 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
     // Owned batches rather than `visit_arrow_batches`: the borrowed-batch scan has no
     // parallel branch, so it decodes on one core and — for a path source — reads one page at
     // a time. The owned path streams extents through the parallel decoder and converts here,
-    // which is the same Arrow conversion `visit_arrow_batches` would have done.
+    // which is the same Arrow conversion `visit_arrow_batches` does.
     let stats = scan.visit_owned_batches(|batch| {
         let record_batch = batch.into_arrow_record_batch(SchemaRef::clone(&batch_schema))?;
         writer
@@ -558,7 +558,7 @@ fn apply_catalog_metadata(
 ///
 /// `fields` and `columns` are paired **positionally**, so `columns` MUST already be in output
 /// order (use [`written_columns`]) — not raw dataset order. Pairing by field position against
-/// raw dataset columns is exactly the projection bug this indirection prevents.
+/// raw dataset columns would attach labels to the wrong fields under projection.
 fn attach_value_labels<'a>(
     fields: &Fields,
     columns: &[&ColumnMeta],

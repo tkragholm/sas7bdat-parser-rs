@@ -15,10 +15,9 @@ Run 'sas7bdat <command> --help' for the full options of a command.";
 
 /// `--version` output: this CLI's version, and the `sas7bdat` reader compiled into it.
 ///
-/// The two are separate version lines whose numbers look alike -- the 0.8.0 wheel of
-/// this CLI carried the reader at 0.6.0 -- so which reader you have is not something
-/// the wheel version tells you. `clap::builder::Str` holds a `&'static str`, hence the
-/// static rather than a `format!` in the attribute.
+/// The CLI and the reader have separate version lines, so the CLI version does not say which
+/// reader is compiled in. `clap::builder::Str` holds a `&'static str`, hence the static
+/// rather than a `format!` in the attribute.
 static LONG_VERSION: LazyLock<String> = LazyLock::new(|| {
     format!(
         "{} (sas7bdat core {})",
@@ -325,7 +324,7 @@ pub enum ProgressMode {
 ///
 /// Mirrors [`IoBackendPreference`] one-for-one. It exists only because `ValueEnum` cannot be
 /// derived for a type from another crate, and deriving it in the core would put clap in the
-/// library's dependency tree — so this stays a wrapper rather than becoming the real enum.
+/// library's dependency tree.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default, ValueEnum)]
 pub enum IoBackend {
     /// Memory-map local files; read network shares sequentially (default).

@@ -1,9 +1,9 @@
-"""The import-time polars check: a clear error where the export hooks would fault.
+"""The import-time polars check: a clear error outside the tested polars range.
 
-The extension hands Series to polars through private hooks, so a polars outside
-the range the wheel was tested against can crash rather than raise. These tests
-pin the check that turns that into an ``ImportError`` naming both versions, and
-the parser of the specifier it reads from the package's own metadata.
+A polars outside the range the wheel was tested against may break the public
+constructors the package builds on. These tests pin the check that turns that
+into an ``ImportError`` naming both versions, and the parser of the specifier it
+reads from the package's own metadata.
 """
 
 from __future__ import annotations

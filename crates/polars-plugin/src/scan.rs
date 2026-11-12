@@ -167,15 +167,15 @@ fn scan_workers() -> usize {
 
 /// Rows per batch when the caller names none.
 ///
-/// Three costs, measured on 7 September 2026 on a twelve-core machine. Every
-/// batch crossing into Python pays a fixed import price, about 70
-/// microseconds, so a narrow 1.7-million-row register file at the core's own
+/// Three costs, measured on a twelve-core machine. Every batch crossing into
+/// Python pays a fixed import price, about 70 microseconds, so a narrow
+/// 1.7-million-row file at the core's own
 /// 4,096-row default made 430 batches and spent a third of a full read on
 /// them. The core decodes batches in parallel, one per worker, so a wide
 /// 84,000-row survey file at 65,536 rows a batch used three cores and read
 /// three times slower. And each worker holds the batch it is decoding, so
 /// memory in flight is workers times batch bytes: at 8 MB a batch the
-/// twelve workers held 114 MB over a single one, and the analysis server has
+/// twelve workers held 114 MB over a single one, and a large server may have
 /// ninety-six.
 ///
 /// So: a budget of 64 MB of decoded rows in flight, shared out per worker and
@@ -378,11 +378,12 @@ fn run_scan(
 ///
 /// Why views: polars converts an imported `Utf8` array into views anyway, and
 /// for a column with any string over twelve bytes it keeps the whole imported
-/// allocation alive behind the result, offsets and validity included: measured
-/// 7 September 2026, 74 MB more resident on a 1.7-million-row register file
-/// and a full read a quarter slower. Why from the scanner's buffer rather than
-/// from the core's `Utf8` array: that array's construction narrows and checks
-/// the offsets and validates the bytes, and views need one pass, not three.
+/// allocation alive behind the result, offsets and validity included: 74 MB
+/// more resident on a 1.7-million-row file, and a full read a quarter slower.
+///
+/// Why from the scanner's buffer rather than from the core's `Utf8` array: that
+/// array's construction narrows and checks the offsets and validates the bytes,
+/// and views need one pass, not three.
 ///
 /// The buffer is validated as UTF-8 as a whole and every offset checked to be
 /// a character boundary, which together are what a per-string check would

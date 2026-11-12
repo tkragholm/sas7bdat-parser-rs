@@ -6,15 +6,14 @@ STATLIB = $(LIBDIR)/libfastsasconvert.a
 # of `-Wl,-x`, `-Wl,-S`, `-Wl,--gc-sections` and `-Wl,-dead_strip` the platform's
 # linker actually accepts, and writes `Makevars`. Edit this file, never that one.
 #
-# Discarding local symbols at link time is where this package's installed size comes
-# down — 8.15 MB to 4.07 MB on macOS, and from over to under the 5 MB that
-# `R CMD check` NOTEs on Linux. It has to happen here rather than in cargo's profile:
-# `-Cstrip` runs at link time and a `staticlib` never links, so setting `strip` in
-# `rust/Cargo.toml` is silently a no-op (measured: 368 bytes of 5.2 MB).
+# Discarding local symbols at link time brings this package's installed size from
+# 8.15 MB to 4.07 MB on macOS, and from over to under the 5 MB that `R CMD check`
+# NOTEs on Linux. It has to happen here rather than in cargo's profile: `-Cstrip`
+# runs at link time and a `staticlib` never links, so setting `strip` in
+# `rust/Cargo.toml` has no effect (368 bytes of 5.2 MB).
 #
-# Only locals are discarded, so the exported entry points are unaffected;
-# `R_init_fastsasconvert` and the extendr metadata symbol were checked afterwards on
-# both ELF and Mach-O.
+# Only locals are discarded, so the exported entry points (`R_init_fastsasconvert`
+# and the extendr metadata symbol) are unaffected on both ELF and Mach-O.
 PKG_LIBS = -L$(LIBDIR) -lfastsasconvert @STRIP_FLAGS@
 
 CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
@@ -27,18 +26,16 @@ CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --t
 # also where the vendored dependencies land (below), so everything cargo reads stays
 # in one place.
 #
-# There is deliberately no `rust-toolchain.toml` in this package. It used to pin an
-# exact nightly, because the core needed `#![feature(portable_simd)]`; since the core
-# moved to `fearless_simd` it builds on stable, and the pin became both unnecessary
-# and actively harmful — rustup would try to *download* the pinned toolchain, which a
-# CRAN build machine cannot do. With no pin, a tarball uses whatever rustc is
-# installed, and inside the repository the root pin still applies.
+# There is deliberately no `rust-toolchain.toml` in this package. A pin would make
+# rustup try to download the pinned toolchain, which a CRAN build machine cannot do.
+# Without one, a tarball uses whatever rustc is installed, and inside the repository
+# the root pin still applies.
 
 $(SHLIB): $(STATLIB)
 
-# FORCE, not a bare rule. Without it make treats an existing archive as up to date
-# — it has no prerequisites, so nothing tells make the Rust sources changed — and
-# silently links the stale one. Cargo already does its own up-to-date check.
+# FORCE, not a bare rule. A rule with no prerequisites leaves an existing archive
+# looking up to date, so make would link a stale one. Cargo does its own
+# up-to-date check.
 #
 # The vendor step is what makes an offline build possible. CRAN builds with no
 # network, so a released tarball carries every dependency's source in

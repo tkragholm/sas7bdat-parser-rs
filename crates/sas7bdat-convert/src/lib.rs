@@ -1,12 +1,11 @@
 //! Convert SAS7BDAT files to Parquet, CSV or TSV — one file, or a directory tree
 //! mirrored into an output root.
 //!
-//! This is the machinery behind the `sas7bdat convert` command, lifted out of the CLI
-//! so that other front ends can reach it. The immediate second caller is the
-//! `fastsas.convert` R package, which needs conversion to happen entirely in Rust:
-//! the files it is pointed at are far too large to pass through an R session.
+//! This is the machinery behind the `sas7bdat convert` command, shared by the CLI and the
+//! `fastsas.convert` R package. The R package needs conversion to happen entirely in Rust,
+//! because the files it is pointed at are far too large to pass through an R session.
 //!
-//! The split is along the UI boundary, not an arbitrary one. Everything here takes
+//! The split is along the UI boundary. Everything here takes
 //! plain options and returns plain outcomes; argument parsing, progress bars,
 //! terminal styling and reporting stay with the caller. [`ConvertOptions`] is
 //! deliberately a struct of values rather than a builder — callers construct it from

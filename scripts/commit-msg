@@ -3,9 +3,7 @@
 
 `cliff.toml` sets `conventional_commits = true` and `filter_unconventional = true`,
 so a subject that is not `type(scope): summary` never reaches CHANGELOG.md. Nothing
-fails: the entry simply is not there. Fourteen commits went in that way once,
-including five that changed what a scan returns, and it was only caught by reading
-`cliff.toml` before a release.
+fails: the entry simply is not there.
 
 The accepted types are read from `cliff.toml` rather than listed here, so this hook
 and the changelog cannot disagree. That also catches the subtler trap: a type that

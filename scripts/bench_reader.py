@@ -2,13 +2,12 @@
 """Measure the Python reader against another build of itself, and say where its
 memory goes.
 
-Two things this repository needed on 7 September 2026 and had no script for:
+Two subcommands:
 
   * `compare`: the same files read by two or three installed builds of
     `sas7bdat-polars`, each in its own interpreter, best of N over M processes.
-    That is how the Arrow-stream rewrite was judged against the plugin it
-    replaced, with the published wheel as a third column to keep the core's
-    own changes apart from the transport's.
+    A published wheel as a third build separates changes in the core from
+    changes in the transport.
   * `memory`: one build, one file, peak resident set after each stage of a
     read in a fresh process: the Rust decode alone, the batches imported and
     dropped, the frames held, the eager read, the single-stream import. The

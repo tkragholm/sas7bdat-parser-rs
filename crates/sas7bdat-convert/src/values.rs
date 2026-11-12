@@ -70,7 +70,7 @@ pub fn format_cell(cell: &CellValue<'_>, kind: LogicalType, null_repr: &str) -> 
 /// Hours are neither wrapped at 24 nor clamped. SAS stores TIME as a plain numeric, and real
 /// files carry values outside `[0, 24h)`: 359,280 seconds renders as `99:48:00`, not
 /// `03:48:00`, because wrapping would print an instant the file does not contain. In-range
-/// values are unaffected — they produce the same two-digit hour as before.
+/// values render as two-digit hours.
 ///
 /// Both cell shapes of a TIME column come through here — whole seconds arrive as
 /// [`CellValue::Time`], values with a fractional part widen to [`CellValue::Float64`] — so a
@@ -210,8 +210,8 @@ mod tests {
     }
 
     /// A SAS TIME outside `[0, 24h)` must render its real elapsed value, not a wrapped or
-    /// clamped clock. These used to collapse to `00:00:00`: `NaiveTime` has no representation
-    /// for them, and the fallback silently substituted midnight in both `head` and the CSV.
+    /// clamped clock. `NaiveTime` has no representation for them, so they need their own
+    /// formatting path.
     #[test]
     fn format_cell_renders_out_of_range_times() {
         use sas7bdat::SasTime;
@@ -224,7 +224,7 @@ mod tests {
                 "",
             )
         };
-        // 359,280s is 99h48m — the value that read back as midnight.
+        // 359,280s is 99h48m.
         assert_eq!(time(359_280), "99:48:00");
         assert_eq!(time(86_400), "24:00:00");
         // Negative offsets failed the `u32::try_from` and hit the same fallback.

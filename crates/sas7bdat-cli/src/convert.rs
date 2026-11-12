@@ -172,10 +172,10 @@ fn report(
         }
     }
 
-    // A closing line whenever the run didn't already account for itself per file. Without the
-    // `!printed_each` half, a single file converted with a progress bar — the default on a
-    // terminal, and exactly how a long benchmark run is invoked — finished with the bar erased
-    // and no total printed at all: no elapsed time, no throughput.
+    // A closing line whenever the run didn't already account for itself per file. The
+    // `!printed_each` half covers a single file converted with a progress bar (the default on
+    // a terminal), which ends with the bar erased and would otherwise show no total, elapsed
+    // time or throughput.
     if (multi || !printed_each) && !args.ui.quiet {
         let style = Style::for_stdout();
         let mark = if failures.is_empty() {
@@ -507,7 +507,7 @@ mod tests {
     }
 
     /// A multi-minute conversion of one file has to show movement, which means the scan's byte
-    /// counter has to reach the bar. The observer now arrives through the trait, so this also
+    /// counter has to reach the bar. The observer arrives through the trait, so this also
     /// covers `ProgressState` satisfying the contract `convert_tree` calls it through.
     #[test]
     fn the_file_bar_follows_bytes_read() {

@@ -22,9 +22,9 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::sync::{Arc, Mutex};
 
-/// v3: every batch crosses as an Arrow C stream; `schema_overrides` values are
-/// type names; the polars API is the Python layer. v2 added `columns=` and
-/// `schema_overrides=` on `scan_sas`, which the layer keeps.
+/// v3: every batch crosses as an Arrow C stream, `schema_overrides` values are
+/// type names, and the polars API is the Python layer. `scan_sas` takes `columns=`
+/// and `schema_overrides=`.
 const PLUGIN_CONTRACT_VERSION: &str = "sas7bdat_polars.v3";
 
 /// The capsule name the Arrow `PyCapsule` Interface specifies for a stream.
@@ -163,7 +163,7 @@ impl SasDataset {
 /// path sequentially), `mmap`, or `buffered`. From the argument, else from
 /// `SAS7BDAT_IO_BACKEND`. A mapped file counts every page it touches against
 /// the process's resident set for as long as the map lives; a buffered read
-/// holds a bounded window, which on a multi-gigabyte register file is the
+/// holds a bounded window, which on a multi-gigabyte file is the
 /// difference between a working set the size of the file and one the size of
 /// the result.
 fn open_options(io_backend: Option<&str>) -> PyResult<OpenOptions> {

@@ -14,10 +14,9 @@ Concurrency then behaves the way the real share does without being told to: N re
 each amortise their own latency, so throughput climbs with N until the bucket is the
 limit and stops climbing.
 
-This is not SMB. It reproduces the performance envelope that the reader was tuned
-against — round-trip cost, a bandwidth ceiling, and the shape of the concurrency curve —
-not the protocol. Credit accounting and the redirector's own read splitting are absent,
-so treat the absolute numbers as a model and the comparisons as the result.
+It models the performance envelope of a share (round-trip cost, a bandwidth
+ceiling, and the shape of the concurrency curve), not the SMB protocol. Credit accounting and the redirector's own read splitting
+are absent, so treat the absolute numbers as a model and the comparisons as the result.
 
   slowfs.py SRC MOUNTPOINT [latency_ms] [rate_mbytes_per_s]
 """

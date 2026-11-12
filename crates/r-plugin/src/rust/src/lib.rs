@@ -103,9 +103,9 @@ fn haven_tagged_na(tag: u8) -> f64 {
 /// * **Complement** — the one's complement of the character's ASCII code: `.` is
 ///   `0xD1`, `_` is `0xA0`, and `.A..=.Z` are `0xBE..=0xA5`.
 ///
-/// Only the ordinal spelling used to be decoded, so every complement-spelled tag
-/// silently became a plain `NA`. A census of the fixture corpus found 6.3M such
-/// cells across nine files — PIAAC's `.V`/`.N`/`.D`/`.R` scheme among them.
+/// Both spellings are decoded. Complement-spelled tags occur in real files: a census
+/// of the fixture corpus found 6.3M such cells across nine files, PIAAC's
+/// `.V`/`.N`/`.D`/`.R` scheme among them.
 ///
 /// One table decodes both because the ranges cannot collide: the complement
 /// family tops out at `0xD1`, below the ordinal family's `0xE4` floor. The
@@ -143,9 +143,8 @@ const fn build_missing_tag_table() -> [u8; 256] {
 ///
 /// Only ever called for cells the parser already flagged missing, so the NaN test
 /// here is a sanity check rather than the thing that decides missingness. It is a
-/// generic "exponent all ones, mantissa non-zero" test: the previous code demanded
-/// the exact top-16 pattern `0xFFFF`, which rejected the quiet-NaN spelling
-/// (`0x7FF8_FF..`) that some writers use.
+/// generic "exponent all ones, mantissa non-zero" test, which also accepts the
+/// quiet-NaN spelling (`0x7FF8_FF..`) that some writers use.
 fn sas_special_missing_tag(bits: u64) -> Option<u8> {
     const EXPONENT: u64 = 0x7FF0_0000_0000_0000;
     const MANTISSA: u64 = 0x000F_FFFF_FFFF_FFFF;
@@ -186,11 +185,9 @@ fn is_valid(valid: Option<&[u64]>, i: usize) -> bool {
 /// haven `tagged_na`, or plain `NA` when there is no tag to recover.
 ///
 /// Tag recovery is not restricted to non-temporal columns: `haven` tags a missing
-/// datetime just as it tags a missing number, and gating this on "plain numeric"
-/// dropped the tag from every temporal column that carries one. It is still
-/// limited to the `F64` arm below, which is not a policy choice — the typed
-/// `Date`/`DateTime`/`Time` buffers have already discarded the NaN payload the tag
-/// lives in, so there is nothing left to recover by the time they get here.
+/// datetime just as it tags a missing number. It is limited to the `F64` arm below
+/// because the typed `Date`/`DateTime`/`Time` buffers have already discarded the NaN
+/// payload the tag lives in, so there is nothing left to recover from them.
 fn fill_real_slice(dst: &mut [f64], class: RealClass, buffer: &OwnedColumnBuffer) {
     let shift = class.epoch_shift();
     let na = f64::from_bits(R_NA_REAL_BITS);
@@ -495,26 +492,24 @@ fn read_impl(
 
     // Decode all batches across cores, then fill each column's R vector in place.
     //
-    // Temporal decoding is turned OFF on purpose, which is not a loss of fidelity
-    // here — it is the opposite. The R column type comes from `logical_type`, and
-    // the epoch shift is applied during the fill (see `RealClass::epoch_shift`),
-    // so this binding never needed the core's typed `Date`/`DateTime`/`Time`
-    // buffers. What those buffers *do* cost is the SAS special-missing tag: they
-    // convert the raw double to an integer count up front, discarding the NaN
-    // payload the tag lives in, so a missing datetime reached R as a plain `NA`
-    // where `haven` gives `tagged_na`. Keeping the raw `F64` preserves the payload
-    // and also keeps sub-second values exact instead of truncating them to whole
-    // units and falling back to `F64` anyway.
-    // Decode threads only. Read concurrency is capped separately by the core (four
-    // in-flight reads), so raising this does not multiply requests against a share; what it
-    // does scale is the memory held by in-flight batches.
-    // `threads = NULL` defers to the core rather than taking every logical core, which is
-    // what it used to do. Unconditional threads is wrong at the small end: measured across
-    // the corpus, twelve of them decode `cars` 2.70x *slower* than one, and
-    // `date_format_time_loop` 1.75x slower, because the spawn and the per-chunk setup cost
-    // more than the work. `Parallelism::Auto` carries a gate calibrated on those
-    // measurements, and a single worker is not a lesser path -- it runs the same chunk decode
-    // inline and still reaches the tiled fill.
+    // Temporal decoding is turned off. The R column type comes from `logical_type`,
+    // and the epoch shift is applied during the fill (see `RealClass::epoch_shift`),
+    // so this binding does not need the core's typed `Date`/`DateTime`/`Time`
+    // buffers. Those buffers convert the raw double to an integer count up front and
+    // discard the NaN payload the SAS special-missing tag lives in, so a missing
+    // datetime would reach R as a plain `NA` where `haven` gives `tagged_na`. The raw
+    // `F64` keeps the payload and keeps sub-second values exact.
+    //
+    // `threads` is decode threads only. Read concurrency is capped separately by the
+    // core (four in-flight reads), so raising it does not multiply requests against
+    // a share. What it does scale is the memory held by in-flight batches.
+    // `threads = NULL` defers to the core rather than taking every logical core.
+    // Unconditional threads is wrong at the small end: measured across the corpus,
+    // twelve of them decode `cars` 2.70x slower than one, and
+    // `date_format_time_loop` 1.75x slower, because the spawn and the per-chunk setup
+    // cost more than the work. `Parallelism::Auto` carries a gate calibrated on those
+    // measurements, and a single worker runs the same chunk decode inline and still
+    // reaches the tiled fill.
     let parallelism = threads.map_or(Parallelism::Auto, Parallelism::Threads);
     let temporal = TemporalDecodeOptions::builder()
         .decode_dates(false)
@@ -529,13 +524,9 @@ fn read_impl(
     // collecting first, the speed coming from touching each batch's bytes while
     // they are still cache-warm from decoding.
     //
-    // (Collecting first *was* the right call while `BatchHint::Auto` produced
-    // ~200 MB batches, because the scan's in-flight window dwarfed everything the
-    // fill did. Now that a batch is capped at 32 MiB, the accumulated `Vec` is
-    // what dominates, and streaming wins.)
-    // `categorical` builds an R factor, which needs a dictionary over the *whole*
-    // column — a per-batch dictionary cannot number levels consistently. Those
-    // columns are the one thing that cannot stream, so their buffers are moved
+    // `categorical` builds an R factor, which needs a dictionary over the whole
+    // column, because a per-batch dictionary cannot number levels consistently.
+    // Those columns are the one thing that cannot stream, so their buffers are moved
     // aside as batches go by (moved, not copied) and everything else still streams.
     let wants_factor: Vec<bool> = metas
         .iter()
@@ -724,7 +715,7 @@ mod tests {
     #[test]
     fn the_quiet_nan_spelling_is_accepted() {
         // `many_columns.sas7bdat` writes `._` as a quiet NaN rather than the
-        // signalling form; the old top-16 == 0xFFFF gate dropped it.
+        // signalling form.
         assert_eq!(sas_special_missing_tag(0x7FF8_FF00_0000_0000), Some(b'_'));
     }
 

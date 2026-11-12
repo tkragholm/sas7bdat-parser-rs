@@ -82,22 +82,19 @@ fn is_sas7bdat(path: &Path) -> bool {
 /// Collect every `.sas7bdat` below `dir`, recording each against `root`.
 ///
 /// This is deliberately hand-rolled rather than `walkdir`. The R bindings must ship
-/// their Rust dependencies vendored — CRAN builds offline — and `walkdir` reaches
-/// `same-file` -> `winapi-util` -> `windows-sys`, whose generated bindings are 18 MB
-/// of source and 1.9 MB compressed. That was 22% of the vendored tarball, paid for a
-/// directory walk.
+/// their Rust dependencies vendored (CRAN builds offline), and `walkdir` reaches
+/// `same-file`, `winapi-util` and `windows-sys`, whose generated bindings are 18 MB of
+/// source and 1.9 MB compressed, about 22% of the vendored tarball.
 ///
-/// The traversal matches what `WalkDir::new(..)` did here, which the two behaviours
-/// below are load-bearing for:
+/// The traversal follows the same two rules as `WalkDir::new(..)` with default options:
 ///
 ///   * `entry.file_type()` does not follow symlinks, so a symlinked *directory* is
-///     not descended into — `walkdir` only follows with `follow_links(true)`, and
-///     recursing into one risks an unbounded cycle.
+///     not descended into. Recursing into one risks an unbounded cycle.
 ///   * `path.is_file()` does follow them, so a symlink *to* a file is still
-///     collected, as it was before.
+///     collected.
 ///
-/// The frontier is an explicit stack rather than recursion: input trees are user
-/// supplied and can nest arbitrarily deep, and `walkdir` did not overflow on them.
+/// The frontier is an explicit stack rather than recursion, because input trees are user
+/// supplied and can nest arbitrarily deep.
 fn push_tree(files: &mut Vec<(PathBuf, PathBuf)>, root: &Path, dir: &Path) -> Result<()> {
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
@@ -206,8 +203,7 @@ mod tests {
         ));
     }
 
-    /// Guards the hand-rolled traversal that replaced `walkdir`: nested directories
-    /// are descended into under `Recursive`, and only under `Recursive`.
+    /// Nested directories are descended into under `Recursive`, and only under `Recursive`.
     #[test]
     fn discover_inputs_walks_nested_directories() {
         let temp = tempfile::tempdir().expect("temp dir");

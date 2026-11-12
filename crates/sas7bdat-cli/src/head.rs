@@ -280,8 +280,8 @@ mod tests {
     #[test]
     fn dropped_column_count_is_thousands_separated() {
         // A wide table squeezed to one column: the footer must report the real number of
-        // hidden columns, grouped (e.g. 4,028) — the bug `info` had when it counted only
-        // the columns dropped from an already-capped subset.
+        // hidden columns, grouped (e.g. 4,028), not only the columns dropped from an
+        // already-capped subset.
         let headers: Vec<String> = (0..1001).map(|i| format!("c{i}")).collect();
         let row: Vec<String> = (0..1001).map(|i| i.to_string()).collect();
         let table = PreviewTable {

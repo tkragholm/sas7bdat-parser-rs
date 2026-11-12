@@ -9,13 +9,13 @@ test_that("bad arguments are rejected by name", {
   f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
 
-  # These used to be silently accepted: `isTRUE()` turned every non-TRUE value
-  # into FALSE, so `categorical = "yes"` quietly did nothing.
+  # A non-logical `categorical` is an error: `isTRUE()` would turn every non-TRUE
+  # value into FALSE, so `categorical = "yes"` would quietly do nothing.
   expect_error(read_sas7bdat(f, categorical = "yes"), "`categorical`")
   expect_error(read_sas7bdat(f, categorical = NA), "`categorical`")
   expect_error(read_sas7bdat(f, categorical = c(TRUE, FALSE)), "`categorical`")
 
-  # And a bad `catalog` used to be reported as an invalid 'path'.
+  # A bad `catalog` is reported as `catalog`, not as an invalid 'path'.
   expect_error(read_sas7bdat(f, catalog = 42), "`catalog`")
   expect_error(read_sas7bdat(42), "`path`")
   expect_error(read_sas7bdat(c(f, f)), "`path`")

@@ -429,7 +429,7 @@ mod tests {
 
     /// Every value is a function of its file-wide row index, so reading the file back proves
     /// both that no row was lost and that the row groups landed in the order they were filled.
-    /// Built in the scanner's own columnar form, which is what the pipeline now takes, so
+    /// Built in the scanner's own columnar form, which is what the pipeline takes, so
     /// the test covers the Arrow conversion inside the encode task as well as the ordering.
     fn batch(first_row: usize, columns: usize) -> OwnedColumnarBatch {
         let rows = first_row..first_row + ROWS_PER_BATCH;
@@ -633,8 +633,8 @@ mod tests {
         let _ = std::fs::remove_file(&parallel_path);
     }
 
-    /// The failure this guards against: a fixed 65,536-row target caps a file at about 2.1
-    /// billion rows, and a 234 GiB SAS file went past it.
+    /// A fixed 65,536-row target caps a file at about 2.1 billion rows, which a 234 GiB SAS
+    /// file exceeds.
     #[test]
     fn row_groups_stay_within_the_parquet_limit() {
         let mut sizer = super::RowGroupSizer::new(65_536);

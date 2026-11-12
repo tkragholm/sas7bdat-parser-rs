@@ -14,9 +14,9 @@ crate-type = ["cdylib", "rlib"]
 # which polars, pyarrow, pandas and duckdb all consume through Arrow's C Data
 # Interface, an ABI Arrow versions and nobody else does. The polars-facing API
 # (`scan_sas`, `read_sas`, ...) is Python, in `python/sas7bdat_polars/`, built on
-# polars' public constructors. Until 0.9 this crate linked polars-rust and
-# crossed into Python through pyo3-polars' private export hooks, which tied the
-# wheel to one Python polars release at a time.
+# polars' public constructors. Linking polars-rust and crossing into Python
+# through pyo3-polars' private export hooks would tie the wheel to one Python
+# polars release at a time.
 [dependencies]
 ahash = "0.8"
 arrow-array = { workspace = true, features = ["ffi"] }

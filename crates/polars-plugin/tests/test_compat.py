@@ -4,8 +4,8 @@ This is what the `compat` job in `.github/workflows/wheels.yml` runs against the
 lowest and the highest polars the package declares, on CPython 3.12 and 3.13.
 Every batch reaches polars as an Arrow C stream through the PyCapsule
 interface, an ABI that tracks Arrow rather than polars, so a polars outside the
-declared range fails here first, as a crash or a wrong value, rather than on a
-register file.
+declared range fails here first, as a crash or a wrong value, rather than in
+a user's analysis.
 
 The fixture is `airline.sas7bdat` from the pandas SAS test corpus (BSD-3-Clause),
 5 KB, 32 rows, six numeric columns: `fixtures/raw_data/pandas/airline.sas7bdat`

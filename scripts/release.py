@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """Plan and run a release, including the parts it forces on other crates.
 
-A release here is never one crate and never one step, and the ordering has until now
-lived in prose comments and in whoever last cut one. Releasing 0.9.0 meant finding
-out, by failing three times in a row, that:
+A release here is never one crate and never one step. The ordering constraints are:
 
-  * `sas7bdat-convert` depends on the core by *version* as well as by path, so its
-    requirement had to cross to "0.9" -- which makes it a breaking release of its
-    own, 0.2.1 -> 0.3.0. `just bump` died at `cargo update` without saying so.
-  * `sas7bdat-convert` cannot even be packaged until the core is on crates.io.
+  * `sas7bdat-convert` depends on the core by version as well as by path. Moving
+    the core across a minor boundary forces its requirement across too, which
+    makes it a breaking release of its own.
+  * `sas7bdat-convert` cannot be packaged until the core is on crates.io.
   * `vendor-r-package.sh` cannot regenerate `inst/AUTHORS` until then either,
-    because it strips `src/.cargo` exactly as `R CMD build` does. That check had
-    been failing in CI since the previous release and could not have been fixed
-    before publishing.
+    because it strips `src/.cargo` exactly as `R CMD build` does.
 
-So this prints the whole sequence first, marks what is already done, and names what
+This prints the whole sequence first, marks what is already done, and names what
 each remaining step is waiting for. Re-run it at any point: every step decides for
 itself whether it has happened, so resuming is just running it again.
 
@@ -204,7 +200,7 @@ def build_plan(crate: str, version: str) -> Plan:
     published = published_workspace_crates()
     manifests = all_manifests()
 
-    # Anything whose stated requirement will no longer match has to move too: a
+    # Anything whose stated requirement stops matching has to move too: a
     # published crate needs its own release, an unpublished one just needs the edit.
     queue = [(name, version)]
     seen = {name}

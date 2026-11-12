@@ -48,8 +48,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # The profiling binaries and the arg-parsing helpers they use are behind
-      # `dev-tools`, which the default-feature pass above does not enable — without
-      # this step nothing in CI type-checks them and they rot silently.
+      # `dev-tools`, which the default-feature pass above does not enable. This step
+      # is the only type-check of them in CI.
       - name: Clippy (dev-tools binaries)
         run: cargo clippy -p sas7bdat-cli --all-targets --features dev-tools -- -D warnings
 
@@ -59,19 +59,15 @@ jobs:
         with:
           r-version: release
 
-      # The R binding is its own crate with its own lockfile, deliberately outside
-      # the workspace (see the root Cargo.toml), so none of the passes above touch
-      # it. Nothing compiled it in CI and it drifted: its lockfile was still pinning
-      # sas7bdat 0.3.0, and listing a serde_json the core dropped in 0.4.0, long
-      # after the core reached 0.6.0. `--locked` is the point of this step as much
-      # as clippy is — it fails on exactly that staleness instead of papering over
-      # it by silently re-resolving.
+      # The R binding is its own crate with its own lockfile, outside the workspace
+      # (see the root Cargo.toml), so none of the passes above touch it. `--locked`
+      # makes the step fail on a stale lockfile instead of silently re-resolving.
       #
-      # `working-directory` is load-bearing, not tidiness. The binding depends on
-      # `sas7bdat` by *version* so that a package built with `R CMD build` can
-      # resolve it from crates.io, and `src/.cargo/config.toml` redirects that back
-      # to this checkout. Cargo discovers config by walking up from the working
-      # directory — not from `--manifest-path` — so running this from the repo root
+      # `working-directory` must be the binding's source directory. The binding
+      # depends on `sas7bdat` by version so that a package built with `R CMD build`
+      # can resolve it from crates.io, and `src/.cargo/config.toml` redirects that
+      # back to this checkout. Cargo discovers config by walking up from the working
+      # directory, not from `--manifest-path`, so running this from the repo root
       # would miss the redirect and try to resolve the unpublished version from the
       # registry. `Makevars` invokes cargo from the same directory for the same reason.
       - name: Clippy (R bindings, outside the workspace)
@@ -83,19 +79,17 @@ jobs:
             echo "::endgroup::"
           done
 
-      # The R sources are hand-maintained — NAMESPACE, the extendr wrappers and
-      # man/ are all written rather than generated — so nothing else notices when
-      # they drift apart. This caught `read_sas()` shipping with no man page at all.
+      # The R sources are hand-maintained: NAMESPACE, the extendr wrappers and
+      # man/ are all written rather than generated, so nothing else notices when
+      # they drift apart.
       #
-      # `--no-install` is what makes the step runnable here: a full check has to
-      # compile the package, and the Rust crate's relative path dependency on the
-      # workspace core does not survive being copied into a build directory. What
-      # is left still checks the documentation, NAMESPACE, DESCRIPTION and Rd
-      # syntax, which is the part that silently rots.
+      # `--no-install` keeps the step runnable here. A full check has to compile the
+      # package, and the Rust crate's relative path dependency on the workspace core
+      # does not survive being copied into a build directory. What is left still
+      # checks the documentation, NAMESPACE, DESCRIPTION and Rd syntax.
       #
-      # `R CMD check` exits 0 on WARNING, so the exit code alone is not a gate —
-      # the status line is. Requiring exactly `Status: OK` also fails on NOTEs,
-      # which is the point: this is a ratchet, and it currently passes clean.
+      # `R CMD check` exits 0 on WARNING, so the exit code alone is not a gate. The
+      # step requires exactly `Status: OK`, which also fails on NOTEs.
       - name: R package checks (docs, NAMESPACE, metadata)
         run: |
           for pkg in r-plugin:fastsas r-convert-plugin:fastsasconvert; do
@@ -128,9 +122,7 @@ jobs:
         with:
           tool: cargo-hack,cargo-machete
 
-      # Declared-but-unused dependencies. Cheap, and it catches exactly the kind of
-      # drift that accumulated in sas7bdat-cli (arrow-array and hex sat in the
-      # manifest unreferenced) — the compiler never complains about those.
+      # Declared-but-unused dependencies, which the compiler does not report.
       - name: Unused dependencies
         run: cargo machete
 
@@ -147,26 +139,23 @@ jobs:
           cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
           --exclude-features nightly-simd
 
-  # The only job that compiles and links the R bindings on Windows, which is a
-  # different build from every other job here rather than the same one repeated.
+  # The only job that compiles and links the R bindings on Windows.
   #
   # `Makevars` is read on Unix and `Makevars.win` on Windows, so the Windows link
-  # line is never exercised elsewhere — and neither is the ABI it depends on. R on
+  # line is not exercised elsewhere, and neither is the ABI it depends on. R on
   # Windows links with Rtools' mingw-w64, while cargo's default target on a Windows
-  # host is MSVC; that mismatch shipped undetected until R-universe tried to build
-  # the packages and every Windows binary failed on `undefined reference to
-  # `__chkstk''. The Linux job could not have caught it, and R-universe is a poor
-  # place to find out: it is a ten-minute round trip on someone else's schedule.
+  # host is MSVC. A mismatch shows up as `undefined reference to `__chkstk'` at
+  # link time.
   #
-  # Installing is most of the value, since that is where a link error surfaces, but
-  # the suites run too — a static library can link and still be wrong about, say,
-  # how it hands strings back — and they cost seconds next to the compile.
+  # Installing is most of the value, since that is where a link error surfaces.
+  # The suites run too, because a static library can link and still be wrong about,
+  # say, how it hands strings back.
   #
-  # One gap worth naming: this installs from the working tree, so `src/.cargo`
-  # redirects the crates to this checkout. R-universe installs from a tarball, where
-  # `.Rbuildignore` strips that redirect and the published crates are used instead.
-  # A green run here means the packaging is sound; it does not prove the last
-  # published core builds on Windows.
+  # This installs from the working tree, so `src/.cargo` redirects the crates to
+  # this checkout. R-universe installs from a tarball, where `.Rbuildignore` strips
+  # that redirect and the published crates are used instead. A green run here shows
+  # that the packaging is sound, not that the last published core builds on
+  # Windows.
   r-windows:
     name: R packages (Windows)
     runs-on: windows-latest
@@ -193,8 +182,7 @@ jobs:
 
       # Installs the pinned toolchain up front so a download is not folded into the
       # first R CMD INSTALL, where its output would be buried. The GNU target itself
-      # is added by Makevars.win — deliberately left to it, so that line is covered
-      # by this job rather than worked around by it.
+      # is added by Makevars.win, which keeps that line covered by this job.
       - name: Show toolchain
         run: rustup show && cargo --version
 
@@ -218,20 +206,18 @@ jobs:
             echo "::endgroup::"
           done
 
-  # Installs the released tarballs on Windows, which is the one combination nothing
-  # else covers.
+  # Installs the released tarballs on Windows.
   #
   # `r-windows` installs from the repository, where there is no `vendor.tar.xz`, so it
-  # takes Makevars.win's *non*-vendored branch. `r-cran` takes the vendored branch but
-  # on Linux. CRAN builds Windows binaries from a source tarball, so the path that
-  # actually ships — mingw toolchain, vendored sources, `--offline`, redirected
-  # CARGO_HOME, `--jobs 2` — had never run anywhere until this job.
+  # takes Makevars.win's non-vendored branch. `r-cran` takes the vendored branch but
+  # on Linux. CRAN builds Windows binaries from a source tarball, so this job is the
+  # only one that runs the path that ships: mingw toolchain, vendored sources,
+  # `--offline`, redirected CARGO_HOME, `--jobs 2`.
   #
-  # That gap is not hypothetical. The vendored tarball is a release artefact and is
-  # not committed, so every defect specific to producing or consuming it is invisible
-  # to a normal push. One such defect already shipped and was caught only by building
-  # on a second platform: macOS bsdtar had been embedding AppleDouble members that its
-  # own `tar tf` hides, and they broke the zstd build on Linux.
+  # The vendored tarball is a release artefact and is not committed, so defects in
+  # producing or consuming it do not show on a normal push. For example, macOS bsdtar
+  # can embed AppleDouble members that its own `tar tf` hides, and they break the
+  # zstd build on Linux.
   r-windows-cran:
     name: R packages (CRAN tarball, Windows)
     runs-on: windows-latest
@@ -299,15 +285,13 @@ jobs:
   # `RUSTUP_TOOLCHAIN` rather than `cargo +nightly`: it overrides rust-toolchain.toml
   # for every tool in the job, including the ones that shell out to cargo themselves.
   #
-  # Pinned to a date for the same reason the stable channel is pinned to a version:
-  # a floating `nightly` turns this job red whenever clippy grows a lint, on Rust's
-  # schedule rather than ours. This is the nightly the whole repository was pinned
-  # to before the stable switch, so it is known to lint clean.
+  # Pinned to a date, like the stable channel is pinned to a version. A floating
+  # `nightly` turns this job red whenever clippy grows a lint.
   #
   # The default features are left on deliberately. `nightly-simd` is documented to
   # override `simd` (see crates/sas7bdat/src/simd/mod.rs), so building with both
-  # enabled is what checks that precedence rule still resolves to one backend rather
-  # than failing to compile — which is also what `--all-features` would hit.
+  # enabled checks that the precedence rule resolves to one backend rather than
+  # failing to compile. `--all-features` would hit the same case.
   nightly-simd:
     name: nightly std::simd backend
     runs-on: ubuntu-latest
@@ -332,11 +316,10 @@ jobs:
   # Coverage of the published library only. The plugins are exercised through their
   # Python/R test suites, and the CLI has no integration tests to measure.
   #
-  # No --fail-under-lines yet: the number (~69%) is a starting point, and the gaps
-  # worth closing are the error and format-variant paths, not the total. Add a
-  # ratchet once it has settled, so it prevents regressions rather than demanding a
-  # sprint. Note that region coverage flatters SIMD code — a chunk loop reads as
-  # covered when only the wide path ran, never the remainder.
+  # There is no --fail-under-lines threshold. Coverage is around 69%, and the gaps
+  # worth closing are the error and format-variant paths. Region coverage
+  # overstates SIMD code: a chunk loop reads as covered when only the wide path
+  # ran, never the remainder.
   coverage:
     name: coverage
     runs-on: ubuntu-latest
@@ -369,12 +352,12 @@ jobs:
   #
   # Three things are only verified here:
   #
-  #   * `-Wl,-x -Wl,-S` in PKG_LIBS behaves under GNU ld. It was measured on ld64,
-  #     and a linker that rejected either flag would fail the install outright.
-  #   * the offline vendored build works — the prune could drop a file some crate
+  #   * `-Wl,-x -Wl,-S` in PKG_LIBS behaves under GNU ld. It has been tried on ld64
+  #     only, and a linker that rejected either flag would fail the install outright.
+  #   * the offline vendored build works. The prune could drop a file some crate
   #     reads, and `vendor-r-package.sh` only test-builds for the host it runs on.
-  #   * installed size stays under the 5 MB that `R CMD check` NOTEs. That is the
-  #     whole point of the fat-LTO profile, and it would regress silently.
+  #   * installed size stays under the 5 MB that `R CMD check` NOTEs. The fat-LTO
+  #     profile exists for this, and the size would regress silently.
   #
   # Not gated on `Status: OK`: both packages carry a known `_abort` WARNING from
   # Rust's std that cannot be removed while extendr needs unwinding, and it is
@@ -464,10 +447,10 @@ jobs:
             *.Rcheck/00install.out
           if-no-files-found: warn
 
-      # Handed to `r-windows-cran` below. Publishing the *tarball* rather than having
-      # that job vendor for itself is deliberate: it is what CRAN does — build a
-      # source package once, install it everywhere — and it keeps the vendoring
-      # toolchain (python3, xz) off the Windows runner.
+      # Handed to `r-windows-cran` below. Publishing the tarball rather than having
+      # that job vendor for itself matches what CRAN does (build a source package
+      # once, install it everywhere) and keeps the vendoring toolchain (python3, xz)
+      # off the Windows runner.
       - uses: actions/upload-artifact@v6
         with:
           name: r-source-tarballs
@@ -477,10 +460,9 @@ jobs:
   fuzz-regressions:
     name: fuzz regressions
     runs-on: ubuntu-latest
-    # AddressSanitizer is nightly-only, so this job needs one regardless of what
-    # rust-toolchain.toml pins. It used to inherit a nightly from that file; now
-    # that the pin is stable, it has to ask for one. cargo-fuzz shells out to cargo
-    # internally, so this has to be the environment variable rather than `+nightly`.
+    # AddressSanitizer is nightly-only, so this job needs a nightly regardless of
+    # what rust-toolchain.toml pins. cargo-fuzz shells out to cargo internally, so
+    # the toolchain is selected with the environment variable rather than `+nightly`.
     env:
       RUSTUP_TOOLCHAIN: nightly-2026-07-27
     steps:
@@ -493,15 +475,15 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
-      # `-runs=0` is what makes this a replay: every input in the directory is executed
+      # `-runs=0` makes this a replay: every input in the directory is executed
       # once and the process exits. Without it, a directory argument is treated as a
-      # corpus to *extend* and the job fuzzes until the runner times out (and writes
-      # new units into the tracked fixture directory). `-runs=0` also does not write.
+      # corpus to extend, and the job fuzzes until the runner times out and writes
+      # new units into the tracked fixture directory.
       #
-      # So this cannot flake and cannot turn CI red on a newly discovered bug; it fails
-      # only if a fixed crash comes back. tests/fuzz_regressions.rs asserts the same
-      # inputs at the library level — what this adds is AddressSanitizer, which the
-      # normal test binary is not built with. Hunting for *new* bugs stays local
+      # So this cannot flake and cannot turn CI red on a newly discovered bug. It
+      # fails only if a fixed crash comes back. tests/fuzz_regressions.rs asserts the
+      # same inputs at the library level, and this adds AddressSanitizer, which the
+      # normal test binary is not built with. Hunting for new bugs stays local
       # (`just fuzz`), because the seed corpus lives in the untracked repo-root
       # fixtures/ and is not available to CI.
       #
@@ -509,12 +491,11 @@ jobs:
       # which reaches the fused single-pass scan that in-memory sources decline.
       # `catalog_parse` takes the .sas7bcat inputs, a different format.
       #
-      # `--target` is not optional here. cargo-fuzz defaults it to the triple of its own
+      # `--target` is required. cargo-fuzz defaults it to the triple of its own
       # executable, not the toolchain's host, and install-action ships a musl-linked
-      # binary — so the default builds for x86_64-unknown-linux-musl and fails with
-      # "sanitizer is incompatible with statically linked libc". Taking the triple from
-      # rustc pins it to the toolchain that actually has a sanitizer runtime, and keeps
-      # working if the runner image ever changes architecture.
+      # binary, so the default builds for x86_64-unknown-linux-musl and fails with
+      # "sanitizer is incompatible with statically linked libc". Taking the triple
+      # from rustc pins it to the toolchain that has a sanitizer runtime.
       - name: Replay fuzz artifacts under ASan
         run: |
           cd crates/sas7bdat

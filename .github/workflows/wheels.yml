@@ -32,10 +32,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # `release-crate.yml` hard-fails when a tag and its manifest disagree; this
-  # workflow had no equivalent. `uv publish --check-url` makes a tag that bumps only
-  # one package a no-op for the other, which is the right behaviour — but it also
-  # means a tag whose version matches *neither* package publishes nothing and still
+  # `release-crate.yml` hard-fails when a tag and its manifest disagree. This
+  # workflow needs the same check. `uv publish --check-url` makes a tag that bumps
+  # only one package a no-op for the other, which is the right behaviour, but it also
+  # means a tag whose version matches neither package publishes nothing and still
   # reports success. That is a silent no-op, so check it up front.
   check-tag:
     name: check tag
@@ -264,9 +264,8 @@ jobs:
   #
   # Each publish job runs only for its own package's tag. `--check-url` alone is not
   # enough: it skips a file already on PyPI only when the hashes match, and two runs
-  # do not build byte-identical wheels. Releasing the two packages in sequence meant
-  # the second tag rebuilt both and failed on a hash mismatch for the one already up,
-  # which is how v0.9.3 went red after v0.10.0 had published both.
+  # do not build byte-identical wheels. If the second tag rebuilt both packages, it
+  # would fail on a hash mismatch for the one already published.
   release:
     name: publish-pypi
     runs-on: ubuntu-latest
