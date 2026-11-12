@@ -53,6 +53,17 @@ TARGET = Path(
 PYTHON = ROOT / "benchmarks" / ".venv" / "bin" / "python"
 RSCRIPT = shutil.which("Rscript") or "Rscript"
 READSTAT = shutil.which("readstat") or "readstat"
+READSTAT_C = TARGET / "dist" / "readstat_read"
+
+
+def build_readstat_c() -> None:
+    """Compile benchmarks/readstat_read.c against the installed ReadStat library."""
+    src = ROOT / "benchmarks" / "readstat_read.c"
+    if READSTAT_C.exists() and READSTAT_C.stat().st_mtime > src.stat().st_mtime:
+        return
+    prefix = Path(READSTAT).resolve().parent.parent
+    subprocess.run(["cc", "-O2", f"-I{prefix / 'include'}", "-o", str(READSTAT_C), str(src),
+                    f"-L{prefix / 'lib'}", "-lreadstat"], check=True)
 
 FILES = {
     "ahs2013n": (
@@ -104,6 +115,7 @@ def _r(tool):
 TOOLS = {
     "sas7bdat-core": ("rust", lambda p: _core(p)),
     "sas7bdat-core-1t": ("rust", lambda p: _core(p, "1")),
+    "readstat-c": ("rust", lambda p: [str(READSTAT_C), str(p)]),
     "sas7bdat-polars": ("python", _py("sas7bdat-polars")),
     "polars-readstat": ("python", _py("polars-readstat")),
     "pyreadstat": ("python", _py("pyreadstat")),
@@ -337,6 +349,8 @@ def main() -> None:
             sys.exit(f"checksum mismatch for {path}")
 
     out_dir = args.out or ROOT / "benchmarks" / "results" / dt.date.today().isoformat()
+    if "readstat-c" in tools:
+        build_readstat_c()
     total, busiest = other_cpu()
     if total > args.max_other_cpu:
         sys.exit(f"other processes use {total:.0f}% CPU (busiest: {busiest}); "
