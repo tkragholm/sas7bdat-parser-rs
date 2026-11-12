@@ -2540,6 +2540,9 @@ mod auto_grain {
     use crate::Parallelism;
     use crate::scan::builder::resolved_parallel_workers;
 
+    /// A batch of the crate's own sizes, far below the in-flight cap.
+    const MB: usize = 1 << 20;
+
     fn budget() -> usize {
         std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
     }
@@ -2547,24 +2550,33 @@ mod auto_grain {
     #[test]
     fn too_little_work_takes_one_worker() {
         // cars: 34 pages, 1,081 rows. Twelve threads decoded it 2.70x slower than one.
-        assert_eq!(resolved_parallel_workers(Parallelism::Auto, 34, 1_081), 1);
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Auto, 34, 1_081, MB),
+            1
+        );
         // date_format_time_loop: past the page gate, short of the row gate.
-        assert_eq!(resolved_parallel_workers(Parallelism::Auto, 47, 4_446), 1);
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Auto, 47, 4_446, MB),
+            1
+        );
         // Past the row gate, short of the page gate: too few chunks to hand out.
-        assert_eq!(resolved_parallel_workers(Parallelism::Auto, 4, 100_000), 1);
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Auto, 4, 100_000, MB),
+            1
+        );
     }
 
     #[test]
     fn enough_work_takes_the_machine_not_a_fraction_of_it() {
         // rmov: 127 pages, 17,678 rows, the smallest file measured faster in parallel.
         assert_eq!(
-            resolved_parallel_workers(Parallelism::Auto, 127, 17_678),
+            resolved_parallel_workers(Parallelism::Auto, 127, 17_678, MB),
             budget().min(127),
             "Auto must not divide the row count into a worker count"
         );
         // homimp, which runs 3.86x faster on threads than on one.
         assert_eq!(
-            resolved_parallel_workers(Parallelism::Auto, 140, 46_641),
+            resolved_parallel_workers(Parallelism::Auto, 140, 46_641, MB),
             budget().min(140)
         );
     }
@@ -2573,15 +2585,38 @@ mod auto_grain {
     fn an_explicit_count_is_not_second_guessed() {
         // Naming a number says the caller knows its own workload; the grain gate does not apply.
         assert_eq!(
-            resolved_parallel_workers(Parallelism::Threads(4), 34, 1_081),
+            resolved_parallel_workers(Parallelism::Threads(4), 34, 1_081, MB),
             4
         );
         // Still clamped to the pages that exist, since a worker with no chunk does nothing.
         assert_eq!(
-            resolved_parallel_workers(Parallelism::Threads(64), 8, 1_000_000),
+            resolved_parallel_workers(Parallelism::Threads(64), 8, 1_000_000, MB),
             8
         );
-        assert_eq!(resolved_parallel_workers(Parallelism::None, 827, 84_355), 1);
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::None, 827, 84_355, MB),
+            1
+        );
+    }
+
+    #[test]
+    fn auto_takes_no_more_threads_than_its_batches_fit_in_the_in_flight_budget() {
+        // The Polars binding's 4,096-row batches of the 2 GiB AHS file: about 200 MB each by
+        // the estimate, so five fit in 1 GiB.
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Auto, 17_517, 70_044, 200 * MB),
+            budget().min(5)
+        );
+        // A batch larger than the whole budget decodes on one thread.
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Auto, 17_517, 70_044, 2048 * MB),
+            1
+        );
+        // An explicit count is honoured whatever the batch size.
+        assert_eq!(
+            resolved_parallel_workers(Parallelism::Threads(12), 17_517, 70_044, 2048 * MB),
+            12
+        );
     }
 }
 

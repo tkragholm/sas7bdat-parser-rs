@@ -58,6 +58,16 @@ const AUTO_MIN_ROWS_TO_PARALLELISE: u64 = 8_192;
 /// work handed out. Threads with nothing to steal are spawns and a channel for no gain.
 const AUTO_MIN_PAGES_TO_PARALLELISE: usize = 16;
 
+/// Decoded bytes that [`Parallelism::Auto`]'s workers may hold in their batches at once.
+///
+/// Each worker fills a batch of its own, so the threads `Auto` takes are capped at this
+/// divided by one batch's estimated size. With the crate's own batch sizes, at most 32 MB,
+/// the cap leaves every core in use. It binds when a caller asks for large batches of a wide
+/// table: the Polars binding reads the 2 GiB AHS file in 4,096-row batches of about 200 MB
+/// by the estimate, and on a 12-core M3 Pro that read took 0.72 to 0.81 s at 4 to 8 threads
+/// and 1.15 to 1.22 s at 9 to 12. The cap gives it 5.
+const AUTO_IN_FLIGHT_BYTES: usize = 1 << 30;
+
 /// Workers for a scan over `work_items` pages carrying about `rows` rows.
 ///
 /// `Auto` asks one question -- is there enough work here to be worth threads at all -- and
@@ -76,10 +86,14 @@ const AUTO_MIN_PAGES_TO_PARALLELISE: usize = 16;
 /// The row estimate comes from [`effective_rows_per_page`], so a wide string table such as
 /// `topical` is cut into enough chunks for the threads to share. That file decodes 4.7x
 /// faster in parallel, and `Auto` needs no exception for it.
+///
+/// `Auto` also caps the threads at [`AUTO_IN_FLIGHT_BYTES`] over `batch_bytes`, the estimated
+/// size of one batch.
 pub(super) fn resolved_parallel_workers(
     parallelism: Parallelism,
     work_items: usize,
     rows: u64,
+    batch_bytes: usize,
 ) -> usize {
     match parallelism {
         Parallelism::Threads(n) => n.max(1).min(work_items.max(1)),
@@ -88,7 +102,8 @@ pub(super) fn resolved_parallel_workers(
             if rows < AUTO_MIN_ROWS_TO_PARALLELISE || work_items < AUTO_MIN_PAGES_TO_PARALLELISE {
                 return 1;
             }
-            auto_thread_budget().min(work_items.max(1))
+            let by_bytes = (AUTO_IN_FLIGHT_BYTES / batch_bytes.max(1)).max(1);
+            auto_thread_budget().min(by_bytes).min(work_items.max(1))
         }
     }
 }
@@ -1554,7 +1569,12 @@ impl ScanBuilder<'_> {
             .saturating_mul(u64::try_from(page_count).unwrap_or(u64::MAX))
             .checked_div(total_pages)
             .unwrap_or(0);
-        let workers = resolved_parallel_workers(self.parallelism, page_count, windowed_rows);
+        let workers = resolved_parallel_workers(
+            self.parallelism,
+            page_count,
+            windowed_rows,
+            plan.batch_bytes,
+        );
 
         // Mapped and in-memory sources decode straight out of one contiguous buffer. A path
         // source has no buffer to decode from, so pages arrive as extents streamed by a small

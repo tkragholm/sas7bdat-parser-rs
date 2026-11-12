@@ -144,6 +144,7 @@ pub(super) fn plan_fused_stream<'a>(
         usize::try_from(page_count).unwrap_or(usize::MAX),
         // Whole-file is a precondition here, so the declared total is the count.
         builder.ds.metadata().row_count,
+        plan.batch_bytes,
     );
     if workers <= 1 || page_count <= 1 {
         return Err(FusedDecline::NothingToParallelise);

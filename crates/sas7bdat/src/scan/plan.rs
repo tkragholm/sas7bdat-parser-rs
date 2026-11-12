@@ -18,6 +18,8 @@ pub(super) struct ScanPlan {
     pub(super) batch: BatchDecodePlan,
     pub(super) batch_row_capacity: usize,
     pub(super) capacity_hint_rows: usize,
+    /// Estimated decoded size of one full batch, from [`estimated_decoded_row_bytes`].
+    pub(super) batch_bytes: usize,
 }
 
 impl ScanPlan {
@@ -35,12 +37,14 @@ impl ScanPlan {
             .min(MAX_BATCH_PREALLOC_BYTES / row_len)
             .max(1);
         let batch = BatchDecodePlan::new(builder, row.clone())?;
+        let batch_bytes = batch_row_capacity.saturating_mul(estimated_decoded_row_bytes(builder));
         Ok(Self {
             raw,
             row,
             batch,
             batch_row_capacity,
             capacity_hint_rows,
+            batch_bytes,
         })
     }
 }

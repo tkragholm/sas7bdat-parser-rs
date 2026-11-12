@@ -17,6 +17,7 @@ hand.
 ### Changed
 
 - An ordered parallel scan claims a chunk only while it is at most twice the number of decode threads ahead of the next chunk to deliver. A slow chunk no longer lets the other threads fill memory with every batch behind it. Memory-mapped scans split the file into chunks of one batch each, cut by the row counts of the pages, so uneven page fill no longer leaves a short extra batch at the end of a chunk.
+- `Parallelism::Auto` takes no more threads than the estimated decoded size of their batches allows in 1 GiB. With the default batch sizes this changes nothing. With large batches of a wide table it avoids a slowdown: a 4,096-row read of a 2 GiB file with 4,041 columns went from 1.2 s on 12 threads to 0.75 s on 5.
 
 ### Fixed
 
