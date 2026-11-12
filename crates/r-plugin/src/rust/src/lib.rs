@@ -557,9 +557,19 @@ fn read_impl(
     let mut caches: Vec<HashMap<Box<[u8]>, libR_sys::SEXP>> =
         (0..metas.len()).map(|_| HashMap::new()).collect();
 
+    // Every batch is written at its own `row_base`, so the order batches arrive in does not
+    // matter, and asking for none spares the core its reorder buffer. Factor columns are the
+    // exception: their buffers are collected in arrival order to build one dictionary over
+    // the column, so they keep file order. The callback runs on this thread either way.
+    let ordering = if wants_factor.iter().any(|w| *w) {
+        sas7bdat::OrderingMode::Stable
+    } else {
+        sas7bdat::OrderingMode::Unordered
+    };
     ds.scan()
         .with_parallelism(parallelism)
         .with_temporal_options(temporal)
+        .with_ordering(ordering)
         .visit_owned_batches(|mut batch| {
             let base = usize::try_from(batch.row_base.0).unwrap_or(0);
             let row_count = batch.row_count;
