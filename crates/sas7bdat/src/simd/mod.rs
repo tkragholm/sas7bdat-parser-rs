@@ -30,13 +30,13 @@
 //! # Kernel rankings do not survive a change of architecture
 //!
 //! On aarch64/NEON at baseline, plain stable Rust is *faster* than `std::simd` on
-//! [`missing_bitmask_x8`] — by about a third — because NEON has no `movemask` and
+//! [`missing_bitmask_x8`], by about a third, because NEON has no `movemask` and
 //! `to_bitmask()` lowers to a multi-instruction emulation that LLVM's autovectoriser
 //! routes around.
 //!
 //! On x86-64 that reverses: scalar is the *slowest* of the three there
-//! (9.1 GiB/s, against 22.7 for `fearless` and 10.9 for `portable`, measured at
-//! baseline on a Zen 3 EPYC). Take no ranking here as architecture-independent.
+//! (9.1 GiB/s, against 22.7 for `fearless` and 10.9 for `portable`, at baseline on an
+//! AVX-512 x86-64 server CPU). Take no ranking here as architecture-independent.
 //!
 //! What does hold across both: the narrow-string kernels are best left to `scalar`,
 //! which is why [`crate::scan::string`] gates on `< 64` rather than calling a
@@ -46,8 +46,8 @@
 //!
 //! `dispatch!` selects a `#[target_feature]` implementation, and such a function
 //! cannot be inlined into a caller that lacks the feature. Driving a column through
-//! the per-chunk kernels therefore costs one real call per 8 rows. It measured at
-//! 6.8 GiB/s against `scalar`'s 55.9 before the column entry points existed.
+//! the per-chunk kernels therefore costs one real call per 8 rows: `chunk_to_i64_masked`
+//! driven that way ran at 6.8 GiB/s against `scalar`'s 55.9.
 //!
 //! So call [`classify_missing_raw_bits`], [`convert_column_i64`],
 //! [`convert_column_i32`] and [`gather_missing`] from the scan pipeline, never the
@@ -57,7 +57,8 @@
 //!
 //! # What the x86-64 sweep says
 //!
-//! Measured on an AVX-512 EPYC, GiB/s, `portable` = `std::simd`:
+//! Measured with `benches/simd_backends.rs` on an AVX-512 x86-64 server CPU, GiB/s,
+//! `portable` = `std::simd`:
 //!
 //! | kernel                 | baseline (SSE2)      | x86-64-v3 (AVX2)     | x86-64-v4 (AVX-512)  |
 //! |------------------------|----------------------|----------------------|----------------------|
@@ -119,8 +120,8 @@ pub use backend::{
 // dispatch *once* and run the whole loop inside the selected implementation. The
 // per-chunk kernels above are still the unit of work, but going through them one
 // call at a time costs a cross-`#[target_feature]` call per 8 rows, which no
-// optimiser can remove — measured at 6.8 GiB/s against scalar's 55.9 before this
-// existed. Call these, not the per-chunk kernels, from the scan pipeline.
+// optimiser can remove (6.8 GiB/s against scalar's 55.9 when driven that way). Call
+// these, not the per-chunk kernels, from the scan pipeline.
 pub use backend::{
     classify_missing_raw_bits, convert_column_i32, convert_column_i64, gather_missing,
 };

@@ -199,7 +199,7 @@ pub fn is_ascii_wide(slice: &[u8]) -> bool {
 // The reason this module is shaped the way it is. `dispatch!` selects a
 // `#[target_feature]` implementation, and such a function cannot be inlined into a
 // caller that lacks the feature — so routing a column through the per-chunk kernels
-// above costs one real call per 8 rows. Measured on a Zen 3 EPYC at baseline,
+// above costs one real call per 8 rows. At baseline on an AVX-512 x86-64 server CPU,
 // `chunk_to_i64_masked` ran at 6.8 GiB/s that way against scalar's 55.9.
 //
 // Dispatching once and instantiating the whole loop inside the selected

@@ -11,17 +11,13 @@ use std::path::Path;
 
 // The one Win32 entry point this crate needs, declared directly.
 //
-// `windows-sys` supplies this, but it is 18 MB of generated bindings — by a wide
-// margin the largest crate in the tree — for a single call. That is most of a
-// vendored dependency bundle, which matters for a CRAN submission and is wasted
-// download and build time everywhere else.
+// `windows-sys` supplies this, but it is 18 MB of generated bindings for a single
+// call, which would dominate a vendored dependency bundle.
 //
 // `kernel32` is already linked by `std` on every Windows target, so naming it here
-// is belt-and-braces rather than load-bearing.
+// is redundant but harmless.
 //
-// Note the `unsafe extern` form is required by edition 2024 and needs rustc >= 1.82.
-// If the crate is ever moved back to edition 2021 for a lower MSRV, this becomes a
-// plain `extern "system"` block.
+// The `unsafe extern` form is required by edition 2024 and needs rustc >= 1.82.
 #[cfg(windows)]
 #[allow(unsafe_code)]
 #[link(name = "kernel32")]

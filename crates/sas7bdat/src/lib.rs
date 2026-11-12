@@ -18,11 +18,15 @@
 //!
 //! # Feature flags
 //!
-//! - **`arrow`** — enables [`ScanBuilder::visit_arrow_batches`] and
-//!   [`ScanBuilder::arrow_schema`]. When active, the crate pulls in `arrow-array` and
-//!   `arrow-schema` and exposes Arrow `RecordBatch` conversion helpers. When absent,
-//!   those APIs do not exist and the rest of the crate is unchanged.
-//! - **`dictionary`** — enables the [`dictionary`] module: string columns are probed for
+//! - **`simd`** (default): vectorised string and numeric kernels through
+//!   `fearless_simd`, on stable Rust 1.89 or later, with the instruction set chosen at
+//!   run time. Without it the crate uses scalar code. **`nightly-simd`** uses
+//!   `std::simd` instead and needs a nightly toolchain.
+//! - **`arrow`**: enables [`ScanBuilder::visit_arrow_batches`] and
+//!   [`ScanBuilder::arrow_schema`]. When active, the crate pulls in `arrow-array`,
+//!   `arrow-buffer` and `arrow-schema` and exposes Arrow `RecordBatch` conversion
+//!   helpers. When absent, those APIs do not exist and the rest of the crate is unchanged.
+//! - **`dictionary`**: enables the [`dictionary`] module: string columns are probed for
 //!   cardinality and, when they look like category codes rather than free text, interned
 //!   into `u32` codes plus a value dictionary. That feeds an Arrow `DictionaryArray<u32>`,
 //!   and through it Polars `Categorical` and R `factor`. Adds `ahash`, `lasso2` and
@@ -41,11 +45,13 @@
 /// The version of this crate, as declared in its manifest.
 ///
 /// Exists so a consumer can report the core it actually embeds. That is not
-/// something a caller can otherwise work out: `sas7bdat-polars` and `sas7bdat-cli`
-/// ship on their own version line, and the numbers collide misleadingly -- the
-/// `sas7bdat-polars` 0.8.0 wheel carries this crate at 0.6.0.
+/// something a caller can otherwise work out, because `sas7bdat-polars` and
+/// `sas7bdat-cli` ship on their own version lines.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Reader for SAS format catalogs (`.sas7bcat`), which hold the value labels of a dataset's formats.
+///
+/// Most callers go through [`Dataset::attach_catalog`](crate::Dataset::attach_catalog) instead.
 pub mod catalog;
 mod columnar;
 mod compression;

@@ -1,4 +1,4 @@
-//! `std::simd` kernels — the original implementation, now one backend of three.
+//! `std::simd` kernels, one of three backends.
 //!
 //! Requires a nightly toolchain for `#![feature(portable_simd)]`. Unlike
 //! [`super::fearless`] this does **not** dispatch at runtime: it lowers to

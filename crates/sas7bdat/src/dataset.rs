@@ -25,18 +25,45 @@ use std::{
     time::Instant,
 };
 
+/// Wall-clock time spent in each stage of opening a file, from [`Dataset::open_breakdown`]. All times are in nanoseconds.
 #[derive(Debug, Clone)]
 pub struct OpenBreakdown {
+    /// Reading file metadata from the file system.
     pub metadata_ns: u128,
+    /// Opening the file.
     pub file_open_ns: u128,
+    /// Memory-mapping the file. `None` when no map was attempted.
     pub mmap_ns: Option<u128>,
+    /// Reading the header.
     pub probe_header_ns: u128,
+    /// Rewinding to the start of the file.
     pub rewind_ns: u128,
+    /// Parsing the column and layout metadata.
     pub parse_layout_ns: u128,
+    /// The whole open.
     pub total_ns: u128,
+    /// Whether the file was memory-mapped.
     pub used_mmap: bool,
 }
 
+/// An opened SAS7BDAT file: its metadata and a handle to its bytes.
+///
+/// Opening reads the header and column metadata only. Rows are decoded when you scan. [`scan`](Self::scan) returns a [`ScanBuilder`] with every option, and the methods on this type are shortcuts for common scans. A `Dataset` is cheap to clone, and clones share the underlying bytes.
+///
+/// ```no_run
+/// use sas7bdat::{Dataset, Result};
+///
+/// fn main() -> Result<()> {
+///     let ds = Dataset::open("data.sas7bdat")?;
+///     println!("{} rows", ds.metadata().row_count);
+///     for column in ds.columns() {
+///         println!("{} {:?}", column.name(), column.logical_type);
+///     }
+///     let rows = ds.scan().limit(10).collect_rows()?;
+///     println!("{}", rows.len());
+///     Ok(())
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Dataset {
     pub(crate) file: Arc<FileInner>,
@@ -46,6 +73,8 @@ pub struct Dataset {
 }
 
 impl Dataset {
+    /// Opens the file like [`open_with`](Self::open_with) and reports the time each stage took, without keeping the dataset.
+    ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be opened, mapped, or its
@@ -133,15 +162,29 @@ impl Dataset {
         })
     }
 
+    /// Opens the SAS7BDAT file at `path` with the default [`OpenOptions`].
+    ///
+    /// Reads the header and column metadata. Rows are read when you scan.
+    ///
+    /// ```no_run
+    /// use sas7bdat::{Dataset, Result};
+    ///
+    /// fn main() -> Result<()> {
+    ///     let ds = Dataset::open("data.sas7bdat")?;
+    ///     println!("{} columns", ds.columns().len());
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be opened or its SAS7BDAT
-    /// structure cannot be parsed.
+    /// Returns [`Error::Io`] if the file cannot be opened or read. Returns a header, metadata,
+    /// corruption or unsupported error if its SAS7BDAT structure cannot be parsed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with(path, OpenOptions::default())
     }
 
-    /// Builds a dataset from any `Read` implementor by buffering the input in memory first.
+    /// Reads all of `reader` into memory and parses it as a SAS7BDAT file, with the default [`OpenOptions`].
     ///
     /// # Errors
     ///
@@ -150,7 +193,7 @@ impl Dataset {
         Self::from_reader_with_options(reader, OpenOptions::default())
     }
 
-    /// Builds a dataset from any `Read` implementor by buffering the input in memory first.
+    /// Reads all of `reader` into memory and parses it as a SAS7BDAT file, with the given options.
     ///
     /// # Errors
     ///
@@ -163,6 +206,8 @@ impl Dataset {
         Self::from_bytes_with_options(bytes, options)
     }
 
+    /// Compiles the page descriptors again and reports where the time went.
+    ///
     /// # Errors
     ///
     /// Returns an error if descriptor compilation fails for the dataset source.
@@ -182,6 +227,11 @@ impl Dataset {
         }
     }
 
+    /// Opens the SAS7BDAT file at `path` with the given options.
+    ///
+    /// With [`IoBackendPreference::Auto`] the file is memory-mapped unless the path is on a
+    /// network share.
+    ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be opened, mapped, or its
@@ -199,6 +249,14 @@ impl Dataset {
         Self::from_buffered_file(path, file, options)
     }
 
+    /// Parses a SAS7BDAT file held in memory. The dataset keeps the bytes.
+    ///
+    /// ```
+    /// use sas7bdat::Dataset;
+    ///
+    /// assert!(Dataset::from_bytes(Vec::new()).is_err());
+    /// ```
+    ///
     /// # Errors
     ///
     /// Returns an error if the provided bytes do not contain a valid
@@ -222,16 +280,19 @@ impl Dataset {
         })
     }
 
+    /// The file-level metadata read from the header.
     #[must_use]
     pub fn metadata(&self) -> &DatasetMetadata {
         &self.metadata
     }
 
+    /// The columns in file order.
     #[must_use]
     pub fn columns(&self) -> &[ColumnMeta] {
         &self.layout.columns
     }
 
+    /// The column called `name`, or `None` when there is none. The comparison is exact.
     #[must_use]
     pub fn column(&self, name: &str) -> Option<&ColumnMeta> {
         self.columns().iter().find(|column| column.name() == name)
@@ -245,6 +306,7 @@ impl Dataset {
         self.layout.rows_per_page
     }
 
+    /// Starts a [`ProjectionBuilder`] for choosing which columns a scan reads.
     #[must_use]
     pub const fn projection(&self) -> ProjectionBuilder<'_> {
         ProjectionBuilder::new(self)
@@ -859,10 +921,10 @@ mod tests {
         assert_eq!(genders, ["é", "F", "M", "F", "F"]);
     }
 
-    /// Regression: a datetime column with fractional (sub-second) SAS values widens to an
-    /// f64 buffer internally. The Arrow path used to declare `Timestamp(Second)` but build
-    /// an `f64` array, crashing `RecordBatch::try_new`. It now emits `Timestamp(Microsecond)`
-    /// (so Parquet stores a real timestamp) and preserves sub-second precision.
+    /// A datetime column with fractional (sub-second) SAS values widens to an f64 buffer
+    /// internally. The Arrow path must still declare a matching timestamp type, so it emits
+    /// `Timestamp(Microsecond)` (Parquet then stores a real timestamp) and preserves
+    /// sub-second precision.
     #[cfg(feature = "arrow")]
     #[test]
     fn fractional_datetime_columns_export_as_microsecond_timestamps() {
@@ -885,9 +947,9 @@ mod tests {
         assert!(batch.num_rows() > 0);
     }
 
-    /// Regression: a TIME column must be declared over a domain its values cannot escape.
-    /// `Time64(Nanosecond)` covers only `[0, 24h)`, so a SAS TIME past midnight-plus-a-day
-    /// was written correctly and read back as null by every spec-following reader.
+    /// A TIME column must be declared over a domain its values cannot escape.
+    /// `Time64(Nanosecond)` covers only `[0, 24h)`, so a SAS TIME past a full day would be
+    /// read back as null by every spec-following reader.
     ///
     /// The schema is asserted against a synthesized dataset rather than a corpus file: the
     /// repo-root `fixtures/` tree is untracked and absent in CI.

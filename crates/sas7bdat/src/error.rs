@@ -1,20 +1,31 @@
 use std::{error::Error as StdError, fmt, path::PathBuf};
 
+/// A `Result` whose error type defaults to [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// An I/O failure while reading a file or stream.
 #[derive(Debug, Clone)]
 pub struct IoError {
+    /// The file being read, when the failure came from opening or reading a path.
     pub path: Option<PathBuf>,
+    /// The text of the underlying [`std::io::Error`].
     pub message: String,
 }
 
+/// A problem in the file header, found before any page is read.
 #[derive(Debug, Clone)]
 pub enum HeaderError {
+    /// The first four bytes are not a SAS7BDAT or catalog magic number.
     InvalidMagic([u8; 4]),
+    /// The header declares a format version this reader does not handle.
     UnsupportedVersion(u16),
+    /// The byte-order marker contradicts the rest of the header.
     UnexpectedEndianness,
+    /// The declared page size, in bytes, is too small to hold a page header.
     PageSizeTooSmall(u32),
+    /// The declared header size, in bytes, is invalid.
     InvalidHeaderSize(u32),
+    /// Any other header problem, described in the message.
     Other(String),
 }
 
@@ -31,11 +42,16 @@ impl fmt::Display for HeaderError {
     }
 }
 
+/// A problem in the column and layout metadata that follows the header.
 #[derive(Debug, Clone)]
 pub enum MetadataError {
+    /// A column declares a type code that is neither numeric nor character.
     InvalidColumnType(u8),
+    /// The column at this 0-based index has no descriptor in the metadata.
     MissingColumnDescriptor(usize),
+    /// The compression signature is not one this reader recognises.
     InvalidCompression(String),
+    /// Any other metadata problem, described in the message.
     Other(String),
 }
 
@@ -52,32 +68,61 @@ impl fmt::Display for MetadataError {
     }
 }
 
+/// A column selection that cannot be built, such as an unknown column name.
 #[derive(Debug, Clone)]
 pub struct ProjectionError {
+    /// What was wrong with the selection.
     pub message: String,
 }
 
+/// A cell value that cannot be decoded as requested.
 #[derive(Debug, Clone)]
 pub struct DecodeError {
+    /// What failed to decode.
     pub message: String,
 }
 
+/// A compressed page or row that cannot be expanded.
 #[derive(Debug, Clone)]
 pub struct CompressionError {
+    /// What failed to decompress.
     pub message: String,
 }
 
+/// A failure while building Arrow arrays or schemas.
 #[derive(Debug, Clone)]
 pub struct ArrowError {
+    /// What failed in the Arrow conversion.
     pub message: String,
 }
 
+/// The file's own structure contradicts itself or points outside the data.
 #[derive(Debug, Clone)]
 pub enum CorruptionError {
-    PageOutOfBounds { index: u64, limit: u64 },
-    PointerOutOfBounds { offset: usize, limit: usize },
+    /// A page index is beyond the page count.
+    PageOutOfBounds {
+        /// The 0-based page index that was requested.
+        index: u64,
+        /// The number of pages in the file.
+        limit: u64,
+    },
+    /// A pointer inside a page leads outside the page.
+    PointerOutOfBounds {
+        /// The offset the pointer refers to, in bytes.
+        offset: usize,
+        /// The page size, in bytes.
+        limit: usize,
+    },
+    /// A subheader carries a signature that is not defined.
     InvalidSubheaderSignature(u32),
-    TypeMismatch { expected: String, found: String },
+    /// A value has a different type from the one the structure requires.
+    TypeMismatch {
+        /// The type the structure requires.
+        expected: String,
+        /// The type that was found.
+        found: String,
+    },
+    /// Any other inconsistency, described in the message.
     Other(String),
 }
 
@@ -101,8 +146,10 @@ impl fmt::Display for CorruptionError {
     }
 }
 
+/// A valid file or request that this build cannot handle.
 #[derive(Debug, Clone)]
 pub struct UnsupportedError {
+    /// What is not supported.
     pub feature: String,
 }
 
@@ -115,20 +162,47 @@ pub struct UnsupportedError {
 /// promises the file is fine and this build simply cannot read that shape yet.
 #[derive(Debug, Clone)]
 pub struct InternalError {
+    /// What invariant was violated.
     pub message: String,
 }
 
+/// Everything that can go wrong when opening or scanning a SAS7BDAT file.
+///
+/// The variant says whose problem it is. [`Error::Io`] is the environment. [`Error::Header`],
+/// [`Error::Metadata`], [`Error::Corruption`] and [`Error::Compression`] mean the file is not a
+/// readable SAS7BDAT. [`Error::Unsupported`] means the file may be fine but this build cannot
+/// read that shape. [`Error::Projection`] and [`Error::Decode`] come from the request, and
+/// [`Error::Internal`] is a bug in this crate. `Display` gives a one-line message that starts
+/// with the kind.
+///
+/// ```
+/// use sas7bdat::{Dataset, Error};
+///
+/// let err = Dataset::from_bytes(b"not a sas file".to_vec()).unwrap_err();
+/// assert!(!matches!(err, Error::Internal(_)));
+/// println!("{err}");
+/// ```
 #[derive(Debug, Clone)]
 pub enum Error {
+    /// An I/O failure.
     Io(IoError),
+    /// The file header is invalid.
     Header(HeaderError),
+    /// The column or layout metadata is invalid.
     Metadata(MetadataError),
+    /// A column selection could not be built.
     Projection(ProjectionError),
+    /// A cell value could not be decoded as requested.
     Decode(DecodeError),
+    /// A compressed page or row could not be expanded.
     Compression(CompressionError),
+    /// Building an Arrow array or schema failed.
     Arrow(ArrowError),
+    /// The file's structure is inconsistent or points outside the data.
     Corruption(CorruptionError),
+    /// The file or request needs a feature this build does not implement.
     Unsupported(UnsupportedError),
+    /// A reader invariant was violated. This is a bug in the crate.
     Internal(InternalError),
 }
 
@@ -145,6 +219,7 @@ impl Error {
         })
     }
 
+    /// An I/O error for `path`.
     #[must_use]
     pub fn io_with_path(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
         Self::Io(IoError {
@@ -153,11 +228,13 @@ impl Error {
         })
     }
 
+    /// An I/O error carrying the text of `err`.
     #[must_use]
     pub fn io_error(err: &std::io::Error) -> Self {
         Self::io(err.to_string())
     }
 
+    /// An I/O error for `path` carrying the text of `err`.
     #[must_use]
     pub fn io_error_with_path(path: impl Into<PathBuf>, err: &std::io::Error) -> Self {
         Self::io_with_path(path, err.to_string())
@@ -180,6 +257,7 @@ impl Error {
         })
     }
 
+    /// A file or request this build cannot handle. `feature` says what.
     #[must_use]
     pub fn unsupported(feature: impl Into<String>) -> Self {
         Self::Unsupported(UnsupportedError {
@@ -187,6 +265,7 @@ impl Error {
         })
     }
 
+    /// A cell value that could not be decoded as requested.
     #[must_use]
     pub fn decode(message: impl Into<String>) -> Self {
         Self::Decode(DecodeError {
@@ -194,26 +273,31 @@ impl Error {
         })
     }
 
+    /// A corrupt page. Builds the same [`Error::Corruption`] value as [`Error::corruption`].
     #[must_use]
     pub fn page_corruption(message: impl Into<String>) -> Self {
         Self::Corruption(CorruptionError::Other(message.into()))
     }
 
+    /// An invalid header, described by `message`.
     #[must_use]
     pub fn header_corruption(message: impl Into<String>) -> Self {
         Self::Header(HeaderError::Other(message.into()))
     }
 
+    /// Invalid column or layout metadata, described by `message`.
     #[must_use]
     pub fn metadata_corruption(message: impl Into<String>) -> Self {
         Self::Metadata(MetadataError::Other(message.into()))
     }
 
+    /// An I/O failure while reading metadata, reported as invalid metadata with the text of `err`.
     #[must_use]
     pub fn metadata_io(err: &std::io::Error) -> Self {
         Self::metadata_corruption(err.to_string())
     }
 
+    /// A failure while building an Arrow array or schema.
     #[must_use]
     pub fn arrow(message: impl Into<String>) -> Self {
         Self::Arrow(ArrowError {

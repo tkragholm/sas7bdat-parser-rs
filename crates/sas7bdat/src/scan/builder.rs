@@ -62,24 +62,20 @@ const AUTO_MIN_PAGES_TO_PARALLELISE: usize = 16;
 ///
 /// `Auto` asks one question -- is there enough work here to be worth threads at all -- and
 /// then uses the machine. **A gate, not a divisor.** Dividing the row count to get a worker
-/// count was tried and measured worse than either extreme: it gave `rmov` two workers, which
-/// ran 2.7x slower than the twelve it had before and slower than one, because two workers pay
-/// the whole chunking cost (an accumulator and a string dictionary each, a channel, an
-/// ordering buffer) for barely any parallelism. Below the thresholds take one worker; above
-/// them take the machine.
+/// count measured worse than either extreme: it gave `rmov` two workers, which ran 2.7x
+/// slower than twelve and slower than one, because two workers pay the whole chunking cost
+/// (an accumulator and a string dictionary each, a channel, an ordering buffer) for barely
+/// any parallelism. Below the thresholds take one worker; above them take the machine.
 ///
-/// A single worker is not a lesser path: since the serial fold it runs the same chunk decode
-/// inline on the calling thread and still reaches the tiled fill. Saying no costs a small file
-/// nothing.
+/// A single worker is not a lesser path: it runs the same chunk decode inline on the calling
+/// thread and still reaches the tiled fill. Saying no costs a small file nothing.
 ///
 /// `Threads(n)` is honoured as asked, clamped only to the pages that exist. A caller naming a
 /// number knows something this does not.
 ///
-/// There was a known gap here: `topical` decoded faster serially than on twelve threads, and
-/// the note said the suspected cause was per-chunk cost on a wide string table. That was
-/// wrong, and measuring it rather than believing it found the real cause in
-/// [`effective_rows_per_page`]: the file was being cut into a single chunk, so the threads had
-/// nothing to take. It now decodes 4.7x faster in parallel and no exception is needed.
+/// The row estimate comes from [`effective_rows_per_page`], so a wide string table such as
+/// `topical` is cut into enough chunks for the threads to share. That file decodes 4.7x
+/// faster in parallel, and `Auto` needs no exception for it.
 pub(super) fn resolved_parallel_workers(
     parallelism: Parallelism,
     work_items: usize,
@@ -358,6 +354,31 @@ where
     Ok((delivered_batches, delivered_rows))
 }
 
+/// Configures and runs a scan over a [`Dataset`]. Get one from [`Dataset::scan`].
+///
+/// The defaults are all columns, all rows, typed decoding, trimmed strings, stable batch order and automatic parallelism. Each `with_*` method changes one setting, and the `visit_*` and `collect_*` methods run the scan. The builder is not consumed by a scan, so it can be run again.
+///
+/// ```no_run
+/// use sas7bdat::{Dataset, Result};
+/// use std::ops::ControlFlow;
+///
+/// fn main() -> Result<()> {
+///     let ds = Dataset::open("data.sas7bdat")?;
+///     let projection = ds.projection().columns(["ID", "BIRTHDATE"]).build()?;
+///     let stats = ds
+///         .scan()
+///         .with_projection(&projection)
+///         .limit(1000)
+///         .visit_rows(|row| {
+///             if let Some(id) = row.get(0) {
+///                 println!("{id:?}");
+///             }
+///             Ok(ControlFlow::Continue(()))
+///         })?;
+///     println!("{} rows", stats.rows_emitted);
+///     Ok(())
+/// }
+/// ```
 pub struct ScanBuilder<'a> {
     pub(crate) ds: &'a Dataset,
     pub(crate) projection: Option<&'a Projection>,
@@ -396,47 +417,54 @@ impl<'a> ScanBuilder<'a> {
 
     /// The absolute row range this scan emits, resolving [`Self::select`] and [`Self::limit`]
     /// into one bound. Every path that needs to know which rows are wanted goes through here,
-    /// so the two knobs cannot drift apart in cost or meaning again.
+    /// so the two knobs cannot drift apart in cost or meaning.
     pub(super) fn row_window(&self) -> super::raw::RowWindow {
         super::raw::RowWindow::resolve(self.row_selection, self.row_limit)
     }
 
+    /// Reads only the columns of `projection`. The default is every column.
     #[must_use]
     pub const fn with_projection(mut self, projection: &'a Projection) -> Self {
         self.projection = Some(projection);
         self
     }
 
+    /// Sets how cells are decoded. The default is [`DecodeMode::Typed`].
     #[must_use]
     pub const fn with_decode_mode(mut self, mode: DecodeMode) -> Self {
         self.decode = mode;
         self
     }
 
+    /// Sets how string columns are decoded.
     #[must_use]
     pub const fn with_string_options(mut self, options: StringDecodeOptions) -> Self {
         self.string_options = options;
         self
     }
 
+    /// Sets how date, datetime and time columns are decoded.
     #[must_use]
     pub const fn with_temporal_options(mut self, options: TemporalDecodeOptions) -> Self {
         self.temporal_options = options;
         self
     }
 
+    /// Sets whether batches arrive in file order. The default is [`OrderingMode::Stable`].
     #[must_use]
     pub const fn with_ordering(mut self, mode: OrderingMode) -> Self {
         self.ordering = mode;
         self
     }
 
+    /// Sets how many threads decode pages. The default is [`Parallelism::Auto`].
     #[must_use]
     pub const fn with_parallelism(mut self, parallelism: Parallelism) -> Self {
         self.parallelism = parallelism;
         self
     }
 
+    /// Sets the target batch size of batch scans. The default is [`BatchHint::Auto`].
     #[must_use]
     pub const fn with_batch_hint(mut self, hint: BatchHint) -> Self {
         self.batch_hint = hint;
@@ -444,7 +472,7 @@ impl<'a> ScanBuilder<'a> {
     }
 
     /// Select the owned-batch decode strategy. See [`ColumnMajorDecode`]. Defaults to
-    /// [`ColumnMajorDecode::Off`] (row-major). Only [`Self::collect_batches`] honors this;
+    /// [`ColumnMajorDecode::On`]. Only [`Self::collect_batches`] honors this;
     /// it falls back to row-major automatically when the column-major preconditions don't hold.
     #[must_use]
     pub const fn with_column_major_decode(mut self, mode: ColumnMajorDecode) -> Self {
@@ -452,12 +480,14 @@ impl<'a> ScanBuilder<'a> {
         self
     }
 
+    /// Stops after `rows` rows. When combined with [`select`](Self::select), the count applies to the selected rows.
     #[must_use]
     pub const fn limit(mut self, rows: u64) -> Self {
         self.row_limit = Some(rows);
         self
     }
 
+    /// Restricts the scan to a [`RowSelection`]. The default is every row.
     #[must_use]
     pub const fn select(mut self, selection: RowSelection) -> Self {
         self.row_selection = selection;
@@ -485,9 +515,14 @@ impl<'a> ScanBuilder<'a> {
         self
     }
 
+    /// Calls `f` with the undecoded bytes of each row in the selection, in file order.
+    ///
+    /// Return [`ControlFlow::Break`] from `f` to stop early.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the scan fails, such as due to I/O or decompression errors.
+    /// Returns an error if the scan fails, such as due to I/O or decompression errors, or if `f`
+    /// returns one.
     pub fn visit_raw_rows<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(RawRow<'_>) -> Result<ControlFlow<()>>,
@@ -515,9 +550,15 @@ impl<'a> ScanBuilder<'a> {
             .map(|stats| stats.summary())
     }
 
+    /// Calls `f` with each decoded row in the selection, in file order.
+    ///
+    /// Return [`ControlFlow::Break`] from `f` to stop early. The [`RowView`] is only valid inside the
+    /// call. Use [`collect_rows`](Self::collect_rows) to keep rows.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the scan or row decoding fails.
+    /// Returns an error if the scan or row decoding fails, or if `f` returns one. A scan in
+    /// [`DecodeMode::Raw`] fails with [`Error::Unsupported`].
     pub fn visit_rows<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(RowView<'_>) -> Result<ControlFlow<()>>,
@@ -544,13 +585,6 @@ impl<'a> ScanBuilder<'a> {
             .map(|stats| stats.summary())
     }
 
-    /// Which decode pipeline this scan will take, for the given entry point.
-    ///
-    /// The pipeline depends on the method you call as much as on the file: `visit_batches`
-    /// and `collect_batches` decode the same data through different code, and only the
-    /// latter can reach the tiled column-major fill. Label a benchmark with this, or it may
-    /// be measuring a path the change under test cannot reach.
-    ///
     /// Which page source an owned-batch scan will use, and why the other candidates
     /// declined. Free: it evaluates the same conditions the scan does without decoding
     /// anything.
@@ -561,7 +595,7 @@ impl<'a> ScanBuilder<'a> {
     ///
     /// The declines are the useful half when a change measures as nothing: they say, for
     /// example, that the one-pass scan was skipped because the source is mapped rather than
-    /// buffered, which is a sentence that previously required instrumenting a branch.
+    /// buffered.
     ///
     /// # Errors
     ///
@@ -571,6 +605,13 @@ impl<'a> ScanBuilder<'a> {
         self.select_page_source(&plan, matches!(self.column_major, ColumnMajorDecode::On))
     }
 
+    /// Which decode pipeline this scan will take, for the given entry point.
+    ///
+    /// The pipeline depends on the method you call as much as on the file: `visit_batches`
+    /// and `collect_batches` decode the same data through different code, and only the
+    /// latter can reach the tiled column-major fill. Label a benchmark with this, or it may
+    /// be measuring a path the change under test cannot reach.
+    ///
     /// # Performance
     ///
     /// The cost is **unspecified and may change**. Today this runs the real selection and
@@ -609,9 +650,14 @@ impl<'a> ScanBuilder<'a> {
         Ok(stats.path)
     }
 
+    /// Calls `f` with each decoded batch of the selection as a [`ColumnarBatch`] that borrows the page.
+    ///
+    /// Return [`ControlFlow::Break`] from `f` to stop early. Use
+    /// [`visit_owned_batches`](Self::visit_owned_batches) for batches you can keep.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the scan or batch decoding fails.
+    /// Returns an error if the scan or batch decoding fails, or if `f` returns one.
     pub fn visit_batches<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
         F: FnMut(ColumnarBatch<'_>) -> Result<ControlFlow<()>>,
@@ -623,9 +669,14 @@ impl<'a> ScanBuilder<'a> {
             })
     }
 
+    /// Calls `f` with each decoded batch of the selection as an Arrow [`RecordBatch`].
+    ///
+    /// The schema is [`arrow_schema`](Self::arrow_schema). Return [`ControlFlow::Break`] from `f` to stop early.
+    /// Available with the `arrow` feature.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the scan or Arrow conversion fails.
+    /// Returns an error if the scan or Arrow conversion fails, or if `f` returns one.
     #[cfg(feature = "arrow")]
     pub fn visit_arrow_batches<F>(&self, mut f: F) -> Result<crate::ScanStatsSummary>
     where
@@ -672,6 +723,11 @@ impl<'a> ScanBuilder<'a> {
             .map(|stats| stats.summary())
     }
 
+    /// The Arrow schema of the batches this scan produces. Available with the `arrow` feature.
+    ///
+    /// Fields follow the projection and are all nullable. Time columns carry the field metadata
+    /// key [`SAS_LOGICAL_TYPE_KEY`](crate::SAS_LOGICAL_TYPE_KEY).
+    ///
     /// # Errors
     ///
     /// Returns an error if scan planning fails.
@@ -681,6 +737,8 @@ impl<'a> ScanBuilder<'a> {
         Ok(super::plan::arrow_schema_for_plan(&plan))
     }
 
+    /// Decodes the selection into Arrow record batches held in memory. Available with the `arrow` feature.
+    ///
     /// # Errors
     ///
     /// Returns an error if scan planning, batch materialization, or Arrow conversion fails.
@@ -694,9 +752,14 @@ impl<'a> ScanBuilder<'a> {
         Ok(batches)
     }
 
+    /// Decodes the selection into owned rows held in memory.
+    ///
+    /// For large files prefer a visitor or batches, which do not hold every row at once.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the scan or row decoding fails.
+    /// Returns an error if the scan or row decoding fails. A scan in [`DecodeMode::Raw`] fails with
+    /// [`Error::Unsupported`].
     pub fn collect_rows(&self) -> Result<Vec<OwnedRow>> {
         if matches!(self.decode, DecodeMode::Raw) {
             return Err(Error::unsupported(
@@ -727,6 +790,10 @@ impl<'a> ScanBuilder<'a> {
         Ok(rows)
     }
 
+    /// Decodes the selection into owned columnar batches held in memory.
+    ///
+    /// See [`ColumnMajorDecode`] for the decode strategy.
+    ///
     /// # Errors
     ///
     /// Returns an error if the scan or batch decoding fails.
@@ -934,8 +1001,7 @@ struct TwoPassStreamPlan<'a> {
 /// A page source that was considered and passed over, with the reason it was.
 ///
 /// Returned beside the choice so a caller, a log line or a bug report can say not just which
-/// pipeline ran but why the others did not. Reconstructing that previously meant
-/// instrumenting a branch and rebuilding.
+/// pipeline ran but why the others did not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceDeclined {
     /// The one-pass scan, and what ruled it out.
@@ -1305,7 +1371,7 @@ impl ScanBuilder<'_> {
     /// batch goes straight to `f`. It exists because [`Self::plan_two_pass_stream`] resolves
     /// one worker for `Parallelism::None`, for `Threads(1)`, and for any file with a single
     /// page in the window, and those scans want the same tiled fill as the parallel ones.
-    /// Planning it separately is what used to make it a pipeline of its own.
+    /// It is planned together with the parallel form, so both share one code path.
     fn run_two_pass_inline<F>(
         &self,
         stream: &TwoPassStreamPlan<'_>,
@@ -1381,19 +1447,18 @@ impl ScanBuilder<'_> {
         descriptors: &'p crate::internal::PageDescriptorTable,
         column_major: bool,
     ) -> Result<TwoPassDecision<'p>> {
-        // Chunk only the pages the window wants. A bounded scan is parallel now that the bound
-        // is an absolute row range rather than a per-worker emitted-row count, so this is what
-        // keeps it from also reading the rest of the file. Worker count follows the windowed
-        // page count, so a small limit does not spawn a thread per idle core.
+        // Chunk only the pages the window wants. A bounded scan is parallel because the bound
+        // is an absolute row range, so chunking only the window keeps it from also reading the
+        // rest of the file. Worker count follows the windowed page count, so a small limit does
+        // not spawn a thread per idle core.
         let window_pages = plan.raw.window().page_range(&descriptors.pages);
         let page_count = window_pages.len();
         // Rows the window will decode, from the header's declared total scaled by the share of
         // pages the window covers.
         //
-        // Not `layout.rows_per_page * pages`, which was tried and is not a proxy for anything:
-        // it is the value SAS declares in the ROW_SIZE subheader, and on `topical` it is under
-        // 10 while the file actually averages 102 rows per page. That estimate put an
-        // 84,355-row file below the gate and decoded it on one thread.
+        // Not `layout.rows_per_page * pages`: that is the value SAS declares in the ROW_SIZE
+        // subheader, and on `topical` it is under 10 while the file actually averages 102 rows
+        // per page. It would put an 84,355-row file below the gate and decode it on one thread.
         let total_pages = u64::try_from(descriptors.pages.len()).unwrap_or(u64::MAX);
         let windowed_rows = self
             .ds
@@ -1517,7 +1582,7 @@ impl ScanBuilder<'_> {
     /// Still long, and deliberately not split further. What remains is one `thread::scope`
     /// whose pieces all borrow the same scope-local channels, stop flag and counters; lifting
     /// either spawn branch out would mean a helper taking a dozen `&'scope` parameters, which
-    /// reads worse than the loop it replaced. The planning that *could* be separated already is.
+    /// reads worse than the loop. The planning that *could* be separated already is.
     #[allow(clippy::too_many_lines)]
     fn try_stream_batches_two_pass<F>(
         &self,
@@ -1935,11 +2000,10 @@ mod drain_tests {
         (seen, delivered_batches, delivered_rows)
     }
 
-    // Regression: a batch buffered for a later chunk must be flushed once the
-    // earlier chunks are finished and drained. Previously delivery only ran
-    // when a new batch arrived, so a `Finished` event that advanced past empty
-    // chunks would strand an already-buffered later batch (it had no following
-    // batch to drive delivery), making the parallel stream drop rows.
+    // A batch buffered for a later chunk must be flushed once the earlier chunks are
+    // finished and drained. If delivery ran only when a new batch arrived, a `Finished`
+    // event that advanced past empty chunks would strand an already-buffered later batch
+    // (no following batch would drive delivery), and the parallel stream would drop rows.
     #[test]
     fn flushes_buffered_later_chunk_when_earlier_chunks_finish() {
         let mut buffered = vec![VecDeque::new(), VecDeque::new()];

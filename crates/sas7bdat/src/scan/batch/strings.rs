@@ -327,9 +327,9 @@ fn push_ascii_cell(
     keep: usize,
 ) -> Result<bool> {
     let (offsets, data, valid, dictionary_ids) = builder;
-    // No width gate. One was tried, on the reasoning that a two-byte cell should not move
-    // sixteen bytes, and it measured worse on the very fixtures it was meant to protect:
-    // the fixed move beats the `memcpy` call even when most of what it moves is discarded.
+    // No width gate. Gating on a small cell width measured worse on the very fixtures it
+    // would protect: the fixed move beats the `memcpy` call even when most of what it moves
+    // is discarded.
     push_variable_valid_overcopy(offsets, data, valid, row, start, keep)?;
     push_dictionary_id(dictionary_ids, DICT_ID_NONE);
     Ok(true)
@@ -491,7 +491,7 @@ mod windows_1252_tests {
 
     /// A one-character column is decoded here and every wider column by `encoding_rs`,
     /// so a byte has to read the same either way. The five bytes windows-1252 leaves
-    /// unassigned are where they used to differ: a replacement character here, a C1
+    /// unassigned are where the two could differ: a replacement character here, a C1
     /// control character there.
     #[test]
     fn every_high_byte_reads_as_encoding_rs_reads_it() {

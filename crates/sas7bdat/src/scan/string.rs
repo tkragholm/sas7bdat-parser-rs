@@ -105,7 +105,7 @@ pub(super) fn trim_and_classify_ascii(slice: &[u8]) -> TrimmedString<'_> {
     // Only when at least the low word loads whole. Below eight bytes every load would go
     // through the padding buffer, and for the one and two byte cells that dominate survey
     // data that copy costs far more than the scan it replaces: gating on `<= 16` alone
-    // measured 13-16% slower on two such fixtures while making register files 14% faster.
+    // measured 13-16% slower on two such fixtures while making wide administrative files 14% faster.
     if (8..=SWAR_MAX_WIDTH).contains(&slice.len()) {
         return swar_trim_and_classify(slice);
     }
@@ -184,18 +184,16 @@ fn is_all_space_or_nul_12(slice: &[u8]) -> bool {
 /// probe below looks for. The repair is then to read the bytes as the UTF-8 they
 /// already are, so it borrows the row and allocates nothing.
 ///
-/// This used to run the other way, walking the *decoded* string back to bytes with
-/// `u8::try_from`. That silently gave up on every character whose second UTF-8 byte
-/// lands in `0x80..=0x9F`, because windows-1252 decodes that band to typographic
-/// characters above U+00FF — a small tilde for "Ø", an ellipsis for "Å", a dagger for
-/// "Æ". Those bytes are exactly the codepoints `U+00C0..=U+00DF`, so the entire
-/// uppercase half of Latin-1 was left mangled while the lowercase half was repaired,
-/// which is worse than repairing neither: one column came back holding both
-/// "Nørrebro" and "KÃ˜BENHAVN".
+/// The repair works on the original bytes, not on the decoded string. Walking the decoded
+/// string back to bytes with `u8::try_from` fails for every character whose second UTF-8
+/// byte lands in `0x80..=0x9F`, because windows-1252 decodes that band to typographic
+/// characters above U+00FF (a small tilde for "Ø", an ellipsis for "Å", a dagger for
+/// "Æ"). That would repair the lowercase half of Latin-1 and leave the uppercase half
+/// mangled, so one column could hold both "Nørrebro" and "KÃ˜BENHAVN".
 ///
 /// Some byte strings are legitimate single-byte text *and* valid UTF-8 — "Ã¸" in
 /// windows-1252 is "ø" in UTF-8 — and nothing in the bytes tells the two apart. This
-/// keeps the older code's answer and prefers the UTF-8 reading.
+/// prefers the UTF-8 reading.
 #[inline]
 pub(super) fn mojibake_repaired<'a>(
     encoding: &'static Encoding,

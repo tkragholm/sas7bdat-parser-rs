@@ -73,11 +73,10 @@ pub fn discover_target_roots(fixtures_root: &Path) -> Vec<PathBuf> {
 ///
 /// **Put this in the benchmark id.** This crate has several decode pipelines and they share
 /// almost every symbol below the point where they diverge, so a benchmark cannot otherwise
-/// tell you which one it measured. Two consequences, both of which have already happened
-/// here:
+/// tell you which one it measured. Two consequences:
 ///
-/// - A change to the tiled column-major fill measured as zero, because the benchmark ran
-///   `visit_batches`, which never reaches that fill.
+/// - A change to the tiled column-major fill measures as zero through `visit_batches`,
+///   which never reaches that fill.
 /// - Two of the entry points this suite exercises most, `visit_batches` and
 ///   `collect_batches`, do not carry the same production consumers, so a number from one
 ///   says nothing about the other.
@@ -130,7 +129,7 @@ pub fn labelled_id_with(
 }
 
 /// Rows through `visit_rows`, the entry `sas7bdat-convert` uses and therefore the one behind
-/// the CLI and the R package. It had no benchmark coverage at all until this was added.
+/// the CLI and the R package.
 ///
 /// # Panics
 ///

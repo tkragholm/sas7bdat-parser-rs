@@ -31,9 +31,8 @@ const PARALLEL_THREADS: usize = 4;
 ///
 /// `sas7bdat-corpus-catalog` records paths relative to the directory it was run from —
 /// the workspace root in practice (`fixtures/raw_data/...`), so that is what a relative
-/// entry resolves against. Resolving against `CARGO_MANIFEST_DIR` instead pointed every
-/// entry at a nonexistent `crates/sas7bdat/fixtures/...`; each load then failed silently
-/// and the run ended in the "matched no profiled fixtures" assert.
+/// entry resolves against. `CARGO_MANIFEST_DIR` would point every entry at a nonexistent
+/// `crates/sas7bdat/fixtures/...`.
 fn load_dataset_path(path: &Path) -> Option<Dataset> {
     let path = if path.is_absolute() {
         path.to_path_buf()
@@ -76,7 +75,7 @@ fn bench_dataset_scans(
             },
         );
         // `visit_rows` streams them, and is what `sas7bdat-convert` calls, so it is the path
-        // behind the CLI and the R package. It had no coverage here at all before.
+        // behind the CLI and the R package.
         bench_visit_rows(
             &mut group,
             &dataset,

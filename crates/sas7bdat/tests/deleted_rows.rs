@@ -4,8 +4,7 @@
 //!
 //! Expected counts here were taken from `ReadStat` built at `da9fcaa`, which is after
 //! `WizardMac/ReadStat#366` added deleted-row support. `ReadStat` 1.1.9 (what `haven` and
-//! `pyreadstat` ship) predates it and over-reports on all three of these files, as did this
-//! crate before the bitmap was read.
+//! `pyreadstat` ship) predates it and over-reports on all three of these files.
 
 use sas7bdat::{Dataset, OwnedCellValue};
 use std::path::{Path, PathBuf};
@@ -30,8 +29,7 @@ const DELETED_ROW_FIXTURES: &[(&str, u64, u64)] = &[
         5,
     ),
     ("raw_data/csharp/data_page_with_deleted.sas7bdat", 998, 1),
-    // Not named for it, and not known to carry deletions until the whole corpus was
-    // re-measured. Nine of its rows are tombstones.
+    // Not named for deletions, but nine of its rows are tombstones.
     ("raw_data/pandas/load_log.sas7bdat", 2097, 9),
     // RLE-compressed, and the tombstone is the subheader pointer's own compression code
     // (0x05) rather than a page bitmap. Its table name says what it is:

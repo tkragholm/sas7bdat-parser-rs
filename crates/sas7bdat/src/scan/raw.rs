@@ -275,16 +275,14 @@ pub(super) fn page_slice<'a>(
 /// The absolute row range a scan emits, resolved from [`RowSelection`] and
 /// [`ScanBuilder::limit`](super::ScanBuilder::limit) together.
 ///
-/// The two used to be enforced by separate mechanisms with opposite costs: the selection was
-/// a per-row predicate that kept parallelism but never stopped the scan, while the limit
-/// stopped early but disabled every parallel path — it counted *emitted* rows, which is a
-/// per-worker quantity and therefore meaningless once decode is split across threads. Resolving
-/// both to one absolute `[start, end)` in row indices makes the bound worker-independent, so a
-/// bounded scan can be parallel and stop early at the same time.
+/// Both resolve to one absolute `[start, end)` in row indices. A count of *emitted* rows is a
+/// per-worker quantity and meaningless once decode is split across threads, so the bound is
+/// kept in file row indices instead. That makes it worker-independent: a bounded scan can be
+/// parallel and stop early at the same time.
 ///
 /// `end` is deliberately not clamped to the declared row count: the count comes from the file
 /// header and this reader already handles files where it is wrong, so clamping would truncate
-/// a scan that the unclamped predicate would have completed.
+/// a scan that should have completed.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RowWindow {
     start: u64,

@@ -3,9 +3,8 @@
 //! reports nothing at all for the plain numeric `w.d` format, which SAS stores with a width
 //! and no name.
 //!
-//! Expected strings are `ReadStat` at `da9fcaa` via `readstat_variable_get_format`. Every
-//! column of every corpus fixture was compared against it when this landed: 4,782 columns,
-//! no differences.
+//! Expected strings are `ReadStat` at `da9fcaa` via `readstat_variable_get_format`. They agree
+//! with this crate on all 4,782 columns of the corpus fixtures.
 
 use sas7bdat::Dataset;
 use std::path::{Path, PathBuf};

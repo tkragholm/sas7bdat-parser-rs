@@ -149,9 +149,9 @@ impl BatchDecodePlan {
         })
     }
 
-    /// Only the tests ask this now: the column-major gates moved to
-    /// [`Self::can_fill_span_column_major`], which is the weaker condition a mixed plan can
-    /// also satisfy.
+    /// Only the tests ask this. The column-major gates use
+    /// [`Self::can_fill_span_column_major`], the weaker condition a mixed plan can also
+    /// satisfy.
     #[cfg(test)]
     pub(crate) const fn all_columns_staged_numeric(&self) -> bool {
         self.flags.has(BatchPlanFlags::ALL_COLUMNS_STAGED_NUMERIC)

@@ -6,8 +6,7 @@ use sas7bdat::{Dataset, Parallelism};
 use std::time::Instant;
 
 fn read_once(path: &str, serial: bool) -> usize {
-    // Parallelism::Auto resolves to a single worker; match the Polars plugin and
-    // set Threads(ncpu) explicitly to exercise the parallel page-streaming path.
+    // Threads(ncpu) takes the parallel path whatever the file size.
     let parallelism = if serial {
         Parallelism::None
     } else {

@@ -241,11 +241,10 @@ fn reserve_row(output: &mut Vec<u8>, expected_len: usize) -> Result<()> {
 
 /// Refuse an emit that would push the row past its declared length.
 ///
-/// The RLE decoder checks this inline before every copy and insert. RDC did not: it
-/// grew `output` freely and only compared lengths after the loop, so a crafted stream
-/// ballooned the buffer first and failed second. One 3-byte RDC token can emit up to
-/// 4114 bytes (`19 + 15 + 255 * 16`), which is roughly 1371x amplification per input
-/// byte — enough for a small page to drive a multi-hundred-megabyte allocation.
+/// Both decoders check this before every copy and insert, so a crafted stream cannot
+/// grow `output` past the row length before failing. One 3-byte RDC token can emit up to
+/// 4114 bytes (`19 + 15 + 255 * 16`), roughly 1371x amplification per input byte, enough
+/// for a small page to drive a multi-hundred-megabyte allocation.
 #[inline]
 fn ensure_room(output: &[u8], add: usize, expected_len: usize) -> Result<()> {
     if output.len().saturating_add(add) > expected_len {
@@ -362,11 +361,9 @@ fn compression_error(message: impl Into<String>) -> Error {
 mod tests {
     use super::{decompress_rdc, decompress_rle};
 
-    /// RDC used to grow `output` freely and only compare lengths after the loop, so a
-    /// stream whose tokens emit far more than the row can hold ballooned the buffer
-    /// first and failed second. One `marker >> 4 == 1` token emits
-    /// `19 + (marker & 0x0F) + next * 16` bytes — 4114 at maximum — from three input
-    /// bytes, so a page's worth of them reached hundreds of megabytes.
+    /// One `marker >> 4 == 1` token emits `19 + (marker & 0x0F) + next * 16` bytes (4114
+    /// at maximum) from three input bytes, so a page's worth of them would reach hundreds
+    /// of megabytes if the decoder only compared lengths after the loop.
     ///
     /// The failure has to arrive without the buffer ever exceeding the row length.
     #[test]

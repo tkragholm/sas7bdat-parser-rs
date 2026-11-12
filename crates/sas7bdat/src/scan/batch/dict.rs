@@ -326,7 +326,7 @@ mod staged_string_lookup_tests {
         assert_eq!(dict.interned_utf8(alpha), b"ALPHA");
 
         // Invalidate the recent cache to force the open-addressed slot scan, which must
-        // still find the (now interned) entry.
+        // still find the interned entry.
         dict.recent_valid = [0; 4];
         assert!(matches!(
             dict.lookup(b"alpha"),

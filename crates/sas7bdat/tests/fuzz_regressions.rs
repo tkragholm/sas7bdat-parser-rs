@@ -3,13 +3,13 @@
 //! Every file under `tests/fixtures/fuzz/` is an input that once made the reader
 //! misbehave. The contract asserted here is deliberately narrow: opening it must
 //! *return*, with either `Ok` or `Err`. Aborting, hanging, or exhausting memory are
-//! all failures, and none of them are things an `assert!` can catch — the test
+//! all failures, and none of them are things an `assert!` can catch. The test
 //! catches them by the run dying instead of finishing.
 //!
 //! Drop new artifacts into that directory and they are covered automatically. Add an
 //! entry to `EXPECTED` when the artifact's whole point is a specific diagnostic, or to
-//! `EXPECTED_NO_DIAGNOSTIC` when it is not — a bug fixed by clamping an allocation
-//! rather than refusing input leaves no message worth pinning, and whatever error the
+//! `EXPECTED_NO_DIAGNOSTIC` when it is not. An input handled by clamping an allocation
+//! rather than refusing it leaves no message worth pinning, and whatever error the
 //! file happens to produce is incidental.
 //!
 //! `catalog/` holds `.sas7bcat` inputs for the separate value-label parser.
@@ -24,48 +24,43 @@ const SCAN_ROW_CAP: usize = 4096;
 /// Artifacts whose error message is itself part of the regression, as
 /// `(file stem, substring the message must contain)`.
 const EXPECTED: &[(&str, &str)] = &[
-    // An 18 KB file declaring 1,085,348,864 columns, and a 32 KB one declaring
-    // 2,863,311,531. Both used to reach `Vec::resize_with` and ask the allocator for
-    // 2.5 GiB before any row was read; libFuzzer caught them as OOMs within 90
-    // seconds of the target first running. The declared count is now refuted against
-    // the file's own geometry, so they fail in constant space.
-    // `_8k` moved to `EXPECTED_NO_DIAGNOSTIC` below: it no longer reaches the column
-    // guard, so its message is now incidental. `_32k` still pins that diagnostic.
+    // A 32 KB file declaring 2,863,311,531 columns. Taking the declared count at face
+    // value would ask the allocator for 2.5 GiB before any row is read. The count is
+    // checked against the file's own geometry, so the file fails in constant space.
+    // The 8 KB sibling in `EXPECTED_NO_DIAGNOSTIC` is refused earlier, so only this one
+    // pins the column diagnostic.
     ("oom_declared_column_count_32k", "columns"),
-    // Found on the very next run, once the OOM above stopped truncating it. A numeric
-    // column declared 67 bytes wide reached `numeric_bits`, whose `unreachable!` arm
-    // panics — and panics in release too, because the `slice.len() <= 8` guard above it
-    // is a `debug_assert!`. A panic out of a library is not a recoverable error for the
-    // Python and R bindings, so the width is now rejected at open time.
+    // A numeric column declared 67 bytes wide would reach `numeric_bits`, whose
+    // `unreachable!` arm panics in release too, because the `slice.len() <= 8` guard above
+    // it is a `debug_assert!`. A panic out of a library is not a recoverable error for the
+    // Python and R bindings, so the width is rejected at open time.
     ("panic_numeric_width_over_8", "numeric but 67 bytes wide"),
     // A 44 KB file declaring a 4,261,413,064-byte row. `decompress_row` reserves the
-    // declared row length per row, so the claim was an allocation primitive:
-    // `malloc(4261413064)` on a file of a few KB. Only reachable through a scan, which
-    // is why the loop below scans rather than stopping at open.
+    // declared row length per row, so an unchecked claim is an allocation primitive.
+    // Only reachable through a scan, which is why the loop below scans rather than
+    // stopping at open.
     ("oom_declared_row_length", "byte row"),
 ];
 
 /// Artifacts with no entry in [`EXPECTED`], listed here only so the completeness check
 /// below can tell "deliberately unasserted" from "fixture went missing".
 ///
-/// These are the cases where the fix was a clamp rather than a rejection, so there is no
-/// diagnostic to assert — the regression signal is memory, and the only observable
-/// contract is that the run finishes. Whatever error they do or do not return is
+/// These are the cases handled by a clamp or an earlier guard rather than a specific
+/// rejection, so there is no diagnostic to assert. The signal is memory, and the only
+/// observable contract is that the run finishes. Whatever error they do or do not return is
 /// incidental and must not be pinned.
 const EXPECTED_NO_DIAGNOSTIC: &[&str] = &[
-    // Was pinned to "columns" until the 64-bit subheader signature started being read as
-    // eight bytes rather than four. This artifact's `COLUMN_SIZE` carries a mutated upper
-    // word (`0x40200000` where a real one is zero), so it is now refused as data before any
-    // column count is declared, and the file fails for a missing `ROW_SIZE` instead. Still
-    // refused, still in constant space, which is what the artifact exists to prove; which
-    // guard catches it is not. `oom_declared_column_count_32k` still covers the column
-    // diagnostic itself.
+    // This artifact's `COLUMN_SIZE` carries a mutated upper word (`0x40200000` where a real
+    // one is zero), so the 64-bit subheader signature is refused as data before any column
+    // count is declared, and the file fails for a missing `ROW_SIZE`. It must be refused in
+    // constant space; which guard catches it is incidental. `oom_declared_column_count_32k`
+    // covers the column diagnostic itself.
     "oom_declared_column_count_8k",
     // 9 KB, 204 rows, 4 columns — a plausible-looking file whose declared `rows_per_page`
     // and row count together drove `BatchAccumulator::new` to ask for 876 GB through
     // `OwnedBatchColumnBuilder::with_capacity_hint`. Reached only via `visit_batches`.
-    // It happens to fail row visiting on an unrelated bounds check; that is not the
-    // regression and is deliberately not asserted.
+    // It fails row visiting on an unrelated bounds check, which is deliberately not
+    // asserted.
     "oom_batch_capacity_hint",
 ];
 
@@ -97,16 +92,13 @@ fn fuzz_artifacts_open_without_aborting_or_exhausting_memory() {
         // reachable through decompression, several frames past `from_bytes`, so a test
         // that stops at open would not have exercised the decompressor at all.
         //
-        // Row visiting and batch visiting run *independently*, not chained. Chaining
-        // them with `and_then` looked tidier and was wrong: `oom_batch_capacity_hint`
-        // fails row visiting on an unrelated (and correct) bounds check, which
-        // short-circuited the batch scan — the one path that exercises the
-        // pre-allocation hint the artifact exists for. Each scan gets its own attempt,
-        // exactly as the fuzz target does.
+        // Row visiting and batch visiting run independently, not chained.
+        // `oom_batch_capacity_hint` fails row visiting on a bounds check, which would skip
+        // the batch scan, the one path that exercises the pre-allocation hint the artifact
+        // is for. Each scan gets its own attempt, as in the fuzz target.
         //
-        // The assertion is that all of this returns. A regression reintroducing an
-        // unbounded allocation does not fail an `assert!` — it takes the whole test
-        // process down, which is the signal.
+        // The assertion is that all of this returns. An unbounded allocation does not fail
+        // an `assert!`, it takes the whole test process down, which is the signal.
         let open = Dataset::from_bytes(bytes);
         let mut first_error = open.as_ref().err().map(ToString::to_string);
 
@@ -161,8 +153,8 @@ fn fuzz_artifacts_open_without_aborting_or_exhausting_memory() {
         exercised += 1;
     }
 
-    // Catch a fixture that was renamed or deleted out from under an EXPECTED entry,
-    // which would otherwise leave the entry silently unasserted.
+    // A fixture renamed or deleted out from under an EXPECTED entry would otherwise leave
+    // the entry silently unasserted.
     for (name, _) in EXPECTED {
         assert!(
             seen_stems.iter().any(|stem| stem == name),
@@ -196,7 +188,7 @@ fn catalog_fuzz_artifacts_parse_without_exhausting_memory() {
         let bytes =
             fs::read(&path).unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()));
 
-        // Same narrow contract: it must return. A regression allocates instead.
+        // Same narrow contract: it must return.
         let outcome = sas7bdat::catalog::parse_catalog(&mut Cursor::new(bytes.as_slice()));
         if let Ok(layout) = outcome {
             for set in &layout.label_sets {
@@ -213,9 +205,9 @@ fn catalog_fuzz_artifacts_parse_without_exhausting_memory() {
 }
 
 /// The guard is a bound on *plausibility*, not a fixed limit, so it has to stay clear
-/// of real files. The widest fixture in the corpus is 4,041 columns; the tightest
-/// ratio of ceiling-to-actual measured across 233 fixtures was 26x. This pins the
-/// direction of that margin: a normal file must not come near the bound.
+/// of real files. The widest fixture in the corpus is 4,041 columns, and the tightest
+/// ratio of ceiling to actual column count across 233 fixtures is 26x. A normal file
+/// must not come near the bound.
 #[test]
 fn tracked_fixtures_are_unaffected_by_the_column_ceiling() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");

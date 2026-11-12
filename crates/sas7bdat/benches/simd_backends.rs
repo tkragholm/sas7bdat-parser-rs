@@ -116,7 +116,7 @@ fn numeric(c: &mut Criterion) {
 
     // The column-level converter, which is what the materializers call. Measured
     // per column rather than per chunk on purpose: a dispatching backend selects
-    // once here, and going through the per-chunk kernel instead used to cost a
+    // once here, whereas going through the per-chunk kernel costs a
     // cross-`#[target_feature]` call per 8 rows.
     let valid: Vec<u64> = (0..data.len().div_ceil(64)).map(|i| !(i as u64)).collect();
     let mut g = c.benchmark_group(format!("{BACKEND}/convert_column_i64"));

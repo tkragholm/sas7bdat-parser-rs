@@ -14,12 +14,16 @@ enum ProjectionItem {
     ExcludeName(String),
 }
 
+/// A column chosen by a projection.
 #[derive(Debug, Clone)]
 pub struct ProjectedColumnMeta {
+    /// The column's 0-based position in the dataset.
     pub index: usize,
+    /// The column name.
     pub name: String,
 }
 
+/// A chosen set of columns, from [`ProjectionBuilder::build`]. Pass it to [`ScanBuilder::with_projection`](crate::ScanBuilder::with_projection).
 #[derive(Debug, Clone)]
 pub struct Projection {
     pub(crate) inner: Arc<ProjectionPlan>,
@@ -28,22 +32,28 @@ pub struct Projection {
 }
 
 impl Projection {
+    /// The chosen columns, in output order.
     #[must_use]
     pub fn columns(&self) -> &[ProjectedColumnMeta] {
         &self.columns
     }
 
+    /// The number of chosen columns.
     #[must_use]
     pub fn len(&self) -> usize {
         self.columns.len()
     }
 
+    /// Whether no column is chosen.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.columns.is_empty()
     }
 }
 
+/// Chooses the columns of a [`Projection`]. Get one from [`Dataset::projection`].
+///
+/// Columns come out in the order they were added. Adding a column twice keeps one copy.
 #[derive(Debug)]
 pub struct ProjectionBuilder<'a> {
     pub(crate) ds: &'a Dataset,
@@ -58,24 +68,28 @@ impl<'a> ProjectionBuilder<'a> {
         }
     }
 
+    /// Adds every column.
     #[must_use]
     pub fn all(mut self) -> Self {
         self.items.push(ProjectionItem::All);
         self
     }
 
+    /// Adds the column called `name`. An unknown name makes [`build`](Self::build) fail.
     #[must_use]
     pub fn column(mut self, name: &str) -> Self {
         self.items.push(ProjectionItem::ColumnName(name.to_owned()));
         self
     }
 
+    /// Adds the column at 0-based position `idx`. A position past the last column makes [`build`](Self::build) fail.
     #[must_use]
     pub fn column_idx(mut self, idx: usize) -> Self {
         self.items.push(ProjectionItem::ColumnIndex(idx));
         self
     }
 
+    /// Adds each of the named columns. An unknown name makes [`build`](Self::build) fail.
     #[must_use]
     pub fn columns<I, S>(mut self, names: I) -> Self
     where
@@ -90,6 +104,7 @@ impl<'a> ProjectionBuilder<'a> {
         self
     }
 
+    /// Removes the column called `name` from the result.
     #[must_use]
     pub fn exclude(mut self, name: &str) -> Self {
         self.items
@@ -97,9 +112,14 @@ impl<'a> ProjectionBuilder<'a> {
         self
     }
 
+    /// Resolves the added columns and removals to a [`Projection`].
+    ///
+    /// With no column added, every column is chosen. An exclusion alone removes columns from that set.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the projection cannot be built, such as if no columns are available.
+    /// Returns [`Error::Projection`] if a name is unknown, an index is out of range, or the
+    /// dataset has no columns.
     pub fn build(self) -> Result<Projection> {
         let available = self.ds.columns();
         if available.is_empty() {

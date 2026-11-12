@@ -20,9 +20,8 @@
 //! ```
 //!
 //! The two axes are independent, which is why they are reported separately. `two-pass-serial`
-//! with a tiled fill and `two-pass-serial` with a row-major one used to be counted as two
-//! pipelines; splitting the axes made it visible that they differ only in the fill, and they
-//! are now one code path that decides the fill per page.
+//! with a tiled fill and with a row-major fill are one code path that decides the fill per
+//! page.
 //!
 //! `two-pass-parallel` and `two-pass-serial` are likewise one implementation: the same plan,
 //! the same chunk decode, run on worker threads or on the calling thread. The source names
@@ -175,14 +174,12 @@ impl FillStrategy {
 ///
 /// This crate has several, chosen by a chain of conditions spread over the builder, the
 /// batch plan and the page descriptors, and **the symbols below the split are shared**, so a
-/// flat profile of one is indistinguishable from a flat profile of another. That has already
-/// cost one wrong conclusion: an optimisation was written for the tiled fill, measured
-/// through `visit_batches`, and appeared to do nothing because `visit_batches` never reaches
-/// it.
+/// flat profile of one is indistinguishable from a flat profile of another. An optimisation
+/// to the tiled fill, for example, shows no effect when measured through `visit_batches`,
+/// which never reaches it.
 ///
-/// The two axes are deliberately separate. Reporting a single name conflated them, so
-/// `ColumnMajorDecode::Off` was indistinguishable from `On`: both changed the fill and
-/// neither changed the source.
+/// The two axes are reported separately because a single name could not tell
+/// `ColumnMajorDecode::Off` from `On`: both change the fill and neither changes the source.
 ///
 /// Every scan records this in [`ScanStatsSummary::path`], and
 /// [`crate::ScanBuilder::predict_path`] answers the same question without a full scan.
@@ -249,16 +246,23 @@ pub enum ScanEntry {
 /// not exposed here.
 #[derive(Debug, Clone, Copy, Serialize, Default)]
 pub struct ScanStatsSummary {
+    /// Rows the scan went through, including those outside the selected window.
     pub rows_seen: u64,
+    /// Rows handed to the callback or collected.
     pub rows_emitted: u64,
+    /// Pages read.
     pub pages_seen: u64,
     /// Contiguous uncompressed pages — reflects SAS file structure.
     pub fused_pages: u64,
     /// Indexed pointer pages — reflects SAS file structure.
     pub indexed_pages: u64,
+    /// Pages that hold compressed rows.
     pub compressed_pages: u64,
+    /// Bytes read from the file or memory map.
     pub raw_bytes_read: u64,
+    /// Bytes of rows expanded from compression.
     pub row_bytes_materialized: u64,
+    /// Batches decoded. 0 for row scans.
     pub decode_batches: u64,
     /// Which pipeline decoded this scan. See [`ScanPath`].
     pub path: ScanPath,
@@ -332,25 +336,40 @@ impl ScanStats {
 /// scan API.
 #[derive(Debug, Clone, Default)]
 pub struct OwnedBatchScanBreakdown {
+    /// Total time of the scan, in nanoseconds.
     pub total_ns: u128,
+    /// Planning, in nanoseconds.
     pub plan_ns: u128,
+    /// Reading row bytes from pages, in nanoseconds.
     pub scan_row_bytes_ns: u128,
+    /// Adding rows to the batch accumulator, in nanoseconds.
     pub push_row_ns: u128,
+    /// Taking finished batches out of the accumulator, in nanoseconds.
     pub take_batch_ns: u128,
+    /// Resetting the accumulator after a flush, in nanoseconds.
     pub reset_after_flush_ns: u128,
+    /// Batches delivered.
     pub batches_emitted: u64,
+    /// Scan statistics.
     pub stats: crate::ScanStatsSummary,
 }
 
 /// A progress snapshot delivered to the observer registered with [`ScanBuilder::with_progress`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ScanProgress {
+    /// Pages read so far.
     pub pages_seen: u64,
+    /// Pages in the file.
     pub total_pages: u64,
+    /// Bytes read so far.
     pub raw_bytes_read: u64,
+    /// Total bytes, estimated as pages times page size.
     pub estimated_total_bytes: u64,
+    /// Compressed pages read so far.
     pub compressed_pages: u64,
+    /// Rows read so far. It can lag the rows already delivered.
     pub rows_seen: u64,
+    /// Rows delivered so far.
     pub rows_emitted: u64,
 }
 

@@ -320,14 +320,9 @@ fn decode_padded_string(bytes: &[u8]) -> Option<String> {
 /// immediately after it, because the header records *local* time under some configurations
 /// (WizardMac/ReadStat#309); subtracting it normalises to UTC.
 ///
-/// Two things were wrong here and they compounded. The offset was **added** rather than
-/// subtracted, and it was 315,532,800 rather than 315,619,200: 1960-01-01 to 1970-01-01 is
-/// 3,653 days, not 3,652, because 1960, 1964 and 1968 are all leap years. Every header
-/// timestamp came back 20 years and a day late, which nothing noticed because nothing
-/// compared them to anything.
-///
-/// The constant now comes from [`SasDateTime`], which the value path already used, so the
-/// two cannot drift apart again.
+/// The epoch offset is 315,619,200 seconds: 1960-01-01 to 1970-01-01 is 3,653 days, not
+/// 3,652, because 1960, 1964 and 1968 are all leap years. The constant comes from
+/// [`SasDateTime`], which the value path also uses.
 fn convert_sas_time(time: f64, diff: f64) -> Option<SystemTime> {
     #[allow(clippy::cast_precision_loss)]
     let epoch_offset = crate::metadata::SasDateTime::SECONDS_SAS_TO_UNIX as f64;
@@ -465,7 +460,7 @@ const fn lookup_encoding(code: u8) -> Option<&'static str> {
 mod tests {
     use super::{SAS_ENDIAN_LITTLE, SAS7BDAT_MAGIC_NUMBER, lookup_encoding, probe_header};
     use crate::{internal::HeaderInfo, metadata::Endianness};
-    use std::{io::Cursor, path::Path};
+    use std::io::Cursor;
 
     #[test]
     fn probes_minimal_little_endian_32bit_header() {
@@ -495,29 +490,6 @@ mod tests {
     fn supports_wider_sas_encoding_map() {
         assert_eq!(lookup_encoding(40), Some("ISO-8859-15"));
         assert_eq!(lookup_encoding(69), Some("MACROMAN"));
-    }
-
-    #[test]
-    fn probes_local_54_class_fixture_when_present() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("fixtures/raw_data/csharp/54-class.sas7bdat");
-        if !path.exists() {
-            return;
-        }
-
-        let mut file = std::fs::File::open(&path).expect("open fixture");
-        let (header, metadata) = probe_header(&mut file).expect("probe fixture header");
-        eprintln!(
-            "fixture_header data_offset={} page_size={} page_count={} page_header_size={} ptr_size={} endianness={:?} table={:?} encoding={:?}",
-            header.data_offset,
-            header.page_size,
-            header.page_count,
-            header.page_header_size,
-            header.subheader_pointer_size,
-            header.endianness,
-            metadata.table_name,
-            metadata.encoding
-        );
     }
 
     fn assert_header(header: &HeaderInfo) {

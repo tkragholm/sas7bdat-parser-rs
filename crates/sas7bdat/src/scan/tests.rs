@@ -1089,7 +1089,7 @@ fn collect_batches_staged_f64_preserves_missing_validity() {
             assert_eq!(values.len(), 2);
             // Exact bit-pattern check (1.25 is exactly representable); avoids a float_cmp lint.
             assert_eq!(values[0].to_bits(), 1.25_f64.to_bits());
-            // Missing cells now preserve their raw SAS bits (validity marks them),
+            // Missing cells preserve their raw SAS bits (validity marks them),
             // so bindings can recover special-missing tags rather than seeing 0.0.
             assert_eq!(values[1].to_bits(), SAS_NUMERIC_MISSING_SENTINEL);
             // Bit-packed validity: row 0 valid (bit 0 = 1), row 1 null (bit 1 = 0) → word = 0b01 = 1.
@@ -2300,7 +2300,7 @@ mod row_window {
         // ...and never lengthens it past the selection.
         assert_eq!(window(RowSelection::range(5, 20), Some(999)), (5, 20));
 
-        // An inverted range is empty, matching the old `(start..end).contains` predicate.
+        // An inverted range is empty, as `(start..end).contains` would treat it.
         assert_eq!(window(RowSelection::range(20, 5), None), (5, 5));
         assert_eq!(window(RowSelection::First(0), None), (0, 0));
     }
@@ -2412,10 +2412,9 @@ fn scanned_text(ds: &crate::dataset::Dataset) -> (String, String) {
 
 #[test]
 fn mojibake_repair_covers_the_whole_latin1_supplement() {
-    // The regression this pins: the previous implementation inverted the mangling by
-    // mapping each decoded char back through `u8::try_from`, which failed for every
-    // character whose second UTF-8 byte lands in windows-1252's 0x80..=0x9F band —
-    // the entire uppercase half of Latin-1, "Ø", "Å" and "Æ" among them.
+    // Mapping each decoded char back through `u8::try_from` would fail for every
+    // character whose second UTF-8 byte lands in windows-1252's 0x80..=0x9F band,
+    // which is the entire uppercase half of Latin-1, "Ø", "Å" and "Æ" among them.
     let mut unrepaired = Vec::new();
     for code in 0xA0..=0xFF_u32 {
         let text = char::from_u32(code)

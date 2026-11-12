@@ -22,6 +22,7 @@ impl From<PageIndex> for u64 {
     }
 }
 
+/// The 0-based position of a row in the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct RowIndex(pub u64);
 
@@ -70,12 +71,14 @@ impl SubAssign<u64> for RowIndex {
 }
 
 impl RowIndex {
+    /// Subtracts `rhs`, stopping at 0 instead of underflowing.
     #[must_use]
     pub const fn saturating_sub(self, rhs: u64) -> Self {
         Self(self.0.saturating_sub(rhs))
     }
 }
 
+/// The 0-based position of a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct ColumnIndex(pub usize);
 

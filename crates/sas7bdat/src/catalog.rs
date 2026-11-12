@@ -14,8 +14,10 @@ use std::{
     path::Path,
 };
 
+/// The contents of a parsed catalog file.
 #[derive(Debug)]
 pub struct CatalogLayout {
+    /// The value-label sets in the catalog, one per format.
     pub label_sets: Vec<LabelSet>,
 }
 
@@ -94,8 +96,7 @@ impl CatalogueIndex {
         // 64-bit catalog large enough to spill past its first index page silently loses every
         // format the later records point at. No error, just missing value labels.
         //
-        // The same bug is open upstream as WizardMac/ReadStat#370, where it was found; our
-        // copy of it came from porting the same hardcoded 16.
+        // The same bug is open upstream as WizardMac/ReadStat#370 (a hardcoded 16).
         let start = cfg.later_page_offset;
         for index in SAS_CATALOG_USELESS_PAGES..header.page_count {
             read_page(reader, header, index, &mut page)?;
@@ -796,7 +797,6 @@ mod tests {
         );
 
         let names: Vec<&str> = layout.label_sets.iter().map(|s| s.name.as_str()).collect();
-        eprintln!("label set names: {names:?}");
 
         let has_a = layout
             .label_sets

@@ -60,15 +60,24 @@ struct IndexedDescriptorInputs {
     remaining_rows: u64,
 }
 
+/// Time spent compiling the page descriptors of a file. Times are in nanoseconds.
 #[derive(Debug, Clone, Default)]
 pub struct DescriptorBreakdown {
+    /// Reading page bodies.
     pub page_read_ns: u128,
+    /// Reading page headers.
     pub header_read_ns: u128,
+    /// Classifying pages and their rows.
     pub classify_ns: u128,
+    /// The whole compilation.
     pub total_ns: u128,
+    /// Pages visited.
     pub pages_seen: u64,
+    /// Page descriptors produced.
     pub descriptors_emitted: usize,
+    /// Row spans produced.
     pub row_spans_emitted: usize,
+    /// Rows found across all pages, before any row selection.
     pub total_candidate_rows: u64,
 }
 
@@ -690,8 +699,8 @@ fn parse_subheader_pointers(
             // uncompressed equivalent is the page bitmap read by `deleted_row_bitmap`; here
             // the tombstone is the subheader pointer's own code.
             //
-            // They share an arm because today they need the same thing. They would separate
-            // again if this ever validated the count, the way ReadStat's
+            // They share an arm because they need the same thing. They would separate
+            // if this validated the count, the way ReadStat's
             // `sas7bdat_register_deleted_row` does: a 0x05 beyond the declared deleted count
             // is a corrupt file, while a 0x01 is not.
             //
@@ -1239,7 +1248,7 @@ mod tests {
     fn stattransfer_mix_data_start_is_not_padded_when_rows_follow_pointers() {
         // 32-bit, 17 subheaders → base_offset = 24 + 17*12 = 228 (% 8 == 4), which SAS would
         // pad to 232. A StatTransfer file ("9.0000M0") instead places rows at 228; padding
-        // would shift every column by 4 (regression: NYYTS_2000_2020_PublicUse).
+        // would shift every column by 4 (seen in NYYTS_2000_2020_PublicUse).
         let mut layout = simple_layout(512, 1, 16, 1);
         layout.header.release = "9.0000M0".to_owned();
 

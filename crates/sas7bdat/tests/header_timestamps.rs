@@ -2,13 +2,11 @@
 //! 1960-01-01, followed by the UTC offset SAS stores beside them because the recorded time
 //! is local under some configurations (`WizardMac/ReadStat#309`).
 //!
-//! Both conversions were wrong and compounded: the epoch offset was added rather than
-//! subtracted, and it was 315,532,800 rather than 315,619,200, since 1960-01-01 to
-//! 1970-01-01 spans 3,653 days and not 3,652. Every timestamp came back twenty years and a
-//! day late. Nothing caught it because nothing compared them to anything.
+//! The offset from 1960-01-01 to 1970-01-01 is 315,619,200 seconds (3,653 days) and is
+//! subtracted from the SAS value to get Unix time.
 //!
-//! Expected values are `ReadStat` at `da9fcaa`. All 318 corpus files with a readable header
-//! were compared against it when this landed, with no differences.
+//! Expected values are `ReadStat` at `da9fcaa`. They agree with this crate on all 318 corpus
+//! files with a readable header.
 
 use sas7bdat::Dataset;
 use std::path::{Path, PathBuf};
@@ -63,9 +61,8 @@ fn header_timestamps_match_the_reference_reader() {
     }
 }
 
-/// A timestamp in the far future is the signature of the bug this replaced: adding the
-/// epoch offset instead of subtracting it moves every file about forty years forward of
-/// where it belongs, which is always wrong and never obviously so.
+/// A timestamp in the far future is the signature of adding the epoch offset instead of
+/// subtracting it, which moves every file about forty years forward of where it belongs.
 #[test]
 fn no_fixture_claims_to_be_from_the_future() {
     let root = fixture("raw_data");

@@ -342,7 +342,7 @@ where
         }
         drop(tx);
         drop(io_err_tx);
-        // The workers hold the only handles that matter now. Keeping these alive here would
+        // The workers hold the only handles that matter from here. Keeping these alive would
         // leave the parse stage parked on a send no one will ever receive, or a reader parked
         // on a recycled buffer no one will ever return, once the consumer stops early.
         drop(recycle);

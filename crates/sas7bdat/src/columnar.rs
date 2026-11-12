@@ -26,6 +26,9 @@ pub const BLANK_ID: u32 = 0;
 #[cfg_attr(not(feature = "arrow"), allow(dead_code))]
 pub type BitSlice<'a> = &'a [u64];
 
+/// Offsets into a variable-width buffer, as `i64`.
+///
+/// Value `i` occupies `data[offsets[i]..offsets[i + 1]]`, so a column of `n` values has `n + 1` offsets. The first is 0 and none is smaller than the one before it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedOffsets {
     offsets: Vec<i64>,
@@ -38,6 +41,7 @@ impl Default for TrustedOffsets {
 }
 
 impl TrustedOffsets {
+    /// Creates a buffer holding the initial 0 offset, with room for `target_rows` more.
     #[must_use]
     pub fn with_capacity_for_rows(target_rows: usize) -> Self {
         let mut offsets = Vec::with_capacity(target_rows.saturating_add(1));
@@ -45,21 +49,25 @@ impl TrustedOffsets {
         Self { offsets }
     }
 
+    /// The offsets, including the initial 0.
     #[must_use]
     pub fn as_slice(&self) -> &[i64] {
         &self.offsets
     }
 
+    /// Resets to the single initial 0 offset and keeps the allocation.
     pub fn clear_for_reuse(&mut self) {
         self.offsets.clear();
         self.offsets.push(0);
     }
 
+    /// The number of offsets, which is one more than the number of values.
     #[must_use]
     pub const fn len(&self) -> usize {
         self.offsets.len()
     }
 
+    /// Whether no offsets are stored. The initial 0 is always present, so this is `false` for a buffer made by this type.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.offsets.is_empty()
@@ -158,22 +166,32 @@ impl TrustedOffsets {
             .expect("trusted offsets always contain an initial zero")
     }
 
+    /// Returns the offsets as a plain vector.
     #[must_use]
     pub fn into_inner(self) -> Vec<i64> {
         self.offsets
     }
 }
 
+/// A borrowed column of fixed-width values.
+///
+/// Slot `i` of `values` is only meaningful when row `i` is valid.
 #[derive(Debug, Clone, Copy)]
 pub struct PrimitiveBuffer<'a, T> {
+    /// One value per row.
     pub values: &'a [T],
     /// Bit-packed validity: each `u64` holds 64 row-validity bits (LSB = first row).
     pub valid: Option<&'a [u64]>,
 }
 
+/// A borrowed column of UTF-8 strings.
+///
+/// Row `i` is `data[offsets[i]..offsets[i + 1]]`.
 #[derive(Debug, Clone, Copy)]
 pub struct Utf8Buffer<'a> {
+    /// Row boundaries into `data`, one more than the number of rows.
     pub offsets: &'a [i64],
+    /// The concatenated string bytes.
     pub data: &'a [u8],
     /// Bit-packed validity: each `u64` holds 64 row-validity bits (LSB = first row).
     pub valid: Option<&'a [u64]>,
@@ -183,27 +201,44 @@ pub struct Utf8Buffer<'a> {
     pub(crate) dictionary_ids: Option<&'a [u32]>,
 }
 
+/// A borrowed column of uninterpreted byte strings.
+///
+/// Row `i` is `data[offsets[i]..offsets[i + 1]]`.
 #[derive(Debug, Clone, Copy)]
 pub struct BytesBuffer<'a> {
+    /// Row boundaries into `data`, one more than the number of rows.
     pub offsets: &'a [i64],
+    /// The concatenated bytes.
     pub data: &'a [u8],
     /// Bit-packed validity: each `u64` holds 64 row-validity bits (LSB = first row).
     pub valid: Option<&'a [u64]>,
 }
 
+/// A borrowed column of one batch, by decoded type.
+///
+/// The variant follows the column's [`LogicalType`](crate::LogicalType) and the decode mode of the scan. `valid` in every buffer is a bit mask with one bit per row, least significant bit first, where 1 means the row has a value. `None` means every row has a value.
 #[derive(Debug, Clone, Copy)]
 pub enum ColumnBuffer<'a> {
+    /// 32-bit integers.
     I32(PrimitiveBuffer<'a, i32>),
+    /// 64-bit integers.
     I64(PrimitiveBuffer<'a, i64>),
+    /// 64-bit floats.
     F64(PrimitiveBuffer<'a, f64>),
+    /// Dates, as days since 1960-01-01.
     Date(PrimitiveBuffer<'a, SasDate>),
+    /// Datetimes, as seconds since 1960-01-01 00:00:00.
     DateTime(PrimitiveBuffer<'a, SasDateTime>),
+    /// Times, as seconds since midnight.
     Time(PrimitiveBuffer<'a, SasTime>),
+    /// UTF-8 strings.
     Utf8(Utf8Buffer<'a>),
+    /// Uninterpreted bytes.
     RawBytes(BytesBuffer<'a>),
 }
 
 impl<'a> ColumnBuffer<'a> {
+    /// Whether the buffer carries a validity mask, so that some rows may be null.
     #[must_use]
     pub const fn is_nullable(&self) -> bool {
         match self {
@@ -218,6 +253,7 @@ impl<'a> ColumnBuffer<'a> {
         }
     }
 
+    /// The values, when this is an [`ColumnBuffer::F64`] column.
     #[must_use]
     pub const fn as_f64_slice(&self) -> Option<&'a [f64]> {
         if let Self::F64(b) = self {
@@ -227,6 +263,7 @@ impl<'a> ColumnBuffer<'a> {
         }
     }
 
+    /// The values, when this is an [`ColumnBuffer::I32`] column.
     #[must_use]
     pub const fn as_i32_slice(&self) -> Option<&'a [i32]> {
         if let Self::I32(b) = self {
@@ -236,6 +273,7 @@ impl<'a> ColumnBuffer<'a> {
         }
     }
 
+    /// The values, when this is an [`ColumnBuffer::I64`] column.
     #[must_use]
     pub const fn as_i64_slice(&self) -> Option<&'a [i64]> {
         if let Self::I64(b) = self {
@@ -278,6 +316,9 @@ impl<'a> ColumnBuffer<'a> {
     }
 }
 
+/// Defines an owned column buffer enum with one variant per column type, plus any extra variants given.
+///
+/// The crate uses it for [`OwnedColumnBuffer`]. It is exported for the crates that build on this one.
 #[macro_export]
 macro_rules! define_owned_column_enum {
     (
@@ -288,39 +329,66 @@ macro_rules! define_owned_column_enum {
     ) => {
         $(#[$meta])*
         $vis enum $name {
+            /// 32-bit integers.
             I32 {
+                /// One value per row.
                 values: Vec<i32>,
+                /// Bit mask with one bit per row, least significant bit first. 1 means the row has a value. `None` means every row has a value.
                 valid: Option<Vec<u64>>,
             },
+            /// 64-bit integers.
             I64 {
+                /// One value per row.
                 values: Vec<i64>,
+                /// Validity mask, as in [`Self::I32`].
                 valid: Option<Vec<u64>>,
             },
+            /// 64-bit floats.
             F64 {
+                /// One value per row.
                 values: Vec<f64>,
+                /// Validity mask, as in [`Self::I32`].
                 valid: Option<Vec<u64>>,
             },
+            /// Dates, as days since 1960-01-01.
             Date {
+                /// One value per row.
                 values: Vec<$crate::metadata::SasDate>,
+                /// Validity mask, as in [`Self::I32`].
                 valid: Option<Vec<u64>>,
             },
+            /// Datetimes, as seconds since 1960-01-01 00:00:00.
             DateTime {
+                /// One value per row.
                 values: Vec<$crate::metadata::SasDateTime>,
+                /// Validity mask, as in [`Self::I32`].
                 valid: Option<Vec<u64>>,
             },
+            /// Times, as seconds since midnight.
             Time {
+                /// One value per row.
                 values: Vec<$crate::metadata::SasTime>,
+                /// Validity mask, as in [`Self::I32`].
                 valid: Option<Vec<u64>>,
             },
+            /// UTF-8 strings.
             Utf8 {
+                /// Row boundaries into `data`, one more than the number of rows.
                 offsets: $crate::columnar::TrustedOffsets,
+                /// The concatenated string bytes.
                 data: Vec<u8>,
+                /// Validity mask, as in [`Self::I32`].
                 valid: Option<Vec<u64>>,
+                /// Codes into a value dictionary, one per row, when dictionary staging produced them.
                 dictionary_ids: Option<Vec<u32>>,
             },
+            /// Uninterpreted bytes.
             RawBytes {
+                /// Row boundaries into `data`, one more than the number of rows.
                 offsets: $crate::columnar::TrustedOffsets,
+                /// The concatenated bytes.
                 data: Vec<u8>,
+                /// Validity mask, as in [`Self::I32`].
                 valid: Option<Vec<u64>>,
             },
             $($extra_variant { $($extra_field : $extra_type),* }),*
@@ -329,6 +397,9 @@ macro_rules! define_owned_column_enum {
 }
 
 define_owned_column_enum! {
+    /// A column of one batch with owned buffers, by decoded type.
+    ///
+    /// The variants match [`ColumnBuffer`]. Use [`OwnedColumnBuffer::as_borrowed`] for a borrowed view.
     #[derive(Debug, Clone)]
     pub enum OwnedColumnBuffer {}
 }
@@ -380,6 +451,7 @@ impl OwnedColumnBuffer {
         }
     }
 
+    /// A borrowed view of this column.
     #[must_use]
     pub fn as_borrowed(&self) -> ColumnBuffer<'_> {
         match self {
@@ -444,8 +516,8 @@ impl OwnedColumnBuffer {
     ///
     /// The borrowed conversion, [`ColumnBuffer::into_arrow_array`], builds
     /// every array through a builder one value at a time, which a batch that
-    /// is only borrowed cannot avoid. Measured on a 1.7-million-row register
-    /// file, moving the buffers took a quarter of the time.
+    /// is only borrowed cannot avoid. On a 1.7-million-row file, moving the
+    /// buffers took a quarter of the time.
     ///
     /// # Errors
     ///
@@ -655,21 +727,30 @@ impl ColumnBuffer<'_> {
     }
 }
 
+/// One batch of rows as borrowed columns, handed to the callback of [`ScanBuilder::visit_batches`](crate::ScanBuilder::visit_batches).
 #[derive(Debug, Clone)]
 pub struct ColumnarBatch<'a> {
+    /// Index of the first row in the batch.
     pub row_base: crate::types::RowIndex,
+    /// Number of rows in the batch.
     pub row_count: usize,
+    /// The columns, in projection order. Each holds `row_count` rows.
     pub columns: &'a [ColumnBuffer<'a>],
 }
 
+/// One batch of rows as owned columns.
 #[derive(Debug, Clone, Default)]
 pub struct OwnedColumnarBatch {
+    /// Index of the first row in the batch.
     pub row_base: crate::types::RowIndex,
+    /// Number of rows in the batch.
     pub row_count: usize,
+    /// The columns, in projection order. Each holds `row_count` rows.
     pub columns: Vec<OwnedColumnBuffer>,
 }
 
 impl OwnedColumnarBatch {
+    /// Borrowed views of the columns, in the same order.
     #[must_use]
     pub fn borrowed_columns(&self) -> Vec<ColumnBuffer<'_>> {
         self.columns
@@ -935,7 +1016,7 @@ fn row_is_valid(valid: Option<&[u64]>, idx: usize) -> bool {
 
 #[cfg(all(test, feature = "arrow"))]
 mod arrow_tests {
-    //! The moved conversion must produce exactly what the copying one does.
+    //! The owning conversion must produce exactly what the borrowing one does.
     use super::{OwnedColumnBuffer, TrustedOffsets, column_buffer_to_arrow, owned_column_to_arrow};
     use crate::metadata::{SasDate, SasDateTime, SasTime};
     use arrow_schema::{DataType, TimeUnit};
@@ -1118,10 +1199,9 @@ mod tests {
         assert!(offsets.validate_for_values_len(2).is_err());
     }
 
-    /// Regression: a SAS TIME is a signed count of seconds since midnight and is not confined
-    /// to a clock day. Under the old `Time64(Nanosecond)` declaration these integers were
-    /// written faithfully but fell outside the type's `[0, 24h)` domain, so arrow-rs, pyarrow,
-    /// `DuckDB` and Polars all handed back null. `Duration(Nanosecond)` carries the same i64
+    /// A SAS TIME is a signed count of seconds since midnight and is not confined to a clock
+    /// day. `Time64(Nanosecond)` covers only `[0, 24h)`, and readers such as arrow-rs, pyarrow,
+    /// `DuckDB` and Polars return null outside it. `Duration(Nanosecond)` carries the same i64
     /// payload over the whole SAS range.
     #[cfg(feature = "arrow")]
     #[test]

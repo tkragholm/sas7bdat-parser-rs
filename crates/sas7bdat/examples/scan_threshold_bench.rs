@@ -2,9 +2,9 @@
 //!
 //! For every `.sas7bdat` under the given path, this decodes the whole file at
 //! several parallelism levels (serial, then N threads) and reports where threads
-//! start to beat a single core. The decode is driven through `visit_owned_batches`
-//! — the exact streaming path the Polars plugin uses — so the numbers reflect the
-//! real register scan, not a microbenchmark.
+//! start to beat a single core. The decode is driven through `visit_owned_batches`,
+//! the streaming path the Polars plugin uses, so the numbers reflect a real scan, not a
+//! microbenchmark.
 //!
 //! The page cache is warmed once per file before timing, so this isolates the
 //! CPU/coordination crossover (the thing that decides "is there enough decode work
@@ -24,7 +24,7 @@
 //! best thread count) sorted by decode size, then the host's observed crossover and
 //! a verdict on whether the plugin's generic grain-size default is safe here — i.e.
 //! whether it already stays serial below the point where threads start to pay off.
-//! This validates the default; it is not required to operate the plugin.
+//! This validates the default and is not needed to operate the plugin.
 
 // Timing/size/speedup math casts integer counters to f64 for display; precision loss is fine here.
 #![allow(clippy::cast_precision_loss)]
@@ -41,8 +41,8 @@ const SPEEDUP_WORTH_IT: f64 = 1.10; // parallel must beat serial by >10% to coun
 
 // The plugin's generic grain default: each worker needs ≥ this many decoded bytes, so
 // parallelism only engages at ≥ 2× this (the smallest split is 2 workers). Kept in sync
-// with DEFAULT_MIN_BYTES_PER_WORKER in the polars-plugin. This benchmark VALIDATES that
-// default on the current host — it is not required to operate the plugin.
+// with DEFAULT_MIN_BYTES_PER_WORKER in the polars-plugin. This benchmark validates that
+// default on the current host.
 const GRAIN_MIN_BYTES_PER_WORKER: u64 = 4 * 1024 * 1024;
 
 struct FileResult {

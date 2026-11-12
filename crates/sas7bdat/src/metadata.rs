@@ -1,21 +1,30 @@
 use crate::labels::LabelSet;
 use std::{collections::HashMap, time::SystemTime};
 
+/// A file timestamp.
 pub type Timestamp = SystemTime;
 
+/// The byte order of the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Endianness {
+    /// Least significant byte first.
     #[default]
     Little,
+    /// Most significant byte first.
     Big,
 }
 
+/// How the data pages are compressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CompressionKind {
+    /// Not compressed.
     #[default]
     None,
+    /// Run-length encoding of each row (`SASYZCRL`).
     Row,
+    /// Binary compression of each row (`SASYZCR2`).
     Binary,
+    /// A compression signature this reader does not recognise.
     Unknown,
 }
 
@@ -62,6 +71,7 @@ impl LogicalType {
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SasDate {
+    /// Days since 1960-01-01. Negative before that date.
     pub days_since_sas_epoch: i32,
 }
 
@@ -80,6 +90,7 @@ impl SasDate {
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SasDateTime {
+    /// Seconds since 1960-01-01 00:00:00. Negative before that instant.
     pub seconds_since_sas_epoch: i64,
 }
 
@@ -98,6 +109,7 @@ impl SasDateTime {
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SasTime {
+    /// Seconds since midnight.
     pub seconds_since_midnight: i32,
 }
 
@@ -194,6 +206,7 @@ impl ColumnMeta {
         })
     }
 
+    /// The variable name. Same as the `name` field.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name

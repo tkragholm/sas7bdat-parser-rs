@@ -46,7 +46,9 @@ impl Default for DictionaryPolicy {
 /// physical id) plus a per-row code (`None` == null).
 #[derive(Debug, Clone)]
 pub struct DictionaryColumn {
+    /// The distinct values. A code is an index into this vector.
     pub dictionary: Vec<String>,
+    /// One code per row, `None` for a null.
     pub codes: Vec<Option<u32>>,
 }
 
@@ -207,11 +209,13 @@ impl Default for DictBuilder {
 }
 
 impl DictBuilder {
+    /// Creates an empty builder.
     #[must_use]
     pub fn new() -> Self {
         Self::with_capacity(0)
     }
 
+    /// Creates an empty builder with room for `rows` codes.
     #[must_use]
     pub fn with_capacity(rows: usize) -> Self {
         Self {
@@ -308,6 +312,7 @@ impl DictBuilder {
         self.dictionary.len()
     }
 
+    /// Consumes the builder and returns the column.
     #[must_use]
     pub fn finish(self) -> DictionaryColumn {
         DictionaryColumn {

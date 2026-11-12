@@ -49,19 +49,16 @@ const AUTO_BATCH_ROWS_MIN: usize = 4096;
 
 /// Ceiling on the decoded size of one [`BatchHint::Auto`] batch.
 ///
-/// `Auto` used to be `rows_per_page` alone: batch size tracked the file's page geometry
-/// and knew nothing about how wide a row is. On the 4,041-column AHS fixture that makes a
-/// 4,096-row batch materialize ~200 MB, and the parallel scan multiplies that number —
-/// it keeps `workers * 2` batches queued plus one in flight per worker. Measured on that
-/// file (buffered I/O, so no mmap pages in the figure), peak RSS went 0.30 GB at one
-/// worker, 1.72 at two, 3.65 at four and 4.81 at eight, while throughput stopped
-/// improving after eight. So the old sizing spent gigabytes to buy nothing, and it spent
-/// more of them the more cores the host had — the wrong way round for a 96-core server.
+/// A row-count rule alone ignores how wide a row is. On the 4,041-column AHS fixture a
+/// 4,096-row batch materializes ~200 MB, and the parallel scan multiplies that by the
+/// `workers * 2` batches it keeps queued plus one in flight per worker. On that file
+/// (buffered I/O) peak RSS was 0.30 GB at one worker, 1.72 at two, 3.65 at four and 4.81
+/// at eight, while throughput stopped improving after eight.
 ///
-/// Sizing by bytes bounds that product no matter how wide the table or how many cores are
-/// free, and it splits wide files into more, smaller batches, which also gives the work
-/// stealer finer granularity. Narrow tables are unaffected: their rows are small enough
-/// that the row-count rule stays the binding constraint.
+/// Capping the bytes per batch bounds that product however wide the table or many the
+/// cores, and splits wide files into more, smaller batches, which gives the work stealer
+/// finer granularity. Narrow tables are unaffected: their rows are small enough that the
+/// row-count rule stays the binding constraint.
 const AUTO_BATCH_TARGET_BYTES: usize = 32 << 20;
 
 /// Bytes one decoded row occupies once materialized into owned column buffers.
@@ -338,7 +335,7 @@ pub(super) fn effective_scan_row_capacity_hint(builder: &ScanBuilder<'_>) -> usi
 
 /// Field metadata key marking a column that SAS declared with a TIME format.
 ///
-/// The Arrow type for such a column is `Duration`, not `Time64` (see [`arrow_data_type`]),
+/// The Arrow type for such a column is `Duration`, not `Time64` (see `arrow_data_type`),
 /// which loses the *intent* that the number is a time of day even though it loses no data.
 /// A consumer that knows its values are in `[0, 24h)` can use this to re-type the column as
 /// a clock time — the i64 payload is bit-identical, so that is a free re-label, not a

@@ -1,8 +1,7 @@
 /// How the reader gets at a file's bytes.
 ///
-/// Three variants because `Dataset::open_with` makes exactly one decision from this — whether
-/// to attempt a memory map. An earlier `BufferedPreferred` sat beside `BufferedOnly` and took
-/// the same branch as it, so the pair named a preference the opener could not act on.
+/// Three variants because `Dataset::open_with` makes exactly one decision from this: whether
+/// to attempt a memory map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IoBackendPreference {
     /// Memory-map local files; read network paths sequentially. The default.
@@ -17,7 +16,7 @@ pub enum IoBackendPreference {
 }
 
 impl IoBackendPreference {
-    /// The canonical lowercase spelling, and the inverse of [`FromStr`].
+    /// The canonical lowercase spelling, and the inverse of [`FromStr`](std::str::FromStr).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -38,8 +37,7 @@ impl std::str::FromStr for IoBackendPreference {
     type Err = crate::error::Error;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        // The hyphenated spellings are the names the profiling tools accepted before the
-        // variants collapsed; kept so existing invocations and scripts keep working.
+        // The hyphenated spellings are accepted for compatibility with existing scripts.
         match value.to_ascii_lowercase().as_str() {
             "auto" => Ok(Self::Auto),
             "mmap" | "mmap-preferred" => Ok(Self::Mmap),
@@ -51,6 +49,7 @@ impl std::str::FromStr for IoBackendPreference {
     }
 }
 
+/// Options for opening a file. Build one with [`OpenOptions::builder`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptions {
     pub(crate) io_backend: IoBackendPreference,
@@ -64,12 +63,14 @@ impl Default for OpenOptions {
     }
 }
 
+/// Builder for [`OpenOptions`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptionsBuilder {
     io_backend: IoBackendPreference,
 }
 
 impl OpenOptions {
+    /// Starts a builder with the default options.
     #[must_use]
     pub const fn builder() -> OpenOptionsBuilder {
         OpenOptionsBuilder::new()
@@ -77,6 +78,7 @@ impl OpenOptions {
 }
 
 impl OpenOptionsBuilder {
+    /// Starts a builder with the default options.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -84,12 +86,14 @@ impl OpenOptionsBuilder {
         }
     }
 
+    /// Sets how the file's bytes are read. The default is [`IoBackendPreference::Auto`].
     #[must_use]
     pub const fn io_backend(mut self, io_backend: IoBackendPreference) -> Self {
         self.io_backend = io_backend;
         self
     }
 
+    /// Builds the options.
     #[must_use]
     pub const fn build(self) -> OpenOptions {
         OpenOptions {
@@ -104,18 +108,21 @@ impl Default for OpenOptionsBuilder {
     }
 }
 
+/// How cells are turned into values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeMode {
+    /// Cells are not decoded. Only [`ScanBuilder::visit_raw_rows`](crate::ScanBuilder::visit_raw_rows) accepts this mode.
     Raw,
+    /// Numbers, dates and strings are decoded to typed values. The default.
     Typed,
+    /// Numeric columns come out as the stored `f64`, whatever their logical type, and character columns as bytes. Nothing is trimmed, converted or reinterpreted.
     TypedLossless,
 }
 
 /// What a scan does with bytes that are invalid in the file's declared encoding.
 ///
-/// Two variants because there are two behaviours. An earlier `Off` never differed from the
-/// lenient path — every decision site tests for `Strict` and treats everything else as lossy —
-/// so it promised a third behaviour the decoder does not have.
+/// Two variants because there are two behaviours. Every decision site tests for `Strict` and
+/// treats everything else as lossy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Utf8ValidationMode {
     /// Replace what will not decode and carry on, optionally repairing mojibake
@@ -126,26 +133,38 @@ pub enum Utf8ValidationMode {
     Strict,
 }
 
+/// Whether text that was written as UTF-8 into a file declared in a single-byte encoding is repaired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MojibakePolicy {
+    /// A cell in a single-byte encoded file whose bytes are valid UTF-8 is read as UTF-8. The default.
     Auto,
+    /// Cells are always decoded with the file's declared encoding.
     Off,
 }
 
+/// Whether repeated string values are staged through a lookup of values already seen while a batch is decoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DictionaryStaging {
+    /// The reader decides, from the string decode path and the column width. The default.
     Auto,
+    /// Never stage.
     Off,
+    /// Stage every string column that has a nonzero width.
     On,
 }
 
+/// How whitespace around string values is handled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrimMode {
+    /// Keep the bytes as stored. A string of only spaces is read as an empty string.
     Preserve,
+    /// Remove trailing spaces and NUL bytes. The default.
     RTrim,
+    /// Remove spaces and NUL bytes from both ends.
     Strip,
 }
 
+/// Options for decoding string columns. Build one with [`StringDecodeOptions::builder`]. The defaults are right-trimmed strings, lenient UTF-8 handling, mojibake repair and automatic dictionary staging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StringDecodeOptions {
     pub(crate) trim_mode: TrimMode,
@@ -165,6 +184,7 @@ impl Default for StringDecodeOptions {
     }
 }
 
+/// Builder for [`StringDecodeOptions`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StringDecodeOptionsBuilder {
     trim_mode: TrimMode,
@@ -174,6 +194,7 @@ pub struct StringDecodeOptionsBuilder {
 }
 
 impl StringDecodeOptions {
+    /// Starts a builder with the default options.
     #[must_use]
     pub const fn builder() -> StringDecodeOptionsBuilder {
         StringDecodeOptionsBuilder::new()
@@ -181,6 +202,7 @@ impl StringDecodeOptions {
 }
 
 impl StringDecodeOptionsBuilder {
+    /// Starts a builder with the default options.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -191,30 +213,35 @@ impl StringDecodeOptionsBuilder {
         }
     }
 
+    /// Sets how whitespace around strings is handled.
     #[must_use]
     pub const fn trim_mode(mut self, trim_mode: TrimMode) -> Self {
         self.trim_mode = trim_mode;
         self
     }
 
+    /// Sets what happens to bytes that are invalid in the file's encoding.
     #[must_use]
     pub const fn utf8_validation(mut self, utf8_validation: Utf8ValidationMode) -> Self {
         self.utf8_validation = utf8_validation;
         self
     }
 
+    /// Sets whether UTF-8 text in single-byte encoded files is repaired.
     #[must_use]
     pub const fn mojibake_fix(mut self, mojibake_fix: MojibakePolicy) -> Self {
         self.mojibake_fix = mojibake_fix;
         self
     }
 
+    /// Sets whether repeated strings are staged through a lookup.
     #[must_use]
     pub const fn dictionary_staging(mut self, dictionary_staging: DictionaryStaging) -> Self {
         self.dictionary_staging = dictionary_staging;
         self
     }
 
+    /// Builds the options.
     #[must_use]
     pub const fn build(self) -> StringDecodeOptions {
         StringDecodeOptions {
@@ -232,6 +259,7 @@ impl Default for StringDecodeOptionsBuilder {
     }
 }
 
+/// Whether date, datetime and time columns are decoded to [`SasDate`](crate::SasDate), [`SasDateTime`](crate::SasDateTime) and [`SasTime`](crate::SasTime), or left as the stored number. All three default to `true`. Build one with [`TemporalDecodeOptions::builder`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TemporalDecodeOptions {
     pub(crate) decode_dates: bool,
@@ -249,6 +277,7 @@ impl Default for TemporalDecodeOptions {
     }
 }
 
+/// Builder for [`TemporalDecodeOptions`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TemporalDecodeOptionsBuilder {
     decode_dates: bool,
@@ -257,6 +286,7 @@ pub struct TemporalDecodeOptionsBuilder {
 }
 
 impl TemporalDecodeOptions {
+    /// Starts a builder with the default options.
     #[must_use]
     pub const fn builder() -> TemporalDecodeOptionsBuilder {
         TemporalDecodeOptionsBuilder::new()
@@ -264,6 +294,7 @@ impl TemporalDecodeOptions {
 }
 
 impl TemporalDecodeOptionsBuilder {
+    /// Starts a builder with the default options.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -273,24 +304,28 @@ impl TemporalDecodeOptionsBuilder {
         }
     }
 
+    /// Sets whether date columns are decoded to dates.
     #[must_use]
     pub const fn decode_dates(mut self, decode_dates: bool) -> Self {
         self.decode_dates = decode_dates;
         self
     }
 
+    /// Sets whether datetime columns are decoded to datetimes.
     #[must_use]
     pub const fn decode_datetimes(mut self, decode_datetimes: bool) -> Self {
         self.decode_datetimes = decode_datetimes;
         self
     }
 
+    /// Sets whether time columns are decoded to times.
     #[must_use]
     pub const fn decode_times(mut self, decode_times: bool) -> Self {
         self.decode_times = decode_times;
         self
     }
 
+    /// Builds the options.
     #[must_use]
     pub const fn build(self) -> TemporalDecodeOptions {
         TemporalDecodeOptions {
@@ -307,9 +342,12 @@ impl Default for TemporalDecodeOptionsBuilder {
     }
 }
 
+/// Whether batches are delivered in file order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderingMode {
+    /// Batches arrive in file order. The default.
     Stable,
+    /// Batches may arrive in any order, as the worker threads finish.
     Unordered,
 }
 
@@ -338,10 +376,14 @@ pub enum Parallelism {
     Threads(usize),
 }
 
+/// The target size of a batch in a batch scan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BatchHint {
+    /// The reader chooses. It aims for at least 4096 rows and caps the decoded size of a batch. The default.
     Auto,
+    /// At most this many rows per batch. 0 is treated as 1.
     Rows(usize),
+    /// About this many decoded bytes per batch, estimated from the row length on disk. At least one row.
     Bytes(usize),
 }
 
@@ -367,11 +409,16 @@ pub enum ColumnMajorDecode {
     On,
 }
 
+/// Which rows a scan covers. Row numbers are 0-based.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowSelection {
+    /// Every row.
     All,
+    /// The rows from `start` up to but not including `end`.
     Range {
+        /// The first row.
         start: crate::types::RowIndex,
+        /// The row after the last one.
         end: crate::types::RowIndex,
     },
     /// Read only the first `n` rows. Equivalent to `.scan().limit(n)` but

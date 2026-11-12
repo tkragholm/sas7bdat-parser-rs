@@ -3,9 +3,9 @@
 //!
 //! This crate has several decode pipelines. They share almost every symbol below the point
 //! where they diverge, so a flat profile of one is indistinguishable from a flat profile of
-//! another. That has already produced one wrong conclusion here: an optimisation was written
-//! for the tiled column-major fill, benchmarked through `visit_batches`, and appeared to do
-//! nothing, because `visit_batches` never reaches that fill however the plan is shaped.
+//! another. For example, an optimisation of the tiled column-major fill cannot be measured
+//! through `visit_batches`, because `visit_batches` never reaches that fill however the plan
+//! is shaped.
 //!
 //! These tests pin the surprising parts so they cannot change quietly.
 
@@ -123,9 +123,8 @@ fn every_entry_point_records_both_axes() {
     }
 }
 
-/// The selection is now a value the executor also uses, so asking it must give the same
-/// answer as running the scan. If these diverge, the report has stopped describing the code,
-/// which is the exact failure the whole mechanism exists to prevent.
+/// The selection is a value the executor also uses, so asking it must give the same
+/// answer as running the scan. If these diverge, the report no longer describes the code.
 #[test]
 fn the_free_selection_agrees_with_the_scan_it_describes() {
     let Some(ds) = dataset() else { return };
@@ -152,9 +151,8 @@ fn the_free_selection_agrees_with_the_scan_it_describes() {
     }
 }
 
-/// One worker is the parallel scan run on the calling thread, not a pipeline beside it. What
-/// used to be a separate serial function existed only to give single-threaded scans the tiled
-/// fill; it is gone, and this is the fact that proves it did not take the fill with it.
+/// One worker is the parallel scan run on the calling thread, not a separate pipeline, so a
+/// single-threaded scan still gets the tiled fill.
 #[test]
 fn a_single_worker_still_reaches_the_tiled_fill() {
     let Some(ds) = dataset() else { return };

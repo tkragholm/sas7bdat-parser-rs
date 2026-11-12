@@ -381,11 +381,8 @@ pub fn parse_layout<R: Read + Seek>(
     // Overshoot is normal and stays a truncate: a column-name subheader is sized in
     // whole entries, so the last one routinely has slack past the final real column.
     //
-    // A shortfall means the metadata never described every column it declared. That
-    // used to be papered over — the count materialised the table up front, so missing
-    // columns silently became zero-width entries named `COL{n}`, and the caller could
-    // not tell an invented column from a real one. Reject instead: handing back
-    // fabricated schema is worse than refusing the file.
+    // A shortfall means the metadata never described every column it declared. Reject
+    // it: inventing placeholder columns would hand back a schema the file does not have.
     let described = state.columns.len();
     if described < column_count as usize {
         return Err(metadata_error(format!(
@@ -415,11 +412,10 @@ pub fn parse_layout<R: Read + Seek>(
             let logical_type = infer_logical_type(column.type_code, format.as_deref());
 
             // SAS stores a numeric as a truncated IEEE-754 double, so its width is
-            // 1..=8 bytes by construction. A wider one is corrupt, and it used to reach
-            // `numeric_bits`, whose `unreachable!` arm panics — in release too, since
-            // the length guard above it is only a `debug_assert!`. Rejecting here turns
-            // that into an `Err` at open time, at the one point every decode path
-            // (row, columnar, projected, fused) draws its widths from.
+            // 1..=8 bytes by construction. A wider one is corrupt. `numeric_bits` panics
+            // on it in release builds too, since its length guard is only a `debug_assert!`.
+            // Rejecting here returns an `Err` at open time, at the one point every decode
+            // path (row, columnar, projected, fused) draws its widths from.
             if logical_type.is_numeric() && column.width > MAX_NUMERIC_WIDTH {
                 return Err(metadata_error(format!(
                     "column {} ({name}) is numeric but {} bytes wide; SAS numerics are at most {MAX_NUMERIC_WIDTH}",
@@ -803,12 +799,11 @@ const fn subheader_entries(len: usize, uses_u64: bool, chunk_width: usize) -> us
 // distinction is the whole point: `DTDATE` prints a date but its value is a
 // datetime, so reading it as a date would be wrong by a factor of 86,400.
 //
-// Membership is exact. These lists used to be substring tests — `contains("MON")`,
-// `ends_with("DA")` and friends — which quietly swept up *user-defined* format
-// names that merely looked temporal. A survey variable formatted `FMONTH` (values
-// 1-12) came back as a `Date` in January 1960; `PSATIME`, `_TOTINDA`, `DRNKSODA`,
-// `STDWEEK`, `YEAR_F`, `DRETIME`, `MONTHLYINCPR` and `YEARLYINCPR` failed the same
-// way across six real government survey files in the fixture corpus.
+// Membership is exact, not a substring test. `contains("MON")` or `ends_with("DA")`
+// would sweep up *user-defined* format names that merely look temporal: `FMONTH`
+// (values 1-12) would read as a `Date` in January 1960, and `PSATIME`, `_TOTINDA`,
+// `DRNKSODA`, `STDWEEK`, `YEAR_F`, `DRETIME`, `MONTHLYINCPR` and `YEARLYINCPR` occur
+// on numeric survey variables in the fixture corpus.
 //
 // Exact matching is safe in the other direction too: SAS reserves the built-in
 // format namespace, so a user-defined format cannot legitimately be called `DATE`.
@@ -818,8 +813,7 @@ const fn subheader_entries(len: usize, uses_u64: bool, chunk_width: usize) -> us
 // Widths and decimals are not part of the stored name (the corpus confirms it: the
 // only names carrying digits are the ISO-8601 families, where the digits are part
 // of the name), so nothing is stripped before the lookup. Stripping trailing digits
-// would reintroduce the bug — it would fold the user-defined `YEAR_F`-style names
-// back onto their built-in prefixes.
+// would fold user-defined `YEAR_F`-style names onto their built-in prefixes.
 //
 // Each list is sorted so the lookup can binary-search; `formats_are_sorted_and_disjoint`
 // enforces both the ordering and the absence of overlap.
@@ -941,8 +935,8 @@ mod format_classification_tests {
     #[test]
     fn formats_that_print_a_date_but_store_a_datetime_are_datetimes() {
         // The scale of the stored value decides, not what the format prints.
-        // `DATEAMPM` was previously classified `Date` purely because its name
-        // contains "DATE", which scaled its seconds as if they were days.
+        // `DATEAMPM` contains "DATE" but stores seconds, so classifying it as `Date`
+        // would scale them as if they were days.
         for name in [
             "DATEAMPM", "DTDATE", "DTMONYY", "DTWKDATX", "DTYEAR", "E8601DN",
         ] {
@@ -957,7 +951,7 @@ mod format_classification_tests {
     #[test]
     fn user_defined_formats_that_merely_look_temporal_stay_numeric() {
         // Every one of these appears on a numeric survey variable in the fixture
-        // corpus and used to be read as a date or a time.
+        // corpus and must not be read as a date or a time.
         for name in [
             "FMONTH",       // contains "MON"
             "_TOTINDA",     // ends with "DA"
@@ -987,7 +981,7 @@ mod format_classification_tests {
     #[test]
     fn a_width_suffix_is_not_stripped() {
         // Stripping trailing digits would fold `YEAR2`-shaped user formats back
-        // onto their built-in prefixes, which is the bug this table replaced.
+        // onto their built-in prefixes.
         assert_eq!(classify_numeric_format("YEAR2"), LogicalType::Float);
         assert_eq!(classify_numeric_format("MMDDYY10"), LogicalType::Float);
     }
