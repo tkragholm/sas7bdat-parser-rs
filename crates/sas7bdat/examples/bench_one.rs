@@ -2,14 +2,16 @@
 //! `benchmarks/run.py`.
 //!
 //! Usage: `bench_one <path> [threads]`. Without `threads` the scan uses the
-//! default parallelism; `1` reads on one thread.
+//! default parallelism; `1` reads on one thread. `BENCH_IO_BACKEND=mmap|buffered`
+//! overrides the default of memory-mapping local files. The output also gives the
+//! decoded batches' heap size, for memory comparisons.
 //!
 //! The timed region is opening the file and collecting every batch. With
 //! `BENCH_CHECKSUM=1` a checksum is computed afterwards, matching `benchmarks/read_py.py`: numeric columns give their
 //! sum and missing count, string columns the total UTF-8 length after removing trailing
 //! spaces. Date, datetime and time columns are left out.
 #![allow(clippy::cast_precision_loss)]
-use sas7bdat::{Dataset, OwnedColumnBuffer, Parallelism};
+use sas7bdat::{Dataset, IoBackendPreference, OpenOptions, OwnedColumnBuffer, Parallelism};
 use std::fmt::Write as _;
 use std::time::Instant;
 
@@ -85,7 +87,13 @@ fn main() {
     };
 
     let start = Instant::now();
-    let ds = Dataset::open(path).expect("open");
+    let io_backend = match std::env::var("BENCH_IO_BACKEND").as_deref() {
+        Ok("mmap") => IoBackendPreference::Mmap,
+        Ok("buffered") => IoBackendPreference::Buffered,
+        _ => IoBackendPreference::Auto,
+    };
+    let ds = Dataset::open_with(path, OpenOptions::builder().io_backend(io_backend).build())
+        .expect("open");
     let batches = ds
         .scan()
         .with_parallelism(parallelism)
@@ -121,8 +129,11 @@ fn main() {
     let mut out = String::new();
     let _ = write!(
         out,
-        "{{\"tool\":\"sas7bdat-core\",\"seconds\":{seconds:.6},\"rows\":{rows},\"cols\":{},\"checksum\":{checksum}}}",
-        names.len()
+        "{{\"tool\":\"sas7bdat-core\",\"seconds\":{seconds:.6},\"rows\":{rows},\"cols\":{},\"io_backend\":\"{}\",\"heap_bytes\":{},\"batches\":{},\"checksum\":{checksum}}}",
+        names.len(),
+        ds.io_backend(),
+        batches.iter().map(sas7bdat::OwnedColumnarBatch::heap_bytes).sum::<usize>(),
+        batches.len()
     );
     println!("{out}");
 }
