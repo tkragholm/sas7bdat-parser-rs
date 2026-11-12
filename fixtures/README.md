@@ -1,183 +1,66 @@
-# SAS Test Fixtures
+# Test fixtures
 
-This directory contains fixture datasets used for parser correctness and
-benchmarking.
+The fixture corpus is not tracked in git; only this README is. Populate the
+directory locally to run the corpus tests, the oracle comparison and the
+benchmarks. Tests that need a missing file skip with a message.
 
-The large binary fixture corpus is intentionally kept out of git. Only this
-README stays tracked. Populate the directory locally when running broad parser
-validation or benchmarks.
+## Contents
 
-### Known gap: `ahs2013n.sas7bdat`
+- `raw_data/pandas/`: the pandas SAS test files (BSD-3-Clause).
+- `raw_data/csharp/`, `raw_data/other/`, `raw_data/principlesofeco/`,
+  `raw_data/readstat/`, `raw_data/readstat_issues/`: test files from other
+  readers and public sample collections.
+- `raw_data/ahs2013/`: files from the US Census American Housing Survey 2013.
+- `ahs2013n.sas7bdat` (2.15 GB, AHS 2013 national file): used by most Polars
+  plugin tests and by the benchmarks. It is public Census data and can be
+  downloaded again. No other file has its `DEGREE` and `LMED` columns.
 
-Referenced throughout this file and by `crates/polars-plugin/tests`, and **not in the
-corpus**. 21 of the 24 Python plugin tests open with `assert FIXTURE.exists()` against
-it and fail immediately when it is absent, so without it that suite is effectively three
-tests. The `just bench-plugin-vs-raw` and `just bench-plugins-single` defaults name it
-too. No other file in the corpus carries its `DEGREE` or `LMED` columns, so nothing can
-stand in for it. It is public US Census AHS 2013 national data, so it can be fetched
-again rather than recreated.
+`raw_data/pandas/corrupt.sas7bdat` and `zero_variables.sas7bdat` are malformed
+on purpose and are left out of the parity tests.
 
-## Source and coverage
+## What uses the corpus
 
-- `raw_data/pandas/`: copied from pandas SAS test corpus (BSD-3-Clause)
-- Additional corpora: `csharp/`, `other/`, `principlesofeco/`, `readstat/`
-- Coverage includes compression variants, date/time fields, value labels, and
-  malformed edge cases
-
-## How fixtures are used
-
-- Rust integration snapshots under `crates/sas7bdat/tests/` use these fixtures.
-- `crates/sas7bdat/tests/fixture_smoke.rs` auto-discovers local `.sas7bdat` files and runs open/raw/typed/batch smoke coverage, plus stricter assertions for selected representative fixtures when they are present.
-  Current pinned regressions include both uncompressed and compressed real files such as `charset_utf8.sas7bdat`, `54-cookie.sas7bdat`, `54-class.sas7bdat`, `test2.sas7bdat`, and `max_sas_date.sas7bdat`.
-  The fixture suite also has a dedicated compressed-corpus smoke pass so compressed datasets are exercised as a first-class runtime path.
-- `crates/sas7bdat/benches/scan_hotpaths.rs` uses a smaller set of local fixtures for repeatable Criterion runs and now includes both the larger compressed `raw_data/ahs2013/topical.sas7bdat` case and the larger uncompressed `raw_data/ahs2013/homimp.sas7bdat` case so the suite is not biased toward tiny files.
-- `sas7bdat-corpus-catalog` builds a local JSON catalog of the available fixture corpus, including the AHS datasets plus the `csharp`, `other`, `pandas`, `principlesofeco`, and `readstat` subcorpora. The catalog records metadata, sampled content features, and derived tags such as `compressed`, `string-heavy`, `benchmark-standard`, or `benchmark-macro`.
-- `sas7bdat-corpus-profile` is the server-oriented version of the catalog workflow. It walks arbitrary input roots, emits one JSON report for the whole corpus, and adds aggregate summaries such as compression counts, encoding counts, tag counts, and top files by size, rows, columns, and string columns.
-- `sas7bdat-fixture-profile` runs one fixture in a selected scan mode (`raw_rows`, `typed_rows`, `typed_batches`, etc.) and emits structured timing plus parser stats. This is intended to be wrapped by established OS tools for memory and CPU inspection.
-- `sas7bdat-fixture-string-profile` samples string columns for one fixture and reports width buckets plus the densest and emptiest string columns. This is useful when deciding whether a large string workload is dominated by dense identifiers, low-cardinality categoricals, or mostly-empty fixed-width columns.
-- In practice, `sas7bdat-fixture-profile` is now the preferred tool for large file-backed workload decisions, backend comparisons, RSS checks, and one-off fixture studies. Criterion remains the primary tool for curated, repeatable hot-path suites over the pinned benchmark set.
-- The root `justfile` is the main entrypoint for this workflow:
-  - `just catalog` generates `fixtures/fixture_catalog.local.json`
-  - `just profile ...` runs a structured profile
-  - `just string-profile ...` reports width buckets and dense/empty string columns for one fixture
-  - `just profile-rss ...` wraps the run with `/usr/bin/time -l` for peak RSS
-  - `just profile-sample ...` wraps the run with macOS `sample`
-  - `just profile-leaks ...` wraps the run with macOS `leaks`
-- Optional Rust-side external comparisons currently target ReadStat/C++/C#.
-- Python (`python/tests/`) and R (`R/tests/`) host pandas/pyreadstat/haven
-  comparison checks.
+- `crates/sas7bdat/tests/`: smoke tests over every file found, pinned
+  regressions on selected files, parity between parallel and serial decoding,
+  and golden tests against the pandas CSVs in `tests/csv_golden/`.
+- `cargo run -p sas7bdat --release --example verify_readstat`: compares every
+  cell with the `readstat` command-line tool on `PATH`. Use a ReadStat build
+  from its main branch; the 1.1.9 release returns deleted rows.
+- `crates/sas7bdat/benches/scan_hotpaths.rs`: Criterion benchmarks over a fixed
+  set of files.
+- Profiling tools in `sas7bdat-cli`, built with `--features dev-tools`:
+  `sas7bdat-corpus-catalog` and `sas7bdat-corpus-profile` describe a whole
+  corpus; `sas7bdat-fixture-profile` and `sas7bdat-fixture-string-profile`
+  time and describe one file.
 
 ## Benchmark workflow
 
-The fixture workflow is intended to make benchmark selection explicit instead of
-implicitly relying on a few hand-picked files.
+```sh
+just catalog                 # write fixtures/fixture_catalog.local.json
+just profile <file> typed_batches mixed 1 128
+just profile-rss <file> typed_batches mixed 1 128    # adds peak RSS (macOS)
+just bench-standard          # Criterion, by catalog tag
+just bench-compressed
+just bench-string-heavy
+```
 
-Recommended procedure:
-
-1. Refresh the local fixture catalog:
-   - `just catalog`
-2. Inspect or diff the catalog if needed:
-   - `just catalog-stdout`
-3. Run a structured single-fixture profile:
-   - `just profile fixtures/raw_data/ahs2013/topical.sas7bdat typed_batches mixed 1 128`
-4. Add peak RSS:
-   - `just profile-rss fixtures/raw_data/ahs2013/topical.sas7bdat typed_batches mixed 1 128`
-5. Use tag-driven Criterion runs for fixture families:
-   - `just bench-standard`
-   - `just bench-compressed`
-   - `just bench-string-heavy`
-   - `just bench-numeric-heavy`
-   - `just bench-macro`
-
-Use the tools differently:
-
-- Use `sas7bdat-corpus-profile` when the question is “what does this whole SAS7BDAT corpus look like?”
-- Use `just profile ...` when the question is fixture-specific, backend-specific, or memory-related.
-- Use Criterion benches when the question is whether a code change improved a pinned hot-path family in a repeatable way.
-- Prefer `sas7bdat-fixture-profile` for very large file-backed datasets like `ahs2013n.sas7bdat`, especially when comparing `mmap-preferred` versus `buffered-only`.
-- Prefer Criterion for curated regression families such as projected `topical`, compressed matrix runs, and backend matrix runs.
-
-The common tuning knobs are recipe arguments, not environment variables:
-
-- projection
-- max fixture count
-- sample rows
-- repeat
-- row limit
-- batch size
-
-The one remaining environment-based escape hatch is `CRITERION_ARGS`, because
-Criterion accepts a free-form set of pass-through flags and it is pragmatic to
-leave that as shell-style argument passthrough.
-
-Examples:
-
-- `cargo run --release -p sas7bdat-cli --bin sas7bdat-corpus-profile -- /data/sas7bdat --sample-rows 512 --out corpus-profile.json`
-- `just bench-standard full 2`
-- `just bench-compressed full 3`
-- `just bench-string-heavy strings 2`
-- `CRITERION_ARGS='--sample-size 10 --warm-up-time 0.1 --measurement-time 0.1' just bench-standard full 1`
-
-## Wheel Packaging
-
-The repository includes a minimal `pyproject.toml` configured for `maturin` `bin` bindings.
-
-That means a command like:
-
-- `uvx maturin build --release --target x86_64-pc-windows-msvc --verbose`
-
-builds a wheel that installs the Rust binaries as Python package scripts. The new `sas7bdat-corpus-profile` binary is intended to be the main server-facing entrypoint for large real corpora.
-
-The intended interpretation of the fixture tags is:
-
-- `correctness-only`: useful for parser validation and narrow regressions, not representative throughput work
-- `benchmark-standard`: normal benchmark candidates
-- `benchmark-macro`: very large or ultra-wide datasets that should not run in every quick benchmark pass
-- `compressed` / `uncompressed`: compression-family selection
-- `string-heavy` / `numeric-heavy` / `mixed`: content-family selection
+Catalog tags pick the files for each family: `benchmark-standard`,
+`benchmark-macro` (very large or very wide), `compressed`, `string-heavy`,
+`numeric-heavy`, `mixed`, and `correctness-only`. Extra Criterion flags go in
+`CRITERION_ARGS`.
 
 ## Benchmark decision policy
 
-Criterion runs in this repository are now treated as two different tools:
+Short Criterion runs (`--sample-size 10 --warm-up-time 0.1
+--measurement-time 0.1`) are for steering. Before keeping or reverting a change
+whose effect is under about 10%, rerun the family with the longer profile
+(`--sample-size 20 --warm-up-time 0.5 --measurement-time 1`), check at least
+one guardrail benchmark, and confirm file-backed or I/O-backend effects with
+`sas7bdat-fixture-profile` on a large file such as `ahs2013n.sas7bdat`.
 
-1. Fast screening runs.
-2. Decision-grade confirmation runs.
-
-Fast screening runs are for iteration only. They are useful when:
-
-- rejecting obvious losers quickly
-- checking that a change did not catastrophically break a benchmark family
-- narrowing down where to spend effort next
-
-Typical fast screening settings are short, for example:
-
-- `--sample-size 10`
-- `--warm-up-time 0.1`
-- `--measurement-time 0.1`
-
-These runs are not considered strong enough on their own for commit or revert
-decisions when the measured effect is small or medium.
-
-Decision-grade confirmation runs are required before concluding that a change is
-worth keeping or backing out when the effect is not overwhelmingly large.
-
-Typical confirmation settings are longer, for example:
-
-- `--sample-size 20`
-- `--warm-up-time 0.5`
-- `--measurement-time 1`
-
-Current policy:
-
-- do not commit or revert based only on a fast screening run when the measured effect is roughly under `10%`
-- rerun the relevant benchmark family with the longer confirmation profile before deciding
-- confirm against the dedicated family benchmark and at least one guardrail benchmark
-- when a decision depends on a specific large file-backed workload or I/O backend, confirm it with `sas7bdat-fixture-profile` as well instead of relying on in-memory Criterion runs alone
-
-For example:
-
-- string-heavy work must be checked against `fixture_topical_projection_strings`
-- mixed-path work must be checked against `fixture_topical_projection`
-- numeric guardrails should still be checked against `fixture_topical_projection_numeric`
-- large uncompressed file-backed tradeoffs should be checked against `ahs2013n.sas7bdat` with `sas7bdat-fixture-profile`
-
-The practical interpretation is:
-
-- short runs are for steering
-- long runs are for decisions
-- `sas7bdat-fixture-profile` is for large targeted workload truth
-
-## Large datasets
-
-Large AHS 2019 datasets are not committed. Download the ZIPs listed in
-`ahs-links.txt`, extract, and place `.sas7bdat` files under:
-
-- `fixtures/raw_data/ahs2019_metro/`
-- `fixtures/raw_data/ahs2019_national/`
-
-## Known excluded broken fixtures
-
-These remain intentionally excluded from parity suites:
-
-- `raw_data/pandas/corrupt.sas7bdat`
-- `raw_data/pandas/zero_variables.sas7bdat`
+| Change touches | Check against |
+|---|---|
+| string decoding | `fixture_topical_projection_strings` |
+| mixed paths | `fixture_topical_projection` |
+| numeric decoding | `fixture_topical_projection_numeric` |
+| large uncompressed files | `ahs2013n.sas7bdat` with `sas7bdat-fixture-profile` |

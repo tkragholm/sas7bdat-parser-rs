@@ -1,6 +1,6 @@
 # sas7bdat-convert
 
-Convert SAS7BDAT files to Parquet, CSV or TSV — one file, or a directory tree
+Convert SAS7BDAT files to Parquet, CSV or TSV: one file, or a directory tree
 mirrored into an output root.
 
 This is the machinery behind the `sas7bdat convert` command, published separately

@@ -1,89 +1,21 @@
-# sas7bdat test fixtures
+# Tracked test fixtures
 
-Small, git-tracked SAS7BDAT files used by unit/integration tests in this crate.
-(The larger `fixtures/` corpus at the repo root is untracked — see its README.)
-Provenance/attribution for all tracked binary fixtures is documented in the
-repo-root `THIRD_PARTY_NOTICES.md`.
+Small SAS files used by this crate's tests. The larger corpus at the
+repository root is not tracked; see `fixtures/README.md`. Attribution for
+tracked third-party files is in `THIRD_PARTY_NOTICES.md`.
 
 ## `people_nonascii.sas7bdat`
 
-A byte-patched copy of `crates/r-plugin/inst/extdata/people.sas7bdat`
-(WINDOWS-1252, 5 rows; a public synthetic teaching dataset — see
-`THIRD_PARTY_NOTICES.md`). Row 0's `GENDER` cell byte was changed from `M` (0x4D)
-to `0xE9`, which is `é` in windows-1252. Everything else is identical.
+A copy of `crates/r-plugin/inst/extdata/people.sas7bdat` (WINDOWS-1252, 5
+rows) with one byte changed: row 0's `GENDER` cell is `0xE9` (`é`) instead of
+`M`. The original is pure ASCII, so it never reaches the transcoding path; this
+copy does. Used by
+`dataset::tests::batch_decode_transcodes_non_ascii_windows_1252_string`. It
+does not cover the compressed single-byte path
+(`append_non_ascii_single_byte_utf8`), which would need a compressed
+WINDOWS-1252 file with non-ASCII text.
 
-Purpose: exercise the columnar decoder's **non-ASCII transcode branch** (the
-direct UTF-8 owned path) end-to-end. The original fixture is entirely ASCII, so
-the scanner takes the ASCII fast path and never transcodes; the patched high
-byte forces a real windows-1252 → UTF-8 conversion. Used by
-`dataset::tests::batch_decode_transcodes_non_ascii_windows_1252_string`.
-
-(Note: the *compressed-only* single-byte family
-`append_non_ascii_single_byte_utf8` is a different decode path that this
-uncompressed fixture does not reach — covering it would need a compressed
-windows-1252 fixture with non-ASCII data.)
-
-## `fuzz/`
-
-Crash artifacts produced by `crates/sas7bdat/fuzz` (libFuzzer, via `cargo fuzz`).
-These are machine-generated mutations of the repo-root corpus, not third-party
-data, so they need no attribution entry. Used by `tests/fuzz_regressions.rs`.
-
-- `oom_declared_column_count_8k.sas7bdat` (18 KB) declares 1,085,348,864 columns
-- `oom_declared_column_count_32k.sas7bdat` (34 KB) declares 2,863,311,531 columns
-
-Both once drove `MetadataState::ensure_column` to ask the allocator for 2.5 GiB
-during *metadata* parsing, before any row was read — reachable from `Dataset::open`
-as well as `from_bytes`, so the CLI and both language plugins inherited it. The
-declared count is now checked against how many columns the file has bytes to
-describe, and neither reaches an allocation.
-
-- `panic_numeric_width_over_8.sas7bdat` (122 KB) declares column 5 as numeric and
-  67 bytes wide
-
-Surfaced on the next fuzz run after the OOM was fixed, which is the point: the OOM
-had been ending every run after ~9k executions, so nothing downstream of it was being
-explored. A numeric wider than 8 bytes reached `scan::numeric::numeric_bits`, whose
-`_ => unreachable!()` arm panics in release as well as debug (the `slice.len() <= 8`
-check above it is only a `debug_assert!`). Width is now validated at open time.
-
-- `oom_declared_row_length.sas7bdat` (44 KB) declares a 4,261,413,064-byte row
-
-`decompress_row` reserves the declared row length once per row, so the claim was an
-allocation primitive: `malloc(4261413064)`. Found by seeding a corpus with only the
-34 compressed fixtures — they are 9% of the corpus, so a general run almost never
-built a valid compressed page. Note this one is reachable *only through a scan*, not
-through `Dataset::open`, and not through `sas7bdat convert` (which decodes columnar
-while the fuzz target uses `visit_rows`). That is why `fuzz_regressions.rs` scans
-each artifact rather than stopping at open.
-
-- `oom_batch_capacity_hint.sas7bdat` (9 KB) declares `rows_per_page` and a row count
-  that together inflate the batch pre-allocation hint
-
-`BatchAccumulator::new` sized every column buffer from
-`min(declared_row_count, rows_per_page)` times the column width, and both inputs are
-declared fields with no geometric check — `Vec::with_capacity` for 876 GB. Reached only
-through `visit_batches`, which is why `fuzz_regressions.rs` visits batches as well as
-rows, and why it runs the two scans independently rather than chaining them: this file
-fails row visiting on an unrelated bounds check, which would short-circuit the batch
-scan that actually matters. Fixed by clamping the hint, which is advisory — the buffers
-grow on demand — so there is no diagnostic to assert for this one.
-
-### `fuzz/catalog/`
-
-`.sas7bcat` inputs for the value-label parser, a separate format reached by
-`Dataset::attach_catalog` and `catalog::parse_catalog`.
-
-- `oom_declared_label_count.sas7bcat` (22 KB) declares 1,313,169,229 value labels
-
-`label_count_used` is a u64 straight out of the file that sized a `Vec`, giving
-`calloc(10505353832)`. Now bounded by how many 6-byte entries the block could hold.
-
-To add more: run `just fuzz`, then copy anything that lands in
-`crates/sas7bdat/fuzz/artifacts/<target>/` into this directory and add it to
-`EXPECTED` in `tests/fuzz_regressions.rs`.
-
-Regenerate `people_nonascii.sas7bdat` (if the base fixture ever changes):
+To regenerate it:
 
 ```python
 data = bytearray(open("crates/r-plugin/inst/extdata/people.sas7bdat", "rb").read())
@@ -91,3 +23,23 @@ assert data[1249] == ord("M")   # row 0 GENDER cell
 data[1249] = 0xE9               # windows-1252 'é'
 open("crates/sas7bdat/tests/fixtures/people_nonascii.sas7bdat", "wb").write(data)
 ```
+
+## `fuzz/`
+
+Inputs found by `cargo fuzz` (`crates/sas7bdat/fuzz`). They are mutations of
+the local corpus, not third-party data. `tests/fuzz_regressions.rs` opens each
+one, visits its rows and, separately, its batches, and expects an error
+rather than a crash or a huge allocation.
+
+| File | What it declares | Guard |
+|---|---|---|
+| `oom_declared_column_count_8k.sas7bdat` | 1,085,348,864 columns | column count checked against the bytes that describe columns |
+| `oom_declared_column_count_32k.sas7bdat` | 2,863,311,531 columns | same |
+| `panic_numeric_width_over_8.sas7bdat` | a numeric column 67 bytes wide | numeric width validated at open |
+| `oom_declared_row_length.sas7bdat` | a 4,261,413,064-byte row | row length bounded before decompression; reached only through a scan |
+| `oom_batch_capacity_hint.sas7bdat` | `rows_per_page` and a row count that inflate the batch size hint | the hint is clamped; reached only through `visit_batches` |
+| `catalog/oom_declared_label_count.sas7bcat` | 1,313,169,229 value labels | label count bounded by what the block can hold |
+
+To add one: run `just fuzz`, copy the file from
+`crates/sas7bdat/fuzz/artifacts/<target>/` into this directory, and add it to
+`EXPECTED` in `tests/fuzz_regressions.rs`.
