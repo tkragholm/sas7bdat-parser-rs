@@ -2,6 +2,7 @@
 name = "sas7bdat"
 version = "0.9.3"
 edition = "2024"
+rust-version = "1.89"
 description = "SIMD-accelerated SAS7BDAT reader with optional Arrow batch output"
 license = "MIT"
 repository = "https://github.com/tkragholm/sas7bdat-parser-rs"

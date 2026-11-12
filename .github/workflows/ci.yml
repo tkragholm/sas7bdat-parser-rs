@@ -361,8 +361,12 @@ jobs:
   #
   # Not gated on `Status: OK`: both packages carry a known `_abort` WARNING from
   # Rust's std that cannot be removed while extendr needs unwinding, and it is
-  # answered in each package's cran-comments.md. The assertions below are on the
-  # specific properties that must not regress, and the full log is uploaded.
+  # answered in each package's cran-comments.md. The job fails on any ERROR, on any
+  # other WARNING, and on the specific properties below; the full log is uploaded.
+  #
+  # The packages are built and checked in a directory outside the checkout, as
+  # CRAN builds them: inside it, the repository's .cargo/config.toml would set
+  # target-cpu flags that CRAN's machines do not use.
   r-cran:
     name: R packages (CRAN checks, Linux)
     runs-on: ubuntu-latest
@@ -413,14 +417,24 @@ jobs:
 
       - name: Build and check
         run: |
+          mkdir -p "$RUNNER_TEMP/rcheck"
+          cd "$RUNNER_TEMP/rcheck"
           for pkg in r-plugin:fastsas r-convert-plugin:fastsasconvert; do
-            dir="crates/${pkg%%:*}"
+            dir="$GITHUB_WORKSPACE/crates/${pkg%%:*}"
             name="${pkg##*:}"
             echo "::group::$name"
             R CMD build "$dir"
             _R_CHECK_CRAN_INCOMING_=false R CMD check --as-cran --no-manual "${name}"_*.tar.gz || true
             log="${name}.Rcheck/00check.log"
             tail -n 40 "$log"
+
+            if grep -qE '\.\.\. ERROR|^ *ERROR$' "$log"; then
+              echo "::error::$name: R CMD check reported an ERROR"; exit 1
+            fi
+            warnings=$(grep -c '\.\.\. WARNING' "$log" || true)
+            if [ "$warnings" -gt 1 ] || { [ "$warnings" -eq 1 ] && ! grep -q 'checking compiled code \.\.\. WARNING' "$log"; }; then
+              echo "::error::$name: a WARNING other than the known _abort one"; exit 1
+            fi
 
             grep -q 'checking installed package size \.\.\. OK' "$log" \
               || { echo "::error::$name: installed size is no longer OK"; exit 1; }
@@ -443,8 +457,8 @@ jobs:
         with:
           name: r-cran-check-logs
           path: |
-            *.Rcheck/00check.log
-            *.Rcheck/00install.out
+            ${{ runner.temp }}/rcheck/*.Rcheck/00check.log
+            ${{ runner.temp }}/rcheck/*.Rcheck/00install.out
           if-no-files-found: warn
 
       # Handed to `r-windows-cran` below. Publishing the tarball rather than having
@@ -454,8 +468,30 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: r-source-tarballs
-          path: '*.tar.gz'
+          path: ${{ runner.temp }}/rcheck/*.tar.gz
           if-no-files-found: error
+
+  # The oldest Rust the published crates and the R packages claim to build on:
+  # `rust-version` in the two crates' manifests, and `SystemRequirements: rustc >=
+  # 1.89` in both DESCRIPTION files. rust-toolchain.toml pins a newer release for
+  # everything else, so without this job the minimum is never compiled.
+  msrv:
+    name: MSRV (Rust 1.89)
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: '1.89'
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup toolchain install 1.89 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: Published crates
+        run: |
+          cargo check --locked -p sas7bdat -p sas7bdat-convert
+          cargo check --locked -p sas7bdat --features arrow,dictionary
+      - name: R packages
+        run: |
+          (cd crates/r-plugin/src && cargo check --locked --manifest-path rust/Cargo.toml)
+          (cd crates/r-convert-plugin/src && cargo check --locked --manifest-path rust/Cargo.toml)
 
   fuzz-regressions:
     name: fuzz regressions
