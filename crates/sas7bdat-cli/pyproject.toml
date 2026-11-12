@@ -8,6 +8,7 @@ version = "0.9.4"
 description = "Fast command-line converter and inspector for SAS7BDAT files"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE", "LICENSE-ReadStat"]
 # A binary wheel: it ships a self-contained executable, not an extension module,
 # so it is tagged `py3-none-<platform>` and works with any CPython/PyPy.
 requires-python = ">=3.8"
