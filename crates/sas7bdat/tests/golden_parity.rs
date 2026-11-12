@@ -1,10 +1,8 @@
-// Golden parity tests: compare SIMD parser output row-by-row against CSV
-// snapshots committed in the sas7bdat-parser-rs reference implementation.
-//
-// CSV files live at: sas7bdat-parser-rs/crates/sas7bdat/tests/csv_golden/
-// SAS files live at: fixtures/raw_data/pandas/
-//
-// All tests are skipped silently when fixtures are absent (CI without full tree).
+// Golden parity tests: compare decoded output row by row against the expected
+// CSV files from pandas' SAS test suite (BSD-3-Clause), tracked in
+// tests/csv_golden/. The SAS inputs are in the untracked corpus under
+// fixtures/raw_data/pandas/; each test is skipped, with a message, when its
+// input is absent.
 
 use sas7bdat::{Dataset, DecodeMode, OwnedCellValue};
 use std::path::Path;
@@ -20,8 +18,8 @@ fn sas_fixture(name: &str) -> std::path::PathBuf {
 }
 
 fn csv_golden(name: &str) -> std::path::PathBuf {
-    workspace_root()
-        .join("sas7bdat-parser-rs/crates/sas7bdat/tests/csv_golden")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/csv_golden")
         .join(name)
 }
 
@@ -262,9 +260,18 @@ fn compare_cell(actual: &OwnedCellValue, expected_csv: &str, col: &str, row: usi
 fn check_parity(sas_name: &str, csv_name: &str) {
     let sas_path = sas_fixture(sas_name);
     let csv_path = csv_golden(csv_name);
-    if !sas_path.exists() || !csv_path.exists() {
+    if !sas_path.exists() {
+        eprintln!(
+            "skipping golden parity for {sas_name}: {} not found",
+            sas_path.display()
+        );
         return;
     }
+    assert!(
+        csv_path.exists(),
+        "missing tracked golden file {}",
+        csv_path.display()
+    );
 
     let ds = Dataset::open(&sas_path).unwrap_or_else(|e| panic!("open {sas_name}: {e}"));
     let golden = load_csv(&csv_path);
