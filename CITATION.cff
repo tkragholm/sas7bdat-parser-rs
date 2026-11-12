@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "sas7bdat: a SAS7BDAT reader in Rust, with Python and R bindings"
+title: "sas7bdat: a fast reader for SAS7BDAT files in Rust, Python and R"
 type: software
 authors:
   - family-names: Kragholm
