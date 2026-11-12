@@ -24,8 +24,8 @@
 #' interrupted run, filter out what already converted:
 #'
 #' ```r
-#' done <- file.exists(sub("\\.sas7bdat$", ".parquet", files))
-#' convert_sas(files[!done], "out")
+#' out <- file.path("out", sub("\\.sas7bdat$", ".parquet", basename(files)))
+#' convert_sas(files[!file.exists(out)], "out", flatten = TRUE)
 #' ```
 #'
 #' @param input Paths to `.sas7bdat` files, directories, or glob patterns.

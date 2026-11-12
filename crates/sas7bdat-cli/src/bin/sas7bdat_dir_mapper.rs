@@ -8,7 +8,7 @@
 //!   --format json|md|both Output format (default: both)
 //!   --jobs <N>            Parallel worker threads (default: all cores)
 //!   --min-group-size <N>  Minimum files to form a register group (default: 2)
-//!   --relative-paths      Use paths relative to root in output (default: true)
+//!   --no-relative-paths   Print absolute paths instead of paths relative to the root
 //!   --help / -h           Print this message
 
 use chrono::Utc;

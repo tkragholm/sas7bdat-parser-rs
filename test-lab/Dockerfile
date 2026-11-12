@@ -1,8 +1,8 @@
 # A lab for measuring the converter against storage that behaves like a network share.
 # See test-lab/README.md for what it does and does not reproduce.
-FROM rustlang/rust:nightly-bookworm AS build
+FROM rust:bookworm AS build
 WORKDIR /src
-# rust-toolchain.toml pins the nightly; rustup fetches it on the first build.
+# rustup installs the toolchain pinned in rust-toolchain.toml.
 COPY rust-toolchain.toml ./
 RUN rustup show
 COPY Cargo.toml Cargo.lock ./

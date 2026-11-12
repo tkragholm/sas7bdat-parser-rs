@@ -2,7 +2,7 @@
 name = "sas7bdat-cli"
 version = "0.9.4"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 description = "Standalone CLI tools for converting, inspecting, and profiling SAS7BDAT files"
 license = "MIT"
 repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
@@ -28,7 +28,7 @@ name = "sas7bdat-inspect"
 path = "src/bin/sas7bdat_inspect.rs"
 required-features = ["aliases"]
 
-# Developer/profiling tools — built only with `--features dev-tools` so a default
+# Developer/profiling tools, built only with `--features dev-tools` so a default
 # build/install ships just the user-facing binaries above.
 [[bin]]
 name = "sas7bdat-corpus-catalog"
@@ -55,13 +55,13 @@ name = "sas7bdat-dir-mapper"
 path = "src/bin/sas7bdat_dir_mapper.rs"
 required-features = ["dir-mapper"]
 
-# Every user-facing binary is in `default`, so `cargo build` / `cargo install` /
-# `just convert` behave exactly as they did before these gates existed.
+# Every user-facing binary is in `default`, so `cargo build`, `cargo install` and
+# `just convert` build all of them.
 #
 # The gates exist for the Python wheels: maturin has no `--bin` filter (a
-# `bindings = "bin"` build packages *every* binary cargo produced), so each
+# `bindings = "bin"` build packages every binary cargo produced), so each
 # pyproject.toml selects its one binary with `no-default-features` plus the
-# matching feature — `cli` for the sas7bdat-cli wheel, `dir-mapper` for the
+# matching feature: `cli` for the sas7bdat-cli wheel, `dir-mapper` for the
 # sas7bdat-dir-mapper wheel.
 [features]
 default = ["cli", "aliases", "dir-mapper"]

@@ -1,8 +1,7 @@
 //! Number formatting for terminal output.
 //!
-//! Rendering SAS *values* moved to `sas7bdat_convert::values` with the rest of
-//! conversion; what is left here formats counts and sizes for a human reading a
-//! report, which is the CLI's own concern.
+//! Formats counts and sizes for a human reading a report. Rendering SAS values lives in
+//! `sas7bdat_convert::values`.
 
 /// Group a number with thousands separators (e.g. `70044` -> `70,044`).
 #[must_use]
@@ -11,7 +10,7 @@ pub fn thousands(n: u64) -> String {
     let len = digits.len();
     let mut out = String::with_capacity(len + len / 3);
     for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(ch);

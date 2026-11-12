@@ -12,12 +12,13 @@
 # This file also governs the PyPI wheel builds in .github/workflows/wheels.yml, so it
 # must stay at a baseline those wheels can rely on. AVX-512 is absent from every Intel
 # consumer part since Alder Lake, and a binary that uses it dies with an illegal
-# instruction on such a CPU — at import, with no useful error. v3 (AVX2, 2013) is the
-# floor the published artifacts commit to.
+# instruction on such a CPU, at import, with no useful error. The Linux and Windows
+# targets therefore stay at v3 (AVX2, 2013). The two macOS targets use
+# `target-cpu=native`, so a macOS build is tuned to the machine that builds it.
 #
-# The deployment server is a 96-core EPYC (Zen 5), which runs AVX-512 on a full 512-bit
-# datapath with no clock penalty. It gets a tuned build via `just build-cli-server`,
-# where RUSTFLAGS overrides this section rather than merging with it.
+# Zen 5 runs AVX-512 on a full 512-bit datapath with no clock penalty. `just
+# build-cli-server` makes a Windows build tuned for it, with RUSTFLAGS overriding this
+# section rather than merging with it.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 

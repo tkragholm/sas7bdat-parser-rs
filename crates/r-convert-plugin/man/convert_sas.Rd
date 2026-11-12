@@ -89,8 +89,8 @@ rather than a silent skip, which keeps a genuine name collision visible. To
 resume an interrupted run, filter out what already converted:
 
 \preformatted{
-done <- file.exists(sub("\\.sas7bdat$", ".parquet", files))
-convert_sas(files[!done], "out")
+out <- file.path("out", sub("\\.sas7bdat$", ".parquet", basename(files)))
+convert_sas(files[!file.exists(out)], "out", flatten = TRUE)
 }
 }
 
