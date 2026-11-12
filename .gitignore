@@ -25,9 +25,6 @@ INDEX.md
 .codex/
 .mcp.json
 
-# Reference implementation
-old-implementation/
-
 # These lockfiles are deliberately tracked: the R packages ship theirs inside the
 # package, CI checks them with `--locked`, and the workspace lock pins the build.
 # Negated here because a contributor may well have `Cargo.lock` in a global

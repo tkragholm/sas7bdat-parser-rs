@@ -3,8 +3,7 @@
 //! quoted text for strings, so every column is comparable. Numeric/date/datetime/time columns
 //! compare our underlying SAS-epoch value against readstat's number; string columns compare our
 //! decoded text against readstat's text (both trailing-trimmed).
-//! Confirms the decoder (now column-major by default) reads real SAS files correctly against an
-//! independent reference implementation.
+//! Confirms the column-major decoder reads real SAS files the same way as `ReadStat`.
 //!
 //! Requires `readstat` on PATH. Run: `cargo run -p sas7bdat --release --example verify_readstat`
 
@@ -14,10 +13,7 @@ use std::process::Command;
 
 fn roots() -> Vec<PathBuf> {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-    vec![
-        base.join("fixtures"),
-        base.join("old-implementation/sas7bdat-parser-rs/fixtures"),
-    ]
+    vec![base.join("fixtures")]
 }
 
 fn find_sas7bdat(root: &Path, out: &mut Vec<PathBuf>) {

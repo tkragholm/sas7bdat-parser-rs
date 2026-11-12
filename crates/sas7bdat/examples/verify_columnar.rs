@@ -1,7 +1,6 @@
 //! Differential verification: for every fixture under `fixtures/`, decode it with the
-//! column-major path (now the default) and with the row-major path forced off, and assert the
-//! two produce byte-identical batches — serial and parallel. Proves flipping the default is a
-//! behavioral no-op on real SAS files.
+//! column-major path (the default) and with the row-major path forced off, and assert the
+//! two produce byte-identical batches, serial and parallel.
 //!
 //! Run with: `cargo run -p sas7bdat --release --example verify_columnar`
 
@@ -132,12 +131,6 @@ fn collect(builder: ScanBuilder<'_>) -> Result<Vec<OwnedColumnarBatch>, String> 
 fn main() {
     let mut fixtures = Vec::new();
     find_sas7bdat(&fixtures_root(), &mut fixtures);
-    // Also the old reference implementation's corpus, for wider coverage.
-    let old_impl = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("old-implementation/sas7bdat-parser-rs/fixtures");
-    find_sas7bdat(&old_impl, &mut fixtures);
     fixtures.sort();
     fixtures.dedup();
 

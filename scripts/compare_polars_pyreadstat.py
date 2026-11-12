@@ -104,7 +104,7 @@ def ref_matrix(path):
 
 
 def main():
-    roots = ["fixtures", "old-implementation/sas7bdat-parser-rs/fixtures"]
+    roots = ["fixtures"]
     fixtures = []
     for r in roots:
         for base, _dirs, files in os.walk(r):
@@ -145,9 +145,9 @@ def main():
                 if cells_match(ca, cb):
                     continue
                 # There is deliberately no tolerance for out-of-range SAS TIME values here.
-                # They used to surface as null because the plugin declared pl.Time, whose
-                # domain is [0, 24h); it now declares Duration('ns') and carries them exactly,
-                # so a null on our side is a real regression and must fail the comparison.
+                # The plugin declares Duration('ns') for them, because pl.Time covers only
+                # [0, 24h), and carries them exactly, so a null on our side is a
+                # regression and must fail the comparison.
                 # Tolerate the intentional mojibake auto-repair divergence on strings (the
                 # plugin's default fixes double-encoded text; pyreadstat decodes literally).
                 if ca and cb and ca[0] == "str" and cb[0] == "str":

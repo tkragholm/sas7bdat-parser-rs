@@ -70,7 +70,7 @@ profile-leaks fixture mode projection="full" repeat="1" limit="0" batch_rows="25
 build-polars-plugin:
     @uvx maturin build --release --manifest-path crates/polars-plugin/Cargo.toml
 
-# Windows CLI tuned for the deployment server (96-core EPYC, Zen 5), cross-built from
+# Windows CLI tuned for Zen 5 servers, cross-built from
 # macOS. `RUSTFLAGS` overrides `[target.x86_64-pc-windows-msvc]` in .cargo/config.toml
 # rather than merging with it, so this replaces the v3 baseline with znver5.
 #
@@ -118,10 +118,10 @@ test-polars-plugin: setup-python
 test-polars-plugin-rust:
     @cargo test -p sas7bdat-polars --lib
 
-# The R suites, which used to live only in ci.yml. They are the strongest evidence
-# the core still behaves, because several of their assertions compare against
-# `haven`, and their bundled fixtures are small enough to resolve to a single worker
-# -- so they exercise the inline scan that `cargo test` alone barely reaches.
+# The R suites. They are strong evidence that the core still behaves, because several
+# of their assertions compare against `haven`, and their bundled fixtures are small
+# enough to resolve to a single worker, so they exercise the inline scan that
+# `cargo test` alone barely reaches.
 #
 # `R CMD INSTALL` compiles the binding against this working tree, through the
 # `[patch.crates-io]` in each package's `src/.cargo/config.toml`. It also installs
@@ -230,7 +230,7 @@ release-preflight crate="sas7bdat":
     echo "preflight clean for {{crate}}"
 
 install-polars-reader-baselines:
-    @.venv/bin/python -m pip install polars-readstat polars_io
+    @uv pip install --python .venv/bin/python polars-readstat polars_io
 
 bench-plugin-vs-raw fixture="fixtures/ahs2013n.sas7bdat" columns="CONTROL,DEGREE,LMED" repeat="5" batch_rows="4096" limit="0":
     @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml
@@ -268,9 +268,6 @@ bench-reader old files:
 bench-reader-memory file:
     @VIRTUAL_ENV="$(pwd)/.venv" uvx maturin develop --release --manifest-path crates/polars-plugin/Cargo.toml --features extension-module
     @python3 scripts/bench_reader.py memory .venv/bin/python {{file}}
-
-bench-compare fixture="fixtures/raw_data/other/cars.sas7bdat" mode="both" repeat="3" batch_rows="4096":
-    @python3 scripts/compare_simd_vs_old.py --fixture {{fixture}} --mode {{mode}} --repeat {{repeat}} --batch-rows {{batch_rows}}
 
 bench-tags tags projection="full" max_fixtures="999" catalog="fixtures/fixture_catalog.local.json":
     @/bin/zsh -lc 'args=(${=CRITERION_ARGS:-}); BENCH_TAGS={{tags}} BENCH_PROJECTION={{projection}} BENCH_CATALOG={{catalog}} BENCH_MAX_FIXTURES={{max_fixtures}} cargo bench -p sas7bdat --bench scan_hotpaths -- "${args[@]}"'

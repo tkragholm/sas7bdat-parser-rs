@@ -57,16 +57,6 @@ pub struct PageDescriptorTable {
     pub total_candidate_rows: u64,
 }
 
-impl PageDescriptorTable {
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn has_non_fused_pages(&self) -> bool {
-        self.pages
-            .iter()
-            .any(|page| page.exec_class != PageExecClass::FusedContiguousUncompressed)
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PageDescriptor {
     pub page_index: PageIndex,
@@ -134,14 +124,6 @@ pub struct HeaderInfo {
     pub pad_alignment: u32,
 }
 
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
-pub struct KernelSet;
-
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
-pub struct PageSource;
-
 pub const fn read_u16(endianness: crate::metadata::Endianness, bytes: &[u8]) -> u16 {
     let mut buf = [0u8; 2];
     buf[0] = bytes[0];
@@ -181,7 +163,7 @@ pub const fn read_u64(endianness: crate::metadata::Endianness, bytes: &[u8]) -> 
 }
 
 // Subheader signatures. Defined once here because `layout` and `pages` both classify
-// subheaders and previously each kept its own copy of the list.
+// subheaders, so the list lives in one place.
 pub const SIG_ROW_SIZE: u32 = 0xF7F7_F7F7;
 pub const SIG_COLUMN_SIZE: u32 = 0xF6F6_F6F6;
 pub const SIG_COLUMN_TEXT: u32 = 0xFFFF_FFFD;
@@ -218,9 +200,9 @@ const SIG_64BIT_UPPER: u64 = 0xFFFF_FFFF_0000_0000;
 ///
 /// Upstream's fix for #369 applies the little-endian rule to both, which breaks big-endian
 /// 64-bit files: `ReadStat` at `da9fcaa` fails on `raw_data/csharp/54-class.sas7bdat`
-/// ("A row in the file was not the expected length", 0 rows) where 1.1.9 read it. That file
-/// is big-endian 64-bit, a shape their test suite does not cover. So the big-endian branch
-/// here is deliberately the older logic, which is correct for it.
+/// ("A row in the file was not the expected length", 0 rows). That file is big-endian
+/// 64-bit, a shape their test suite does not cover. The big-endian branch here therefore
+/// keeps the big-endian rule above.
 pub fn parse_subheader_signature(header: &HeaderInfo, data: &[u8]) -> Option<u32> {
     if data.len() < header.subheader_signature_size {
         return None;
@@ -331,7 +313,7 @@ mod signature_tests {
                 None,
                 "{value:e} has a data upper word and must not read as a signature"
             );
-            // The bug this guards: taking only the low four bytes finds a signature.
+            // Taking only the low four bytes would find a signature here.
             let low = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
             assert!(
                 low == SIG_ROW_SIZE || low & 0xFFFF_FFF8 == 0xFFFF_FFF8,
