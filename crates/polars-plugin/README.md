@@ -9,6 +9,10 @@ pip install sas7bdat-polars           # needs Python 3.12+ and polars 1.41+
 pip install "sas7bdat-polars[cli]"    # also the `sas7bdat` command-line tool
 ```
 
+Wheels are built for Linux (x86-64 and ARM64), Windows (x86-64) and macOS (Apple
+Silicon). On x86-64 they need a CPU with AVX2: Intel Haswell (2013) or AMD
+Excavator (2015) and later.
+
 ## Usage
 
 ```python

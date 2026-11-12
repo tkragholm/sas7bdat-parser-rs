@@ -13,6 +13,10 @@ pip install sas7bdat-cli
 uv tool install sas7bdat-cli
 ```
 
+Wheels are built for Linux (x86-64 and ARM64), Windows (x86-64) and macOS (Apple
+Silicon). On x86-64 the binary needs a CPU with AVX2: Intel Haswell (2013) or AMD
+Excavator (2015) and later.
+
 The wheel ships a single executable, `sas7bdat`. It is a plain binary wheel
 (`py3-none-<platform>`), so it works with any Python version and has no
 dependencies; pip is only the way it is delivered.

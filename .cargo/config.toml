@@ -13,8 +13,10 @@
 # must stay at a baseline those wheels can rely on. AVX-512 is absent from every Intel
 # consumer part since Alder Lake, and a binary that uses it dies with an illegal
 # instruction on such a CPU, at import, with no useful error. The Linux and Windows
-# targets therefore stay at v3 (AVX2, 2013). The two macOS targets use
-# `target-cpu=native`, so a macOS build is tuned to the machine that builds it.
+# targets therefore stay at v3 (AVX2, 2013), and so does Intel macOS. Apple Silicon
+# builds for `apple-m1`, which every Apple Silicon Mac supports, rather than for
+# whichever chip the build runner has. For a build tuned to the local machine, set
+# `RUSTFLAGS="-C target-cpu=native"`, which replaces these flags.
 #
 # Zen 5 runs AVX-512 on a full 512-bit datapath with no clock penalty. `just
 # build-cli-server` makes a Windows build tuned for it, with RUSTFLAGS overriding this
@@ -26,7 +28,7 @@ rustflags = ["-C", "target-cpu=x86-64-v3"]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 
 [target.aarch64-apple-darwin]
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=apple-m1"]
 
 [target.x86_64-apple-darwin]
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=x86-64-v3"]
