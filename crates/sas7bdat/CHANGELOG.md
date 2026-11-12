@@ -4,632 +4,206 @@ All notable changes to the `sas7bdat` **library crate** are documented here. The
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Cargo's SemVer rules](https://doc.rust-lang.org/cargo/reference/semver.html).
 
-This file covers the Rust crate only. The Python packages built from this repository —
-`sas7bdat-polars` and `sas7bdat-cli` — carry their own version line, currently 0.8.x, and
-git tags (`v0.8.0`, …) track *those*, not this crate. A tag name is not this crate's
-version.
+This file covers the Rust crate only. The Python packages built from this repository,
+`sas7bdat-polars` and `sas7bdat-cli`, have their own version numbers, and the plain `v*`
+tags (`v0.10.1`, ...) belong to them. This crate's tags are `sas7bdat-v*`.
 
-Entries from 0.4.0 onward are generated from Conventional Commits with
-[git-cliff](https://git-cliff.org) (`cliff.toml` at the repository root); 0.3.0 and
-earlier are written by hand.
+New entries are drafted from the Conventional Commits history with
+[git-cliff](https://git-cliff.org) (`cliff.toml` at the repository root) and edited by
+hand.
 
 ## [Unreleased]
-
 ## [0.9.3] - 2026-10-20
 
 ### Fixed
 
-- **A saturated row count no longer truncates a scan.** The page walk stopped at the row
-  count the header declares. A file declaring exactly `u32::MAX` rows has a saturated
-  counter rather than a count, and any rows beyond it were dropped while the scan reported
-  success. At that value the walk now follows the page headers to the last data page.
-  `DatasetMetadata::row_count` still reports what the header says.
-
-- **Unassigned windows-1252 bytes no longer become U+FFFD.** A text column one character
-  wide in a compressed file decoded 0x81, 0x8D, 0x8F, 0x90 and 0x9D to the replacement
-  character, or failed under strict validation, where every wider column decoded them to
-  the C1 control characters of the same number. Both now decode them as `encoding_rs`
-  does, so the byte is kept and reads the same in any column.
+- A file declaring exactly `u32::MAX` rows no longer loses rows past that count. The scan now follows the page headers to the last data page. `DatasetMetadata::row_count` still reports the header value.
+- Bytes 0x81, 0x8D, 0x8F, 0x90 and 0x9D in a one-character text column of a compressed file no longer decode to U+FFFD or fail strict validation. They decode as `encoding_rs` does, as in wider columns.
 
 ## [0.9.2] - 2026-10-20
 
 ### Fixed
 
-- **A buffered whole-file scan could deadlock.** A reader claimed the next extent before
-  it had a buffer, and the scan holds extents that arrive early, with their buffers, until
-  the one before them arrives. When the reader holding that one lost the race for a
-  buffer, the pool drained into held extents and every thread waited. Readers now take a
-  buffer first. Memory-mapped scans were not affected. `Auto` picks buffered reads for a
-  path it recognises as a network share.
+- A buffered whole-file scan could deadlock when the buffer pool ran dry. Memory-mapped scans were not affected.
 
 ## [0.9.1] - 2026-09-11
 
 ### Added
 
-- **`Dataset::io_backend`** names how a file's bytes are reached: `"mmap"` for a memory
-  map, `"buffered"` for sequential reads of a path, `"bytes"` for an in-memory buffer.
-  `Auto` decides between the first two by probing whether the path is on a network share,
-  and a share can be presented in ways the probe answers "local" to, so a caller that
-  cares which side it landed on can read it here without a decode.
+- `Dataset::io_backend` reports how a file's bytes are read: `"mmap"`, `"buffered"` or `"bytes"`.
 
 ### Changed
 
-- **`Parallelism::Auto` is grain-aware.** Small files stop paying for threads, and when
-  `Auto` declines them the materialise does not fan out either.
-
-- **An owned batch moves its buffers into Arrow** rather than copying every value across.
-
-- **A scan with a row limit compiles page descriptors only as far as it reads.** A table
-  that covers part of the file is not cached, since it must not be served to the next scan
-  as the whole. On a large file on a network share, the page headers a peek no longer reads
-  are the whole cost of the peek.
+- `Parallelism::Auto` no longer spawns threads for small files.
+- A scan with a row limit compiles page descriptors only as far as it reads.
 
 ### Fixed
 
-- **A declared zero rows-per-page collapsed a whole file into one chunk.**
+- A declared zero rows-per-page no longer collapses a whole file into one chunk.
 
 ## [0.9.0] - 2026-08-31
 
-Five correctness fixes, four of which change what a scan returns for files that were
-previously read wrong. **Read the first entry before upgrading: row counts move.**
-
-Every fix was checked against `ReadStat` built at `da9fcaa`, which is master after
-WizardMac/ReadStat#366 and the only build that gets deleted rows right. The released
-ReadStat 1.1.9 that `haven` and `pyreadstat` ship does not.
+Four of the fixes below change what a scan returns for files that were previously read wrong. Row counts move for files with deleted rows.
 
 ### Fixed
 
-- **Deleted rows were delivered as live data.** SAS tombstones a deleted row rather
-  than removing it: the row stays on the page, stays counted by the header, and a
-  reader that does not look for the mark returns it. Two representations, so two
-  mechanisms: an uncompressed page carries a trailing bitmap, and a compressed row is
-  tombstoned by its subheader pointer's compression code `0x05`.
-
-  **Row counts change for affected files.** Measured on fixtures already in the corpus:
-  `all_rand_normal_with_deleted` 37 to 36, `all_rand_normal_with_deleted2` 37 to 32,
-  `data_page_with_deleted` 998 to 997, `pandas/load_log` 2097 to 2088. `comp_deleted`
-  previously failed to open at all with "unsupported subheader compression mode 5"; the
-  four before it read cleanly and were quietly wrong, which is the worse failure.
-
-  Gated on a deleted-row count read once per file from the ROW_SIZE subheader, so a file
-  that declares no deletions does one extra `u64` read at metadata time and nothing per
-  page. A page with tombstones cannot stay on the fused contiguous path, which addresses
-  rows as `data_start + i * row_len` and has nowhere to put a hole, so such a page is
-  demoted to explicit spans over the live rows. Only pages that need it pay.
-
-- **A 64-bit subheader signature was compared four bytes at a time.** On a little-endian
-  64-bit file the signature is eight bytes. Any `f64` whose low word happened to equal a
-  signature constant was then taken for a subheader, so an uncompressed row stored in a
-  subheader whose first numeric column holds such a value was skipped or failed to parse.
-  Little-endian 64-bit is what SAS on Linux writes, so this is the ordinary shape rather
-  than an exotic one. Upstream is WizardMac/ReadStat#369, whose fix breaks big-endian:
-  porting it verbatim broke twelve files here, so the big-endian branch is kept as it was.
-
-- **A 64-bit catalog lost every format past its first index page.** `XLSR` records on
-  index pages after the first were read at a hardcoded offset 16, which is the page
-  header's width on a 32-bit catalog; on a 64-bit one it is 32. A 64-bit catalog big
-  enough to spill past its first index page silently dropped every format the later
-  records point at, with no error and no warning. The offset now comes from
-  `IndexLayout` beside the other widths that switch on `uses_u64_pointers`.
-
-  Upstream as WizardMac/ReadStat#370, unmerged. **No fixture here exercises the 64-bit
-  multi-page path**: the only 64-bit catalog in the corpus is three pages and the loop
-  starts at page three. Correct by construction and pinned by a unit test, but recorded
-  rather than papered over.
-
-- **A column's format is three fields, and we read one of them.** SAS stores a format as
-  a name, a width and a decimal count. Reading the name alone made `DATETIME22.3` come
-  back as `DATETIME`, and made the plain numeric `w.d` format -- which has a width and no
-  name -- look like no format at all.
-
-  Additive, not a change in meaning: `ColumnMeta::format` still holds the bare name, so
-  `infer_logical_type` and any caller matching on `"DATE"` is untouched. The new
-  `ColumnMeta::format_width` and `ColumnMeta::format_digits` sit beside it, and the new
-  `ColumnMeta::format_spec()` assembles the three the way SAS writes them. Upstream this
-  is WizardMac/ReadStat#364 for the fields and #361 for the unnamed `w.d`.
-
-  Verified against every column of every fixture rather than a sample: 4,782 columns
-  against `readstat_variable_get_format`, zero differences.
-
-- **Every header timestamp was twenty years and a day late.** The conversion added the
-  SAS-to-Unix epoch offset where it had to subtract it, and used 315,532,800 where the
-  correct value is 315,619,200: 1960-01-01 to 1970-01-01 spans 3,653 days, not 3,652,
-  because 1960, 1964 and 1968 are all leap years. The two errors compound, so a file SAS
-  wrote in May 2015 was reported as May 2035.
-
-  Only the two header fields were affected. Date and datetime *values* in the data were
-  always right: they go through `SasDateTime::SECONDS_SAS_TO_UNIX`, which has the correct
-  constant, and the conversion now uses that same constant so the two cannot drift apart
-  again. Verified across 318 files, both timestamps each, no differences.
+- Deleted rows were returned as live data. They are now skipped, for both uncompressed and compressed pages. **Row counts change for affected files**, for example 37 to 36 and 2097 to 2088 on fixtures in the corpus. A compressed file with deleted rows previously failed to open with "unsupported subheader compression mode 5".
+- On little-endian 64-bit files, a numeric value whose low word matched a subheader signature could make an uncompressed row be skipped or fail to parse (WizardMac/ReadStat#369).
+- A 64-bit catalog lost every format past its first index page (WizardMac/ReadStat#370).
+- Column formats now keep their width and decimal count. `DATETIME22.3` is no longer read as `DATETIME`, and the plain numeric `w.d` format is no longer read as no format (WizardMac/ReadStat#364 and #361). `ColumnMeta::format` still holds the bare name.
+- Header timestamps were about twenty years too late (a file written in May 2015 was reported as May 2035). Date and datetime values in the data were not affected.
 
 ### Added
 
-- **`sas7bdat::VERSION`**, the crate's own version. It exists because nothing
-  downstream could report which reader it embedded: `sas7bdat-polars` and
-  `sas7bdat-cli` ship on a separate version line, and the numbers collide
-  misleadingly -- the `sas7bdat-polars` 0.8.0 wheel carries this crate at 0.6.0, and
-  0.9.0 carries 0.8.0. Establishing that took walking twelve git tags. The wheel now
-  exposes it as `sas7bdat_polars.__core_version__` and the CLI prints it under
-  `--version` (`-V` stays short).
-
-- **`ScanPath`, and a way to ask for it without scanning.** This crate has several decode
-  pipelines, they share almost every symbol below the point where they diverge, and
-  nothing said which one a given scan took. That cost a wrong conclusion: an optimisation
-  was written for the tiled column-major fill, benchmarked through `visit_batches`, and
-  appeared to do nothing, because `visit_batches` never reaches that fill however the plan
-  is shaped.
-
-  `ScanStatsSummary::path` now reports what ran, on two independent axes: `PageSource`
-  (how pages were read and planned) and `FillStrategy` (how page bytes became columns).
-  They are separate because `ColumnMajorDecode::Off` changes the second and leaves the
-  first alone, which a single name reported identically.
-  `ScanBuilder::predict_path(ScanEntry)` answers the same question ahead of a full scan,
-  and `ScanBuilder::predict_page_source()` answers the source half for free, returning the
-  candidates that declined and why as `Vec<SourceDeclined>`.
+- `sas7bdat::VERSION`, the crate's version. The wheel exposes it as `sas7bdat_polars.__core_version__` and the CLI prints it under `--version`.
+- `ColumnMeta::format_width`, `ColumnMeta::format_digits` and `ColumnMeta::format_spec()`.
+- `ScanStatsSummary::path` reports which decode pipeline a scan took, as a `PageSource` and a `FillStrategy`. `ScanBuilder::predict_path(ScanEntry)` and `ScanBuilder::predict_page_source()` answer the same question without a full scan.
 
 ### Changed
 
-- **Trimming and classifying a narrow string cell takes two word loads instead of two
-  byte scans.** Cells up to sixteen bytes wide -- the common register shape -- find their
-  trailing padding with a SWAR zero-and-space test over the first and last eight bytes
-  rather than scanning twice. Measured at 1.38x on the string-path benchmark.
-
-- **A short string cell is copied as a fixed sixteen bytes and cut back**, rather than
-  calling `memcpy` for five. Safe code: a fixed-size `extend_from_slice` followed by
-  `truncate`, no `unsafe`. Measured at 1.14x.
-
-- **The tiled column-major fill now runs when a string column is present**, filling the
-  numerics column-major over the same span and the remaining families row by row, where
-  before a single string column sent the whole page row-major. Measured at 1.17x.
-
-- **The serial batch scan is gone as a separate pipeline.** A single worker now runs the
-  same plan and the same chunk decode as the parallel scan, inline on the calling thread,
-  so it can no longer drift from it. A path source with one worker still falls back to row
-  streaming, since its pages arrive from a reader pool that needs a thread of its own;
-  that fallback reports the new `PageSource::TwoPassRowStream` rather than sharing a name
-  with the inline run. Single-threaded owned-batch scans now report progress per page.
-  Costs about 35 us per scan in planning, which does not scale with rows.
+- Faster handling of short string cells, and the tiled column-major fill now runs when a string column is present.
+- The serial batch scan is gone as a separate pipeline. A single worker runs the parallel scan inline. A path source with one worker still streams rows and reports the new `PageSource::TwoPassRowStream`.
 
 ## [0.8.1] - 2026-08-24
 
 ### Fixed
 
-- **Mojibake repair no longer gives up on the uppercase half of Latin-1.** The
-  automatic fix for a file that declares a single-byte encoding but holds UTF-8
-  (`MojibakePolicy::Auto`, the default) undid the mangling by walking the *decoded*
-  string back to bytes with `u8::try_from`. That inverse is latin-1, but the damage
-  is done by windows-1252, and the two disagree on `0x80..=0x9F`: where latin-1 has
-  the C1 controls, windows-1252 has typographic characters above U+00FF. `u8::try_from`
-  failed on those and returned the whole string unrepaired.
-
-  That byte band is exactly the codepoints `U+00C0..=U+00DF`, so every uppercase
-  accented character was left mangled while its lowercase counterpart was repaired —
-  27 of 32, the five survivors (`ÁÍÏÐÝ`) owing it to windows-1252's undefined slots
-  mapping below U+0100. For Danish text that meant `Nørrebro` and `KÃ˜BENHAVN` came
-  out of the same column, which is worse than repairing neither: the inconsistency
-  hides the problem rather than showing it. The abort is per string, so one uppercase
-  letter anywhere in a cell forfeited the cell.
-
-  The repair no longer inverts anything. When the bytes are really UTF-8, the wanted
-  text is already there, so it is read as the UTF-8 it is and handed back as a borrow.
-  No character mapping means no band to fall into, and the repaired path now allocates
-  nothing where it previously allocated a `Vec<u8>` and a second `String` per cell.
-  On the lenient paths the probe runs before the decode, so a mojibake cell no longer
-  pays for a string it would discard; the strict paths keep the decode first so strict
-  validation still sees `had_errors`.
-
-  Values that were already decoding correctly are unaffected: bytes carrying no
-  two-byte UTF-8 lead are still left to the declared encoding's decoder, and genuine
-  windows-1252 text transcodes as before.
+- `MojibakePolicy::Auto` (the default) left uppercase accented characters mangled when a file declares a single-byte encoding but holds UTF-8. `KÃ˜BENHAVN` is now repaired to `KØBENHAVN` like its lowercase counterparts.
 
 ## [0.8.0] - 2026-08-14
 
 ### Changed
 
-- **The crate builds on stable Rust.** 0.7.0 and earlier carried an unconditional
-  `#![feature(portable_simd)]` and could only be compiled by a nightly toolchain. The
-  vectorized kernels now sit behind a backend selected by feature, and the default
-  backend uses [`fearless_simd`](https://crates.io/crates/fearless_simd), which is
-  stable (needs rustc >= 1.89). Consumers no longer need `rust-toolchain.toml` or a
-  nightly in CI.
-
-  This is why the runtime dispatch matters rather than only the stable support:
-  `std::simd` lowers to whatever target features were enabled at compile time, so a
-  portable build on x86-64 executes 512-bit logical vectors as SSE2. `fearless_simd`
-  detects AVX2/AVX-512 at runtime. Measured at baseline on a Zen 3 EPYC, the numeric
-  null scan runs 4.8x faster than the `std::simd` build and the column converter 3.6x
-  faster, without the caller setting `-C target-cpu`.
-
-- **Two dependencies removed.** `bstr` (which pulled `regex-automata`) is replaced by
-  `String::from_utf8_lossy` — verified equivalent across 17,068,288 byte sequences,
-  every 1-, 2- and 3-byte sequence exhaustively, since these are the invalid-UTF-8
-  paths where U+FFFD placement is user-visible. `windows-sys`, 18 MB of generated
-  bindings for a single `GetDriveTypeW` call, is replaced by a direct
-  `extern "system"` declaration. Vendored and xz-compressed, the dependency bundle
-  drops from 5.6 MB to 2.4 MB.
+- The crate builds on stable Rust (rustc 1.89 or later). The vectorised kernels use [`fearless_simd`](https://crates.io/crates/fearless_simd) with runtime CPU dispatch, and no nightly toolchain is needed.
+- The `bstr` and `windows-sys` dependencies are removed.
 
 ### Added
 
-- **`simd`** (default) — `fearless_simd`, runtime-dispatched, stable rustc >= 1.89.
-- **`nightly-simd`** — the previous `std::simd` kernels; requires a nightly toolchain
-  and overrides `simd` when both are enabled.
-- With neither enabled, a scalar backend that needs nothing beyond `std`. It is also
-  the oracle the other two are differentially tested against on every kernel.
+- Feature `simd` (default), using `fearless_simd`.
+- Feature `nightly-simd`, the previous `std::simd` kernels. Requires nightly and overrides `simd` when both are enabled.
+- With neither feature, a scalar backend that needs only `std`.
 
 ### Performance
 
-- **Dispatch is taken once per column rather than once per 8 rows.** A `dispatch!`
-  arm is a `#[target_feature]` function, which cannot be inlined into a caller that
-  lacks the feature, so driving a column through the per-chunk kernels cost a real
-  call every 8 rows — 6.8 GiB/s against the scalar path's 55.9 on the masked
-  converter. The scan pipeline now enters through column-level functions whose loops
-  are instantiated inside the selected implementation.
-
-- **`is_ascii` accumulates instead of reducing per chunk.** The early exit almost
-  never fires on SAS character data, so the per-chunk reduction and branch were pure
-  overhead. Removing them took the scalar path from 24.6 to 72.6 GiB/s on 256-byte
-  columns; the branch was what stopped LLVM widening the loop.
-
-### Notes
-
-Entries above are curated rather than generated: `git-cliff` groups by commit type
-across the whole repository, and this file covers the library crate alone.
+- Dispatch is taken once per column instead of once per 8 rows, and `is_ascii` no longer reduces per chunk.
 
 ## [0.7.0] - 2026-08-13
 
-Published as 0.7.0, not 0.5.0 or 0.6.0: those two versions were developed, tagged and
-documented below but never pushed to crates.io, so the registry goes 0.4.0 -> 0.7.0 while
-this file records every step. Their entries are kept as written — nothing about them is
-retracted, they simply reached users as part of this release rather than their own.
+Published as 0.7.0 because 0.5.0 and 0.6.0 were never pushed to crates.io. The registry goes from 0.4.0 to 0.7.0, and their entries below reached users in this release.
 
 ### Fixed
 
-- **Breaking (behaviour). SAS format names are matched exactly instead of by substring.**
-  `infer_logical_type` classified a numeric column as temporal when its format *name
-  contained* `DATE`, `YY`, `MON`, `WEEK`, `YEAR` or `TIME`, or ended in `DA`/`DT`/`TM`.
-  Those tests cannot tell a built-in format from a user-defined one, so survey variables
-  were silently read as dates: a column formatted `FMONTH` holding the values 1-12 came
-  back as dates in January 1960, and `PSATIME`, `_TOTINDA`, `DRNKSODA`, `STDWEEK`,
-  `YEAR_F`, `DRETIME`, `MONTHLYINCPR` and `YEARLYINCPR` failed the same way — 17 columns
-  across six real government survey files in the fixture corpus.
-
-  Formats are now looked up in exact, sorted tables grouped by the **scale of the stored
-  value** rather than by what the format prints. That distinction fixes a second defect:
-  `DATEAMPM` formats a *datetime* but was classified `Date`, scaling its seconds as if
-  they were days.
-
-  The old tests also *under*-matched. `DAY`, `DOWNAME`, `JULDAY`, `JULIAN`, `QTRR`,
-  `WORDDATX`, `HOUR`, `MMSS`, `MDYAMPM`, `E8601DN`, `B8601DN`, `E8601DZ`, `B8601DZ` and
-  `E8601LZ` were all read as plain numbers; 176 columns in the corpus gain a correct
-  temporal type. A built-in that is still missing from the tables degrades to `Float` — a
-  visibly wrong type rather than silently wrong values.
-
-- **Variable labels are trimmed the way SAS pads them.** Labels went through the same
-  trim as column and format names, which are identifiers where surrounding space is noise.
-  A label is different: SAS writes it at its declared width, so the trailing run is padding,
-  but a *leading* space is inside the text the author typed. Labels are now trimmed at the
-  end only, and only of ASCII padding (`0x20`, NUL) — a trailing non-breaking space is
-  content, and `str::trim` would have eaten it because U+00A0 carries the Unicode
-  `White_Space` property.
-
-  All three rules matter: trimming both ends left 411 corpus labels differing from `haven`,
-  trimming neither left 3, and trimming Unicode whitespace at the end left 1. Trimming
-  trailing ASCII padding leaves 0 of 1,529. A label that is nothing but padding is still
-  reported as absent.
+- **Breaking (behaviour).** SAS format names are matched exactly instead of by substring in `infer_logical_type`. Columns with user-defined formats such as `FMONTH` or `YEAR_F` are no longer read as dates, and `DATEAMPM` is now a datetime. Formats such as `DAY`, `JULIAN`, `HOUR`, `MMSS` and `E8601DN` are now read as temporal. A built-in missing from the tables is read as `Float`.
+- Variable labels are trimmed of trailing ASCII padding only. Leading spaces and a trailing non-breaking space are kept. A label that is only padding is still reported as absent.
 
 ### Changed
 
-- **`BatchHint::Auto` sizes batches by bytes, not just rows.** `Auto` resolved to
-  `rows_per_page` with no upper bound and no knowledge of row width, so batch size tracked
-  page geometry rather than memory cost: on a 4,041-column file a 4,096-row batch
-  materializes ~200 MB, and the parallel scan holds `workers * 2` batches queued plus one
-  per worker in flight. Peak RSS therefore scaled with core count — measured at 0.30 GB
-  (1 worker), 1.72 (2), 3.65 (4) and 4.81 (8) on that file, while throughput stopped
-  improving past 8 workers. Wrong direction for a many-core host.
-
-  `Auto` now also caps a batch at 32 MiB of decoded data. On the same file peak RSS falls
-  to 0.07/0.39/0.72/0.98 GB for 1/2/4/8 workers — 4.5× lower at 8 — and the scan gets
-  *faster* (0.74 s → 0.57 s), because more, smaller batches give the work stealer finer
-  granularity. Narrow tables are untouched: their rows are small enough that the row rule
-  still binds, and all 388 corpus fixtures produce byte-identical output. An explicit
-  `BatchHint::Rows`/`Bytes` is unaffected.
-
-- **Bounded scans are now parallel and stop early.** `RowSelection` and
-  `ScanBuilder::limit` were enforced by two separate mechanisms with opposite costs: the
-  selection was a per-row predicate that kept parallelism but never ended the scan, while the
-  limit ended it early but disabled every parallel path — it counted *emitted* rows, a
-  per-worker quantity that is meaningless once decode is split across threads. Both now resolve
-  to one absolute `[start, end)` row range, which is worker-independent, so the parallel and
-  fused paths accept a bounded scan; and because page descriptors carry `row_base`, that range
-  maps to a contiguous slice of pages, so pages outside the window are never read or faulted in.
-
-  Measured on a 138,929-row fixture: `.limit(130_000)` went from 157 ms to 24 ms (6.6× — it was
-  silently single-threaded), and `select(First(100))` from 1090 µs to 181 µs (6× — it used to
-  walk every page). The two spellings now perform identically, as their documentation always
-  claimed. Whole-file scans are unaffected: the window is unbounded, and page pruning
-  short-circuits to the full descriptor slice.
-
-  This reaches the Polars plugin directly — `n_rows` pushdown uses `limit`, so every Polars
-  query carrying one was running on a single core.
-
-- **Breaking (API).** `IoBackendPreference` has three variants instead of four:
-  `MmapPreferred` is now `Mmap`, `BufferedOnly` is now `Buffered`, and `BufferedPreferred` is
-  gone — it took the same branch as `BufferedOnly` in the only place the setting is read, so
-  the pair named a preference the opener could not act on. The enum now implements `Display`
-  and `FromStr` (`auto` / `mmap` / `buffered`, with the old hyphenated spellings still
-  accepted), replacing four hand-maintained string tables across the CLI, the profiling
-  binaries, an example and a benchmark.
-- **Breaking (API).** `Utf8ValidationMode` has two variants instead of three: `Auto` is now
-  `Lenient` and `Off` is gone. Every decision site tests for `Strict` and treats everything
-  else as lossy, so `Off` and `Auto` were the same behaviour under two names. The name now
-  matches the `*Lenient` decode kernels it selects.
-- `ScanBuilder::collect_batches` is now a thin wrapper over the streaming owned-batch driver
-  instead of a second, parallel dispatch tree. The two had drifted: the collect side never
-  grew the fused single-pass scan or the extent-streamed parallel reader, so a path-backed
-  dataset (a network share, where `Dataset::open` declines to memory-map) collected serially
-  in two passes while the identical scan streamed in one. Collecting from such a source is now
-  parallel and single-pass — this is the R binding's path. Output is unchanged: all 387
-  decodable corpus fixtures produce the same batch count, row count and cell digest as before.
-- Owned-batch scans now reject `DecodeMode::Raw` at the entry point rather than only in the
-  row-major fallback, so `visit_owned_batches` and `collect_batches` agree. Previously
-  `collect_batches` errored while `visit_owned_batches` silently decoded every column as
-  `Binary` whenever it took a parallel or fused branch.
+- `BatchHint::Auto` also caps a batch at 32 MiB of decoded data, which lowers peak memory on wide files. An explicit `BatchHint::Rows` or `Bytes` is unchanged.
+- Scans bounded by `RowSelection` or `ScanBuilder::limit` run in parallel and stop early. This makes `n_rows` pushdown in the Polars plugin much faster.
+- **Breaking (API).** `IoBackendPreference` has three variants: `Auto`, `Mmap` (was `MmapPreferred`) and `Buffered` (was `BufferedOnly`). `BufferedPreferred` is removed. The enum implements `Display` and `FromStr`.
+- **Breaking (API).** `Utf8ValidationMode` has two variants: `Lenient` (was `Auto`) and `Strict`. `Off` is removed.
+- `ScanBuilder::collect_batches` on a path source is now parallel and single-pass.
+- Owned-batch scans reject `DecodeMode::Raw` at the entry point, so `visit_owned_batches` no longer silently decodes every column as `Binary`.
 
 ### Added
 
-- `Error::Internal` (with `InternalError` and `Error::internal`) and `Error::corruption`, a
-  general constructor for the existing `Corruption` variant. `Error::unsupported` had become a
-  catch-all covering five unrelated failure kinds at 62 call sites, which mattered because this
-  crate parses untrusted files: a caller could not tell "your file is corrupt" from "this
-  reader has a bug" from "this build cannot read that shape yet". 15 sites that a truncated or
-  hostile file can reach (`row span exceeds page bounds`, `page slice exceeds source bounds`,
-  the offset overflows) are now `Corruption`; 8 that are reader invariants (`compiled plan did
-  not match column builder`, poisoned locks, worker panics) are now `Internal`, which prints
-  "(please report)". `Unsupported` keeps what it should always have meant: genuinely
-  unimplemented layouts, unsupported mode combinations, and platform width limits.
-- `ProfileMode` and `ProjectionPreset::as_str` in the `fixture-catalog` module, so the two
-  profiling binaries share one definition instead of carrying identical copies. In-repo
-  tooling behind an off-by-default feature; no stability guarantee.
+- `Error::Internal` (with `InternalError` and `Error::internal`) and `Error::corruption`. Errors reachable from a truncated or hostile file are now `Corruption`, reader bugs are `Internal`, and `Unsupported` is kept for unimplemented layouts and platform limits.
+- `ProfileMode` and `ProjectionPreset::as_str` in the `fixture-catalog` module, which has no stability guarantee.
 
 ### Removed
 
-- **Breaking (API and CLI).** `ValidationMode`, `OpenOptionsBuilder::validation`, and the
-  CLI's `--strict-dates` flag. The option was stored on `OpenOptions` and read by nothing, so
-  the flag — documented as "reject out-of-range dates/times instead of passing them through" —
-  had no effect whatsoever. Implementing it was considered and rejected: a census of the corpus
-  found 357 of 894 temporal columns widening to `Float64`, every one of them because of
-  *sub-second* values rather than an out-of-range one, and not a single genuinely out-of-range
-  date, datetime or time in 388 files. The check would have had nothing to reject. Widening is
-  also not observable downstream — `column_buffer_to_arrow` and the Polars converter both
-  reconcile a widened `F64` buffer back into the column's declared temporal type with
-  sub-second precision intact — so there is no schema surprise to guard against either.
-- `Utf8Dictionary` and `Utf8Buffer`'s `dictionary` field: ids without a vocabulary. The field
-  was `#[allow(dead_code)]`, documented as "not yet populated", and no scan path ever set it.
-  `dictionary_ids` itself is unaffected and still populated by dictionary staging.
-
-- **Breaking (API).** `PrefetchPolicy` and `PageCachePolicy`, along with the
-  `OpenOptionsBuilder::prefetch` and `::page_cache` setters. Both were stored on `OpenOptions`
-  and read by nothing — they never influenced a single read.
-- **Breaking (API).** The `RawRowSink`, `RowSink` and `BatchSink` traits and the
-  `ScanBuilder::write_raw_rows`, `::write_rows` and `::write_batches` methods that drove them.
-  They were one-line wrappers around the corresponding `visit_*` closures, and nothing in the
-  workspace — no crate, test, example or benchmark — ever implemented or called them. Callers
-  wanting a push sink can pass `|row| sink.push(row)` to `visit_rows` directly.
-- The `direct_numeric` batch decode family, which was unreachable. Every numeric decode kernel
-  compiles a `NumericTileMode`, and `compile_batch_column_families` routes any column with a
-  tile mode to `staged_numeric` before the family match runs, so no column could ever land in
-  it. Verified by replacing its selection arm with a panic: the full test suite and a decode of
-  all 387 corpus fixtures never reached it. Removing it also retires the five
-  `OwnedBatchColumnBuilder::append_*_fast` methods it was the only caller of, and drops one
-  branch from the per-row family dispatch. The internal `batch_direct_numeric_cells` scan
-  counter is gone with it; `ScanStatsSummary` is unaffected.
-
-Behaviour is unchanged: converting the corpus with the previous release and with this build
-produces byte-identical Parquet and CSV output across all 363 files.
+- **Breaking (API and CLI).** `ValidationMode`, `OpenOptionsBuilder::validation` and the CLI's `--strict-dates` flag. They had no effect.
+- **Breaking (API).** `PrefetchPolicy`, `PageCachePolicy`, `OpenOptionsBuilder::prefetch` and `OpenOptionsBuilder::page_cache`. They had no effect.
+- **Breaking (API).** The `RawRowSink`, `RowSink` and `BatchSink` traits and `ScanBuilder::write_raw_rows`, `write_rows` and `write_batches`. Pass a closure to `visit_rows` instead.
+- `Utf8Dictionary` and the `dictionary` field of `Utf8Buffer`. `dictionary_ids` is unchanged.
 
 ## [0.6.0] - 2026-07-30
 
 ### Changed
 
-- **Breaking (Arrow schema).** A SAS `TIME` column is now `Duration(Nanosecond)` instead of
-  `Time64(Nanosecond)`, in the library's Arrow schema, in Parquet output, and in the Polars
-  plugin (`pl.Duration` rather than `pl.Time`). SAS stores `TIME` as a plain numeric count of
-  seconds since midnight, and real files carry values outside `[0, 24h)` — an elapsed
-  duration recorded with a `TIME` format, or a negative offset. `Time64` is defined only over
-  `[0, 24h)`, so those columns were written correctly but read back as **null** by every
-  spec-following reader (arrow-rs, pyarrow, DuckDB, Polars). Both types carry the same `i64`
-  nanosecond payload, so the change costs nothing in file size and a caller who knows a
-  column is a clock time can `.cast(pl.Time)` for free. Fields also carry a
-  `sas.logical_type: TIME` metadata entry (exported as `SAS_LOGICAL_TYPE_KEY`), which
-  survives a Parquet round-trip, so the clock-time intent is still recoverable.
+- **Breaking (Arrow schema).** A SAS `TIME` column is now `Duration(Nanosecond)` instead of `Time64(Nanosecond)`, in the Arrow schema, in Parquet output and in the Polars plugin (`pl.Duration`). Values outside `[0, 24h)` read back as null under `Time64`. Fields carry a `sas.logical_type: TIME` metadata entry (`SAS_LOGICAL_TYPE_KEY`).
 
 ### Added
 
-- **(CLI)** `--batch-rows` sets the scan batch size independently of
-  `--parquet-row-group-size`. Each batch costs serial work on the collector thread, so a
-  larger value takes that stage off the critical path, at the cost of stretching read extents.
-  The plumbing already existed but nothing could reach it.
-- **(CLI)** `--encode-in-flight-bytes` caps the decoded bytes held by row groups that are
-  encoding but not yet written, which is what decides how many encode concurrently. The column
-  axis tops out at the column count, so on a narrow table this is what fills a large host —
-  raise it when cores sit idle at a large `--parquet-row-group-size`. Defaults to 1 GiB.
-- **(CLI)** The conversion summary now reports source size and sustained throughput
-  (`2.0 GB → 180.7 MB · 1.5 s · 1373 MiB/s`). Throughput is measured over *input* bytes,
-  since output size moves with the codec and dictionary policy and so cannot be compared
-  across runs.
+- **(CLI)** `--batch-rows` sets the scan batch size independently of `--parquet-row-group-size`.
+- **(CLI)** `--encode-in-flight-bytes` caps the decoded bytes held by row groups being encoded. Defaults to 1 GiB.
+- **(CLI)** The conversion summary reports source size and throughput.
 
 ### Fixed
 
-- **(CLI)** A single file converted with a progress bar — the default on a terminal — printed
-  no summary at all. The bar was erased on completion and neither the per-file line (suppressed
-  so it cannot corrupt the bar) nor the aggregate line (batch runs only) was written, so a long
-  conversion ended with no elapsed time and no row count. The closing line is now printed
-  whenever the run did not already account for itself per file.
-- **(CLI)** A SAS `TIME` value outside `[0, 24h)` printed as `00:00:00` in both `head` and
-  CSV export. `NaiveTime` cannot represent such a value, and the fallback silently
-  substituted midnight — so 359,280 seconds (99h48m) was written to CSV as midnight, with no
-  error. Out-of-range and negative times now render their real elapsed value (`99:48:00`,
-  `-00:01:17`); in-range values are unchanged.
-- **(CLI)** CSV export ignored a column's logical type for temporal cells that widened to
-  `Float64` (any sub-second date/datetime/time), writing raw SAS-epoch numbers next to
-  properly formatted neighbours — one column could emit `19:18:27.950`, `00:00:00` and
-  `359960.4` in three consecutive rows. `head` and CSV now share one formatter per type.
-- **(CLI)** A SAS `TIME` value with a sub-millisecond fraction rendered as `.000`. It now
-  keeps microsecond precision.
-- **(CLI)** A conversion of more than about 2.1 billion rows failed part-way with `Parquet
-  does not support more than 32767 row groups per file`. Row groups held 65,536 rows
-  whatever the file's size, and 32,767 of those cover 2,147,418,112 rows — which a 234 GiB
-  SAS file went past. Row groups are now sized from the declared row count, and the writer
-  doubles both of its triggers as it goes, so the count stays inside the format's limit
-  without needing a row count it can trust.
-- **(CLI)** `--parquet-row-group-size` no longer sets the scan's batch size too. The writer
-  gathers scan batches into row groups, so the two are independent — and tying them meant a
-  large row group stretched the read extents to match, undoing the read tuning.
+- **(CLI)** A single-file conversion with a progress bar printed no summary.
+- **(CLI)** A `TIME` value outside `[0, 24h)` printed as `00:00:00` in `head` and CSV export. It now prints its elapsed value, such as `99:48:00`.
+- **(CLI)** CSV export wrote raw SAS-epoch numbers for date, datetime and time cells with sub-second values. `head` and CSV now share one formatter.
+- **(CLI)** A `TIME` value with a sub-millisecond fraction rendered as `.000`. It now keeps microsecond precision.
+- **(CLI)** Converting more than about 2.1 billion rows failed with "Parquet does not support more than 32767 row groups per file". Row groups are now sized to stay inside the limit.
+- **(CLI)** `--parquet-row-group-size` no longer sets the scan batch size.
 
 ## [0.5.0] - 2026-07-29
 
-Read the file once instead of twice, and stop encoding Parquet on a single core. Together
-these are what a conversion on network storage was waiting on. Entries marked **(CLI)**
-describe the `sas7bdat` command, which shares this repository but ships on PyPI under its
-own version (0.7.0).
+Entries marked **(CLI)** describe the `sas7bdat` command, which ships on PyPI under its own version.
 
 ### Added
 
-- **(CLI)** Parquet row groups are encoded across cores instead of on the thread that reads
-  them. With the input cached, so decode and I/O are as cheap as they get, that single
-  thread was 80-90% of a conversion. Row groups are the axis that scales here — production
-  SAS files often carry 10 columns and sometimes 3, so splitting by column alone would
-  leave most of a large host idle. Several row groups encode at once and are written in
-  file order; their columns are encoded in parallel too, which is what covers tables wide
-  enough that one row group already fills the pool. Isolated on 12 cores, zstd-3:
-
-  | columns | serial | parallel | |
-  |---|---|---|---|
-  | 3 | 177 ms | 26 ms | 6.8× |
-  | 10 | 611 ms | 82 ms | 7.4× |
-  | 28 | 1.85 s | 246 ms | 7.5× |
-
-  `--parse-threads` now sets the thread budget for encoding as well as decoding.
-- Progress reporting from the parallel and fused scans. The observer registered with
-  `ScanBuilder::with_progress` was only ever called from the serial page loop, so the paths
-  that handle large files reported nothing at all. Counters are now updated as each chunk
-  completes and reported as batches are delivered.
-- `ScanBuilder::with_progress_observer`, taking an already-shared `ScanProgressObserver` so
-  one callback can be reused across scans without being boxed again.
-- **(CLI)** A per-file progress bar showing bytes read, rate and ETA, under the existing
-  file-count bar. A single multi-minute conversion previously showed only `0/1 files`.
-  Suppressed above eight concurrent files, where the bars would be noise.
-- Single-pass owned-batch scans of path sources. Page descriptors are now compiled from
-  the same 4 MB extents that feed decode, so the file is read once rather than twice —
-  once for the descriptor table, once for the rows. `row_base` is a running total, so a
-  sequential stage sits between the concurrent readers and the decode pool, reordering
-  extents and carrying the row index forward. The descriptor table is never built, which
-  also drops its memory: a compressed dataset previously held one row span per row for the
-  whole scan.
-
-  Fusion applies to `visit_owned_batches` (and so to the CLI's parquet export and the
-  Polars plugin) when the source is an unmapped path, the scan covers every row, and the
-  descriptor table isn't already cached. Everything else keeps the two-pass path.
+- **(CLI)** Parquet row groups are encoded across cores. `--parse-threads` now sets the thread budget for encoding as well as decoding.
+- Progress reporting from the parallel and fused scans, which previously reported nothing.
+- `ScanBuilder::with_progress_observer`, taking an already-shared `ScanProgressObserver`.
+- **(CLI)** A per-file progress bar with bytes read, rate and ETA.
+- Single-pass owned-batch scans of path sources, so the file is read once instead of twice. Applies to `visit_owned_batches` when the source is an unmapped path and the scan covers every row.
 
 ### Changed
 
-- **(CLI)** Outputs are written to a temporary file and moved into place when complete, so a
-  run that fails or is interrupted leaves nothing at the destination. By default the
-  temporary sits beside the output, making the move a rename. `--tmp-dir` stages somewhere
-  else — point it at a local disk and only the finished file crosses a network link.
-- **(CLI)** Parquet output goes through a 1 MB buffer. parquet-rs wraps the sink in a
-  `BufWriter` of its own, but at the 8 KiB default, which a column chunk writes straight
-  past — so each one was its own round trip to a network share.
+- **(CLI)** Outputs are written to a temporary file and moved into place when complete. `--tmp-dir` sets where the temporary file goes.
+- **(CLI)** Parquet output goes through a 1 MB write buffer.
 
 ### Fixed
 
-- A streamed parallel scan of a path source could hang if the consumer stopped early. The
-  scan held a receiver open past the point its workers had exited, leaving a reader parked
-  on a send that would never complete.
+- A streamed parallel scan of a path source could hang if the consumer stopped early.
 
 ## [0.4.0] - 2026-07-28
 
-Throughput work for large files on network storage, driven by measurements against SMB
-(`scripts/probe.py` reproduces them). On a 104 GB file over a 341 MB/s link, a
-conversion went from ~37 minutes to ~10.
-
 ### Added
 
-- Parallel decode for path sources. Pages stream as 4 MB extents read by up to 4
-  concurrent readers, each with its own file handle. Previously a path source had no
-  parallel path at all: it fell back to a serial scan issuing one `seek` + `read_exact`
-  per page.
+- Parallel decode for path sources, which previously had no parallel path.
 
 ### Changed
 
-- `Parallelism::Auto` resolves to every logical core. It previously resolved to a single
-  worker, so serial decode was the default and callers had to pass
-  `Parallelism::Threads(n)` to get any parallelism.
-- `IoBackendPreference::Auto` no longer memory-maps a file on a network share. Mapping a
-  remote file turns each access into a round-trip with no readahead. On Windows, UNC paths
-  and mapped network drives are detected; other platforms are treated as local.
-  `MmapPreferred` still maps a remote file.
-- Page-descriptor compilation reads ~4 MB blocks instead of one syscall per page. The pass
-  runs before any row is decoded, and a 100 GB file holds on the order of a million pages.
+- `Parallelism::Auto` resolves to every logical core. It previously resolved to a single worker.
+- `IoBackendPreference::Auto` no longer memory-maps a file on a network share. On Windows, UNC paths and mapped network drives are detected. `MmapPreferred` still maps a remote file.
+- Page-descriptor compilation reads larger blocks instead of one syscall per page.
 - `LabelSet`, `ValueLabel`, `ValueKey` and `ValueType` derive `Serialize`.
 
 ### Fixed
 
-- A read that failed partway through a parallel scan closed its channel, which the decoders
-  saw as end of input: the scan returned fewer rows and reported success. The I/O error is
-  now returned.
-
+- A read that failed partway through a parallel scan made the scan return fewer rows and report success. The I/O error is now returned.
 
 ## [0.3.0] - 2026-07-28
 
-A ground-up rewrite. **No part of the 0.2.0 public API survives**: the `dataset`,
-`parser`, and `cell` modules are gone, as are the `RowSink`, `ColumnarSink`, and
-`RowValue` traits, and every feature flag has been replaced. `cargo-semver-checks`
-counts 13 categories of breaking change against 0.2.0. Treat this as a new library that
-happens to share a name — there is no incremental migration path from 0.2.x.
+A rewrite. **No part of the 0.2.0 public API survives.** The `dataset`, `parser` and `cell` modules, the `RowSink`, `ColumnarSink` and `RowValue` traits, and every feature flag are replaced. There is no incremental migration path from 0.2.x.
 
 ### Added
 
-- Zero-copy memory-mapped I/O (`memmap2`), with a selectable I/O backend.
-- SIMD-accelerated string decoding (`std::simd` + `simdutf8`) and parallel page scanning
-  via `rayon`. The crate now requires a **nightly** toolchain (`portable_simd`); the
-  pinned version is in `rust-toolchain.toml`.
-- A scan API — `Dataset::scan()` returning a `ScanBuilder` — with column projection, row
-  range selection, and batch or row-at-a-time consumption.
-- Columnar output types (`ColumnarBatch`, `OwnedColumnBuffer`, `Utf8Buffer`, …).
-- Optional Arrow `RecordBatch` output behind the `arrow` feature.
-- Optional string-column dictionary encoding behind the `dictionary` feature.
-- Companion `.sas7bcat` catalog support for hydrating value labels, exposed as
-  `catalog::parse_catalog_file` plus the `LabelSet` / `ValueLabel` / `ValueKey` types.
-- `Serialize` on `LabelSet`, `ValueLabel`, `ValueKey`, and `ValueType`, so a label set
-  can be persisted verbatim by downstream tools.
-- `Debug` on `CatalogLayout`.
-- RLE and CHAR compression support; `WINDOWS-1252` and UTF-8 encodings.
+- Memory-mapped I/O (`memmap2`) with a selectable I/O backend.
+- SIMD string decoding (`std::simd` and `simdutf8`) and parallel page scanning with `rayon`. The crate requires a nightly toolchain (`portable_simd`).
+- A scan API, `Dataset::scan()` returning a `ScanBuilder`, with column projection, row range selection and batch or row-at-a-time consumption.
+- Columnar output types (`ColumnarBatch`, `OwnedColumnBuffer`, `Utf8Buffer`).
+- Arrow `RecordBatch` output behind the `arrow` feature.
+- String-column dictionary encoding behind the `dictionary` feature.
+- `.sas7bcat` catalog support for value labels: `catalog::parse_catalog_file`, `LabelSet`, `ValueLabel`, `ValueKey`.
+- `Serialize` on `LabelSet`, `ValueLabel`, `ValueKey` and `ValueType`, and `Debug` on `CatalogLayout`.
+- RLE and CHAR compression, and `WINDOWS-1252` and UTF-8 encodings.
 
 ### Changed
 
-- **`catalog::parse_catalog` now rejects a file carrying the sas7bdat dataset magic
-  number.** Datasets and catalogs share a header layout, so such a file previously
-  decoded into an empty catalog and silently attached no labels at all. It is now a
-  `HeaderError`.
-- Feature flags are entirely different: 0.2.0's `chrono`, `cli`, `csv`, `parquet`,
-  `time`, and `fast-string` are replaced by `arrow`, `dictionary`, plus the internal
-  `internal-bench` and `fixture-catalog`.
-- `RowSelection` changed from a struct to an enum.
-- Dependency floors were raised to versions that actually build: `bytemuck` 1.4,
-  `serde` 1.0.130, `encoding_rs` 0.8.11, `ahash` 0.8.7, `cardinality-estimator` 1.0.1.
-  The previously declared minimums did not compile when resolved.
+- `catalog::parse_catalog` now returns a `HeaderError` for a file carrying the dataset magic number, instead of an empty catalog.
+- Feature flags are replaced: `chrono`, `cli`, `csv`, `parquet`, `time` and `fast-string` give way to `arrow` and `dictionary`, plus the internal `internal-bench` and `fixture-catalog`.
+- `RowSelection` is an enum instead of a struct.
+- Dependency minimums were raised to versions that build: `bytemuck` 1.4, `serde` 1.0.130, `encoding_rs` 0.8.11, `ahash` 0.8.7, `cardinality-estimator` 1.0.1.
 
 ### Removed
 
-- The `sas7` binary that shipped inside the crate in 0.2.0. The command-line tool is now
-  the separate `sas7bdat-cli` package (`sas7bdat` on PyPI and via `cargo install`).
-- `fixture_catalog` and its exports (`FixtureCatalog`, `build_catalog`,
-  `discover_fixture_paths`, `profile_fixture`, …) from the default build. This is corpus
-  profiling for the in-repo benchmark harness, not reader API — a consumer has no fixture
-  corpus to point it at. Still available behind the `fixture-catalog` feature.
-- `serde_json` as a dependency. It was only ever used by examples and benchmarks, so
-  consumers were compiling it for nothing.
+- The `sas7` binary. The command-line tool is now the separate `sas7bdat-cli` package.
+- `fixture_catalog` and its exports from the default build. Still available behind the `fixture-catalog` feature.
+- `serde_json` as a dependency.
 
 ## [0.2.0] and earlier
 
@@ -642,7 +216,9 @@ different implementation with a `dataset`/`parser`/`cell` module layout and a bu
      `v0.7.0` in particular was a wheel release in July, unrelated to 0.7.0 here.
      `sas7bdat-v0.5.0` was never created, so 0.5.0 has no release to link to. -->
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.9.1...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.9.3...HEAD
+[0.9.3]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.3
+[0.9.2]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.2
 [0.9.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.1
 [0.9.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.0
 [0.8.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.8.1
