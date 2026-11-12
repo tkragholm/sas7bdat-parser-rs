@@ -10,12 +10,18 @@ tool starts from a warm page cache.
 
 Per run it records the read time measured inside the process (excluding
 interpreter start-up and imports), the wall time of the whole process, and its
-peak resident memory from /usr/bin/time -l. After the runs it compares each
-reader's checksum (rows, columns, per-column sums and string lengths) with the
-Rust core's, so a fast but wrong reader shows up.
+peak resident memory (see measure.py). After the runs it compares each reader's
+checksum (rows, columns, per-column sums and string lengths) with the Rust
+core's, so a fast but wrong reader shows up.
 
-Files are expected in fixtures/benchmark/ and are checked against the SHA-256
-values below; see benchmarks/README.md for where to download them.
+Runs on Linux and macOS. On Windows it runs without peak memory and without the
+check for other busy processes. It builds the Rust binaries it needs with cargo
+(profile `dist`) and compiles readstat_read.c with the C compiler on PATH.
+
+Files are expected in fixtures/benchmark/ (fetch.py downloads them) and are
+checked against the SHA-256 values below. Tools are found on PATH, or through the
+environment variables RSCRIPT, READSTAT and READSTAT_PREFIX, and the Python readers
+run in benchmarks/.venv.
 """
 
 from __future__ import annotations
@@ -27,7 +33,6 @@ import hashlib
 import json
 import os
 import platform
-import re
 import shutil
 import statistics
 import subprocess
@@ -50,10 +55,25 @@ TARGET = Path(
         ).stdout
     )["target_directory"]
 )
-PYTHON = ROOT / "benchmarks" / ".venv" / "bin" / "python"
-RSCRIPT = shutil.which("Rscript") or "Rscript"
-READSTAT = shutil.which("readstat") or "readstat"
-READSTAT_C = TARGET / "dist" / "readstat_read"
+WINDOWS = os.name == "nt"
+EXE = ".exe" if WINDOWS else ""
+VENV = ROOT / "benchmarks" / ".venv"
+PYTHON = VENV / ("Scripts/python.exe" if WINDOWS else "bin/python")
+RSCRIPT = os.environ.get("RSCRIPT") or shutil.which("Rscript") or "Rscript"
+READSTAT = os.environ.get("READSTAT") or shutil.which("readstat") or "readstat"
+DIST = TARGET / "dist"
+CORE = DIST / "examples" / f"bench_one{EXE}"
+CLI = DIST / f"sas7bdat{EXE}"
+READSTAT_C = DIST / f"readstat_read{EXE}"
+MEASURE = ROOT / "benchmarks" / "measure.py"
+
+
+def build_rust() -> None:
+    """Build the core benchmark and the CLI with the release profile users get."""
+    for args in (["-p", "sas7bdat", "--example", "bench_one"],
+                 ["-p", "sas7bdat-cli", "--bin", "sas7bdat"]):
+        subprocess.run(["cargo", "build", "--quiet", "--profile", "dist", *args],
+                       cwd=ROOT, check=True)
 
 
 def build_readstat_c() -> None:
@@ -61,9 +81,16 @@ def build_readstat_c() -> None:
     src = ROOT / "benchmarks" / "readstat_read.c"
     if READSTAT_C.exists() and READSTAT_C.stat().st_mtime > src.stat().st_mtime:
         return
-    prefix = Path(READSTAT).resolve().parent.parent
-    subprocess.run(["cc", "-O2", f"-I{prefix / 'include'}", "-o", str(READSTAT_C), str(src),
-                    f"-L{prefix / 'lib'}", "-lreadstat"], check=True)
+    prefix = Path(os.environ.get("READSTAT_PREFIX")
+                  or Path(shutil.which(READSTAT) or READSTAT).resolve().parent.parent)
+    cc = os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc") or "clang"
+    cmd = [cc, "-O2", "-o", str(READSTAT_C), str(src)]
+    if (prefix / "include" / "readstat.h").exists():
+        cmd.insert(2, f"-I{prefix / 'include'}")
+    if (prefix / "lib").is_dir():
+        cmd.append(f"-L{prefix / 'lib'}")
+    cmd += ["-lreadstat", "-lm"]
+    subprocess.run(cmd, check=True)
 
 FILES = {
     "ahs2013n": (
@@ -91,7 +118,7 @@ FILES = {
 
 # (group, command builder). The group is the comparison a tool belongs to.
 def _core(path, *extra):
-    return [str(TARGET / "dist" / "examples" / "bench_one"), str(path), *extra]
+    return [str(CORE), str(path), *extra]
 
 
 def _py(tool):
@@ -127,9 +154,6 @@ TOOLS = {
     "readstat-cli-csv": ("csv", None),
 }
 
-RSS = re.compile(r"^\s*(\d+)\s+maximum resident set size", re.MULTILINE)
-
-
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -138,13 +162,32 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def other_cpu() -> tuple[float, str]:
-    """CPU use, in percent of one core, of processes outside this benchmark.
+def _procs_linux(interval: float = 0.5) -> list[tuple[int, int, float, str]]:
+    """(pid, ppid, cpu percent over `interval`, name) from two reads of /proc."""
 
-    Returns the total and the busiest such process. A benchmark run is only
-    comparable when this is close to zero.
-    """
-    me = os.getpid()
+    def read() -> dict[int, tuple[int, int, str]]:
+        out = {}
+        for stat in Path("/proc").glob("[0-9]*/stat"):
+            try:
+                raw = stat.read_text()
+            except OSError:
+                continue
+            name = raw[raw.index("(") + 1 : raw.rindex(")")]
+            fields = raw[raw.rindex(")") + 2 :].split()
+            # After the name: state ppid ... utime is field 14, stime 15 (1-based).
+            out[int(stat.parent.name)] = (int(fields[1]), int(fields[11]) + int(fields[12]), name)
+        return out
+
+    first = read()
+    time.sleep(interval)
+    second = read()
+    ticks = os.sysconf("SC_CLK_TCK") * interval
+    return [(pid, ppid, 100 * (used - first.get(pid, (0, used, ""))[1]) / ticks, name)
+            for pid, (ppid, used, name) in second.items()]
+
+
+def _procs_ps() -> list[tuple[int, int, float, str]]:
+    """(pid, ppid, cpu percent, name) from ps, whose %CPU on macOS is a recent average."""
     rows = subprocess.run(["ps", "-Ao", "pid=,ppid=,pcpu=,comm="], capture_output=True,
                           text=True, check=True).stdout.splitlines()
     procs = []
@@ -152,6 +195,21 @@ def other_cpu() -> tuple[float, str]:
         parts = line.split(None, 3)
         if len(parts) == 4:
             procs.append((int(parts[0]), int(parts[1]), float(parts[2]), parts[3]))
+    return procs
+
+
+def other_cpu() -> tuple[float, str]:
+    """CPU use, in percent of one core, of processes outside this benchmark.
+
+    Returns the total and the busiest such process. A benchmark run is only
+    comparable when this is close to zero. Linux procps reports %CPU averaged over a
+    process's whole life, so there it is measured from /proc instead. Not available
+    on Windows, where it returns zero.
+    """
+    if WINDOWS:
+        return 0.0, "not measured on Windows"
+    me = os.getpid()
+    procs = _procs_linux() if Path("/proc/self/stat").exists() else _procs_ps()
     parent = {pid: ppid for pid, ppid, _, _ in procs}
 
     def ours(pid: int) -> bool:
@@ -179,7 +237,7 @@ def run_one(tool: str, path: Path, scratch: Path) -> dict:
     if tool == "sas7bdat-cli-csv":
         out = scratch / "ours.csv"
         cmd = [
-            str(TARGET / "dist" / "sas7bdat"),
+            str(CLI),
             "convert",
             str(path),
             "--out",
@@ -193,36 +251,39 @@ def run_one(tool: str, path: Path, scratch: Path) -> dict:
     else:
         out = None
         cmd = build(path)
-    load = os.getloadavg()[0]
+    load = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
     others, _ = other_cpu()
-    start = time.perf_counter()
     proc = subprocess.run(
-        ["/usr/bin/time", "-l", *cmd],
+        [sys.executable, str(MEASURE), *cmd],
         capture_output=True,
         text=True,
         timeout=1800,
         check=False,
     )
-    wall = time.perf_counter() - start
-    match = RSS.search(proc.stderr)
+    lines = proc.stdout.strip().splitlines()
+    measured = json.loads(lines.pop()[len("MEASURE "):]) if lines and lines[-1].startswith(
+        "MEASURE ") else {"wall_s": None, "peak_rss_bytes": None, "returncode": proc.returncode}
+    wall = measured["wall_s"]
+    peak = measured["peak_rss_bytes"]
+    ok = proc.returncode == 0 and measured["returncode"] == 0
     row = {
         "tool": tool,
         "group": group,
         "wall_s": wall,
         "load1": load,
         "other_cpu": others,
-        "peak_rss_mb": int(match.group(1)) / 1e6 if match else None,
-        "ok": proc.returncode == 0,
+        "peak_rss_mb": peak / 1e6 if peak is not None else None,
+        "ok": ok,
         "read_s": None,
         "rows": None,
         "cols": None,
         "checksum": None,
     }
-    if proc.returncode != 0:
+    if not ok:
         row["error"] = proc.stderr.strip().splitlines()[-1:] or ["?"]
         return row
     if out is None:
-        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        result = json.loads(lines[-1])
         row.update(
             read_s=result["seconds"],
             rows=result["rows"],
@@ -270,6 +331,33 @@ def environment(files: list[str]) -> dict:
         except OSError:
             return None
 
+    def first_match(path: str, key: str) -> str | None:
+        try:
+            for line in Path(path).read_text().splitlines():
+                if line.startswith(key):
+                    return line.split(":", 1)[1].strip()
+        except OSError:
+            pass
+        return None
+
+    def cpu_name() -> str | None:
+        if sys.platform == "darwin":
+            return out(["sysctl", "-n", "machdep.cpu.brand_string"])
+        return first_match("/proc/cpuinfo", "model name") or platform.processor() or None
+
+    def memory_gb() -> float | None:
+        try:
+            return round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30, 1)
+        except (ValueError, OSError, AttributeError):
+            return None
+
+    def power() -> str | None:
+        if sys.platform == "darwin":
+            lines = (out(["pmset", "-g", "batt"]) or "").splitlines()
+            return lines[0] if lines else None
+        supplies = sorted(Path("/sys/class/power_supply").glob("*/status"))
+        return "; ".join(f"{p.parent.name} {p.read_text().strip()}" for p in supplies) or None
+
     r_versions = out(
         [
             RSCRIPT,
@@ -282,11 +370,12 @@ def environment(files: list[str]) -> dict:
         "date": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "commit": out(["git", "rev-parse", "HEAD"]),
         "dirty": bool(out(["git", "status", "--porcelain", "--untracked-files=no"])),
-        "os": f"{platform.system()} {platform.mac_ver()[0] or platform.release()}",
-        "cpu": out(["sysctl", "-n", "machdep.cpu.brand_string"]),
+        "os": platform.platform(),
+        "machine": platform.machine(),
+        "cpu": cpu_name(),
         "cores": os.cpu_count(),
-        "memory_gb": round(int(out(["sysctl", "-n", "hw.memsize"]) or 0) / 2**30, 1),
-        "power": (out(["pmset", "-g", "batt"]) or "").splitlines()[:1],
+        "memory_gb": memory_gb(),
+        "power": power(),
         "rustc": out(["rustc", "--version"]),
         "python_packages": out([str(PYTHON), "-m", "pip", "freeze"])
         or out(["uv", "pip", "freeze", "--python", str(PYTHON)]),
@@ -320,9 +409,10 @@ def summarise(rows: list[dict], files: list[str], tools: list[str]) -> str:
             med = statistics.median(reads)
             wall = statistics.median(r["wall_s"] for r in runs)
             rss = [r["peak_rss_mb"] for r in runs if r["peak_rss_mb"] is not None]
+            rss_cell = f"{statistics.median(rss):.0f}" if rss else "n/a"
             lines.append(
                 f"| {f} | {t} | {med:.3f} | {q[2] - q[0]:.3f} | {wall:.3f} | "
-                f"{statistics.median(rss):.0f} | {size / med:.0f} |"
+                f"{rss_cell} | {size / med:.0f} |"
             )
     return "\n".join(lines)
 
@@ -349,6 +439,7 @@ def main() -> None:
             sys.exit(f"checksum mismatch for {path}")
 
     out_dir = args.out or ROOT / "benchmarks" / "results" / dt.date.today().isoformat()
+    build_rust()
     if "readstat-c" in tools:
         build_readstat_c()
     total, busiest = other_cpu()
