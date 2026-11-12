@@ -17,10 +17,11 @@ itself whether it has happened, so resuming is just running it again.
     just release sas7bdat 0.9.0                      # plan only, changes nothing
     just release sas7bdat 0.9.0 --execute            # local work, and push main
     just release sas7bdat 0.9.0 --execute --publish  # also push tags (irreversible)
-    just release polars-plugin 0.9.3 --execute --publish   # the PyPI wheel: tag v0.9.3
+    just release polars-plugin 0.11.0 --execute --publish  # tag sas7bdat-polars-v0.11.0
 
 The two PyPI distributions (`polars-plugin` and `sas7bdat-cli`) release through the
-same sequence with a `v<version>` tag, which `wheels.yml` builds and uploads. They
+same sequence with a `sas7bdat-polars-v<version>` or `sas7bdat-cli-v<version>` tag,
+which `wheels.yml` builds and uploads. They
 publish nothing to crates.io, so no inst/AUTHORS step follows them.
 
 `--execute` stops at each human gate rather than guessing past it: the changelog
@@ -119,14 +120,13 @@ def published_workspace_crates() -> dict[str, Path]:
 
 
 #: The two distributions that go to PyPI rather than crates.io. They are workspace
-#: crates with `publish = false`, released by a `v<version>` tag that `wheels.yml`
-#: turns into wheels and uploads; a tag whose version matches only one of them
-#: publishes that one and leaves the other alone.
+#: crates with `publish = false`, released by a `<name>-v<version>` tag that
+#: `wheels.yml` turns into that package's wheels and uploads.
 WHEELS = {"sas7bdat-polars", "sas7bdat-cli"}
 
 
 def tag_for(move: Move) -> str:
-    return f"v{move.target}" if move.name in WHEELS else f"{move.name}-v{move.target}"
+    return f"{move.name}-v{move.target}"
 
 
 def is_published(name: str, version: str) -> bool:

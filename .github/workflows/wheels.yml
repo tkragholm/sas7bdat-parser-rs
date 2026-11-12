@@ -7,11 +7,10 @@
 #     plain binary wheel (py3-none-<platform>): no Python floor, no polars pin.
 #     It backs the `sas7bdat-polars[cli]` extra.
 #
-# On a `v*` tag, the `release*` jobs below publish to PyPI via Trusted Publishing
-# (OIDC, no stored token). On branch/PR pushes the wheels are only uploaded as CI
-# artifacts. The two packages carry independent version numbers, so `--check-url`
-# makes a tag that only bumps one of them a no-op for the other instead of an
-# "already exists" failure.
+# A `sas7bdat-polars-v<version>` or `sas7bdat-cli-v<version>` tag publishes that
+# package to PyPI via Trusted Publishing (OIDC, no stored token). The two packages
+# have independent version numbers, so each has its own tag prefix. On branch and
+# PR pushes the wheels are only uploaded as CI artifacts.
 #
 # Neither package lives at the repo root (the root pyproject.toml builds the
 # sas7bdat-dir-mapper wheel), hence the explicit --manifest-path everywhere.
@@ -20,7 +19,7 @@ name: wheels
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['sas7bdat-polars-v*', 'sas7bdat-cli-v*']
   pull_request:
   workflow_dispatch:
 
@@ -29,37 +28,38 @@ permissions:
 
 concurrency:
   group: wheels-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on a tag is a release; never cancel one part-way through an upload.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
-  # `release-crate.yml` hard-fails when a tag and its manifest disagree. This
-  # workflow needs the same check. `uv publish --check-url` makes a tag that bumps
-  # only one package a no-op for the other, which is the right behaviour, but it also
-  # means a tag whose version matches neither package publishes nothing and still
-  # reports success. That is a silent no-op, so check it up front.
+  # A tag names one package and one version. Fail here when the version is not the
+  # one in that package's manifest, so a wrong tag publishes nothing and is red.
   check-tag:
     name: check tag
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-    # The publish jobs below gate on these, so each one runs only for its own tag.
+    # The publish jobs below gate on `package`, so each runs only for its own tag.
     outputs:
-      polars: ${{ steps.versions.outputs.polars }}
-      cli: ${{ steps.versions.outputs.cli }}
+      package: ${{ steps.versions.outputs.package }}
     steps:
       - uses: actions/checkout@v6
-      - name: Tag must match a package version
+      - name: Tag must match the package's version
         id: versions
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          polars=$(awk -F'"' '/^version = /{print $2; exit}' crates/polars-plugin/Cargo.toml)
-          cli=$(awk -F'"' '/^version = /{print $2; exit}' crates/sas7bdat-cli/Cargo.toml)
-          echo "tag $tag | sas7bdat-polars $polars | sas7bdat-cli $cli"
-          if [ "$tag" != "$polars" ] && [ "$tag" != "$cli" ]; then
-            echo "::error::tag v$tag matches neither package; nothing would publish and the run would still be green"
+          package="${GITHUB_REF_NAME%-v*}"
+          tagged="${GITHUB_REF_NAME##*-v}"
+          case "$package" in
+            sas7bdat-polars) dir=crates/polars-plugin ;;
+            sas7bdat-cli) dir=crates/sas7bdat-cli ;;
+            *) echo "::error::tag $GITHUB_REF_NAME names no wheel package"; exit 1 ;;
+          esac
+          version=$(awk -F'"' '/^version = /{print $2; exit}' "$dir/Cargo.toml")
+          echo "tag $GITHUB_REF_NAME | $package $version"
+          if [ "$tagged" != "$version" ]; then
+            echo "::error::tag says $tagged but $dir/Cargo.toml says $version"
             exit 1
           fi
-          echo "polars=$polars" >> "$GITHUB_OUTPUT"
-          echo "cli=$cli" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
 
   linux:
     name: linux-${{ matrix.target }}
@@ -257,8 +257,53 @@ jobs:
           crates/polars-plugin/tests/test_version_check.py
           crates/polars-plugin/tests/test_smoke.py::test_public_api_contract_is_exposed
 
-  # Publishes to PyPI via Trusted Publishing (OIDC) — no stored token. Runs only on a
-  # v* tag, after every platform build succeeds. Requires a trusted publisher registered
+  # Every built wheel, installed and run on its own platform: the extension module
+  # imported and read through, the CLI wheel's `sas7bdat` run on a file. Linux
+  # aarch64 is left out; it would need an arm runner.
+  smoke:
+    name: smoke-${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    needs: [linux, windows, macos]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+          - platform: windows-x64
+            runner: windows-latest
+          - platform: macos-aarch64
+            runner: macos-14
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: dist
+      - uses: actions/download-artifact@v7
+        with:
+          name: cli-wheels-${{ matrix.platform }}
+          path: dist-cli
+      - name: Fetch a fixture
+        run: |
+          curl -sSfL -o airline.sas7bdat \
+            https://raw.githubusercontent.com/pandas-dev/pandas/v2.2.3/pandas/tests/io/sas/data/airline.sas7bdat
+      - name: Install and run both wheels
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl dist-cli/*.whl
+          python -c "import sas7bdat_polars as sp; df = sp.read_sas('airline.sas7bdat'); assert df.shape == (32, 6), df.shape; print(df.shape)"
+          sas7bdat --version
+          sas7bdat info airline.sas7bdat
+
+  # Publishes to PyPI via Trusted Publishing (OIDC), no stored token. Runs only on
+  # that package's tag, after every platform build, the compat matrix and the smoke
+  # tests succeed. Requires a trusted publisher registered
   # on PyPI for owner=tkragholm, repo=sas7bdat-parser-rs, workflow=wheels.yml — one per
   # project (sas7bdat-polars and sas7bdat-cli each need their own).
   #
@@ -269,8 +314,8 @@ jobs:
   release:
     name: publish-pypi
     runs-on: ubuntu-latest
-    if: ${{ github.ref_name == format('v{0}', needs.check-tag.outputs.polars) }}
-    needs: [check-tag, linux, windows, macos]
+    if: ${{ needs.check-tag.outputs.package == 'sas7bdat-polars' }}
+    needs: [check-tag, linux, windows, macos, compat, smoke]
     permissions:
       # Mints the OIDC token PyPI Trusted Publishing exchanges for a short-lived upload token.
       id-token: write
@@ -288,8 +333,8 @@ jobs:
   release-cli:
     name: publish-pypi-cli
     runs-on: ubuntu-latest
-    if: ${{ github.ref_name == format('v{0}', needs.check-tag.outputs.cli) }}
-    needs: [check-tag, linux, windows, macos]
+    if: ${{ needs.check-tag.outputs.package == 'sas7bdat-cli' }}
+    needs: [check-tag, linux, windows, macos, compat, smoke]
     permissions:
       id-token: write
     steps:

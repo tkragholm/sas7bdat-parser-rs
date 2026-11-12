@@ -5,8 +5,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate 
 [Cargo's SemVer rules](https://doc.rust-lang.org/cargo/reference/semver.html).
 
 This file covers the Rust crate only. The Python packages built from this repository,
-`sas7bdat-polars` and `sas7bdat-cli`, have their own version numbers, and the plain `v*`
-tags (`v0.10.1`, ...) belong to them. This crate's tags are `sas7bdat-v*`.
+`sas7bdat-polars` and `sas7bdat-cli`, have their own version numbers and their own tags,
+`sas7bdat-polars-v*` and `sas7bdat-cli-v*`; up to sas7bdat-polars 0.10.1 and
+sas7bdat-cli 0.9.4 they were tagged plain `v*`. This crate's tags are `sas7bdat-v*`.
 
 New entries are drafted from the Conventional Commits history with
 [git-cliff](https://git-cliff.org) (`cliff.toml` at the repository root) and edited by

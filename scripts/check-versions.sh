@@ -133,14 +133,19 @@ done
 
 # A crate whose files changed since the tag of the version its manifest claims is
 # two codes under one number: the published one and this one. A bump is what says
-# the code moved, and this says when the bump is owed. The Python packages use the
-# `v<version>` tag scheme and crates.io crates use `<name>-v<version>`, which is what
-# the prefixes are.
+# the code moved, and this says when the bump is owed. Every package is tagged
+# `<name>-v<version>`. The two Python packages were tagged `v<version>` up to
+# sas7bdat-polars 0.10.1 and sas7bdat-cli 0.9.4, so for them the plain `v` tag is
+# accepted when the prefixed one does not exist.
 released_code() {
-  local dir="$1" prefix="$2"
+  local dir="$1" prefix="$2" legacy="${3:-}"
   local v tag
   v="$(crate_version "$dir")"
   tag="${prefix}${v}"
+  if [ -n "$legacy" ] && ! git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null 2>&1 \
+    && git rev-parse -q --verify "refs/tags/${legacy}${v}^{commit}" >/dev/null 2>&1; then
+    tag="${legacy}${v}"
+  fi
   if ! git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null 2>&1; then
     printf '  ok %-46s %s has no tag %s yet: an unreleased bump\n' "crates/$dir" "$v" "$tag"
   elif git diff --quiet "$tag" HEAD -- "crates/$dir"; then
@@ -153,13 +158,13 @@ released_code() {
 
 echo
 echo "Crate versions vs the code their tags released:"
-if [ -z "$(git tag --list 'v*' 'sas7bdat-v*' 2>/dev/null)" ]; then
+if [ -z "$(git tag --list 'v*' 'sas7bdat-*v*' 2>/dev/null)" ]; then
   echo "  ?  no release tags in this clone (shallow checkout?); nothing to compare against"
 else
   released_code sas7bdat         sas7bdat-v
   released_code sas7bdat-convert sas7bdat-convert-v
-  released_code polars-plugin    v
-  released_code sas7bdat-cli     v
+  released_code polars-plugin    sas7bdat-polars-v v
+  released_code sas7bdat-cli     sas7bdat-cli-v    v
 fi
 
 if [ $status -ne 0 ]; then
