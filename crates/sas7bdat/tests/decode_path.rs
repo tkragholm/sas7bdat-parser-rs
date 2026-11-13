@@ -9,17 +9,13 @@
 //!
 //! These tests pin the surprising parts so they cannot change quietly.
 
+mod common;
+
+use common::fixture;
 use sas7bdat::{
     Dataset, FillStrategy, IoBackendPreference, OpenOptions, PageSource, Parallelism, ScanEntry,
     SourceDeclined,
 };
-use std::path::{Path, PathBuf};
-
-fn fixture(rel: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures")
-        .join(rel)
-}
 
 fn dataset() -> Option<Dataset> {
     let path = fixture("raw_data/ahs2013/homimp.sas7bdat");

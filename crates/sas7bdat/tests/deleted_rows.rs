@@ -6,14 +6,10 @@
 //! `WizardMac/ReadStat#366` added deleted-row support. `ReadStat` 1.1.9 (what `haven` and
 //! `pyreadstat` ship) predates it and over-reports on all three of these files.
 
-use sas7bdat::{Dataset, OwnedCellValue};
-use std::path::{Path, PathBuf};
+mod common;
 
-fn fixture(rel: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures")
-        .join(rel)
-}
+use common::fixture;
+use sas7bdat::{Dataset, OwnedCellValue};
 
 /// `(fixture, rows the header claims, rows actually deleted)`. Live rows are the difference.
 const DELETED_ROW_FIXTURES: &[(&str, u64, u64)] = &[

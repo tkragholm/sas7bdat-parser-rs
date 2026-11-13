@@ -2,11 +2,12 @@
 # The result must hold the surviving rows only, and the right ones. The first column
 # of these files is a ladder (0..10, then by tens, hundreds and thousands), so the
 # values that survive name the deleted rows. Golden values are ReadStat's, as in the
-# core's tests/deleted_rows.rs. The files are in the repository's local corpus.
+# core's tests/deleted_rows.rs. The files are Parso's, tracked with the core's
+# tests; outside a clone of the repository (R CMD check) they are skipped.
 
 corpus_file <- function(name) {
-  path <- file.path("..", "..", "..", "..", "fixtures", "raw_data", "csharp", name)
-  if (!file.exists(path)) skip(paste("corpus file not present:", name))
+  path <- file.path("..", "..", "..", "sas7bdat", "tests", "fixtures", "corpus", "parso", name)
+  if (!file.exists(path)) skip(paste("tracked test file not present:", name))
   path
 }
 

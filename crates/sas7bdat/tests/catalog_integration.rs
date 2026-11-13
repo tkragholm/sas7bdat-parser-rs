@@ -1,14 +1,10 @@
+mod common;
+
+use common::fixture;
 use sas7bdat::{
     Dataset, LabelSet, ValueKey, ValueType, catalog::normalize_format_name,
     catalog::parse_catalog_file,
 };
-use std::path::Path;
-
-fn fixture(rel: &str) -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures")
-        .join(rel)
-}
 
 #[test]
 fn attach_catalog_populates_label_sets() {

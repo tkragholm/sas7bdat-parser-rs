@@ -8,6 +8,8 @@ license = "MIT"
 repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
 documentation = "https://docs.rs/sas7bdat"
 readme = "README.md"
+# Third-party test files, tracked for CI with their notices at the repository root.
+exclude = ["tests/fixtures/corpus/"]
 keywords = ["sas7bdat", "sas", "arrow", "parser", "simd"]
 # "statistics" is not a crates.io slug; "encoding" covers decoding the on-disk format.
 categories = ["parser-implementations", "science", "encoding"]

@@ -8,15 +8,12 @@
 //! Expected values are `ReadStat` at `da9fcaa`. They agree with this crate on all 318 corpus
 //! files with a readable header.
 
+mod common;
+
+use common::fixture;
 use sas7bdat::Dataset;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-fn fixture(rel: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures")
-        .join(rel)
-}
 
 fn unix_seconds(t: Option<SystemTime>) -> Option<i64> {
     t?.duration_since(UNIX_EPOCH)

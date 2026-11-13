@@ -27,9 +27,19 @@ fn excluded_fixture(path: &Path) -> bool {
         .is_some_and(|name| EXCLUDED_FIXTURE_NAMES.contains(&name))
 }
 
+/// The local corpus when it is there, else the tracked subset, so CI walks something.
+fn fixture_root() -> PathBuf {
+    let local = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+    if local.is_dir() && env::var_os("SAS7BDAT_TRACKED_ONLY").is_none() {
+        local
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/corpus")
+    }
+}
+
 #[test]
 fn local_fixtures_open_and_scan() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+    let root = fixture_root();
     let mut fixtures = discover_fixture_paths(std::slice::from_ref(&root)).unwrap_or_default();
     fixtures.retain(|path| !excluded_fixture(path));
     fixtures.sort();
@@ -73,7 +83,7 @@ fn local_fixtures_open_and_scan() {
 
 #[test]
 fn local_compressed_fixtures_open_and_scan() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+    let root = fixture_root();
     let mut fixtures = discover_fixture_paths(std::slice::from_ref(&root)).unwrap_or_default();
     fixtures.retain(|path| !excluded_fixture(path));
     fixtures.sort();

@@ -6,14 +6,11 @@
 //! Expected strings are `ReadStat` at `da9fcaa` via `readstat_variable_get_format`. They agree
 //! with this crate on all 4,782 columns of the corpus fixtures.
 
-use sas7bdat::Dataset;
-use std::path::{Path, PathBuf};
+mod common;
 
-fn fixture(rel: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures")
-        .join(rel)
-}
+use common::fixture;
+use sas7bdat::Dataset;
+use std::path::Path;
 
 fn spec(path: &Path, column: &str) -> Option<String> {
     let ds = Dataset::open(path).expect("open dataset");

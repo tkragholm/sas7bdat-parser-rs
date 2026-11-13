@@ -8,16 +8,13 @@
 //! Comparison is per row, not per batch: the two paths cut batches at different boundaries, so
 //! anything that hashes whole buffers would report a difference that isn't one.
 
+mod common;
+
+use common::fixture;
 use sas7bdat::{
     Dataset, IoBackendPreference, OpenOptions, OwnedColumnBuffer, OwnedColumnarBatch, Parallelism,
 };
 use std::{ops::ControlFlow, path::Path};
-
-fn fixture(rel: &str) -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures")
-        .join(rel)
-}
 
 /// Bit-packed validity, LSB first; `None` means every row is valid.
 fn valid_at(valid: Option<&Vec<u64>>, row: usize) -> bool {

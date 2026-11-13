@@ -2,14 +2,24 @@
 
 The fixture corpus is not tracked in git; only this README is. Populate the
 directory locally to run the corpus tests, the oracle comparison and the
-benchmarks. Tests that need a missing file skip with a message.
+benchmarks. A subset with clear licences is tracked in
+`crates/sas7bdat/tests/fixtures/corpus/` and listed in its `MANIFEST.tsv`; the
+tests fall back to it, so continuous integration runs them. Tests that need a
+file in neither place skip.
 
 ## Contents
 
 - `raw_data/pandas/`: the pandas SAS test files (BSD-3-Clause).
-- `raw_data/csharp/`, `raw_data/other/`, `raw_data/principlesofeco/`,
-  `raw_data/readstat/`, `raw_data/readstat_issues/`: test files from other
-  readers and public sample collections.
+- `raw_data/csharp/`: the test files of the C# reader
+  [richokelly/sas7bdat](https://github.com/richokelly/sas7bdat) (Apache-2.0).
+  The ones tracked here are byte-identical to files in
+  [Parso](https://github.com/epam/parso)'s test resources (Apache-2.0) and are
+  tracked under `parso/`.
+- `raw_data/readstat/`: despite the name, pyreadstat's test files (Apache-2.0),
+  the same as those tracked in `crates/r-plugin/inst/extdata/`.
+- `raw_data/other/`, `raw_data/principlesofeco/`, `raw_data/readstat_issues/`:
+  files from public sample collections and ReadStat issue attachments, with no
+  recorded licence; they are not redistributed.
 - `raw_data/ahs2013/`: files from the US Census American Housing Survey 2013.
 - `ahs2013n.sas7bdat` (2.15 GB, AHS 2013 national file): used by most Polars
   plugin tests and by the benchmarks. It is public Census data and can be

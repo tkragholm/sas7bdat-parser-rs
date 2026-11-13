@@ -4,14 +4,11 @@
 //   §2.6 Duplicate column in projection (documents deduplication behaviour)
 //   §2.7 Batch size edge cases
 
+mod common;
+
+use common::fixture;
 use sas7bdat::{BatchHint, Dataset, RowSelection};
 use std::path::Path;
-
-fn fixture(rel: &str) -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures")
-        .join(rel)
-}
 
 // ─── §2.5 Window / skip + limit ──────────────────────────────────────────────
 

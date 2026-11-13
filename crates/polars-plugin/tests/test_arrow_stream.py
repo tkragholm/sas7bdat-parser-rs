@@ -219,15 +219,17 @@ def test_a_file_that_is_not_sas7bdat_raises_value_error(tmp_path):
 
 
 DELETED = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[2]
+    / "sas7bdat"
+    / "tests"
     / "fixtures"
-    / "raw_data"
-    / "csharp"
+    / "corpus"
+    / "parso"
     / "all_rand_normal_with_deleted2.sas7bdat"
 )
 
 
-@pytest.mark.skipif(not DELETED.exists(), reason=f"corpus file not present: {DELETED}")
+@pytest.mark.skipif(not DELETED.exists(), reason=f"tracked test file not present: {DELETED}")
 def test_info_counts_the_rows_a_read_returns():
     # The header counts five rows SAS marked as deleted; a read skips them.
     info = sp.sas_info(str(DELETED))

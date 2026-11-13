@@ -4,6 +4,21 @@ Small SAS files used by this crate's tests. The larger corpus at the
 repository root is not tracked; see `fixtures/README.md`. Attribution for
 tracked third-party files is in `THIRD_PARTY_NOTICES.md`.
 
+## `corpus/`
+
+22 files from the SAS test suites of pandas and Parso, chosen so that each
+format feature has one: 32- and 64-bit, little- and big-endian, RLE and RDC
+compression, deleted rows (uncompressed, compressed and on a data page), a
+392-column table, UTF-8, GB18030 and Shift-JIS headers, single-byte text above
+ASCII, dates, datetimes and times, and an empty file. `MANIFEST.tsv` gives each
+file's upstream path and commit, licence, SHA-256, and the header facts that
+`tests/corpus_manifest.rs` checks. The files are unmodified; each matched its
+upstream file byte for byte when copied on 13 November 2026.
+
+`tests/common/mod.rs` resolves a path in the untracked corpus to its tracked
+copy here. `SAS7BDAT_TRACKED_ONLY=1` makes the tests use only the tracked
+files, as continuous integration does.
+
 ## `people_nonascii.sas7bdat`
 
 A copy of `crates/r-plugin/inst/extdata/people.sas7bdat` (WINDOWS-1252, 5

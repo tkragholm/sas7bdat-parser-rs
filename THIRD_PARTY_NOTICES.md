@@ -36,6 +36,22 @@ the BSD 3-Clause License, see
 [LICENSES/BSD-3-Clause-pandas.txt](LICENSES/BSD-3-Clause-pandas.txt).
 Unmodified.
 
+The following files in `crates/sas7bdat/tests/fixtures/corpus/pandas/` are
+copied from the same directory of pandas, at commit `b650df099160`, under the
+same licence. Unmodified.
+
+- `0x40controlbyte.sas7bdat`
+- `airline.sas7bdat`
+- `datetime.sas7bdat`
+- `many_columns.sas7bdat`
+- `test10.sas7bdat`
+- `test13.sas7bdat`
+- `test14.sas7bdat`
+- `test15.sas7bdat`
+- `test16.sas7bdat`
+- `test3.sas7bdat`
+- `zero_rows.sas7bdat`
+
 ### From pyreadstat (Apache-2.0)
 
 The following files in `crates/r-plugin/inst/extdata/` are copied from the
@@ -58,6 +74,22 @@ Unmodified.
 under the Apache License 2.0, see
 [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt). Unmodified.
 
+The following files in `crates/sas7bdat/tests/fixtures/corpus/parso/` are
+copied from Parso's `src/test/resources/`, at commit `3c514e66264f`, under the
+same licence. Unmodified. Parso has no NOTICE file.
+
+- `54-cookie.sas7bdat` (from `bugs/54-cookie.sas7bdat`)
+- `all_rand_normal.sas7bdat` (from `sas7bdat/all_rand_normal.sas7bdat`)
+- `all_rand_normal_with_deleted.sas7bdat` (from `sas7bdat/all_rand_normal_with_deleted.sas7bdat`)
+- `all_rand_normal_with_deleted2.sas7bdat` (from `sas7bdat/all_rand_normal_with_deleted2.sas7bdat`)
+- `charset_utf8.sas7bdat` (from `sas7bdat/charset_utf8.sas7bdat`)
+- `chinese_column_works.sas7bdat` (from `sas7bdat/chinese_column_works.sas7bdat`)
+- `comp_deleted.sas7bdat` (from `sas7bdat/comp_deleted.sas7bdat`)
+- `data_page_with_deleted.sas7bdat` (from `sas7bdat/data_page_with_deleted.sas7bdat`)
+- `date_formats.sas7bdat` (from `sas7bdat/date_formats.sas7bdat`)
+- `mix_and_missing.sas7bdat` (from `sas7bdat/mix_and_missing.sas7bdat`)
+- `time_formats.sas7bdat` (from `sas7bdat/time_formats.sas7bdat`)
+
 ### `people.sas7bdat`
 
 - `crates/r-plugin/inst/extdata/people.sas7bdat` is a small synthetic teaching
@@ -71,8 +103,9 @@ under the Apache License 2.0, see
 ### Untracked local corpus
 
 The fixture corpus under `fixtures/` is not tracked in git and is not
-redistributed. Parts of it come from the pandas SAS test corpus (BSD-3-Clause)
-and other public sample-file collections; see `fixtures/README.md`.
+redistributed, apart from the files listed above under pandas and Parso. Parts
+of it come from the pandas SAS test corpus (BSD-3-Clause) and other public
+sample-file collections; see `fixtures/README.md`.
 
 ## References and correctness oracles
 

@@ -1,20 +1,15 @@
 // Golden parity tests: compare decoded output row by row against the expected
 // CSV files from pandas' SAS test suite (BSD-3-Clause), tracked in
-// tests/csv_golden/. The SAS inputs are in the untracked corpus under
-// fixtures/raw_data/pandas/; each test is skipped, with a message, when its
-// input is absent.
+// tests/csv_golden/. The SAS inputs are pandas' files, tracked in
+// tests/fixtures/corpus/pandas/ (see tests/common/mod.rs).
+
+mod common;
 
 use sas7bdat::{Dataset, DecodeMode, OwnedCellValue};
 use std::path::Path;
 
-fn workspace_root() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..") // crates/sas7bdat → crates
-        .join("..") // crates → workspace root
-}
-
 fn sas_fixture(name: &str) -> std::path::PathBuf {
-    workspace_root().join("fixtures/raw_data/pandas").join(name)
+    common::fixture(&format!("raw_data/pandas/{name}"))
 }
 
 fn csv_golden(name: &str) -> std::path::PathBuf {

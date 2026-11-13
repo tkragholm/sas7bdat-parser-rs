@@ -202,10 +202,18 @@ and pyreadstat, returns deleted rows; its main branch now skips them too.
 The reference is ReadStat. `examples/verify_readstat.rs` decodes each file in
 a local corpus with both readers and compares every cell. Where the two
 differ on purpose, the README says so: deleted rows against ReadStat 1.1.9,
-and ISO-8859-1 text. The corpus is not in the repository; CI runs the unit
-tests on synthetic files built in code, replays past fuzzing crashes under
-AddressSanitizer, and runs the R package's tests against haven on its bundled
-files.
+and ISO-8859-1 text. That comparison needs the full corpus and runs locally.
+
+Continuous integration runs the rest. Twenty-two files from the pandas and
+Parso test suites are tracked, one for each format feature: both byte orders
+and bitnesses, RLE and RDC compression, deleted rows, a wide table, multi-byte
+encodings and an empty file (`crates/sas7bdat/tests/fixtures/corpus/`). Their
+manifest records each file's source, licence and header facts, and a test
+checks every file against it. The parity tests between pipelines, the
+comparison with pandas' expected CSV output, and the deleted-row and
+row-selection tests run on those files. CI also runs unit tests on synthetic
+files built in code, replays past fuzzing crashes under AddressSanitizer, and
+runs the R package's tests against haven on its bundled files.
 
 Unsafe code is limited by a workspace lint that continuous integration turns
 into an error. Five places are allowed, each with a safety comment: the

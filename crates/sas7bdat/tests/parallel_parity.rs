@@ -5,14 +5,11 @@
 // row_base. Catches dropped rows, off-by-one errors, or data corruption in
 // the parallel code path.
 
+mod common;
+
+use common::fixture;
 use sas7bdat::{Dataset, OwnedColumnBuffer, OwnedColumnarBatch, Parallelism};
 use std::path::Path;
-
-fn fixture(rel: &str) -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures")
-        .join(rel)
-}
 
 fn canonical_batch(batch: &OwnedColumnarBatch) -> (u64, Vec<u8>) {
     let mut out = Vec::new();
