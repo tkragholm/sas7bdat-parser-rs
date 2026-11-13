@@ -90,3 +90,10 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
+
+# The Python extension unwinds instead of aborting: pyo3 turns a Rust panic into
+# a Python exception, and the plugin's `catch_unwind` around the decode thread
+# only works under unwinding. Aborting would end the user's Python process.
+[profile.dist-py]
+inherits = "dist"
+panic = "unwind"
