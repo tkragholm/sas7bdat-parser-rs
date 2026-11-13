@@ -119,7 +119,8 @@ sas7bdat convert data.sas7bdat --out data.csv
 | `crates/r-convert-plugin` | R package `fastsasconvert`, for conversion |
 
 Building, testing, and releasing are described in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md), and how the reader is built and why in
+[DESIGN.md](DESIGN.md).
 
 ## Related work
 

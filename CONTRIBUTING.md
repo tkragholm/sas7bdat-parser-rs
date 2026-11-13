@@ -14,6 +14,12 @@ setting that wrote the file are often enough.
 
 Questions about usage are welcome in the issue tracker too.
 
+## How the code is organised
+
+[DESIGN.md](DESIGN.md) describes the layers, the scan pipelines, and the
+measurements behind their limits. Read it before changing how pages are
+decoded, scheduled or read.
+
 ## Development setup
 
 The workspace builds on stable Rust. The exact toolchain is pinned in

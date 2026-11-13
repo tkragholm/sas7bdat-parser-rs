@@ -16,6 +16,12 @@
 //! }
 //! ```
 //!
+//! # Design
+//!
+//! How the reader is built, and why: the layers, the scan pipelines, parallelism and its
+//! memory limits, I/O, text handling and the vector kernels, in
+//! [DESIGN.md](https://github.com/tkragholm/sas7bdat-parser-rs/blob/main/DESIGN.md).
+//!
 //! # Feature flags
 //!
 //! - **`simd`** (default): vectorised string and numeric kernels through
@@ -29,7 +35,7 @@
 //! - **`dictionary`**: enables the [`dictionary`] module: string columns are probed for
 //!   cardinality and, when they look like category codes rather than free text, interned
 //!   into `u32` codes plus a value dictionary. That feeds an Arrow `DictionaryArray<u32>`,
-//!   and through it Polars `Categorical` and R `factor`. Adds `ahash`, `lasso2` and
+//!   and the R package's `factor` columns. Adds `ahash`, `lasso2` and
 //!   `cardinality-estimator`.
 //!
 //! The remaining features exist for this repository's own tooling and carry no API
