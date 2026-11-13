@@ -70,6 +70,14 @@ A tibble with these column types:
   network shares sequentially. Only Windows can tell the two apart, so on other
   systems pass `io_backend = "buffered"` for files on a share.
 - `threads`: the number of decode threads (default: all cores).
+- `col_select`, `skip`, `n_max`: columns by name or position, and a range of
+  rows, as in haven. Unselected columns are not decoded.
+- `encoding`: read the text in another encoding than the file declares, for
+  files whose header is wrong; `strict = TRUE` fails on bytes that do not
+  decode instead of replacing them.
+
+`sas_info()` gives a file's row count, encoding, table name and a data frame of
+its columns with their labels and formats, without reading any rows.
 
 ## Development
 

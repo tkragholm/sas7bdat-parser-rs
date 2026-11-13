@@ -23,17 +23,26 @@ import sas7bdat_polars as sp
 # is the largest saving on wide files.
 df = sp.read_sas("data.sas7bdat", columns=["id", "age"])
 df = sp.read_sas("data.sas7bdat", columns=["age"], n_rows=1_000_000)
+df = sp.read_sas("data.sas7bdat", row_offset=1_000_000, n_rows=1_000_000)  # rows 1M to 2M
 
 # Lazy scan. Projection and a row limit reach the decoder; filters run per batch.
 lf = sp.scan_sas("data.sas7bdat", columns=["id", "age"])
 df = lf.filter(pl.col("age") > 30).collect()
 
-# Metadata and schema without decoding rows.
+# Metadata and schema without decoding rows: counts, encoding, table name, and
+# each column's label and SAS format.
 info = sp.sas_info("data.sas7bdat")
+columns = sp.column_info("data.sas7bdat")   # name, label, format, type, width
 schema = sp.schema_for_file("data.sas7bdat")
 
-# Value labels from a companion catalog.
+# Value labels from a companion catalog: labelled columns come back as labels,
+# or as their codes with apply_labels=False; value_labels gives the mapping.
 lf = sp.scan_sas("data.sas7bdat", catalog_path="formats.sas7bcat")
+codes = sp.SasDataset("data.sas7bdat", "formats.sas7bcat", apply_labels=False).read()
+labels = sp.value_labels("data.sas7bdat", "formats.sas7bcat")  # {column: {code: label}}
+
+# A header that names the wrong encoding, and failing on bytes that do not decode.
+df = sp.read_sas("data.sas7bdat", encoding="utf-8", strict=True)
 
 # SAS stores every number as a float. Declare integer-coded columns to get Int64.
 lf = sp.scan_sas("data.sas7bdat", schema_overrides={"region": pl.Int64})
