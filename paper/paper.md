@@ -171,8 +171,10 @@ AVX2 instead, because recent Intel consumer processors lack AVX-512 and a
 binary that uses it fails at import there, so each operation runs as two
 256-bit halves. A build for the local processor uses AVX-512 where it exists,
 and Apple Silicon builds target the M1 instruction set. Optional dictionary
-encoding, a cardinality sketch gating a string interner, speeds up
-low-cardinality character columns into R `factor`s and Polars `Categorical`s.
+encoding, a cardinality sketch gating a string interner, speeds up turning
+low-cardinality character columns into R `factor`s; the Polars plugin instead
+writes Arrow dictionary columns, one dictionary per batch, which Polars reads
+as `Categorical`.
 
 Numeric columns are IEEE-754 doubles stored in 3 to 8 bytes and are widened to
 8 on read. SAS dates, datetimes, and times are converted from the 1960 epoch
