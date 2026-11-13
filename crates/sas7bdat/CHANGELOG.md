@@ -15,8 +15,19 @@ hand.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-13
+
+Minor rather than patch because the `arrow` feature moves to arrow 60. Its functions take and return arrow types, so code built against arrow 59 has to move with it.
+
+### Added
+
+- The manifest declares `rust-version = "1.89"`, the minimum the crate already needed, so an older toolchain gets a clear error from cargo.
+- The package ships ReadStat's MIT licence, since parts of the parser began as a translation of ReadStat.
+
 ### Changed
 
+- **Breaking:** the `arrow` feature depends on arrow 60 instead of 59. `into_arrow_array`, `into_arrow_record_batch`, `arrow_schema` and `collect_arrow_batches` use its types.
+- The `simd` feature uses fearless_simd 1.2 instead of 0.7. The kernels and their results are unchanged.
 - An ordered parallel scan claims a chunk only while it is at most twice the number of decode threads ahead of the next chunk to deliver. A slow chunk no longer lets the other threads fill memory with every batch behind it. Memory-mapped scans split the file into chunks of one batch each, cut by the row counts of the pages, so uneven page fill no longer leaves a short extra batch at the end of a chunk.
 - `Parallelism::Auto` takes no more threads than the estimated decoded size of their batches allows in 1 GiB. With the default batch sizes this changes nothing. With large batches of a wide table it avoids a slowdown: a 4,096-row read of a 2 GiB file with 4,041 columns went from 1.2 s on 12 threads to 0.75 s on 5.
 
@@ -227,7 +238,8 @@ different implementation with a `dataset`/`parser`/`cell` module layout and a bu
      `v0.7.0` in particular was a wheel release in July, unrelated to 0.7.0 here.
      `sas7bdat-v0.5.0` was never created, so 0.5.0 has no release to link to. -->
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.9.3...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.10.0...HEAD
+[0.10.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.10.0
 [0.9.3]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.3
 [0.9.2]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.2
 [0.9.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.1

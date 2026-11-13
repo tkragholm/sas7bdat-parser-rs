@@ -10,9 +10,9 @@ hand the result to Apache Arrow.
 
 ```toml
 [dependencies]
-sas7bdat = "0.9"
+sas7bdat = "0.10"
 # or, with Arrow record batches:
-sas7bdat = { version = "0.9", features = ["arrow"] }
+sas7bdat = { version = "0.10", features = ["arrow"] }
 ```
 
 ```rust

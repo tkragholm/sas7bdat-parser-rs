@@ -18,8 +18,8 @@ extendr-ffi = "0.9"
 # — which copies these sources out of the workspace — can still resolve them. The
 # repository redirects them back to the working tree via `src/.cargo/config.toml`;
 # `.Rbuildignore` strips that file, so a tarball gets the published crates.
-sas7bdat = { version = "0.9" }
-sas7bdat-convert = { version = "0.3" }
+sas7bdat = { version = "0.10" }
+sas7bdat-convert = { version = "0.4" }
 
 # Detach from the parent cargo workspace: an R package's Rust crate builds
 # standalone (and is copied in isolation by R CMD INSTALL).

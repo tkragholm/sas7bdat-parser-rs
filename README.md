@@ -27,7 +27,7 @@ Statistics Denmark's research servers.
 
 ```toml
 [dependencies]
-sas7bdat = { version = "0.9", features = ["arrow"] }
+sas7bdat = { version = "0.10", features = ["arrow"] }
 ```
 
 ```rust
