@@ -513,6 +513,16 @@ fn finalize_column(mut col: Robj, meta: &ColMeta) -> Robj {
 }
 
 /// Assemble a bare `data.frame` from named columns.
+/// The columns of a read that returns no rows, each empty with its class and labels. A
+/// column that would have been a factor is a character vector here, as it is when the
+/// dictionary is vetoed.
+fn finish_empty_columns(cols: Vec<Option<Robj>>, metas: &[ColMeta]) -> Vec<Robj> {
+    cols.into_iter()
+        .zip(metas)
+        .map(|(col, meta)| finalize_column(col.unwrap_or_else(|| Strings::new(0).into()), meta))
+        .collect()
+}
+
 fn build_data_frame(names: &[String], cols: Vec<Robj>, nrow: usize) -> Robj {
     let mut df: Robj = List::from_values(cols).into();
     df.set_names(names.iter().map(String::as_str)).unwrap();
@@ -538,12 +548,28 @@ fn resolve_catalog(path: &str, catalog: Option<&str>) -> Option<PathBuf> {
     sibling.exists().then_some(sibling)
 }
 
+/// Which columns and rows to read, as `read_sas7bdat()` passes them.
+struct Selection {
+    /// Columns by name or by 0-based position, in output order; `None` for every column.
+    columns: Option<ColumnChoice>,
+    /// Rows to skip before reading, counting the rows a read returns.
+    skip: u64,
+    /// The most rows to read; `None` for no limit.
+    n_max: Option<u64>,
+}
+
+enum ColumnChoice {
+    Names(Vec<String>),
+    Positions(Vec<usize>),
+}
+
 fn read_impl(
     path: &str,
     catalog: Option<&str>,
     categorical: bool,
     io_backend: &str,
     threads: Option<usize>,
+    selection: &Selection,
 ) -> std::result::Result<Robj, String> {
     // `Auto` memory-maps local files and reads network shares sequentially, which is the
     // right default — but it can only tell the two apart on Windows, and even there a DFS
@@ -567,11 +593,36 @@ fn read_impl(
         }
     }
 
-    let names: Vec<String> =
-        ds.columns().iter().map(|c| before_nul_str(&c.name).to_owned()).collect();
+    // The columns read, in output order: all of them, or the ones `col_select` named.
+    let projection = match &selection.columns {
+        None => None,
+        Some(ColumnChoice::Names(names)) => Some(ds.projection().columns(names).build()),
+        Some(ColumnChoice::Positions(positions)) => Some(
+            positions
+                .iter()
+                .fold(ds.projection(), |builder, &idx| builder.column_idx(idx))
+                .build(),
+        ),
+    }
+    .transpose()
+    .map_err(|e| format!("sas7bdat: col_select: {e}"))?;
+    let chosen: Vec<&sas7bdat::ColumnMeta> = projection.as_ref().map_or_else(
+        || ds.columns().iter().collect(),
+        |projection| {
+            projection
+                .columns()
+                .iter()
+                .filter_map(|column| ds.columns().get(column.index))
+                .collect()
+        },
+    );
+    let names: Vec<String> = chosen
+        .iter()
+        .map(|c| before_nul_str(&c.name).to_owned())
+        .collect();
     let metas: Vec<ColMeta> = {
         let label_sets = &ds.metadata().label_sets;
-        ds.columns()
+        chosen
             .iter()
             .map(|c| ColMeta {
                 class: col_class(c.logical_type),
@@ -585,8 +636,15 @@ fn read_impl(
             .collect()
     };
     // The header's row count includes rows SAS marked as deleted, which the scan skips.
+    // `skip` and `n_max` count the rows a read returns, as the core's row selection does.
     let deleted = ds.metadata().deleted_row_count;
-    let nrow = usize::try_from(ds.metadata().row_count.saturating_sub(deleted)).unwrap_or(0);
+    let live = ds.metadata().row_count.saturating_sub(deleted);
+    let first = selection.skip.min(live);
+    let rows = selection
+        .n_max
+        .map_or(live - first, |n_max| n_max.min(live - first));
+    let selected = first > 0 || rows < live;
+    let nrow = usize::try_from(rows).map_err(|_| "sas7bdat: too many rows for R".to_owned())?;
 
     // Decode all batches across cores, then fill each column's R vector in place.
     //
@@ -668,18 +726,33 @@ fn read_impl(
     // their buffers in arrival order to build one dictionary over the column. And in a file
     // with deleted rows, `row_base` counts the deleted rows before the batch, so it is not
     // the batch's position in the result. The callback runs on this thread either way.
-    let positional = deleted == 0 && !wants_factor.iter().any(|w| *w);
+    // A row selection also makes `row_base` count from the file's start, not the selection's.
+    let positional = deleted == 0 && !selected && !wants_factor.iter().any(|w| *w);
     let ordering = if positional {
         sas7bdat::OrderingMode::Unordered
     } else {
         sas7bdat::OrderingMode::Stable
     };
     let mut next_row = 0usize;
-    ds.scan()
+    let mut scan = ds
+        .scan()
         .with_parallelism(parallelism)
         .with_temporal_options(temporal)
-        .with_ordering(ordering)
-        .visit_owned_batches(|mut batch| {
+        .with_ordering(ordering);
+    if let Some(projection) = &projection {
+        scan = scan.with_projection(projection);
+    }
+    if selected {
+        scan = scan.select(sas7bdat::RowSelection::range(first, first + rows));
+    }
+    if nrow == 0 {
+        return Ok(build_data_frame(
+            &names,
+            finish_empty_columns(cols, &metas),
+            0,
+        ));
+    }
+    scan.visit_owned_batches(|mut batch| {
             let row_count = batch.row_count;
             let base = if positional {
                 usize::try_from(batch.row_base.0).unwrap_or(usize::MAX)
@@ -766,19 +839,49 @@ fn read_impl(
 /// `catalog` is an optional path to a `.sas7bcat` value-label catalog; when
 /// absent a same-stem `.sas7bcat` sibling is attached if present.
 #[extendr]
+#[allow(clippy::too_many_arguments)]
 fn read_sas7bdat(
     path: &str,
     catalog: Option<String>,
     categorical: bool,
     io_backend: &str,
     threads: Option<i32>,
+    col_select: Robj,
+    skip: f64,
+    n_max: f64,
 ) -> Robj {
     let threads = match threads {
         None => None,
         Some(n) if n >= 1 => Some(n as usize),
         Some(n) => throw_r_error(format!("sas7bdat: threads must be >= 1, got {n}")),
     };
-    match read_impl(path, catalog.as_deref(), categorical, io_backend, threads) {
+    // The R wrapper has already checked these; here they only change representation.
+    let columns = if col_select.is_null() {
+        None
+    } else if let Some(names) = col_select.as_string_vector() {
+        Some(ColumnChoice::Names(names))
+    } else if let Some(positions) = col_select.as_real_vector() {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        Some(ColumnChoice::Positions(
+            positions.iter().map(|p| *p as usize - 1).collect(),
+        ))
+    } else {
+        throw_r_error("sas7bdat: col_select must be column names or positions")
+    };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let selection = Selection {
+        columns,
+        skip: skip as u64,
+        n_max: n_max.is_finite().then_some(n_max as u64),
+    };
+    match read_impl(
+        path,
+        catalog.as_deref(),
+        categorical,
+        io_backend,
+        threads,
+        &selection,
+    ) {
         Ok(df) => df,
         Err(e) => throw_r_error(e),
     }

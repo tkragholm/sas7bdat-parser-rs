@@ -10,7 +10,10 @@ read_sas7bdat(
   catalog = NULL,
   categorical = FALSE,
   io_backend = c("auto", "mmap", "buffered"),
-  threads = NULL
+  threads = NULL,
+  col_select = NULL,
+  skip = 0,
+  n_max = Inf
 )
 
 read_sas(
@@ -18,7 +21,10 @@ read_sas(
   catalog = NULL,
   categorical = FALSE,
   io_backend = c("auto", "mmap", "buffered"),
-  threads = NULL
+  threads = NULL,
+  col_select = NULL,
+  skip = 0,
+  n_max = Inf
 )
 }
 \arguments{
@@ -46,6 +52,17 @@ files, it is a faster one -- spawning twelve threads for a few thousand rows
 costs more than it saves. Set a number to override, to leave the machine room
 for other work, or to bound memory: in-flight batches scale with it. Read
 concurrency is capped separately by the reader and is not affected.}
+
+\item{col_select}{Columns to read: a character vector of names, or a numeric
+vector of 1-based positions, in the order they should appear. \code{NULL} (the
+default) reads every column. Unlike haven, tidyselect helpers are not
+accepted.}
+
+\item{skip}{Rows to skip before reading. Rows SAS marked as deleted are not
+counted.}
+
+\item{n_max}{The most rows to read. \code{Inf} (the default) reads to the end;
+\code{0} reads no rows and returns the columns with their types and labels.}
 }
 \value{
 A tibble (or a base \code{data.frame} if the \pkg{tibble} package is not

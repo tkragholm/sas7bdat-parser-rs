@@ -56,6 +56,14 @@
 #'   costs more than it saves. Set a number to override, to leave the machine room
 #'   for other work, or to bound memory: in-flight batches scale with it. Read
 #'   concurrency is capped separately by the reader and is not affected.
+#' @param col_select Columns to read: a character vector of names, or a numeric
+#'   vector of 1-based positions, in the order they should appear. `NULL` (the
+#'   default) reads every column. Unlike haven, tidyselect helpers are not
+#'   accepted.
+#' @param skip Rows to skip before reading. Rows SAS marked as deleted are not
+#'   counted.
+#' @param n_max The most rows to read. `Inf` (the default) reads to the end;
+#'   `0` reads no rows and returns the columns with their types and labels.
 #' @return A tibble (or a base `data.frame` if the `tibble` package is not
 #'   installed).
 #' @export
@@ -82,7 +90,8 @@
 #' }
 read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
                           io_backend = c("auto", "mmap", "buffered"),
-                          threads = NULL) {
+                          threads = NULL, col_select = NULL, skip = 0,
+                          n_max = Inf) {
   path <- check_path(path, "path")
   if (!is.null(catalog)) {
     catalog <- check_path(catalog, "catalog")
@@ -94,7 +103,12 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
   io_backend <- match.arg(io_backend)
   threads <- check_threads(threads)
 
-  df <- sas7bdat_read_impl(path, catalog, categorical, io_backend, threads)
+  col_select <- check_col_select(col_select)
+  skip <- check_row_count(skip, "skip", allow_inf = FALSE)
+  n_max <- check_row_count(n_max, "n_max", allow_inf = TRUE)
+
+  df <- sas7bdat_read_impl(path, catalog, categorical, io_backend, threads,
+                           col_select, skip, n_max)
   if (requireNamespace("tibble", quietly = TRUE)) {
     tibble::new_tibble(df, nrow = nrow(df))
   } else {
@@ -109,6 +123,31 @@ read_sas <- read_sas7bdat
 # `threads` reaches Rust as an integer, so reject the values R would otherwise
 # coerce silently: 0, negatives, fractions and NA all mean something the reader
 # cannot act on.
+check_col_select <- function(value) {
+  if (is.null(value)) {
+    return(NULL)
+  }
+  if (is.character(value) && length(value) > 0L && !anyNA(value)) {
+    return(value)
+  }
+  if (is.numeric(value) && length(value) > 0L && !anyNA(value) &&
+      all(value == trunc(value)) && all(value >= 1)) {
+    return(as.double(value))
+  }
+  stop("`col_select` must be NULL, column names, or 1-based column positions, not ",
+       deparse1(value), call. = FALSE)
+}
+
+check_row_count <- function(value, arg, allow_inf) {
+  ok <- is.numeric(value) && length(value) == 1L && !is.na(value) && value >= 0 &&
+    if (is.infinite(value)) allow_inf else value == trunc(value)
+  if (!ok) {
+    stop("`", arg, "` must be a whole number >= 0",
+         if (allow_inf) " or Inf" else "", ", not ", deparse1(value), call. = FALSE)
+  }
+  as.double(value)
+}
+
 check_threads <- function(value) {
   if (is.null(value)) {
     return(NULL)
