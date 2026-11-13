@@ -82,9 +82,6 @@ wheel (`sas7bdat-cli`) installs the command-line converter with no Python
 dependencies. The R package is at present installed from source and needs a
 Rust toolchain.
 
-<!-- TODO: if you can, add one measured server timing here (file size, rows,
-time with the previous ReadStat-based step, time with this reader). -->
-
 # State of the field
 
 ReadStat [@readstat] is the reference C implementation and the backend of
@@ -232,13 +229,21 @@ difference. The R package's times include building R vectors.
 
 # Research impact statement
 
-The library is used for register-based epidemiological research on Statistics
-Denmark's secure research servers, where it replaced ReadStat-based conversion
-of SAS register extracts as the entry point of Polars-based analysis
-pipelines. It is distributed on crates.io and PyPI. Outside users have
-requested features, for example storing SAS labels and formats as Parquet
-key-value metadata, which has since been implemented. The repository ships the
-benchmark scripts and a corpus-profiling toolchain (`sas7bdat-corpus-profile`,
+The library is used in register research by Mary Elizabeth's Hospital's Data
+Powerhouse at Rigshospitalet, Copenhagen, which studies the health, social,
+and economic consequences of severe illness in children, young people,
+pregnant women, and their families using nationwide Danish registers
+[@datapowerhouse]. The author has used it on Statistics Denmark's research
+servers since its first release in January 2026. In November 2026 it converted
+all of the group's SAS register data there, 1,469 files and 2.76 TB, to
+Parquet in about two hours, and the group's researchers now work from that
+Parquet. Before, they mostly loaded the SAS files into R with haven, which
+reads them through ReadStat. Outside users have requested features, for
+example storing SAS labels and formats as Parquet key-value metadata, which
+has since been implemented. By 13 November 2026 the crate had been downloaded
+about 7,600 times from crates.io and the Python package about 4,000 times from
+PyPI, mirrors excluded. The repository ships the benchmark scripts and a
+corpus-profiling toolchain (`sas7bdat-corpus-profile`,
 `sas7bdat-fixture-profile`), so the measurements reported here can be repeated
 on any SAS7BDAT corpus.
 
