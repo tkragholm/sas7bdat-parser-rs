@@ -158,7 +158,7 @@ jobs:
       matrix:
         include:
           - target: aarch64
-            runner: macos-14   # Apple Silicon
+            runner: macos-15   # Apple Silicon
     steps:
       - uses: actions/checkout@v6
       # maturin-action takes the toolchain as an input and cannot read
@@ -273,7 +273,7 @@ jobs:
           - platform: windows-x64
             runner: windows-latest
           - platform: macos-aarch64
-            runner: macos-14
+            runner: macos-15
     defaults:
       run:
         shell: bash
