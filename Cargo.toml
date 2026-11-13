@@ -48,9 +48,9 @@ parquet = { version = "60", default-features = false, features = [
     "simdutf8",
 ] }
 # generate-import-lib synthesizes pythonXX.lib so Windows wheels can be cross-compiled without a Windows Python install.
-pyo3 = { version = "0.29", features = ["generate-import-lib"] }
+pyo3 = { version = "0.30", features = ["generate-import-lib"] }
 # Keep in lockstep with pyo3 — provides the build.rs extension-module linker args.
-pyo3-build-config = "0.29"
+pyo3-build-config = "0.30"
 rayon = "1"
 rmp-serde = "1"
 serde = { version = "1.0.130", features = ["derive"] }
