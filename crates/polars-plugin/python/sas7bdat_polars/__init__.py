@@ -471,8 +471,9 @@ def sas_info(
     catalog_path: str | os.PathLike[str] | None = None,
     io_backend: str | None = None,
 ) -> dict[str, Any]:
-    """Header-level facts about a file: ``n_rows``, ``n_columns``, ``encoding``,
-    ``compression``, ``rows_per_page``, ``size_bytes``. No rows are decoded."""
+    """Header-level facts about a file: ``n_rows`` (the rows a read returns),
+    ``n_deleted_rows``, ``n_columns``, ``encoding``, ``compression``,
+    ``rows_per_page``, ``size_bytes``. No rows are decoded."""
     return dict(
         _native_sas_info(
             str(path), None if catalog_path is None else str(catalog_path), io_backend

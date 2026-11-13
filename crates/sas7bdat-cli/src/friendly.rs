@@ -35,11 +35,20 @@ fn guard_exists(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Say whose problem a failure is: the file system, a part of the format this reader
+/// does not handle, a bug here, or the file itself.
 fn not_a_sas_file(path: &Path, err: &sas7bdat::Error) -> anyhow::Error {
-    anyhow::anyhow!(
-        "'{}' doesn't look like a valid SAS7BDAT file ({err})",
-        path.display()
-    )
+    let path = path.display();
+    match err {
+        sas7bdat::Error::Io(io) => anyhow::anyhow!("Could not read '{path}': {}", io.message),
+        sas7bdat::Error::Unsupported(_) => anyhow::anyhow!(
+            "'{path}' uses a part of the SAS7BDAT format this reader does not support ({err})"
+        ),
+        sas7bdat::Error::Internal(_) => {
+            anyhow::anyhow!("Reading '{path}' hit a bug in this reader ({err})")
+        }
+        _ => anyhow::anyhow!("'{path}' doesn't look like a valid SAS7BDAT file ({err})"),
+    }
 }
 
 /// Reject a convert input before the library touches it.

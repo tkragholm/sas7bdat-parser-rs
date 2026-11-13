@@ -13,7 +13,9 @@ mod scan;
 
 use arrow_array::RecordBatch;
 use arrow_array::ffi_stream::FFI_ArrowArrayStream;
-use pyo3::exceptions::{PyRuntimeError, PyStopIteration, PyValueError};
+use pyo3::exceptions::{
+    PyFileNotFoundError, PyOSError, PyRuntimeError, PyStopIteration, PyValueError,
+};
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyDict};
 use sas7bdat::{Dataset, IoBackendPreference, LogicalType, OpenOptions};
@@ -32,6 +34,26 @@ const STREAM_CAPSULE_NAME: &CStr = c"arrow_array_stream";
 
 fn value_error(err: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(err.to_string())
+}
+
+/// Opening a file: a missing path is `FileNotFoundError` and any other failure to read
+/// it is `OSError`, as Python's own `open` would raise; a file that is not a readable
+/// SAS7BDAT is `ValueError`.
+fn open_error(err: sas7bdat::Error) -> PyErr {
+    match err {
+        sas7bdat::Error::Io(_) => PyOSError::new_err(err.to_string()),
+        _ => value_error(err),
+    }
+}
+
+fn require_file(path: &str) -> PyResult<()> {
+    if std::path::Path::new(path).exists() {
+        Ok(())
+    } else {
+        Err(PyFileNotFoundError::new_err(format!(
+            "no such file: {path}"
+        )))
+    }
 }
 
 // ─── SasDataset ───────────────────────────────────────────────────────────────
@@ -56,11 +78,13 @@ impl SasDataset {
         io_backend: Option<&str>,
     ) -> PyResult<Self> {
         let options = open_options(io_backend)?;
+        require_file(path)?;
         let mut ds = py
             .detach(|| Dataset::open_with(path, options))
-            .map_err(value_error)?;
+            .map_err(open_error)?;
         if let Some(catalog) = catalog_path {
-            ds.attach_catalog(catalog).map_err(value_error)?;
+            require_file(catalog)?;
+            ds.attach_catalog(catalog).map_err(open_error)?;
         }
         if let Some(overrides) = schema_overrides {
             let parsed = overrides
@@ -208,7 +232,12 @@ fn info_dict<'py>(py: Python<'py>, ds: &Dataset, path: &str) -> PyResult<Bound<'
     let meta = ds.metadata();
     let info = PyDict::new(py);
     info.set_item("path", path)?;
-    info.set_item("n_rows", meta.row_count)?;
+    // The header's row count includes rows SAS marked as deleted, which a read skips.
+    info.set_item(
+        "n_rows",
+        meta.row_count.saturating_sub(meta.deleted_row_count),
+    )?;
+    info.set_item("n_deleted_rows", meta.deleted_row_count)?;
     info.set_item("n_columns", ds.columns().len())?;
     info.set_item("row_length_bytes", meta.row_len)?;
     info.set_item("page_count", meta.page_count)?;
@@ -343,11 +372,13 @@ fn sas_info<'py>(
     io_backend: Option<&str>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let options = open_options(io_backend)?;
+    require_file(path)?;
     let mut ds = py
         .detach(|| Dataset::open_with(path, options))
-        .map_err(value_error)?;
+        .map_err(open_error)?;
     if let Some(catalog) = catalog_path {
-        ds.attach_catalog(catalog).map_err(value_error)?;
+        require_file(catalog)?;
+        ds.attach_catalog(catalog).map_err(open_error)?;
     }
     info_dict(py, &ds, path)
 }

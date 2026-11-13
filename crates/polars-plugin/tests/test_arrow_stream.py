@@ -201,3 +201,35 @@ def test_categorical_refuses_what_it_cannot_encode():
         sp.read_sas(PEOPLE, categorical=["NOPE"])
     with pytest.raises(ValueError, match="only string"):
         sp.read_sas(PEOPLE, categorical=["AGE"])
+
+
+def test_a_missing_file_raises_file_not_found(tmp_path):
+    missing = tmp_path / "absent.sas7bdat"
+    with pytest.raises(FileNotFoundError, match="absent.sas7bdat"):
+        sp.SasDataset(str(missing))
+    with pytest.raises(FileNotFoundError):
+        sp.SasDataset(str(PEOPLE), catalog_path=str(tmp_path / "absent.sas7bcat"))
+
+
+def test_a_file_that_is_not_sas7bdat_raises_value_error(tmp_path):
+    junk = tmp_path / "junk.sas7bdat"
+    junk.write_bytes(b"not a SAS file" * 100)
+    with pytest.raises(ValueError):
+        sp.SasDataset(str(junk))
+
+
+DELETED = (
+    Path(__file__).resolve().parents[3]
+    / "fixtures"
+    / "raw_data"
+    / "csharp"
+    / "all_rand_normal_with_deleted2.sas7bdat"
+)
+
+
+@pytest.mark.skipif(not DELETED.exists(), reason=f"corpus file not present: {DELETED}")
+def test_info_counts_the_rows_a_read_returns():
+    # The header counts five rows SAS marked as deleted; a read skips them.
+    info = sp.sas_info(str(DELETED))
+    assert info["n_deleted_rows"] == 5
+    assert info["n_rows"] == sp.read_sas(str(DELETED)).height == 32

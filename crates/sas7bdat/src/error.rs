@@ -309,7 +309,10 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(err) => write!(f, "io error: {}", err.message),
+            Self::Io(err) => match &err.path {
+                Some(path) => write!(f, "io error: {}: {}", path.display(), err.message),
+                None => write!(f, "io error: {}", err.message),
+            },
             Self::Header(err) => write!(f, "header error: {err}"),
             Self::Metadata(err) => write!(f, "metadata error: {err}"),
             Self::Projection(err) => write!(f, "projection error: {}", err.message),
@@ -345,6 +348,14 @@ mod tests {
         assert_eq!(
             Error::unsupported("this compressed page layout is not implemented yet").to_string(),
             "unsupported: this compressed page layout is not implemented yet"
+        );
+    }
+
+    #[test]
+    fn an_io_error_names_its_file() {
+        assert_eq!(
+            Error::io_with_path("/data/x.sas7bdat", "permission denied").to_string(),
+            "io error: /data/x.sas7bdat: permission denied"
         );
     }
 
