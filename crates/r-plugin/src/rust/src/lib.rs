@@ -79,6 +79,9 @@ const fn col_class(logical: LogicalType) -> ColClass {
 struct ColMeta {
     class: ColClass,
     var_label: Option<String>,
+    /// The SAS format as haven's `format.sas` attribute spells it: name and width,
+    /// `DATE9`, `$A`, `DATETIME23.3`.
+    format_sas: Option<String>,
     value_labels: Option<LabelSet>,
 }
 
@@ -506,10 +509,18 @@ fn finalize_column(mut col: Robj, meta: &ColMeta) -> Robj {
             }
         }
     }
+    set_column_attributes(&mut col, meta);
+    col
+}
+
+/// The attributes haven gives every column: the variable label and the SAS format.
+fn set_column_attributes(col: &mut Robj, meta: &ColMeta) {
     if let Some(label) = &meta.var_label {
         col.set_attrib("label", label.as_str()).unwrap();
     }
-    col
+    if let Some(format) = &meta.format_sas {
+        col.set_attrib("format.sas", format.as_str()).unwrap();
+    }
 }
 
 /// Assemble a bare `data.frame` from named columns.
@@ -647,6 +658,7 @@ fn read_impl(
             .map(|c| ColMeta {
                 class: col_class(c.logical_type),
                 var_label: c.label.as_deref().map(|label| before_nul_str(label).to_owned()),
+                format_sas: c.format_spec().map(|spec| before_nul_str(&spec).to_owned()),
                 value_labels: c
                     .format
                     .as_deref()
@@ -832,9 +844,7 @@ fn read_impl(
                 .filter(|dict| !dict.dictionary.iter().any(|level| level.contains('\0')))
             {
                 let mut col = factor_from_dict(dict, nrow);
-                if let Some(label) = &meta.var_label {
-                    col.set_attrib("label", label.as_str()).unwrap();
-                }
+                set_column_attributes(&mut col, meta);
                 cols[ci] = Some(col);
                 held[ci].clear();
                 continue;
@@ -926,9 +936,116 @@ fn read_sas7bdat(
     }
 }
 
+/// The R class a column of this type is read as.
+const fn r_class_name(logical: LogicalType) -> &'static str {
+    match col_class(logical) {
+        ColClass::Real(RealClass::Plain) => "double",
+        ColClass::Real(RealClass::Date) => "Date",
+        ColClass::Real(RealClass::DateTime) => "POSIXct",
+        ColClass::Real(RealClass::Time) => "hms",
+        ColClass::Text => "character",
+    }
+}
+
+/// A character vector with `NA` where `values` has `None`.
+fn strings_with_na<'a>(values: impl Iterator<Item = Option<&'a str>>) -> Robj {
+    let values: Vec<Rstr> = values
+        .map(|value| value.map_or_else(Rstr::na, Rstr::from))
+        .collect();
+    Strings::from_values(values).into()
+}
+
+/// A `POSIXct` in UTC, `NA` when absent.
+fn posixct(time: Option<std::time::SystemTime>) -> Robj {
+    let seconds = time.map_or(f64::NAN, |time| match time.duration_since(std::time::UNIX_EPOCH) {
+        Ok(after) => after.as_secs_f64(),
+        Err(before) => -before.duration().as_secs_f64(),
+    });
+    let value = if seconds.is_nan() { Rfloat::na() } else { Rfloat::from(seconds) };
+    let mut out: Robj = Doubles::from_values([value]).into();
+    out.set_class(&["POSIXct", "POSIXt"]).unwrap();
+    out.set_attrib("tzone", "UTC").unwrap();
+    out
+}
+
+fn info_impl(
+    path: &str,
+    catalog: Option<&str>,
+    encoding: Option<&str>,
+) -> std::result::Result<Robj, String> {
+    let builder = OpenOptions::builder();
+    let builder = match encoding {
+        None => builder,
+        Some(label) => builder
+            .encoding(label)
+            .map_err(|e| format!("sas7bdat: encoding: {e}"))?,
+    };
+    let mut ds = Dataset::open_with(path, builder.build())
+        .map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
+    if let Some(catalog) = catalog {
+        ds.attach_catalog(catalog)
+            .map_err(|e| format!("sas7bdat: catalog `{catalog}`: {e}"))?;
+    }
+    let meta = ds.metadata();
+    let columns = ds.columns();
+    let names: Vec<String> = columns.iter().map(|c| before_nul_str(&c.name).to_owned()).collect();
+    let formats: Vec<Option<String>> = columns.iter().map(|c| c.format_spec()).collect();
+    let column_frame = build_data_frame(
+        &["name", "label", "format", "type", "width"].map(str::to_owned),
+        vec![
+            strings_with_na(names.iter().map(|name| Some(name.as_str()))),
+            strings_with_na(columns.iter().map(|c| c.label.as_deref().map(before_nul_str))),
+            strings_with_na(formats.iter().map(|f| f.as_deref().map(before_nul_str))),
+            strings_with_na(columns.iter().map(|c| Some(r_class_name(c.logical_type)))),
+            Doubles::from_values(columns.iter().map(|c| f64::from(c.physical_width))).into(),
+        ],
+        columns.len(),
+    );
+    #[allow(clippy::cast_precision_loss)]
+    let count = |n: u64| n as f64;
+    let info = List::from_names_and_values(
+        [
+            "n_rows",
+            "n_deleted_rows",
+            "n_columns",
+            "encoding",
+            "compression",
+            "table_name",
+            "file_label",
+            "created",
+            "modified",
+            "columns",
+        ],
+        [
+            r!(count(meta.row_count.saturating_sub(meta.deleted_row_count))),
+            r!(count(meta.deleted_row_count)),
+            r!(count(columns.len() as u64)),
+            strings_with_na([meta.encoding.as_deref()].into_iter()),
+            r!(format!("{:?}", meta.compression).to_ascii_lowercase()),
+            strings_with_na([meta.table_name.as_deref()].into_iter()),
+            strings_with_na([meta.file_label.as_deref()].into_iter()),
+            posixct(meta.created_at),
+            posixct(meta.modified_at),
+            column_frame,
+        ],
+    )
+    .map_err(|e| format!("sas7bdat: {e}"))?;
+    Ok(info.into())
+}
+
+/// Header-level facts about a SAS7BDAT file, without reading its rows.
+#[extendr]
+fn sas7bdat_info(path: &str, catalog: Option<String>, encoding: Option<String>) -> Robj {
+    match info_impl(path, catalog.as_deref(), encoding.as_deref()) {
+        Ok(info) => info,
+        Err(e) => throw_r_error(e),
+    }
+}
+
 extendr_module! {
     mod fastsas;
     fn read_sas7bdat;
+    fn sas7bdat_info;
 }
 
 #[cfg(test)]

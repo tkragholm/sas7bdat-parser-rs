@@ -45,3 +45,16 @@ test_that("a catalog beside the file that cannot be read is a warning", {
   expect_null(attr(df, "fastsas_warning"))
   expect_identical(nrow(df), 5L)
 })
+
+test_that("format.sas is set as haven sets it", {
+  skip_if_not_installed("haven")
+  for (name in c("dtdate.sas7bdat", "test_data_win.sas7bdat", "missing_test.sas7bdat")) {
+    f <- system.file("extdata", name, package = "fastsas")
+    skip_if(f == "", "bundled fixture not installed")
+    ours <- lapply(read_sas7bdat(f), attr, "format.sas")
+    theirs <- lapply(haven::read_sas(f), attr, "format.sas")
+    expect_identical(ours, theirs, info = name)
+  }
+  f <- system.file("extdata", "test_data_win.sas7bdat", package = "fastsas")
+  expect_identical(attr(read_sas7bdat(f, categorical = TRUE)$ID, "format.sas"), NULL)
+})

@@ -2,4 +2,5 @@
 
 export(read_sas)
 export(read_sas7bdat)
+export(sas_info)
 useDynLib(fastsas, .registration = TRUE)
