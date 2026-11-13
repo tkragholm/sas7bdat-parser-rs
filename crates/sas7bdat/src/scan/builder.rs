@@ -66,7 +66,7 @@ const AUTO_MIN_PAGES_TO_PARALLELISE: usize = 16;
 /// table: the Polars binding reads the 2 GiB AHS file in 4,096-row batches of about 200 MB
 /// by the estimate, and on a 12-core M3 Pro that read took 0.72 to 0.81 s at 4 to 8 threads
 /// and 1.15 to 1.22 s at 9 to 12. The cap gives it 5.
-const AUTO_IN_FLIGHT_BYTES: usize = 1 << 30;
+const AUTO_IN_FLIGHT_BYTES: usize = super::gate::IN_FLIGHT_BYTES;
 
 /// Workers for a scan over `work_items` pages carrying about `rows` rows.
 ///
@@ -1748,7 +1748,7 @@ impl ScanBuilder<'_> {
         let gate = super::gate::ChunkGate::new(
             chunk_count,
             matches!(self.ordering, OrderingMode::Stable)
-                .then(|| super::gate::ordered_window(workers)),
+                .then(|| super::gate::ordered_window_for(workers, plan.batch_bytes)),
         );
         let descriptor_table = descriptors.as_ref();
         let counters = ProgressCounters::default();
@@ -1761,7 +1761,7 @@ impl ScanBuilder<'_> {
         };
 
         let total_stats = std::thread::scope(|scope| -> Result<ScanStats> {
-            let channel_bound = workers.saturating_mul(2).max(1);
+            let channel_bound = super::gate::channel_bound(workers, plan.batch_bytes);
             let (tx, rx) = sync_channel(channel_bound);
             let stop = Arc::new(AtomicBool::new(false));
             let gate = &gate;

@@ -61,6 +61,8 @@ struct FusedRun<'a> {
     path: &'a std::path::Path,
     spans: &'a [(u64, usize)],
     workers: usize,
+    /// The estimated decoded size of one batch, which bounds the queues.
+    batch_bytes: usize,
     ordering: super::OrderingMode,
     observer: Option<&'a super::ScanProgressObserver>,
     total_pages: u64,
@@ -211,6 +213,7 @@ where
         path,
         spans: &spans,
         workers,
+        batch_bytes: plan.batch_bytes,
         ordering: builder.ordering,
         observer: builder.progress.as_ref(),
         total_pages: page_count,
@@ -268,7 +271,7 @@ where
     let gate = super::gate::ChunkGate::new(
         run.parse.chunk_count,
         matches!(run.ordering, super::OrderingMode::Stable)
-            .then(|| super::gate::ordered_window(workers)),
+            .then(|| super::gate::ordered_window_for(workers, run.batch_bytes)),
     );
     let counters = ProgressCounters::default();
     let counters = &counters;
@@ -282,7 +285,10 @@ where
     };
 
     std::thread::scope(|scope| -> Result<(ScanStats, u64)> {
-        let (tx, rx) = sync_channel::<StreamedBatchMessage>(workers.saturating_mul(2).max(1));
+        let (tx, rx) = sync_channel::<StreamedBatchMessage>(super::gate::channel_bound(
+            workers,
+            run.batch_bytes,
+        ));
         let stop = Arc::new(AtomicBool::new(false));
         // Readers get their own stop flag. `stop` means the consumer asked to quit, which
         // decode workers honour mid-chunk; the readers must also stop once the parse stage

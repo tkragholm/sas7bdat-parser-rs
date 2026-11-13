@@ -142,11 +142,69 @@ pub(super) const fn ordered_window(workers: usize) -> usize {
     if w < 2 { 2 } else { w }
 }
 
+/// Batches a scan may hold beyond the ones its workers are decoding: those finished and waiting
+/// for an earlier chunk, and those queued for the consumer. With small batches the bounds are
+/// counts, as before.
+///
+/// The thread count is capped so that the workers' own batches fit
+/// [`IN_FLIGHT_BYTES`]; the two queues were not, and with wide batches and a slow consumer
+/// they could hold three times as much again. On the 4,041-column AHS file the Polars plugin's
+/// 120 MB batches put its peak about 2 GB above the core's.
+pub(super) const IN_FLIGHT_BYTES: usize = 1 << 30;
+
+/// [`IN_FLIGHT_BYTES`] in batches of `batch_bytes`, at least one.
+const fn batches_in_budget(batch_bytes: usize) -> usize {
+    let b = if batch_bytes == 0 { 1 } else { batch_bytes };
+    let n = IN_FLIGHT_BYTES / b;
+    if n == 0 { 1 } else { n }
+}
+
+/// [`ordered_window`], cut to the byte budget for wide batches, but never below one chunk per
+/// worker plus one, so that every worker can hold a chunk while the next one to deliver is
+/// claimed.
+pub(super) const fn ordered_window_for(workers: usize, batch_bytes: usize) -> usize {
+    let full = ordered_window(workers);
+    let budget = batches_in_budget(batch_bytes);
+    let floor = workers.saturating_add(1);
+    let cut = if budget < full { budget } else { full };
+    if cut < floor { floor } else { cut }
+}
+
+/// Batches the channel to the consumer may queue: two per worker, cut to the byte budget, and
+/// at least one.
+pub(super) const fn channel_bound(workers: usize, batch_bytes: usize) -> usize {
+    let full = workers.saturating_mul(2);
+    let budget = batches_in_budget(batch_bytes);
+    let cut = if budget < full { budget } else { full };
+    if cut == 0 { 1 } else { cut }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
+
+    const MB: usize = 1 << 20;
+
+    #[test]
+    fn small_batches_keep_the_count_bounds() {
+        assert_eq!(ordered_window_for(12, 32 * MB), ordered_window(12));
+        assert_eq!(channel_bound(12, 32 * MB), 24);
+        assert_eq!(channel_bound(1, 32 * MB), 2);
+    }
+
+    #[test]
+    fn wide_batches_are_bounded_by_bytes_but_keep_every_worker_busy() {
+        // 200 MB batches: five fit in the budget.
+        assert_eq!(channel_bound(5, 200 * MB), 5);
+        assert_eq!(ordered_window_for(5, 200 * MB), 6);
+        // A batch larger than the whole budget still leaves room to make progress.
+        assert_eq!(channel_bound(4, 2048 * MB), 1);
+        assert_eq!(ordered_window_for(4, 2048 * MB), 5);
+        // An explicit thread count above the budget keeps a chunk per worker.
+        assert_eq!(ordered_window_for(12, 200 * MB), 13);
+    }
 
     #[test]
     fn claims_are_handed_out_in_order_and_end_with_the_chunks() {
