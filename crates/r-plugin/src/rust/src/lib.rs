@@ -488,7 +488,9 @@ fn read_impl(
             })
             .collect()
     };
-    let nrow = usize::try_from(ds.metadata().row_count).unwrap_or(0);
+    // The header's row count includes rows SAS marked as deleted, which the scan skips.
+    let deleted = ds.metadata().deleted_row_count;
+    let nrow = usize::try_from(ds.metadata().row_count.saturating_sub(deleted)).unwrap_or(0);
 
     // Decode all batches across cores, then fill each column's R vector in place.
     //
@@ -558,21 +560,35 @@ fn read_impl(
         (0..metas.len()).map(|_| HashMap::new()).collect();
 
     // Every batch is written at its own `row_base`, so the order batches arrive in does not
-    // matter, and asking for none spares the core its reorder buffer. Factor columns are the
-    // exception: their buffers are collected in arrival order to build one dictionary over
-    // the column, so they keep file order. The callback runs on this thread either way.
-    let ordering = if wants_factor.iter().any(|w| *w) {
-        sas7bdat::OrderingMode::Stable
-    } else {
+    // matter, and asking for none spares the core its reorder buffer. Two cases keep file
+    // order and write each batch after the previous one instead. Factor columns collect
+    // their buffers in arrival order to build one dictionary over the column. And in a file
+    // with deleted rows, `row_base` counts the deleted rows before the batch, so it is not
+    // the batch's position in the result. The callback runs on this thread either way.
+    let positional = deleted == 0 && !wants_factor.iter().any(|w| *w);
+    let ordering = if positional {
         sas7bdat::OrderingMode::Unordered
+    } else {
+        sas7bdat::OrderingMode::Stable
     };
+    let mut next_row = 0usize;
     ds.scan()
         .with_parallelism(parallelism)
         .with_temporal_options(temporal)
         .with_ordering(ordering)
         .visit_owned_batches(|mut batch| {
-            let base = usize::try_from(batch.row_base.0).unwrap_or(0);
             let row_count = batch.row_count;
+            let base = if positional {
+                usize::try_from(batch.row_base.0).unwrap_or(usize::MAX)
+            } else {
+                next_row
+            };
+            next_row = next_row.saturating_add(row_count);
+            if base.checked_add(row_count).is_none_or(|end| end > nrow) {
+                return Err(sas7bdat::Error::corruption(format!(
+                    "the scan delivered more rows than the {nrow} the header declares"
+                )));
+            }
             for (ci, buffer) in std::mem::take(&mut batch.columns).into_iter().enumerate() {
                 let Some(meta) = metas.get(ci) else { continue };
                 if wants_factor[ci] {
@@ -583,9 +599,8 @@ fn read_impl(
                 match meta.class {
                     ColClass::Text => {
                         // SAFETY: `col` owns the STRSXP and keeps it alive; every
-                        // write is on this (main) thread — the visitor is called
-                        // serially — and `base + i` is always < nrow because the
-                        // scan cannot emit more rows than the header declared.
+                        // write is on this (main) thread, since the visitor is called
+                        // serially; and `base + row_count <= nrow` was checked above.
                         let sexp = unsafe { col.get() };
                         unsafe { fill_text_sexp(sexp, base, &buffer, &mut caches[ci]) };
                     }
