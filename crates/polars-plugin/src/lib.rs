@@ -17,7 +17,7 @@ use pyo3::exceptions::{
     PyFileNotFoundError, PyOSError, PyRuntimeError, PyStopIteration, PyValueError,
 };
 use pyo3::prelude::*;
-use pyo3::types::{PyCapsule, PyDict};
+use pyo3::types::{PyCapsule, PyDict, PyList};
 use sas7bdat::{Dataset, IoBackendPreference, LogicalType, OpenOptions};
 use scan::{ScanReader, ScanSpec};
 use std::collections::HashMap;
@@ -253,7 +253,36 @@ fn info_dict<'py>(py: Python<'py>, ds: &Dataset, path: &str) -> PyResult<Bound<'
     if let Ok(fs_meta) = std::fs::metadata(path) {
         info.set_item("size_bytes", fs_meta.len())?;
     }
+    info.set_item("table_name", meta.table_name.clone())?;
+    info.set_item("file_label", meta.file_label.clone())?;
+    info.set_item("created", meta.created_at)?;
+    info.set_item("modified", meta.modified_at)?;
+    let columns = PyList::empty(py);
+    for column in ds.columns() {
+        let entry = PyDict::new(py);
+        entry.set_item("name", &column.name)?;
+        entry.set_item("label", column.label.as_deref())?;
+        entry.set_item("format", column.format_spec())?;
+        entry.set_item("type", logical_type_name(column.logical_type))?;
+        entry.set_item("width", column.physical_width)?;
+        columns.append(entry)?;
+    }
+    info.set_item("columns", columns)?;
     Ok(info)
+}
+
+/// The name a column's type has in `sas_info` and `column_info`, one of the names
+/// `schema_overrides` accepts.
+const fn logical_type_name(logical_type: LogicalType) -> &'static str {
+    match logical_type {
+        LogicalType::Integer => "int64",
+        LogicalType::Float => "float64",
+        LogicalType::Date => "date",
+        LogicalType::DateTime => "datetime",
+        LogicalType::Time => "time",
+        LogicalType::String => "string",
+        LogicalType::Bytes => "binary",
+    }
 }
 
 // ─── ArrowStream ──────────────────────────────────────────────────────────────

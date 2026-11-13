@@ -471,13 +471,52 @@ def sas_info(
     catalog_path: str | os.PathLike[str] | None = None,
     io_backend: str | None = None,
 ) -> dict[str, Any]:
-    """Header-level facts about a file: ``n_rows`` (the rows a read returns),
-    ``n_deleted_rows``, ``n_columns``, ``encoding``, ``compression``,
-    ``rows_per_page``, ``size_bytes``. No rows are decoded."""
+    """Header-level facts about a file, without decoding any rows.
+
+    The keys are ``n_rows`` (the rows a read returns), ``n_deleted_rows``,
+    ``n_columns``, ``encoding``, ``compression``, ``rows_per_page``,
+    ``size_bytes``, ``table_name``, ``file_label``, ``created`` and ``modified``
+    (datetimes from the file header), and ``columns``: one dict per column with
+    its ``name``, ``label``, ``format`` (as SAS writes it, e.g. ``DATE9.``),
+    ``type`` and ``width`` in bytes. :func:`column_info` gives the columns as a
+    DataFrame.
+
+    >>> info = sas_info("airline.sas7bdat")  # doctest: +SKIP
+    >>> info["n_rows"], info["n_columns"]  # doctest: +SKIP
+    (32, 6)
+    """
     return dict(
         _native_sas_info(
             str(path), None if catalog_path is None else str(catalog_path), io_backend
         )
+    )
+
+
+def column_info(
+    path: str | os.PathLike[str],
+    catalog_path: str | os.PathLike[str] | None = None,
+) -> pl.DataFrame:
+    """One row per column: ``name``, ``label``, ``format``, ``type`` and
+    ``width``, read from the file header without decoding any rows.
+
+    The variable labels and format strings a SAS user sees in ``PROC CONTENTS``.
+    ``type`` is the polars type the column is read as, by its name in
+    ``schema_overrides``.
+
+    >>> column_info("airline.sas7bdat").columns  # doctest: +SKIP
+    ['name', 'label', 'format', 'type', 'width']
+    """
+    columns = sas_info(path, catalog_path)["columns"]
+    return pl.DataFrame(
+        columns,
+        schema={
+            "name": pl.String,
+            "label": pl.String,
+            "format": pl.String,
+            "type": pl.String,
+            "width": pl.UInt32,
+        },
+        orient="row",
     )
 
 
@@ -551,6 +590,7 @@ __all__ = [
     "SasIoSource",
     "batch_reader",
     "check_polars_version",
+    "column_info",
     "polars_requirement",
     "read_sas",
     "sas_info",

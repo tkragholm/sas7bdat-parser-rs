@@ -235,3 +235,22 @@ def test_info_counts_the_rows_a_read_returns():
     info = sp.sas_info(str(DELETED))
     assert info["n_deleted_rows"] == 5
     assert info["n_rows"] == sp.read_sas(str(DELETED)).height == 32
+
+
+def test_info_reports_file_and_column_metadata():
+    info = sp.sas_info(str(EXTDATA / "test_data_win.sas7bdat"))
+    assert info["n_columns"] == len(info["columns"]) == 3
+    assert {"table_name", "file_label", "created", "modified"} <= info.keys()
+    first = info["columns"][0]
+    assert first["name"] == "ID"
+    assert first["type"] == "string"
+    assert set(first) == {"name", "label", "format", "type", "width"}
+
+
+def test_column_info_is_a_frame_of_names_labels_and_formats():
+    frame = sp.column_info(str(EXTDATA / "dtdate.sas7bdat"))
+    assert frame.columns == ["name", "label", "format", "type", "width"]
+    assert frame.height == sp.sas_info(str(EXTDATA / "dtdate.sas7bdat"))["n_columns"]
+    # Its DTDATEw. columns are datetimes and carry their SAS format.
+    assert frame["type"].to_list() == ["datetime"] * 6
+    assert frame["format"].to_list()[:2] == ["DTDATE", "DTDATE5"]

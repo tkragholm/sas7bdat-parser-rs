@@ -95,6 +95,10 @@ def sas_info(
 ) -> dict[str, Any]:
     """Header-level facts about a file; no rows are decoded."""
 
+def column_info(
+    path: str | os.PathLike[str],
+    catalog_path: str | os.PathLike[str] | None = ...,
+) -> pl.DataFrame: ...
 def schema_for_file(
     path: str | os.PathLike[str], catalog_path: str | os.PathLike[str] | None = ...
 ) -> pl.Schema:
