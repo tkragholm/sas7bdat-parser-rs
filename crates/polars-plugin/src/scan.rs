@@ -34,6 +34,8 @@ pub struct ScanSpec {
     /// is every column.
     pub columns: Option<Vec<String>>,
     pub n_rows: Option<usize>,
+    /// Rows to skip first, counting the rows a read returns.
+    pub row_offset: usize,
     pub batch_size: Option<usize>,
     /// String columns to hand over dictionary-encoded, which polars reads as
     /// `Categorical`: a code per row and the distinct values once per batch.
@@ -287,6 +289,26 @@ type ColumnWork<'a> = (
     (&'a Option<LabelSet>, &'a mut Option<Interner>),
 );
 
+/// `scan` restricted to the rows `spec` asks for: a row limit alone, or a range from
+/// `row_offset`. Both count the rows a read returns.
+fn with_rows<'a>(
+    scan: sas7bdat::ScanBuilder<'a>,
+    spec: &ScanSpec,
+) -> SasResult<sas7bdat::ScanBuilder<'a>> {
+    let to_u64 =
+        |n: usize| u64::try_from(n).map_err(|_| Error::unsupported("row count exceeds u64"));
+    Ok(match (spec.row_offset, spec.n_rows) {
+        (0, None) => scan,
+        (0, Some(n_rows)) => scan.limit(to_u64(n_rows)?),
+        (offset, n_rows) => {
+            let start = to_u64(offset)?;
+            let end =
+                n_rows.map_or(Ok(u64::MAX), |n| to_u64(n).map(|n| start.saturating_add(n)))?;
+            scan.select(sas7bdat::RowSelection::range(start, end))
+        }
+    })
+}
+
 fn run_scan(
     ds: &Dataset,
     spec: &ScanSpec,
@@ -303,10 +325,7 @@ fn run_scan(
     if let Some(ref projection) = projection {
         scan = scan.with_projection(projection);
     }
-    if let Some(n_rows) = spec.n_rows {
-        scan = scan
-            .limit(u64::try_from(n_rows).map_err(|_| Error::unsupported("row limit exceeds u64"))?);
-    }
+    scan = with_rows(scan, spec)?;
     scan = scan.with_batch_hint(BatchHint::Rows(
         spec.batch_size
             .unwrap_or_else(|| default_batch_rows(ds, spec)),

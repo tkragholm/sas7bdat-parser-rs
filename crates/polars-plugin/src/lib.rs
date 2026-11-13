@@ -120,17 +120,19 @@ impl SasDataset {
     ///
     /// The stream decodes on its own thread from the moment a consumer asks for
     /// it, and stops if the consumer lets go of it early.
-    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None, categorical=None))]
+    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None, categorical=None, row_offset=0))]
     fn stream(
         &self,
         columns: Option<Vec<String>>,
         n_rows: Option<usize>,
         batch_size: Option<usize>,
         categorical: Option<Vec<String>>,
+        row_offset: usize,
     ) -> PyResult<ArrowStream> {
         let spec = ScanSpec {
             columns,
             n_rows,
+            row_offset,
             batch_size,
             categorical: categorical.unwrap_or_default(),
         };
@@ -162,17 +164,19 @@ impl SasDataset {
 
     /// The same rows as `stream`, one batch at a time, each batch its own
     /// single-batch stream. For a consumer that wants to work per batch.
-    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None, categorical=None))]
+    #[pyo3(signature = (columns=None, n_rows=None, batch_size=None, categorical=None, row_offset=0))]
     fn batches(
         &self,
         columns: Option<Vec<String>>,
         n_rows: Option<usize>,
         batch_size: Option<usize>,
         categorical: Option<Vec<String>>,
+        row_offset: usize,
     ) -> PyResult<BatchIterator> {
         let spec = ScanSpec {
             columns,
             n_rows,
+            row_offset,
             batch_size,
             categorical: categorical.unwrap_or_default(),
         };

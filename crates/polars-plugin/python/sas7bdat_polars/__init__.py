@@ -358,12 +358,15 @@ class SasDataset:
         n_rows: int | None = None,
         batch_size: int | None = None,
         categorical: bool | Sequence[str] = False,
+        row_offset: int = 0,
     ) -> ArrowStream:
         """An Arrow C stream of the rows: give it to anything that imports
         ``__arrow_c_stream__``."""
         columns = list(columns) if columns else None
         names = self._categorical(columns, categorical)
-        return self._native.stream(columns, n_rows, batch_size, names)
+        return self._native.stream(
+            columns, n_rows, batch_size, names, row_offset=_offset(row_offset)
+        )
 
     def __arrow_c_stream__(self, requested_schema: object = None) -> object:
         return self._native.stream(None, None, None, None).__arrow_c_stream__(
@@ -376,6 +379,7 @@ class SasDataset:
         n_rows: int | None = None,
         predicate: pl.Expr | None = None,
         categorical: bool | Sequence[str] = False,
+        row_offset: int = 0,
     ) -> pl.DataFrame:
         columns = list(columns) if columns else None
         names = self._categorical(columns, categorical)
@@ -384,7 +388,9 @@ class SasDataset:
         # again as slow on a register-shaped file. The concat keeps the chunks.
         frames = [
             pl.DataFrame(batch)
-            for batch in self._native.batches(columns, n_rows, None, names)
+            for batch in self._native.batches(
+                columns, n_rows, None, names, row_offset=_offset(row_offset)
+            )
         ]
         if not frames:
             return pl.DataFrame(self._native.schema_stream(columns, names))
@@ -398,10 +404,13 @@ class SasDataset:
         n_rows: int | None = None,
         batch_size: int | None = None,
         categorical: bool | Sequence[str] = False,
+        row_offset: int = 0,
     ) -> BatchReader:
         columns = list(with_columns) if with_columns else None
         names = self._categorical(columns, categorical)
-        batches = self._native.batches(columns, n_rows, batch_size, names)
+        batches = self._native.batches(
+            columns, n_rows, batch_size, names, row_offset=_offset(row_offset)
+        )
         return BatchReader(batches, predicate)
 
     def scan_sas(
@@ -410,13 +419,14 @@ class SasDataset:
         n_rows: int | None = None,
         predicate: pl.Expr | None = None,
         categorical: bool | Sequence[str] = False,
+        row_offset: int = 0,
     ) -> pl.LazyFrame:
-        """A lazy frame over the file. Projection and a row limit reach the
-        decoder; a filter is applied per batch by polars."""
+        """A lazy frame over the file. Projection, a row offset and a row limit
+        reach the decoder; a filter is applied per batch by polars."""
         columns = list(columns) if columns else None
         names = self._categorical(columns, categorical) or []
         lf = register_io_source(
-            io_source=SasIoSource(self, columns, n_rows, names),
+            io_source=SasIoSource(self, columns, n_rows, names, _offset(row_offset)),
             schema=self.schema(columns, names),
             validate_schema=False,
             is_pure=True,
@@ -424,6 +434,13 @@ class SasDataset:
         if predicate is not None:
             lf = lf.filter(predicate)
         return lf
+
+
+def _offset(row_offset: int) -> int:
+    """``row_offset`` checked: a whole number of rows, not negative."""
+    if isinstance(row_offset, bool) or not isinstance(row_offset, int) or row_offset < 0:
+        raise ValueError(f"row_offset must be a whole number >= 0, not {row_offset!r}")
+    return row_offset
 
 
 class SasIoSource:
@@ -440,11 +457,13 @@ class SasIoSource:
         columns: list[str] | None,
         n_rows: int | None,
         categorical: list[str] | None = None,
+        row_offset: int = 0,
     ) -> None:
         self._dataset = dataset
         self._columns = columns
         self._n_rows = n_rows
         self._categorical = categorical or []
+        self._row_offset = row_offset
 
     def __call__(
         self,
@@ -460,7 +479,9 @@ class SasIoSource:
         names = [
             name for name in self._categorical if columns is None or name in columns
         ]
-        return self._dataset.batch_reader(columns, predicate, limit, batch_size, names)
+        return self._dataset.batch_reader(
+            columns, predicate, limit, batch_size, names, row_offset=self._row_offset
+        )
 
 
 # ─── module-level API ─────────────────────────────────────────────────────────
@@ -536,15 +557,18 @@ def scan_sas(
     n_rows: int | None = None,
     predicate: pl.Expr | None = None,
     io_backend: str | None = None,
+    row_offset: int = 0,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file into a ``pl.LazyFrame``.
 
-    Pass ``columns`` to decode only those (the dominant cost on a wide file) and
-    ``n_rows`` to bound the read. ``schema_overrides`` re-types columns at schema
-    time, e.g. ``{"ID": pl.Int64}`` for an integer-coded numeric column.
+    Pass ``columns`` to decode only those (the dominant cost on a wide file),
+    and ``row_offset`` and ``n_rows`` to read a range of rows; both count the
+    rows a read returns, so rows SAS marked as deleted are not counted.
+    ``schema_overrides`` re-types columns at schema time, e.g.
+    ``{"ID": pl.Int64}`` for an integer-coded numeric column.
     """
     return SasDataset(path, catalog_path, schema_overrides, io_backend).scan_sas(
-        columns, n_rows, predicate, categorical
+        columns, n_rows, predicate, categorical, row_offset=row_offset
     )
 
 
@@ -557,10 +581,15 @@ def read_sas(
     schema_overrides: Mapping[str, Any] | None = None,
     io_backend: str | None = None,
     categorical: bool | Sequence[str] = False,
+    row_offset: int = 0,
 ) -> pl.DataFrame:
-    """Read a SAS7BDAT file eagerly into a ``pl.DataFrame``."""
+    """Read a SAS7BDAT file eagerly into a ``pl.DataFrame``.
+
+    ``row_offset`` rows are skipped and at most ``n_rows`` read after them; both
+    count the rows a read returns, so rows SAS marked as deleted are not counted.
+    """
     return SasDataset(path, catalog_path, schema_overrides, io_backend).read(
-        columns, n_rows, predicate, categorical
+        columns, n_rows, predicate, categorical, row_offset=row_offset
     )
 
 
@@ -574,10 +603,11 @@ def batch_reader(
     schema_overrides: Mapping[str, Any] | None = None,
     io_backend: str | None = None,
     categorical: bool | Sequence[str] = False,
+    row_offset: int = 0,
 ) -> BatchReader:
     """Iterate a file one ``pl.DataFrame`` per decoded batch."""
     return SasDataset(path, catalog_path, schema_overrides, io_backend).batch_reader(
-        with_columns, predicate, n_rows, batch_size, categorical
+        with_columns, predicate, n_rows, batch_size, categorical, row_offset=row_offset
     )
 
 

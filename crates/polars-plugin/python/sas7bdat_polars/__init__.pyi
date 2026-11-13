@@ -47,6 +47,7 @@ class SasDataset:
         n_rows: int | None = ...,
         batch_size: int | None = ...,
         categorical: bool | Sequence[str] = ...,
+        row_offset: int = ...,
     ) -> ArrowStream: ...
     def __arrow_c_stream__(self, requested_schema: object = ...) -> object: ...
     def read(
@@ -55,6 +56,7 @@ class SasDataset:
         n_rows: int | None = ...,
         predicate: pl.Expr | None = ...,
         categorical: bool | Sequence[str] = ...,
+        row_offset: int = ...,
     ) -> pl.DataFrame: ...
     def batch_reader(
         self,
@@ -63,6 +65,7 @@ class SasDataset:
         n_rows: int | None = ...,
         batch_size: int | None = ...,
         categorical: bool | Sequence[str] = ...,
+        row_offset: int = ...,
     ) -> BatchReader: ...
     def scan_sas(
         self,
@@ -70,6 +73,7 @@ class SasDataset:
         n_rows: int | None = ...,
         predicate: pl.Expr | None = ...,
         categorical: bool | Sequence[str] = ...,
+        row_offset: int = ...,
     ) -> pl.LazyFrame: ...
 
 class SasIoSource:
@@ -79,6 +83,7 @@ class SasIoSource:
         columns: list[str] | None,
         n_rows: int | None,
         categorical: list[str] | None = ...,
+        row_offset: int = ...,
     ) -> None: ...
     def __call__(
         self,
@@ -113,6 +118,7 @@ def scan_sas(
     n_rows: int | None = ...,
     predicate: pl.Expr | None = ...,
     io_backend: str | None = ...,
+    row_offset: int = ...,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file. Pass ``columns`` to project at the reader."""
 
@@ -125,6 +131,7 @@ def read_sas(
     schema_overrides: Mapping[str, Any] | None = ...,
     io_backend: str | None = ...,
     categorical: bool | Sequence[str] = ...,
+    row_offset: int = ...,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a DataFrame."""
 
@@ -138,6 +145,7 @@ def batch_reader(
     schema_overrides: Mapping[str, Any] | None = ...,
     io_backend: str | None = ...,
     categorical: bool | Sequence[str] = ...,
+    row_offset: int = ...,
 ) -> BatchReader:
     """Iterate a file one DataFrame per decoded batch."""
 

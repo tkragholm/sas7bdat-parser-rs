@@ -254,3 +254,25 @@ def test_column_info_is_a_frame_of_names_labels_and_formats():
     # Its DTDATEw. columns are datetimes and carry their SAS format.
     assert frame["type"].to_list() == ["datetime"] * 6
     assert frame["format"].to_list()[:2] == ["DTDATE", "DTDATE5"]
+
+
+def test_row_offset_skips_rows_that_a_read_returns():
+    every = sp.read_sas(str(PEOPLE))
+    assert sp.read_sas(str(PEOPLE), row_offset=1, n_rows=2).equals(every.slice(1, 2))
+    assert sp.read_sas(str(PEOPLE), row_offset=3).equals(every.slice(3))
+    assert sp.read_sas(str(PEOPLE), row_offset=10).height == 0
+    lazy = sp.scan_sas(str(PEOPLE), row_offset=2).collect()
+    assert lazy.equals(every.slice(2))
+    batches = list(sp.batch_reader(str(PEOPLE), row_offset=4))
+    assert sum(b.height for b in batches) == 1
+
+
+@pytest.mark.skipif(not DELETED.exists(), reason=f"tracked test file not present: {DELETED}")
+def test_row_offset_counts_past_deleted_rows():
+    every = sp.read_sas(str(DELETED))
+    assert sp.read_sas(str(DELETED), row_offset=8, n_rows=4).equals(every.slice(8, 4))
+
+
+def test_a_negative_row_offset_is_rejected():
+    with pytest.raises(ValueError, match="row_offset"):
+        sp.read_sas(str(PEOPLE), row_offset=-1)
