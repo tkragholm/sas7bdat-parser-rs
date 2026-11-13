@@ -155,6 +155,7 @@ dependencies = [
 name = "fastsas"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "extendr-api",
  "extendr-ffi",
  "sas7bdat",
@@ -162,9 +163,9 @@ dependencies = [
 
 [[package]]
 name = "fearless_simd"
-version = "0.7.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4beca3cb2444e3304ac30843cc091f44ed58932353cd492ce740067bfce6b12"
+checksum = "629c9d6b6f30b5604089e0980f4d924a013aacb1654a6cdf5d3d852224f68651"
 
 [[package]]
 name = "getrandom"
@@ -311,9 +312,9 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "sas7bdat"
-version = "0.9.3"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48698476678501c9762e9661daaae450f1a0fe897e312625bc61c473524aa282"
+checksum = "b4c368a95c2e28e783f88544be4b8515f012a389e4274527f4904a844af1b2d6"
 dependencies = [
  "ahash",
  "bytemuck",
