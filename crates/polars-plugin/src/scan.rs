@@ -40,6 +40,9 @@ pub struct ScanSpec {
     pub strict: bool,
     /// Leave labelled columns as their codes even when a catalog is attached.
     pub keep_codes: bool,
+    /// Numeric columns that each get a `<name>_missing` column with the tag of every
+    /// missing value, `.A` to `.Z`, `._` or `.`.
+    pub missing_tags: Vec<String>,
     pub batch_size: Option<usize>,
     /// String columns to hand over dictionary-encoded, which polars reads as
     /// `Categorical`: a code per row and the distinct values once per batch.
@@ -53,7 +56,7 @@ pub struct ScanSpec {
 pub fn stream_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
     let core = core_schema(ds, spec)?;
     let labels = label_sets(ds, &core, spec.keep_codes);
-    stream_schema_from(&core, &labels, &spec.categorical)
+    stream_schema_from(&core, &labels, &spec.categorical, &spec.missing_tags)
 }
 
 /// Arrow's spelling of what polars reads as `Categorical`.
@@ -65,7 +68,16 @@ fn stream_schema_from(
     core: &Schema,
     labels: &[Option<LabelSet>],
     categorical: &[String],
+    missing_tags: &[String],
 ) -> SasResult<SchemaRef> {
+    for name in missing_tags {
+        let tag_name = missing_tag_name(name);
+        if core.column_with_name(&tag_name).is_some() {
+            return Err(Error::unsupported(format!(
+                "missing_tags on {name}: the file already has a column {tag_name}"
+            )));
+        }
+    }
     for name in categorical {
         let Some((index, _)) = core.column_with_name(name) else {
             return Err(Error::unsupported(format!(
@@ -94,7 +106,93 @@ fn stream_schema_from(
             )
         })
         .collect::<Vec<_>>();
-    Ok(Arc::new(Schema::new(fields)))
+    // A tag column follows its column, for the columns the scan reads.
+    let mut with_tags = Vec::with_capacity(fields.len() + missing_tags.len());
+    for field in fields {
+        let tagged = missing_tags.contains(field.name());
+        let name = field.name().clone();
+        with_tags.push(field);
+        if tagged {
+            with_tags.push(Arc::new(Field::new(
+                missing_tag_name(&name),
+                DataType::Utf8View,
+                true,
+            )));
+        }
+    }
+    Ok(Arc::new(Schema::new(with_tags)))
+}
+
+/// The name of the column that holds `name`'s special-missing tags.
+pub fn missing_tag_name(name: &str) -> String {
+    format!("{name}_missing")
+}
+
+/// The tag column of each column `spec.missing_tags` names, `None` for the others.
+/// Read from the buffers before conversion takes them over.
+fn tag_columns(
+    columns: &[OwnedColumnBuffer],
+    core: &Schema,
+    spec: &ScanSpec,
+    rows: usize,
+) -> Vec<Option<ArrayRef>> {
+    columns
+        .iter()
+        .zip(core.fields().iter())
+        .map(|(column, field)| {
+            spec.missing_tags
+                .contains(field.name())
+                .then(|| missing_tags_of(column, rows))
+        })
+        .collect()
+}
+
+/// `columns` with each tag column placed after the column it belongs to.
+fn with_tag_columns(columns: Vec<ArrayRef>, tags: Vec<Option<ArrayRef>>) -> Vec<ArrayRef> {
+    if tags.iter().all(Option::is_none) {
+        return columns;
+    }
+    let mut out = Vec::with_capacity(columns.len() + tags.len());
+    for (column, tag) in columns.into_iter().zip(tags) {
+        out.push(column);
+        out.extend(tag);
+    }
+    out
+}
+
+/// The spelling of each tag as SAS writes it, `.A` to `.Z` then `._`.
+const TAG_SPELLINGS: [&str; 27] = [
+    ".A", ".B", ".C", ".D", ".E", ".F", ".G", ".H", ".I", ".J", ".K", ".L", ".M", ".N", ".O", ".P",
+    ".Q", ".R", ".S", ".T", ".U", ".V", ".W", ".X", ".Y", ".Z", "._",
+];
+
+/// A column of `buffer`'s special-missing tags: null where a value is present, the tag
+/// as SAS writes it where it is missing, `.` for a plain missing. A buffer that kept no
+/// raw bits, any type but `F64`, gives `.` for every missing row.
+fn missing_tags_of(buffer: &OwnedColumnBuffer, rows: usize) -> ArrayRef {
+    let (values, valid) = match buffer {
+        OwnedColumnBuffer::F64 { values, valid } => (Some(values.as_slice()), valid.as_deref()),
+        OwnedColumnBuffer::I32 { valid, .. }
+        | OwnedColumnBuffer::I64 { valid, .. }
+        | OwnedColumnBuffer::Date { valid, .. }
+        | OwnedColumnBuffer::DateTime { valid, .. }
+        | OwnedColumnBuffer::Time { valid, .. }
+        | OwnedColumnBuffer::Utf8 { valid, .. }
+        | OwnedColumnBuffer::RawBytes { valid, .. } => (None, valid.as_deref()),
+    };
+    let present = |row: usize| valid.is_none_or(|words| words[row / 64] >> (row % 64) & 1 == 1);
+    let tags = (0..rows).map(|row| {
+        if present(row) {
+            return None;
+        }
+        let tag = values.and_then(|values| sas7bdat::special_missing_tag(values[row].to_bits()));
+        Some(match tag {
+            Some('_') => TAG_SPELLINGS[26],
+            Some(letter) => TAG_SPELLINGS[(letter as u8 - b'A') as usize],
+            None => ".",
+        })
+    });
+    Arc::new(tags.collect::<StringViewArray>())
 }
 
 fn core_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
@@ -239,7 +337,7 @@ impl ScanReader {
     pub fn start(ds: Arc<Dataset>, spec: ScanSpec) -> SasResult<Self> {
         let core = core_schema(&ds, &spec)?;
         let labels = label_sets(&ds, &core, spec.keep_codes);
-        let schema = stream_schema_from(&core, &labels, &spec.categorical)?;
+        let schema = stream_schema_from(&core, &labels, &spec.categorical, &spec.missing_tags)?;
         // Two batches of slack: enough that the decoder is not stalled by a
         // consumer doing a little work per batch, and the smallest number that
         // measured no slower than four.
@@ -314,6 +412,16 @@ fn with_rows<'a>(
     })
 }
 
+/// The thread pool a batch's columns convert on, as many threads as the scan decodes
+/// with; `None` for one, which converts on the calling thread.
+fn conversion_pool() -> SasResult<Option<rayon::ThreadPool>> {
+    let workers = scan_workers();
+    (workers > 1)
+        .then(|| rayon::ThreadPoolBuilder::new().num_threads(workers).build())
+        .transpose()
+        .map_err(|err| Error::internal(format!("conversion thread pool: {err}")))
+}
+
 fn run_scan(
     ds: &Dataset,
     spec: &ScanSpec,
@@ -359,17 +467,14 @@ fn run_scan(
     // took longer than decoding them on all the others: 0.5 s of the 0.95 s read
     // of the 4,041-column AHS file. The columns are independent, so they convert
     // in parallel, on as many threads as the scan decodes with.
-    let workers = scan_workers();
-    let pool = (workers > 1)
-        .then(|| rayon::ThreadPoolBuilder::new().num_threads(workers).build())
-        .transpose()
-        .map_err(|err| Error::internal(format!("conversion thread pool: {err}")))?;
+    let pool = conversion_pool()?;
     scan.visit_owned_batches(|batch| {
         // The core moves a numeric or temporal buffer into its array; a string
         // buffer becomes views here, in one pass over its bytes; a labelled
         // column is rebuilt from its values to their labels; a categorical
         // column becomes codes against its interner's dictionary.
         let rows = batch.row_count;
+        let tags = tag_columns(&batch.columns, core, spec, rows);
         let convert =
             |((column, field), (label, interner)): ColumnWork<'_>| -> SasResult<ArrayRef> {
                 let interner = interner.as_mut();
@@ -424,6 +529,7 @@ fn run_scan(
             }),
             None => work.map(convert).collect::<SasResult<Vec<_>>>(),
         }?;
+        let columns = with_tag_columns(columns, tags);
         let batch = RecordBatch::try_new(Arc::clone(stream_schema), columns)
             .map_err(|err| Error::arrow(err.to_string()))?;
         // The receiver is gone: the consumer released the stream. Stop decoding.

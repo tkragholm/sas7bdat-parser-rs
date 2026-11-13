@@ -270,9 +270,15 @@ class BatchReader(Iterator[pl.DataFrame]):
     empties are skipped rather than yielded.
     """
 
-    def __init__(self, batches: BatchIterator, predicate: pl.Expr | None) -> None:
+    def __init__(
+        self,
+        batches: BatchIterator,
+        predicate: pl.Expr | None,
+        columns: list[str] | None = None,
+    ) -> None:
         self._batches = batches
         self._predicate = predicate
+        self._columns = columns
 
     def __iter__(self) -> BatchReader:
         return self
@@ -285,7 +291,7 @@ class BatchReader(Iterator[pl.DataFrame]):
                 df = df.filter(self._predicate)
                 if df.is_empty():
                     continue
-            return df
+            return df if self._columns is None else df.select(self._columns)
 
 
 class SasDataset:
@@ -320,6 +326,12 @@ class SasDataset:
     With a catalog, a column whose SAS format has value labels is read as its
     labels. ``apply_labels=False`` keeps the codes instead, for joins to other
     registers; :meth:`value_labels` gives the mapping from code to label.
+
+    ``missing_tags`` names numeric columns whose SAS special missing values
+    should be kept apart. Each gets a column ``<name>_missing`` after it, holding
+    the tag as SAS writes it, ``".A"`` to ``".Z"`` or ``"._"``, ``"."`` for a
+    plain missing value, and null where the value is present. Without it every
+    missing value is a null.
     """
 
     def __init__(
@@ -331,8 +343,10 @@ class SasDataset:
         encoding: str | None = None,
         strict: bool = False,
         apply_labels: bool = True,
+        missing_tags: Sequence[str] | None = None,
     ) -> None:
         self.path = str(path)
+        self._missing_tags = list(missing_tags or [])
         self._native = _NativeDataset(
             self.path,
             None if catalog_path is None else str(catalog_path),
@@ -341,6 +355,7 @@ class SasDataset:
             encoding,
             bool(strict),
             not apply_labels,
+            self._missing_tags,
         )
 
     @property
@@ -350,6 +365,23 @@ class SasDataset:
     def info(self) -> dict[str, Any]:
         """Header-level facts: row and column counts, encoding, compression."""
         return dict(self._native.info())
+
+    def _source_columns(
+        self, columns: list[str] | None
+    ) -> tuple[list[str] | None, list[str] | None]:
+        """The source columns behind ``columns``, a tag column standing for the
+        column it belongs to, and the columns to select from the result, or
+        ``None`` when the source columns already give exactly ``columns``."""
+        if columns is None or not self._missing_tags:
+            return columns, None
+        source: list[str] = []
+        for name in columns:
+            base = name.removesuffix("_missing")
+            if name != base and base in self._missing_tags:
+                name = base
+            if name not in source:
+                source.append(name)
+        return source, (None if source == columns else columns)
 
     def value_labels(self) -> dict[str, dict[Any, str]]:
         """The value labels of every column that has them, by column name: a dict
@@ -378,8 +410,10 @@ class SasDataset:
     ) -> pl.Schema:
         """The polars schema of ``columns`` (or every column), from the header alone."""
         columns = list(columns) if columns else None
+        columns, select = self._source_columns(columns)
         names = self._categorical(columns, categorical)
-        return pl.DataFrame(self._native.schema_stream(columns, names)).schema
+        schema = pl.DataFrame(self._native.schema_stream(columns, names)).schema
+        return schema if select is None else pl.Schema({n: schema[n] for n in select})
 
     def stream(
         self,
@@ -411,6 +445,7 @@ class SasDataset:
         row_offset: int = 0,
     ) -> pl.DataFrame:
         columns = list(columns) if columns else None
+        columns, select = self._source_columns(columns)
         names = self._categorical(columns, categorical)
         # Batch by batch rather than one stream: polars imports a whole stream
         # after the decode instead of overlapping with it, and measured half
@@ -424,7 +459,9 @@ class SasDataset:
         if not frames:
             return pl.DataFrame(self._native.schema_stream(columns, names))
         df = pl.concat(frames, rechunk=False)
-        return df if predicate is None else df.filter(predicate)
+        if predicate is not None:
+            df = df.filter(predicate)
+        return df if select is None else df.select(select)
 
     def batch_reader(
         self,
@@ -436,11 +473,12 @@ class SasDataset:
         row_offset: int = 0,
     ) -> BatchReader:
         columns = list(with_columns) if with_columns else None
+        columns, select = self._source_columns(columns)
         names = self._categorical(columns, categorical)
         batches = self._native.batches(
             columns, n_rows, batch_size, names, row_offset=_offset(row_offset)
         )
-        return BatchReader(batches, predicate)
+        return BatchReader(batches, predicate, select)
 
     def scan_sas(
         self,
@@ -641,6 +679,7 @@ def scan_sas(
     strict: bool = False,
     include_file_paths: str | None = None,
     glob: bool = True,
+    missing_tags: Sequence[str] | None = None,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file into a ``pl.LazyFrame``.
 
@@ -659,7 +698,13 @@ def scan_sas(
     paths = _expand_paths(path, glob)
     if paths is None:
         lf = SasDataset(
-            path, catalog_path, schema_overrides, io_backend, encoding, strict
+            path,
+            catalog_path,
+            schema_overrides,
+            io_backend,
+            encoding,
+            strict,
+            missing_tags=missing_tags,
         ).scan_sas(columns, n_rows, predicate, categorical, row_offset=row_offset)
         if include_file_paths is not None:
             lf = lf.with_columns(pl.lit(os.fspath(path)).alias(include_file_paths))
@@ -667,7 +712,13 @@ def scan_sas(
     frames = []
     for one in paths:
         lf = SasDataset(
-            one, catalog_path, schema_overrides, io_backend, encoding, strict
+            one,
+            catalog_path,
+            schema_overrides,
+            io_backend,
+            encoding,
+            strict,
+            missing_tags=missing_tags,
         ).scan_sas(columns, None, predicate, categorical)
         if include_file_paths is not None:
             lf = lf.with_columns(pl.lit(one).alias(include_file_paths))
@@ -693,6 +744,7 @@ def read_sas(
     strict: bool = False,
     include_file_paths: str | None = None,
     glob: bool = True,
+    missing_tags: Sequence[str] | None = None,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a ``pl.DataFrame``.
 
@@ -716,9 +768,16 @@ def read_sas(
             strict,
             include_file_paths,
             glob,
+            missing_tags,
         ).collect()
     df = SasDataset(
-        path, catalog_path, schema_overrides, io_backend, encoding, strict
+        path,
+        catalog_path,
+        schema_overrides,
+        io_backend,
+        encoding,
+        strict,
+        missing_tags=missing_tags,
     ).read(columns, n_rows, predicate, categorical, row_offset=row_offset)
     if include_file_paths is not None:
         df = df.with_columns(pl.lit(os.fspath(path)).alias(include_file_paths))
@@ -738,10 +797,17 @@ def batch_reader(
     row_offset: int = 0,
     encoding: str | None = None,
     strict: bool = False,
+    missing_tags: Sequence[str] | None = None,
 ) -> BatchReader:
     """Iterate a file one ``pl.DataFrame`` per decoded batch."""
     return SasDataset(
-        path, catalog_path, schema_overrides, io_backend, encoding, strict
+        path,
+        catalog_path,
+        schema_overrides,
+        io_backend,
+        encoding,
+        strict,
+        missing_tags=missing_tags,
     ).batch_reader(
         with_columns, predicate, n_rows, batch_size, categorical, row_offset=row_offset
     )

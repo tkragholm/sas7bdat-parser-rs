@@ -362,3 +362,40 @@ def test_file_paths_column_and_ranges_across_files(tmp_path):
 def test_a_pattern_that_matches_nothing_is_file_not_found(tmp_path):
     with pytest.raises(FileNotFoundError):
         sp.read_sas(str(tmp_path / "none_*.sas7bdat"))
+
+
+MISSING = EXTDATA / "missing_test.sas7bdat"
+# haven's na_tag() for each column of missing_test.sas7bdat, upper-cased.
+HAVEN_TAGS = [".A", ".B", ".C", ".X", ".Y", ".Z", "._", ".", None]
+
+
+def test_missing_tags_give_each_special_missing_value_its_tag():
+    columns = sp.SasDataset(MISSING).column_names
+    df = sp.SasDataset(MISSING, missing_tags=columns).read()
+    assert df.columns[:2] == ["var1", "var1_missing"]
+    assert [df[f"{c}_missing"][0] for c in columns] == HAVEN_TAGS
+    # The values themselves are unchanged: missing is still null.
+    assert df.select(columns).equals(sp.read_sas(MISSING))
+
+
+def test_missing_tags_follow_projection_and_lazy_scans():
+    ds = sp.SasDataset(MISSING, missing_tags=["var2", "var9"])
+    assert ds.read(columns=["var2_missing"]).to_dict(as_series=False) == {
+        "var2_missing": [".B"]
+    }
+    lazy = ds.scan_sas().select("var9", "var9_missing").collect()
+    assert lazy.to_dict(as_series=False) == {"var9": [1.0], "var9_missing": [None]}
+    assert ds.schema()["var2_missing"] == pl.String
+
+
+def test_missing_tags_on_a_bad_column_is_an_error():
+    with pytest.raises(ValueError, match="no column"):
+        sp.SasDataset(MISSING, missing_tags=["nope"])
+    with pytest.raises(ValueError, match="numeric"):
+        sp.SasDataset(PEOPLE, missing_tags=["GENDER"])
+
+
+def test_module_readers_take_missing_tags():
+    df = sp.read_sas(MISSING, missing_tags=["var1"])
+    assert df["var1_missing"].to_list() == [".A"]
+    assert sp.scan_sas(MISSING, missing_tags=["var1"]).collect().equals(df)

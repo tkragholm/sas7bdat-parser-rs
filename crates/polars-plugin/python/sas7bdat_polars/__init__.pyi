@@ -20,7 +20,12 @@ class BatchIterator(Iterator[ArrowStream]):
     def __next__(self) -> ArrowStream: ...
 
 class BatchReader(Iterator[pl.DataFrame]):
-    def __init__(self, batches: BatchIterator, predicate: pl.Expr | None) -> None: ...
+    def __init__(
+        self,
+        batches: BatchIterator,
+        predicate: pl.Expr | None,
+        columns: list[str] | None = ...,
+    ) -> None: ...
     def __iter__(self) -> BatchReader: ...
     def __next__(self) -> pl.DataFrame: ...
 
@@ -35,6 +40,7 @@ class SasDataset:
         encoding: str | None = ...,
         strict: bool = ...,
         apply_labels: bool = ...,
+        missing_tags: Sequence[str] | None = ...,
     ) -> None: ...
     @property
     def column_names(self) -> list[str]: ...
@@ -134,6 +140,7 @@ def scan_sas(
     strict: bool = ...,
     include_file_paths: str | None = ...,
     glob: bool = ...,
+    missing_tags: Sequence[str] | None = ...,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file. Pass ``columns`` to project at the reader."""
 
@@ -151,6 +158,7 @@ def read_sas(
     strict: bool = ...,
     include_file_paths: str | None = ...,
     glob: bool = ...,
+    missing_tags: Sequence[str] | None = ...,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a DataFrame."""
 
@@ -167,6 +175,7 @@ def batch_reader(
     row_offset: int = ...,
     encoding: str | None = ...,
     strict: bool = ...,
+    missing_tags: Sequence[str] | None = ...,
 ) -> BatchReader:
     """Iterate a file one DataFrame per decoded batch."""
 

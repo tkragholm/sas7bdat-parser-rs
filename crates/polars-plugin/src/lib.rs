@@ -68,12 +68,14 @@ struct SasDataset {
     strict: bool,
     /// Leave labelled columns as their codes even when a catalog is attached.
     keep_codes: bool,
+    /// Numeric columns read with a `<name>_missing` column of special-missing tags.
+    missing_tags: Vec<String>,
 }
 
 #[pymethods]
 impl SasDataset {
     #[new]
-    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None, encoding=None, strict=false, keep_codes=false))]
+    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None, encoding=None, strict=false, keep_codes=false, missing_tags=None))]
     // Each is a keyword argument of the Python constructor, which is where they are read.
     #[allow(clippy::too_many_arguments)]
     fn open(
@@ -85,6 +87,7 @@ impl SasDataset {
         encoding: Option<&str>,
         strict: bool,
         keep_codes: bool,
+        missing_tags: Option<Vec<String>>,
     ) -> PyResult<Self> {
         let options = open_options(io_backend, encoding)?;
         require_file(path)?;
@@ -102,11 +105,28 @@ impl SasDataset {
                 .collect::<PyResult<Vec<_>>>()?;
             ds.apply_schema_overrides(parsed).map_err(value_error)?;
         }
+        let missing_tags = missing_tags.unwrap_or_default();
+        for name in &missing_tags {
+            match ds.column(name).map(|column| column.logical_type) {
+                Some(LogicalType::Float | LogicalType::Integer) => {}
+                Some(_) => {
+                    return Err(PyValueError::new_err(format!(
+                        "missing_tags: {name} is not a numeric column"
+                    )));
+                }
+                None => {
+                    return Err(PyValueError::new_err(format!(
+                        "missing_tags: the file has no column {name}"
+                    )));
+                }
+            }
+        }
         Ok(Self {
             ds: Arc::new(ds),
             path: path.to_owned(),
             strict,
             keep_codes,
+            missing_tags,
         })
     }
 
@@ -146,6 +166,7 @@ impl SasDataset {
             row_offset,
             strict: self.strict,
             keep_codes: self.keep_codes,
+            missing_tags: self.missing_tags.clone(),
             batch_size,
             categorical: categorical.unwrap_or_default(),
         };
@@ -206,6 +227,8 @@ impl SasDataset {
         let spec = ScanSpec {
             columns,
             categorical: categorical.unwrap_or_default(),
+            keep_codes: self.keep_codes,
+            missing_tags: self.missing_tags.clone(),
             ..ScanSpec::default()
         };
         let schema = scan::stream_schema(&self.ds, &spec).map_err(value_error)?;
@@ -229,6 +252,7 @@ impl SasDataset {
             row_offset,
             strict: self.strict,
             keep_codes: self.keep_codes,
+            missing_tags: self.missing_tags.clone(),
             batch_size,
             categorical: categorical.unwrap_or_default(),
         };
