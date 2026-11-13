@@ -21,6 +21,7 @@ Minor rather than patch because the `arrow` feature moves to arrow 60. Its funct
 
 ### Added
 
+- `special_missing_tag` reads the tag of a SAS special missing value (`.A` to `.Z`, `._`) from a missing cell's raw bits, which an `F64` column keeps. It decodes both spellings SAS writes.
 - `OpenOptionsBuilder::encoding` reads a file's text in another encoding than its header declares, for files whose header is wrong. It takes WHATWG labels, SAS's names for the Windows code pages (`wlatin1` and the like) and the Mac encodings, and an unknown label is an error.
 - The manifest declares `rust-version = "1.89"`, the minimum the crate already needed, so an older toolchain gets a clear error from cargo.
 - The package ships ReadStat's MIT licence, since parts of the parser began as a translation of ReadStat.

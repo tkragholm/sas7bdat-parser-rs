@@ -85,6 +85,7 @@ mod probe;
 mod projection;
 mod row;
 mod scan;
+mod special_missing;
 // Public only under `internal-bench`, so the `simd_backends` benchmark can time the
 // kernels of whichever backend is live. Private in every shipped configuration —
 // this is an implementation detail, not API.
@@ -137,3 +138,4 @@ pub use scan::{
     FillStrategy, OwnedBatchScanBreakdown, PageSource, ScanBuilder, ScanEntry, ScanPath,
     ScanProgress, ScanProgressObserver, ScanStatsSummary, SourceDeclined,
 };
+pub use special_missing::special_missing_tag;

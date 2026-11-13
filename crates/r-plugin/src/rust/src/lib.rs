@@ -95,68 +95,11 @@ fn haven_tagged_na(tag: u8) -> f64 {
     f64::from_bits(R_NA_REAL_BITS | (u64::from(tag) << 32))
 }
 
-/// Indicator byte -> haven tag character; `0` means "plain `.`, no tag".
-///
-/// SAS spells a special missing as a NaN whose byte 5 (bits 47:40) says which of
-/// `.`, `._` or `.A`-`.Z` it is. Two spellings of that byte occur in the wild:
-///
-/// * **Ordinal** — `0xFF - n` over the sequence `_ . A .. Z`: `0xFF` is `._`,
-///   `0xFE` is `.`, and `0xFD..=0xE4` are `.A..=.Z`.
-/// * **Complement** — the one's complement of the character's ASCII code: `.` is
-///   `0xD1`, `_` is `0xA0`, and `.A..=.Z` are `0xBE..=0xA5`.
-///
-/// Both spellings are decoded. Complement-spelled tags occur in real files: a census
-/// of the fixture corpus found 6.3M such cells across nine files, PIAAC's
-/// `.V`/`.N`/`.D`/`.R` scheme among them.
-///
-/// One table decodes both because the ranges cannot collide: the complement
-/// family tops out at `0xD1`, below the ordinal family's `0xE4` floor. The
-/// `const` builder asserts that, so an overlap would fail the build rather than
-/// silently resolve one way.
-const MISSING_TAG: [u8; 256] = build_missing_tag_table();
-
-const fn build_missing_tag_table() -> [u8; 256] {
-    let mut table = [0u8; 256];
-
-    // Ordinal spelling. `0xFE` (plain `.`) is left 0 deliberately.
-    table[0xFF] = b'_';
-    let mut i = 0usize;
-    while i < 26 {
-        assert!(table[0xFD - i] == 0, "special-missing spellings overlap");
-        table[0xFD - i] = b'a' + i as u8;
-        i += 1;
-    }
-
-    // Complement spelling. `!'.'` == `0xD1` (plain `.`) is left 0 deliberately.
-    assert!(table[0xFF - b'_' as usize] == 0, "special-missing spellings overlap");
-    table[0xFF - b'_' as usize] = b'_';
-    let mut c = 0u8;
-    while c < 26 {
-        let slot = 0xFF - (b'A' + c) as usize;
-        assert!(table[slot] == 0, "special-missing spellings overlap");
-        table[slot] = b'a' + c;
-        c += 1;
-    }
-
-    table
-}
-
-/// Recover a SAS special-missing tag from a preserved missing cell's raw bits.
-///
-/// Only ever called for cells the parser already flagged missing, so the NaN test
-/// here is a sanity check rather than the thing that decides missingness. It is a
-/// generic "exponent all ones, mantissa non-zero" test, which also accepts the
-/// quiet-NaN spelling (`0x7FF8_FF..`) that some writers use.
+/// The haven tag of a preserved missing cell's raw bits: the core's tag, lowercase, as
+/// haven's `tagged_na()` spells it. `None` for the plain `.`.
 fn sas_special_missing_tag(bits: u64) -> Option<u8> {
-    const EXPONENT: u64 = 0x7FF0_0000_0000_0000;
-    const MANTISSA: u64 = 0x000F_FFFF_FFFF_FFFF;
-    if bits & EXPONENT != EXPONENT || bits & MANTISSA == 0 {
-        return None;
-    }
-    match MISSING_TAG[((bits >> 40) & 0xFF) as usize] {
-        0 => None,
-        tag => Some(tag),
-    }
+    #[allow(clippy::cast_possible_truncation)]
+    sas7bdat::special_missing_tag(bits).map(|tag| tag.to_ascii_lowercase() as u8)
 }
 
 /// Map a catalog value-label tag key to its R numeric code (uppercase `A`-`Z` /
@@ -1089,59 +1032,12 @@ extendr_module! {
 
 #[cfg(test)]
 mod tests {
-    use super::{haven_tagged_na, sas_special_missing_tag, MISSING_TAG};
-
-    /// Build the raw bits SAS writes for a missing cell with indicator byte `b`,
-    /// in the signalling form (`0xFFFF_bb_00..`) both spellings use in practice.
-    const fn missing_bits(indicator: u8) -> u64 {
-        0xFFFF_0000_0000_0000 | ((indicator as u64) << 40)
-    }
+    use super::{haven_tagged_na, sas_special_missing_tag};
 
     #[test]
-    fn the_ordinal_spelling_decodes() {
-        assert_eq!(sas_special_missing_tag(missing_bits(0xFF)), Some(b'_'));
-        assert_eq!(sas_special_missing_tag(missing_bits(0xFD)), Some(b'a'));
-        assert_eq!(sas_special_missing_tag(missing_bits(0xFC)), Some(b'b'));
-        assert_eq!(sas_special_missing_tag(missing_bits(0xE4)), Some(b'z'));
-        // Plain `.` carries no tag.
-        assert_eq!(sas_special_missing_tag(missing_bits(0xFE)), None);
-    }
-
-    #[test]
-    fn the_complement_spelling_decodes() {
-        // These are the bytes observed in the corpus, with the tags `haven` gives.
-        for (byte, tag) in [
-            (0xA9u8, b'v'),
-            (0xAA, b'u'),
-            (0xAD, b'r'),
-            (0xB1, b'n'),
-            (0xB2, b'm'),
-            (0xBB, b'd'),
-            (0xBD, b'b'),
-            (0xBE, b'a'),
-            (0xA5, b'z'),
-            (0xA0, b'_'),
-        ] {
-            assert_eq!(sas_special_missing_tag(missing_bits(byte)), Some(tag), "byte {byte:#04x}");
-        }
-        // `!'.'` is a plain missing, not a tag — it is the single most common
-        // indicator in the corpus, so mis-decoding it would be very loud.
-        assert_eq!(sas_special_missing_tag(missing_bits(0xD1)), None);
-    }
-
-    #[test]
-    fn the_two_spellings_never_collide() {
-        let ordinal = (0xE4u8..=0xFF).collect::<Vec<_>>();
-        let complement: Vec<u8> = (b'A'..=b'Z').chain(*b"_.").map(|c| 0xFF - c).collect();
-        for b in &complement {
-            assert!(!ordinal.contains(b), "byte {b:#04x} is claimed by both spellings");
-        }
-        // And every byte outside both families stays untagged.
-        for b in 0..=u8::MAX {
-            if !ordinal.contains(&b) && !complement.contains(&b) {
-                assert_eq!(MISSING_TAG[b as usize], 0, "byte {b:#04x} should be untagged");
-            }
-        }
+    fn tags_are_lowercased_as_haven_spells_them() {
+        // `.A` in the ordinal spelling.
+        assert_eq!(sas_special_missing_tag(0xFFFF_FD00_0000_0000), Some(b'a'));
     }
 
     #[test]
