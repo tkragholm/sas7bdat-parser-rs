@@ -75,9 +75,12 @@ the Polars plugin. The library was written for, and is used in, register
 research on Statistics Denmark's secure research servers, where it reads SAS
 register extracts directly into Polars pipelines. Deployment there is simple
 because the Python package is published on PyPI as prebuilt wheels
-(`sas7bdat-polars`, Python 3.12 or later) that install from a PyPI mirror
-without a compiler or a system C library. The R package is at present
-installed from source and needs a Rust toolchain.
+(`sas7bdat-polars`, Python 3.12 or later, Polars 1.41 or later) for Linux on
+x86-64 and ARM64, Windows on x86-64, and Apple Silicon macOS. They install
+from a PyPI mirror without a compiler or a system C library, and a separate
+wheel (`sas7bdat-cli`) installs the command-line converter with no Python
+dependencies. The R package is at present installed from source and needs a
+Rust toolchain.
 
 <!-- TODO: if you can, add one measured server timing here (file size, rows,
 time with the previous ReadStat-based step, time with this reader). -->
@@ -148,20 +151,31 @@ column buffers directly, so downstream Arrow, Polars, and R consumers avoid a
 row-to-column transpose and per-row allocation. Row-oriented visitors remain
 available for streaming use.
 
-*Parallelism at the page level.* A SAS7BDAT file is a sequence of
-independent pages. After a sequential metadata pass, data pages are decoded
-in parallel with work-stealing (rayon), for both compressed and uncompressed
-files.
+*Parallelism at the page level.* A SAS7BDAT file is a sequence of independent
+pages. After a sequential metadata pass, data pages are cut into chunks of
+about one output batch each and decoded on worker threads, for both compressed
+and uncompressed files. Two choices bound the memory this takes. Batches are
+delivered in file order, and decoding may run ahead of delivery by at most
+twice as many chunks as there are workers. A caller that does not need file
+order can switch ordering off, which the R package does unless a column
+becomes a factor. With the default thread count, the number of workers is also
+limited so that their estimated batches together stay under 1 GiB, so very
+wide files decode on fewer threads. On the widest benchmark file this was
+faster than using every core.
 
 *SIMD string handling.* Fixed-width string cells are trimmed, validated, and
 transcoded with explicitly vectorized routines built on the portable
 `fearless_simd` crate, on stable Rust. A `std::simd` backend is available
 behind a feature flag for nightly toolchains. Cells that are pure ASCII are
-borrowed directly
-from the memory-mapped file; other cells are transcoded from the file's
-declared encoding. Optional dictionary encoding, a cardinality sketch gating
-a string interner, speeds up low-cardinality character columns into R
-`factor`s and Polars `Categorical`s.
+borrowed directly from the memory-mapped file; other cells are transcoded from
+the file's declared encoding. The vector kernels are written for 64-byte
+vectors, the width of one AVX-512 register. The published x86-64 wheels target
+AVX2 instead, because recent Intel consumer processors lack AVX-512 and a
+binary that uses it fails at import there, so each operation runs as two
+256-bit halves. A build for the local processor uses AVX-512 where it exists,
+and Apple Silicon builds target the M1 instruction set. Optional dictionary
+encoding, a cardinality sketch gating a string interner, speeds up
+low-cardinality character columns into R `factor`s and Polars `Categorical`s.
 
 Numeric columns are IEEE-754 doubles stored in 3 to 8 bytes and are widened to
 8 on read. SAS dates, datetimes, and times are converted from the 1960 epoch
@@ -170,6 +184,15 @@ encoding are replaced and common double-encoding is repaired; a strict mode in
 the Rust API fails on the first such cell instead. The Python and R bindings
 use the default and do not yet expose strict mode. Encoding labels the reader
 does not recognise are read as UTF-8.
+
+Local files are memory-mapped by default. On Windows the reader detects
+network drives and reads them sequentially instead, since each access to a
+mapped remote file is a network round trip; on other systems the caller
+chooses with an `io_backend` option, which the Python, R and command-line
+interfaces all expose. A file shorter than its header declares is rejected
+when it is opened, before any rows are returned. A memory-mapped file that
+another process truncates during a read can stop the process on Unix systems,
+so files that may change while being read should use the buffered backend.
 
 In the core crate and the Polars plugin, a workspace lint flags every use of
 unsafe code and continuous integration fails on it, except at five marked
@@ -233,12 +256,14 @@ AI-assisted output.
 Development started in October 2025 from a prototype that used a c2rust
 translation of ReadStat's C reader as its starting point and was rewritten in
 Rust within two weeks. The present code base is a second rewrite, begun in
-March 2026. Its catalog reader, file probe, and encoding lookup descend from
-the first rewrite, and none of the translated code remains. ReadStat's MIT
-licence is included in the repository's third-party notices. pandas, Parso,
-and Shotwell's documentation served as references for the file format.
-Correctness rests on the comparison with ReadStat described under State of the
-field.
+March 2026. It replaced the repository's earlier history, so the public commit
+history starts on 29 March 2026, while releases on crates.io go back to
+January 2026. In the present code base, the catalog reader, file probe, and
+encoding lookup descend from the first rewrite, and none of the translated
+code remains. ReadStat's MIT licence is included in the repository's
+third-party notices. pandas, Parso, and Shotwell's documentation served as
+references for the file format. Correctness rests on the comparison with
+ReadStat described under State of the field.
 
 # Acknowledgements
 
