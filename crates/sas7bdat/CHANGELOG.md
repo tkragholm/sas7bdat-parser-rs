@@ -34,6 +34,7 @@ Minor rather than patch because the `arrow` feature moves to arrow 60. Its funct
 ### Fixed
 
 - Parallel scans of compressed files sized their chunks from the declared rows per page, which counts uncompressed rows. A chunk then held several batches, and a file could have fewer chunks than decode threads. The larger of the declared figure and the file's average is used now for read extents, and memory-mapped chunks are cut by row count.
+- An I/O error prints the path of the file it came from, which it already recorded.
 
 ## [0.9.3] - 2026-10-20
 
