@@ -5,4 +5,4 @@
 #' @keywords internal
 NULL
 
-convert_sas_impl <- function(input, output, recursive, flatten, overwrite, sink, compression, io_backend, threads, tmp_dir) .Call("wrap__convert_sas_impl", input, output, recursive, flatten, overwrite, sink, compression, io_backend, threads, tmp_dir, PACKAGE = "fastsasconvert")
+convert_sas_impl <- function(input, output, recursive, flatten, overwrite, sink, compression, io_backend, threads, tmp_dir, encoding, strict) .Call("wrap__convert_sas_impl", input, output, recursive, flatten, overwrite, sink, compression, io_backend, threads, tmp_dir, encoding, strict, PACKAGE = "fastsasconvert")

@@ -127,7 +127,15 @@ fn convert_impl(
     io_backend: &str,
     threads: Option<usize>,
     tmp_dir: Option<String>,
+    encoding: Option<String>,
+    strict: bool,
 ) -> std::result::Result<Robj, String> {
+    // An unknown encoding would fail every file the same way; say so once instead.
+    if let Some(label) = &encoding {
+        sas7bdat::OpenOptions::builder()
+            .encoding(label)
+            .map_err(|err| format!("encoding: {err}"))?;
+    }
     let options = ConvertOptions {
         layout: OutputLayout {
             out_dir: output.map(PathBuf::from),
@@ -139,6 +147,8 @@ fn convert_impl(
         io_backend: parse_backend(io_backend)?,
         parse_threads: threads,
         compression: parse_compression(compression)?,
+        encoding,
+        strict,
         ..ConvertOptions::default()
     };
 
@@ -268,6 +278,8 @@ fn convert_sas_impl(
     io_backend: &str,
     threads: Option<i32>,
     tmp_dir: Option<String>,
+    encoding: Option<String>,
+    strict: bool,
 ) -> Robj {
     let threads = match threads {
         None => None,
@@ -285,6 +297,8 @@ fn convert_sas_impl(
         io_backend,
         threads,
         tmp_dir,
+        encoding,
+        strict,
     ) {
         Ok(frame) => frame,
         Err(message) => throw_r_error(message),

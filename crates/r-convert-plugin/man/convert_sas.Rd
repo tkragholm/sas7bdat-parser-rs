@@ -14,7 +14,9 @@ convert_sas(
   compression = c("zstd", "lz4", "snappy", "none"),
   io_backend = c("auto", "mmap", "buffered"),
   threads = NULL,
-  tmp_dir = NULL
+  tmp_dir = NULL,
+  encoding = NULL,
+  strict = FALSE
 )
 }
 \arguments{
@@ -50,6 +52,15 @@ logical core.}
 (default) stages beside the destination, where the move is a rename. Point this
 at a local disk to keep the write off a network link until there is a finished
 file to send — at the cost of copying it afterwards.}
+
+\item{encoding}{Read each file's text in this encoding instead of the one its
+header declares, for files whose header is wrong. A WHATWG label
+(\code{"utf-8"}, \code{"windows-1252"}) or SAS's name for a Windows code page
+(\code{"wlatin1"}). \code{NULL} (the default) uses the declared encoding.}
+
+\item{strict}{If \code{TRUE}, a file with a cell that does not decode in its
+encoding fails, with the reason in \code{error}. By default such bytes are
+replaced.}
 }
 \value{
 A data frame with one row per converted input — zero rows if nothing matched,

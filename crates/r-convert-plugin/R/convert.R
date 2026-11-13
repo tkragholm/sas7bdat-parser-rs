@@ -49,6 +49,13 @@
 #'   (default) stages beside the destination, where the move is a rename. Point
 #'   this at a local disk to keep the write off a network link until there is a
 #'   finished file to send — at the cost of copying it afterwards.
+#' @param encoding Read each file's text in this encoding instead of the one its
+#'   header declares, for files whose header is wrong. A WHATWG label
+#'   (`"utf-8"`, `"windows-1252"`) or SAS's name for a Windows code page
+#'   (`"wlatin1"`). `NULL` (the default) uses the declared encoding.
+#' @param strict If `TRUE`, a file with a cell that does not decode in its
+#'   encoding fails, with the reason in `error`. By default such bytes are
+#'   replaced.
 #' @return A data frame with one row per converted input — zero rows if nothing
 #'   matched, which is not an error: `input`, `output`, `rows`,
 #'   `columns`, `input_bytes`, `output_bytes`, `seconds`, `status` and `error`.
@@ -82,7 +89,9 @@ convert_sas <- function(input,
                         compression = c("zstd", "lz4", "snappy", "none"),
                         io_backend = c("auto", "mmap", "buffered"),
                         threads = NULL,
-                        tmp_dir = NULL) {
+                        tmp_dir = NULL,
+                        encoding = NULL,
+                        strict = FALSE) {
   if (!is.character(input) || length(input) == 0L || anyNA(input)) {
     stop("`input` must be one or more file paths", call. = FALSE)
   }
@@ -93,8 +102,13 @@ convert_sas <- function(input,
   if (!is.null(tmp_dir)) {
     tmp_dir <- check_scalar_path(tmp_dir, "tmp_dir")
   }
-  for (arg in c("recursive", "flatten", "overwrite")) {
+  for (arg in c("recursive", "flatten", "overwrite", "strict")) {
     check_flag(get(arg), arg)
+  }
+  if (!is.null(encoding) &&
+      (!is.character(encoding) || length(encoding) != 1L || is.na(encoding))) {
+    stop("`encoding` must be NULL or a single encoding name, not ",
+         deparse1(encoding), call. = FALSE)
   }
   sink <- match.arg(sink)
   compression <- match.arg(compression)
@@ -102,7 +116,8 @@ convert_sas <- function(input,
 
   convert_sas_impl(
     input, output, recursive, flatten, overwrite,
-    sink, compression, io_backend, check_threads(threads), tmp_dir
+    sink, compression, io_backend, check_threads(threads), tmp_dir,
+    encoding, strict
   )
 }
 
