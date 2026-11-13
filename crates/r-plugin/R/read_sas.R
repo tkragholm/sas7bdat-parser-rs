@@ -60,11 +60,20 @@
 #'   installed).
 #' @export
 #' @examples
-#' \dontrun{
-#' df <- read_sas7bdat("path/to/file.sas7bdat")
-#' df <- read_sas7bdat("data.sas7bdat", catalog = "formats.sas7bcat")
-#' df <- read_sas7bdat("survey.sas7bdat", categorical = TRUE)
+#' # A small file that ships with the package
+#' path <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+#' df <- read_sas7bdat(path)
+#' df
 #'
+#' # Value labels from a format catalog
+#' data <- system.file("extdata", "test_data_win.sas7bdat", package = "fastsas")
+#' formats <- system.file("extdata", "test_formats_win.sas7bcat", package = "fastsas")
+#' read_sas7bdat(data, catalog = formats)
+#'
+#' # Text columns as factors
+#' str(read_sas7bdat(path, categorical = TRUE))
+#'
+#' \dontrun{
 #' # Reading from a network share on a platform where "auto" cannot detect one:
 #' df <- read_sas7bdat("//server/share/data.sas7bdat", io_backend = "buffered")
 #'

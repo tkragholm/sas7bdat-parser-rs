@@ -38,6 +38,28 @@ pyreadstat cover those.
 - Value labels from companion `.sas7bcat` catalogs
 - Rows that SAS has marked as deleted are excluded
 
+## Trying it
+
+Any SAS7BDAT file will do. pandas' test suite has a small one (BSD-3-Clause):
+
+```sh
+curl -LO https://raw.githubusercontent.com/pandas-dev/pandas/v2.2.3/pandas/tests/io/sas/data/airline.sas7bdat
+```
+
+```sh
+sas7bdat info airline.sas7bdat                                    # pip install sas7bdat-cli
+python -c 'import sas7bdat_polars as sp; print(sp.read_sas("airline.sas7bdat"))'
+```
+
+The R packages ship example files, used in their help pages:
+
+```r
+fastsas::read_sas7bdat(system.file("extdata", "people.sas7bdat", package = "fastsas"))
+```
+
+In a clone of the repository, `cargo run -p sas7bdat --example read_file`
+prints the columns and rows of the same file from Rust.
+
 ## Rust
 
 ```toml

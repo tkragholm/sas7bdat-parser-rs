@@ -56,6 +56,12 @@
 #'   found, which exceeds `nrow()` when a run was stopped early.
 #' @export
 #' @examples
+#' # Convert a small file that ships with the package to Parquet
+#' path <- system.file("extdata", "people.sas7bdat", package = "fastsasconvert")
+#' out <- file.path(tempdir(), "fastsas-example")
+#' result <- convert_sas(path, out, threads = 1)
+#' result[, c("input", "output", "status", "rows")]
+#'
 #' \dontrun{
 #' # Mirror a tree of SAS files into a tree of Parquet files.
 #' result <- convert_sas("//server/share/sas", "D:/parquet")

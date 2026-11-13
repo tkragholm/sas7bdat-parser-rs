@@ -16,6 +16,9 @@
 //! }
 //! ```
 //!
+//! `examples/read_file.rs` in the repository is the same idea, runnable on a file the
+//! repository ships: `cargo run -p sas7bdat --example read_file`.
+//!
 //! # Design
 //!
 //! How the reader is built, and why: the layers, the scan pipelines, parallelism and its
