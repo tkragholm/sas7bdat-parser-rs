@@ -53,12 +53,15 @@ impl std::str::FromStr for IoBackendPreference {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptions {
     pub(crate) io_backend: IoBackendPreference,
+    /// Replaces the encoding the file declares, for every text in it.
+    pub(crate) encoding: Option<&'static encoding_rs::Encoding>,
 }
 
 impl Default for OpenOptions {
     fn default() -> Self {
         Self {
             io_backend: IoBackendPreference::Auto,
+            encoding: None,
         }
     }
 }
@@ -67,6 +70,7 @@ impl Default for OpenOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptionsBuilder {
     io_backend: IoBackendPreference,
+    encoding: Option<&'static encoding_rs::Encoding>,
 }
 
 impl OpenOptions {
@@ -83,7 +87,28 @@ impl OpenOptionsBuilder {
     pub const fn new() -> Self {
         Self {
             io_backend: IoBackendPreference::Auto,
+            encoding: None,
         }
+    }
+
+    /// Reads the file's text in `label`'s encoding instead of the one the file declares:
+    /// cell values, column names, labels and format names alike. For files whose header
+    /// names the wrong encoding, a common case being UTF-8 data in a file marked latin1.
+    /// [`DatasetMetadata::encoding`](crate::DatasetMetadata::encoding) then reports the
+    /// encoding used.
+    ///
+    /// `label` is a WHATWG label (`utf-8`, `windows-1252`, `latin1`), one of SAS's names
+    /// for the Windows code pages (`wlatin1`, `wlatin2`, ...), or a Mac encoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unsupported`](crate::Error::Unsupported) for a label not recognised.
+    pub fn encoding(mut self, label: &str) -> crate::error::Result<Self> {
+        let encoding = crate::encoding::encoding_for_label(label).ok_or_else(|| {
+            crate::error::Error::unsupported(format!("unknown encoding {label:?}"))
+        })?;
+        self.encoding = Some(encoding);
+        Ok(self)
     }
 
     /// Sets how the file's bytes are read. The default is [`IoBackendPreference::Auto`].
@@ -98,6 +123,7 @@ impl OpenOptionsBuilder {
     pub const fn build(self) -> OpenOptions {
         OpenOptions {
             io_backend: self.io_backend,
+            encoding: self.encoding,
         }
     }
 }

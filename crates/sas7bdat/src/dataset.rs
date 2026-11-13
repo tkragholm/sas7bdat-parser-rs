@@ -268,7 +268,7 @@ impl Dataset {
     fn from_bytes_with_options(bytes: Vec<u8>, options: OpenOptions) -> Result<Self> {
         let bytes = Arc::<[u8]>::from(bytes);
         let mut cursor = Cursor::new(&*bytes);
-        let (layout, metadata) = Self::parse_from_reader(&mut cursor)?;
+        let (layout, metadata) = Self::parse_from_reader(&mut cursor, options)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Bytes(Arc::clone(&bytes)),
@@ -603,8 +603,16 @@ impl Dataset {
 }
 
 impl Dataset {
-    fn parse_from_reader<R: Read + Seek>(reader: &mut R) -> Result<(LayoutPlan, DatasetMetadata)> {
-        let (header, metadata) = probe_header(reader)?;
+    fn parse_from_reader<R: Read + Seek>(
+        reader: &mut R,
+        options: OpenOptions,
+    ) -> Result<(LayoutPlan, DatasetMetadata)> {
+        let (header, mut metadata) = probe_header(reader)?;
+        // An override replaces the declared encoding before the metadata pages are read,
+        // so column names and labels use it too.
+        if let Some(encoding) = options.encoding {
+            metadata.encoding = Some(encoding.name().to_owned());
+        }
         reader.rewind().map_err(|err| Error::io_error(&err))?;
         let (layout, metadata) = parse_layout(reader, header, metadata)?;
         Ok((layout, metadata))
@@ -627,12 +635,13 @@ impl Dataset {
     }
 
     fn from_buffered_file(path: &Path, mut file: File, options: OpenOptions) -> Result<Self> {
-        let (layout, metadata) = Self::parse_from_reader(&mut file).map_err(|mut err| {
-            if let Error::Io(ref mut io_err) = err {
-                io_err.path = Some(path.to_path_buf());
-            }
-            err
-        })?;
+        let (layout, metadata) =
+            Self::parse_from_reader(&mut file, options).map_err(|mut err| {
+                if let Error::Io(ref mut io_err) = err {
+                    io_err.path = Some(path.to_path_buf());
+                }
+                err
+            })?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Path(path.to_path_buf()),
@@ -647,7 +656,7 @@ impl Dataset {
     fn from_mmap(mmap: Mmap, options: OpenOptions) -> Result<Self> {
         let mmap = Arc::new(mmap);
         let mut cursor = Cursor::new(&mmap[..]);
-        let (layout, metadata) = Self::parse_from_reader(&mut cursor)?;
+        let (layout, metadata) = Self::parse_from_reader(&mut cursor, options)?;
         Ok(Self {
             file: Arc::new(FileInner {
                 source: FileSource::Mmap(Arc::clone(&mmap)),
@@ -721,6 +730,7 @@ mod tests {
             &path,
             OpenOptions {
                 io_backend: IoBackendPreference::Mmap,
+                ..OpenOptions::default()
             },
         )
         .expect("mmap dataset open");
@@ -740,6 +750,7 @@ mod tests {
             &path,
             OpenOptions {
                 io_backend: IoBackendPreference::Buffered,
+                ..OpenOptions::default()
             },
         )
         .expect("buffered dataset open");
@@ -840,6 +851,7 @@ mod tests {
             tracked_fixture(),
             OpenOptions {
                 io_backend: IoBackendPreference::Mmap,
+                ..OpenOptions::default()
             },
         )
         .expect("mmap breakdown");
@@ -864,6 +876,7 @@ mod tests {
             tracked_fixture(),
             OpenOptions {
                 io_backend: IoBackendPreference::Buffered,
+                ..OpenOptions::default()
             },
         )
         .expect("buffered breakdown");

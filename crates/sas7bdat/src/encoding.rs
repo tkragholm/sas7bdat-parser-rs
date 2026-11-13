@@ -4,6 +4,13 @@ pub fn resolve_encoding(label: Option<&str>) -> &'static Encoding {
     label.and_then(resolve_label).unwrap_or(UTF_8)
 }
 
+/// The encoding a label names, or `None` for a label not recognised. Takes WHATWG labels
+/// (`utf-8`, `windows-1252`, `latin1`), SAS's names for the Windows code pages (`wlatin1`,
+/// `wlatin2`, `wcyrillic`, `wgreek`, `wturkish`), and the Mac encodings.
+pub fn encoding_for_label(name: &str) -> Option<&'static Encoding> {
+    resolve_label(name)
+}
+
 fn resolve_label(name: &str) -> Option<&'static Encoding> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -15,7 +22,24 @@ fn resolve_label(name: &str) -> Option<&'static Encoding> {
         try_encoding_label(&lower)
             .or_else(|| try_encoding_label(&lower.replace('_', "-")))
             .or_else(|| mac_compat_encoding(&lower))
+            .or_else(|| sas_windows_encoding(&lower))
     })
+}
+
+/// SAS's names for the Windows code pages, as `haven` and `PROC OPTIONS` spell them.
+fn sas_windows_encoding(lower_label: &str) -> Option<&'static Encoding> {
+    match lower_label {
+        "wlatin1" => Encoding::for_label(b"windows-1252"),
+        "wlatin2" => Encoding::for_label(b"windows-1250"),
+        "wcyrillic" => Encoding::for_label(b"windows-1251"),
+        "wgreek" => Encoding::for_label(b"windows-1253"),
+        "wturkish" => Encoding::for_label(b"windows-1254"),
+        "whebrew" => Encoding::for_label(b"windows-1255"),
+        "warabic" => Encoding::for_label(b"windows-1256"),
+        "wbaltic" => Encoding::for_label(b"windows-1257"),
+        "wvietnamese" => Encoding::for_label(b"windows-1258"),
+        _ => None,
+    }
 }
 
 fn try_encoding_label(label: &str) -> Option<&'static Encoding> {
