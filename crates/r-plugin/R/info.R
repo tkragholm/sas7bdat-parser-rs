@@ -27,8 +27,8 @@ sas_info <- function(path, catalog = NULL, encoding = NULL) {
   }
   if (!is.null(encoding) &&
       (!is.character(encoding) || length(encoding) != 1L || is.na(encoding))) {
-    stop("`encoding` must be NULL or a single encoding name, not ",
-         deparse1(encoding), call. = FALSE)
+    abort_argument("`encoding` must be NULL or a single encoding name, not ",
+                   deparse1(encoding))
   }
-  sas7bdat_info_impl(path, catalog, encoding)
+  raise_classed(sas7bdat_info_impl(path, catalog, encoding))
 }

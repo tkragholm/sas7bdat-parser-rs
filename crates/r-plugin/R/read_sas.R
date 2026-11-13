@@ -104,8 +104,8 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
     catalog <- check_path(catalog, "catalog")
   }
   if (!is.logical(categorical) || length(categorical) != 1L || is.na(categorical)) {
-    stop("`categorical` must be TRUE or FALSE, not ",
-         deparse1(categorical), call. = FALSE)
+    abort_argument("`categorical` must be TRUE or FALSE, not ",
+         deparse1(categorical))
   }
   io_backend <- match.arg(io_backend)
   threads <- check_threads(threads)
@@ -116,15 +116,16 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
 
   if (!is.null(encoding) &&
       (!is.character(encoding) || length(encoding) != 1L || is.na(encoding))) {
-    stop("`encoding` must be NULL or a single encoding name, not ",
-         deparse1(encoding), call. = FALSE)
+    abort_argument("`encoding` must be NULL or a single encoding name, not ",
+         deparse1(encoding))
   }
   if (!is.logical(strict) || length(strict) != 1L || is.na(strict)) {
-    stop("`strict` must be TRUE or FALSE, not ", deparse1(strict), call. = FALSE)
+    abort_argument("`strict` must be TRUE or FALSE, not ", deparse1(strict))
   }
 
-  df <- sas7bdat_read_impl(path, catalog, categorical, io_backend, threads,
-                           col_select, skip, n_max, encoding, strict)
+  df <- raise_classed(sas7bdat_read_impl(path, catalog, categorical, io_backend,
+                                         threads, col_select, skip, n_max,
+                                         encoding, strict))
   problem <- attr(df, "fastsas_warning", exact = TRUE)
   if (!is.null(problem)) {
     attr(df, "fastsas_warning") <- NULL
@@ -155,16 +156,16 @@ check_col_select <- function(value) {
       all(value == trunc(value)) && all(value >= 1)) {
     return(as.double(value))
   }
-  stop("`col_select` must be NULL, column names, or 1-based column positions, not ",
-       deparse1(value), call. = FALSE)
+  abort_argument("`col_select` must be NULL, column names, or 1-based column positions, not ",
+       deparse1(value))
 }
 
 check_row_count <- function(value, arg, allow_inf) {
   ok <- is.numeric(value) && length(value) == 1L && !is.na(value) && value >= 0 &&
     if (is.infinite(value)) allow_inf else value == trunc(value)
   if (!ok) {
-    stop("`", arg, "` must be a whole number >= 0",
-         if (allow_inf) " or Inf" else "", ", not ", deparse1(value), call. = FALSE)
+    abort_argument("`", arg, "` must be a whole number >= 0",
+         if (allow_inf) " or Inf" else "", ", not ", deparse1(value))
   }
   as.double(value)
 }
@@ -175,8 +176,8 @@ check_threads <- function(value) {
   }
   if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
       value != trunc(value) || value < 1) {
-    stop("`threads` must be NULL or a whole number >= 1, not ",
-         deparse1(value), call. = FALSE)
+    abort_argument("`threads` must be NULL or a whole number >= 1, not ",
+         deparse1(value))
   }
   as.integer(value)
 }
@@ -186,8 +187,8 @@ check_threads <- function(value) {
 # 'path' argument" regardless of which argument it came from.
 check_path <- function(value, arg) {
   if (!is.character(value) || length(value) != 1L || is.na(value)) {
-    stop("`", arg, "` must be a single file path, not ",
-         deparse1(value), call. = FALSE)
+    abort_argument("`", arg, "` must be a single file path, not ",
+         deparse1(value))
   }
   path.expand(value)
 }

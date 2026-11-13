@@ -559,6 +559,34 @@ fn resolve_catalog(path: &str, catalog: Option<&str>) -> Option<PathBuf> {
     sibling.exists().then_some(sibling)
 }
 
+// ── errors ────────────────────────────────────────────────────────────────────
+//
+// An error reaches R as a condition whose class says whose problem it is, so a loop
+// over many files can catch one kind and stop on the others. Rust cannot build an R
+// condition, so the message carries its class before a unit separator, and the R
+// wrapper (`raise_classed()` in R/read_sas.R) splits it off and raises the condition.
+
+const ARGUMENT: &str = "fastsas_error_argument";
+const UNSUPPORTED: &str = "fastsas_error_unsupported";
+const INTERNAL: &str = "fastsas_error_internal";
+
+/// `message` prefixed with its condition class, for the R wrapper to raise.
+fn tagged(class: &str, message: String) -> String {
+    format!("{class}\u{1f}{message}")
+}
+
+/// The condition class for an error from the reader.
+const fn class_of(err: &sas7bdat::Error) -> &'static str {
+    match err {
+        sas7bdat::Error::Io(_) => "fastsas_error_io",
+        sas7bdat::Error::Decode(_) => "fastsas_error_decode",
+        sas7bdat::Error::Unsupported(_) => UNSUPPORTED,
+        sas7bdat::Error::Projection(_) => ARGUMENT,
+        sas7bdat::Error::Internal(_) | sas7bdat::Error::Arrow(_) => INTERNAL,
+        _ => "fastsas_error_format",
+    }
+}
+
 /// Which columns and rows to read, as `read_sas7bdat()` passes them.
 struct Selection {
     /// Columns by name or by 0-based position, in output order; `None` for every column.
@@ -593,17 +621,18 @@ fn read_impl(
     // round-trip with no readahead.
     let backend: IoBackendPreference = io_backend
         .parse()
-        .map_err(|e| format!("sas7bdat: io_backend: {e}"))?;
+        .map_err(|e| tagged(ARGUMENT, format!("sas7bdat: io_backend: {e}")))?;
     let builder = OpenOptions::builder().io_backend(backend);
     let builder = match &selection.encoding {
         None => builder,
         Some(label) => builder
             .encoding(label)
-            .map_err(|e| format!("sas7bdat: encoding: {e}"))?,
+            .map_err(|e| tagged(ARGUMENT, format!("sas7bdat: encoding: {e}")))?,
     };
     let options = builder.build();
     let mut ds =
-        Dataset::open_with(path, options).map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
+        Dataset::open_with(path, options)
+        .map_err(|e| tagged(class_of(&e), format!("sas7bdat: open `{path}`: {e}")))?;
 
     // A catalog the caller named must load. One found beside the file is used if it
     // loads, and otherwise reported as a warning, so the read is not silently unlabelled.
@@ -612,7 +641,10 @@ fn read_impl(
         match ds.attach_catalog(&cat_path) {
             Ok(()) => {}
             Err(e) if catalog.is_some() => {
-                return Err(format!("sas7bdat: catalog `{}`: {e}", cat_path.display()));
+                return Err(tagged(
+                    class_of(&e),
+                    format!("sas7bdat: catalog `{}`: {e}", cat_path.display()),
+                ));
             }
             Err(e) => {
                 warning = Some(format!(
@@ -636,7 +668,7 @@ fn read_impl(
         ),
     }
     .transpose()
-    .map_err(|e| format!("sas7bdat: col_select: {e}"))?;
+    .map_err(|e| tagged(ARGUMENT, format!("sas7bdat: col_select: {e}")))?;
     let chosen: Vec<&sas7bdat::ColumnMeta> = projection.as_ref().map_or_else(
         || ds.columns().iter().collect(),
         |projection| {
@@ -676,7 +708,8 @@ fn read_impl(
         .n_max
         .map_or(live - first, |n_max| n_max.min(live - first));
     let selected = first > 0 || rows < live;
-    let nrow = usize::try_from(rows).map_err(|_| "sas7bdat: too many rows for R".to_owned())?;
+    let nrow = usize::try_from(rows)
+        .map_err(|_| tagged(UNSUPPORTED, "sas7bdat: too many rows for R".to_owned()))?;
 
     // Decode all batches across cores, then fill each column's R vector in place.
     //
@@ -830,7 +863,7 @@ fn read_impl(
             }
             Ok(std::ops::ControlFlow::Continue(()))
         })
-        .map_err(|e| format!("sas7bdat: scan `{path}`: {e}"))?;
+        .map_err(|e| tagged(class_of(&e), format!("sas7bdat: scan `{path}`: {e}")))?;
 
     for (ci, meta) in metas.iter().enumerate() {
         if wants_factor[ci] {
@@ -900,7 +933,10 @@ fn read_sas7bdat(
     let threads = match threads {
         None => None,
         Some(n) if n >= 1 => Some(n as usize),
-        Some(n) => throw_r_error(format!("sas7bdat: threads must be >= 1, got {n}")),
+        Some(n) => throw_r_error(tagged(
+            ARGUMENT,
+            format!("sas7bdat: threads must be >= 1, got {n}"),
+        )),
     };
     // The R wrapper has already checked these; here they only change representation.
     let columns = if col_select.is_null() {
@@ -913,7 +949,10 @@ fn read_sas7bdat(
             positions.iter().map(|p| *p as usize - 1).collect(),
         ))
     } else {
-        throw_r_error("sas7bdat: col_select must be column names or positions")
+        throw_r_error(tagged(
+            ARGUMENT,
+            "sas7bdat: col_select must be column names or positions".to_owned(),
+        ))
     };
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let selection = Selection {
@@ -978,13 +1017,13 @@ fn info_impl(
         None => builder,
         Some(label) => builder
             .encoding(label)
-            .map_err(|e| format!("sas7bdat: encoding: {e}"))?,
+            .map_err(|e| tagged(ARGUMENT, format!("sas7bdat: encoding: {e}")))?,
     };
     let mut ds = Dataset::open_with(path, builder.build())
-        .map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
+        .map_err(|e| tagged(class_of(&e), format!("sas7bdat: open `{path}`: {e}")))?;
     if let Some(catalog) = catalog {
         ds.attach_catalog(catalog)
-            .map_err(|e| format!("sas7bdat: catalog `{catalog}`: {e}"))?;
+            .map_err(|e| tagged(class_of(&e), format!("sas7bdat: catalog `{catalog}`: {e}")))?;
     }
     let meta = ds.metadata();
     let columns = ds.columns();
@@ -1029,7 +1068,7 @@ fn info_impl(
             column_frame,
         ],
     )
-    .map_err(|e| format!("sas7bdat: {e}"))?;
+    .map_err(|e| tagged(INTERNAL, format!("sas7bdat: {e}")))?;
     Ok(info.into())
 }
 

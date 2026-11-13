@@ -79,6 +79,20 @@ A tibble with these column types:
 `sas_info()` gives a file's row count, encoding, table name and a data frame of
 its columns with their labels and formats, without reading any rows.
 
+## Errors
+
+Every error has the class `fastsas_error` and one saying whose problem it is:
+`fastsas_error_argument`, `fastsas_error_io` (the file could not be read),
+`fastsas_error_format` (not a readable SAS7BDAT file), `fastsas_error_decode`
+(text that does not decode, with `strict = TRUE`), `fastsas_error_unsupported`
+or `fastsas_error_internal`. A loop over many files can catch one kind:
+
+```r
+dfs <- lapply(files, function(f) {
+  tryCatch(read_sas7bdat(f), fastsas_error_format = function(e) NULL)
+})
+```
+
 ## Development
 
 `src/rust/Cargo.toml` depends on `sas7bdat` by version, so a package built
