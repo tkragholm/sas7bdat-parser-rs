@@ -256,9 +256,10 @@ fn apply_column_encodings(
     builder
 }
 use crate::parquet_pipeline;
+use rayon::prelude::*;
 use sas7bdat::{
-    BatchHint, CellValue, ColumnMeta, Dataset, Error, LogicalType, Parallelism, Projection,
-    RowSelection, ScanBuilder, ScanProgressObserver,
+    BatchHint, CellValue, ColumnMeta, Dataset, Error, LogicalType, OwnedColumnBuffer, Parallelism,
+    Projection, RowSelection, SasDate, SasDateTime, SasTime, ScanBuilder, ScanProgressObserver,
 };
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
@@ -450,9 +451,6 @@ pub fn write_csv_or_tsv(
         },
     );
 
-    // Precompute the SAS epoch once instead of rebuilding it per date/time cell.
-    let (date_epoch, datetime_epoch) = sas_epochs();
-
     // Logical type per emitted column, in the same order as `header_names`. A temporal cell
     // that didn't fit a whole integer unit arrives as a raw `Float64` of SAS-epoch units;
     // without the column's type here it would be written as a bare number next to properly
@@ -479,39 +477,218 @@ pub fn write_csv_or_tsv(
         },
     );
 
-    let mut wrote_header = false;
-    // Reused across every cell so formatting numerics/dates allocates no per-cell String.
-    let mut scratch = String::new();
-    let stats = scan.visit_rows(|row| {
-        if options.headers && !wrote_header {
-            writer
-                .write_record(header_names.iter())
-                .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
-            wrote_header = true;
-        }
-        for (index, cell) in row.iter().enumerate() {
-            let kind = logical_types
-                .get(index)
-                .copied()
-                .unwrap_or(LogicalType::Float);
-            write_cell_field(
-                &mut writer,
-                &mut scratch,
-                cell,
-                kind,
-                date_epoch,
-                datetime_epoch,
-            )
-            .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
-        }
-        // Terminate the record after the field sequence.
+    // The header is written whether or not any row follows, so an empty dataset still
+    // names its columns. A dataset with no columns writes nothing: the csv crate would
+    // write an empty record as `""`.
+    if options.headers && !header_names.is_empty() {
         writer
-            .write_record(None::<&[u8]>)
+            .write_record(header_names.iter())
             .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
+    }
+    writer.flush()?;
+    let mut file = std::io::BufWriter::with_capacity(
+        OUTPUT_BUFFER_BYTES,
+        writer
+            .into_inner()
+            .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?,
+    );
+
+    // Batches are decoded in parallel and arrive in file order. Each batch's rows are
+    // formatted in chunks on a thread pool, each chunk by its own CSV writer into a buffer,
+    // and the buffers are written in order: the same records, field for field, as one
+    // writer over the row stream would produce.
+    let pool = options
+        .scan
+        .parse_threads
+        .map(|threads| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads.max(1))
+                .build()
+        })
+        .transpose()?;
+    let (date_epoch, datetime_epoch) = sas_epochs();
+    let delimiter = options.delimiter;
+    let stats = scan.visit_owned_batches(|batch| {
+        let rows = batch.row_count;
+        let format_chunk = |range: std::ops::Range<usize>| -> csv::Result<Vec<u8>> {
+            let mut chunk = WriterBuilder::new()
+                .delimiter(delimiter)
+                .has_headers(false)
+                .from_writer(Vec::new());
+            let mut scratch = String::new();
+            let texts: Vec<Option<&str>> = batch.columns.iter().map(column_text).collect();
+            for row in range {
+                for (index, column) in batch.columns.iter().enumerate() {
+                    let kind = logical_types
+                        .get(index)
+                        .copied()
+                        .unwrap_or(LogicalType::Float);
+                    let cell = batch_cell(column, texts[index], row, kind);
+                    write_cell_field(
+                        &mut chunk,
+                        &mut scratch,
+                        &cell,
+                        kind,
+                        date_epoch,
+                        datetime_epoch,
+                    )?;
+                }
+                chunk.write_record(None::<&[u8]>)?;
+            }
+            chunk.into_inner().map_err(|err| err.into_error().into())
+        };
+        let chunk_rows = (CSV_CELLS_PER_CHUNK / batch.columns.len().max(1)).max(1);
+        let ranges: Vec<std::ops::Range<usize>> = (0..rows)
+            .step_by(chunk_rows)
+            .map(|start| start..(start + chunk_rows).min(rows))
+            .collect();
+        let format_all = || {
+            ranges
+                .par_iter()
+                .cloned()
+                .map(format_chunk)
+                .collect::<csv::Result<Vec<Vec<u8>>>>()
+        };
+        let chunks = match &pool {
+            Some(pool) => pool.install(format_all),
+            None => format_all(),
+        }
+        .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
+        for chunk in &chunks {
+            file.write_all(chunk)
+                .map_err(|err| Error::unsupported(format!("csv write failed: {err}")))?;
+        }
         Ok(ControlFlow::Continue(()))
     })?;
-    writer.flush()?;
+    file.flush()?;
     Ok(stats.rows_emitted)
+}
+
+/// Cells each formatting task takes. Sized in cells, not rows, because a batch of a wide
+/// table holds few rows: the 4,041-column AHS file's batches are about 1,000 rows, which in
+/// 512-row tasks kept two threads busy. This gives it about 16 tasks per batch, and a narrow
+/// table a few thousand rows per task.
+const CSV_CELLS_PER_CHUNK: usize = 1 << 18;
+
+/// A string column's bytes as text, checked once per batch. `None` for other columns, and
+/// for one whose bytes are not UTF-8, which the scanner does not produce.
+fn column_text(column: &OwnedColumnBuffer) -> Option<&str> {
+    match column {
+        OwnedColumnBuffer::Utf8 { data, .. } => std::str::from_utf8(data).ok(),
+        _ => None,
+    }
+}
+
+/// Whether row `row` is set in a bit-packed validity mask; no mask means every row is.
+fn is_valid(valid: Option<&Vec<u64>>, row: usize) -> bool {
+    valid.is_none_or(|words| {
+        words
+            .get(row / 64)
+            .is_some_and(|word| word >> (row % 64) & 1 == 1)
+    })
+}
+
+/// A whole `f64` as an `i64`, by the rule the row stream applies to a numeric cell: finite,
+/// within the `i64` range, and within machine epsilon of its truncation.
+fn whole_i64(number: f64) -> Option<i64> {
+    #[allow(clippy::cast_precision_loss)]
+    const MIN: f64 = i64::MIN as f64;
+    #[allow(clippy::cast_precision_loss)]
+    const MAX: f64 = i64::MAX as f64;
+    if !number.is_finite() || !(MIN..=MAX).contains(&number) {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    let value = number as i64;
+    #[allow(clippy::cast_precision_loss)]
+    ((value as f64 - number).abs() < f64::EPSILON).then_some(value)
+}
+
+/// The cell at `row` of a batch column, as the row stream would have typed it.
+///
+/// The batch decoder types a numeric column once per batch, so a column with one fractional
+/// value is `F64` throughout; the row stream types each cell, giving a whole value as an
+/// integer and a temporal value that fits as a date, datetime or time. This applies the
+/// row stream's per-cell rules to an `F64` column so both paths write the same text.
+fn batch_cell<'a>(
+    column: &'a OwnedColumnBuffer,
+    text: Option<&'a str>,
+    row: usize,
+    kind: LogicalType,
+) -> CellValue<'a> {
+    match column {
+        OwnedColumnBuffer::I32 { values, valid } if is_valid(valid.as_ref(), row) => {
+            CellValue::Int32(values[row])
+        }
+        OwnedColumnBuffer::I64 { values, valid } if is_valid(valid.as_ref(), row) => {
+            CellValue::Int64(values[row])
+        }
+        OwnedColumnBuffer::F64 { values, valid } if is_valid(valid.as_ref(), row) => {
+            let number = values[row];
+            if number.is_nan() {
+                return CellValue::Null;
+            }
+            match kind {
+                LogicalType::Date => whole_i64(number)
+                    .and_then(|days| i32::try_from(days).ok())
+                    .map_or(CellValue::Float64(number), |days| {
+                        CellValue::Date(SasDate {
+                            days_since_sas_epoch: days,
+                        })
+                    }),
+                LogicalType::DateTime => {
+                    whole_i64(number).map_or(CellValue::Float64(number), |seconds| {
+                        CellValue::DateTime(SasDateTime {
+                            seconds_since_sas_epoch: seconds,
+                        })
+                    })
+                }
+                LogicalType::Time => whole_i64(number)
+                    .and_then(|seconds| i32::try_from(seconds).ok())
+                    .map_or(CellValue::Float64(number), |seconds| {
+                        CellValue::Time(SasTime {
+                            seconds_since_midnight: seconds,
+                        })
+                    }),
+                _ => whole_i64(number).map_or(CellValue::Float64(number), CellValue::Int64),
+            }
+        }
+        OwnedColumnBuffer::Date { values, valid } if is_valid(valid.as_ref(), row) => {
+            CellValue::Date(values[row])
+        }
+        OwnedColumnBuffer::DateTime { values, valid } if is_valid(valid.as_ref(), row) => {
+            CellValue::DateTime(values[row])
+        }
+        OwnedColumnBuffer::Time { values, valid } if is_valid(valid.as_ref(), row) => {
+            CellValue::Time(values[row])
+        }
+        OwnedColumnBuffer::Utf8 {
+            offsets,
+            data,
+            valid,
+        } if is_valid(valid.as_ref(), row) => {
+            let offsets = offsets.as_slice();
+            let (start, end) = (
+                usize::try_from(offsets[row]).unwrap_or(0),
+                usize::try_from(offsets[row + 1]).unwrap_or(0),
+            );
+            text.and_then(|text| text.get(start..end))
+                .map_or_else(|| CellValue::Bytes(&data[start..end]), CellValue::Str)
+        }
+        OwnedColumnBuffer::RawBytes {
+            offsets,
+            data,
+            valid,
+        } if is_valid(valid.as_ref(), row) => {
+            let offsets = offsets.as_slice();
+            let (start, end) = (
+                usize::try_from(offsets[row]).unwrap_or(0),
+                usize::try_from(offsets[row + 1]).unwrap_or(0),
+            );
+            CellValue::Bytes(&data[start..end])
+        }
+        _ => CellValue::Null,
+    }
 }
 
 fn apply_scan_options<'a>(dataset: &'a Dataset, options: ScanOptions<'a>) -> ScanBuilder<'a> {
