@@ -13,6 +13,21 @@ file in 0.67 s, against 21 s for pyreadstat and 67 s for haven; see
 [benchmarks](benchmarks/README.md). It is used to read SAS register extracts on
 Statistics Denmark's research servers.
 
+## Why
+
+National statistics and health-data agencies deliver research data as SAS7BDAT
+files. Researchers who work in R or Python rather than SAS read those files
+through a few open readers, most often ReadStat by way of haven and pyreadstat,
+which decode on one thread and return values one at a time. This reader is for
+that step when the files are large or many: it decodes pages in parallel, hands
+back Arrow and Polars columns directly, and has the same core behind its R,
+Python and command-line interfaces. [DESIGN.md](DESIGN.md) explains how it is
+built and why.
+
+It reads SAS7BDAT files and their `.sas7bcat` catalogs. It does not write files,
+and it does not read SAS transport (XPORT), Stata or SPSS files; ReadStat and
+pyreadstat cover those.
+
 ## Features
 
 - RLE (`COMPRESS=CHAR`) and RDC (`COMPRESS=BINARY`) compression
@@ -65,11 +80,15 @@ See [crates/polars-plugin](crates/polars-plugin/README.md).
 
 ## R
 
-The `fastsas` package returns haven-compatible tibbles. It is not on CRAN yet
-and installs from source with a Rust toolchain:
+The `fastsas` package returns haven-compatible tibbles. It is not on CRAN.
+[R-universe](https://tkragholm.r-universe.dev) builds it as a binary package for
+Windows, macOS and Linux, so no Rust toolchain is needed:
 
-```sh
-R CMD INSTALL --no-staged-install crates/r-plugin
+```r
+install.packages(
+  "fastsas",
+  repos = c("https://tkragholm.r-universe.dev", "https://cloud.r-project.org")
+)
 ```
 
 ```r

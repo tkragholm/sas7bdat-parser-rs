@@ -56,7 +56,19 @@ access into a round-trip with no readahead.
 `tmp_dir` stages outputs on a local disk and moves the finished file across,
 keeping the write off the network link until there is something complete to send.
 
-## Build / install
+## Install
+
+[R-universe](https://tkragholm.r-universe.dev) builds the package as a binary for
+Windows, macOS and Linux:
+
+```r
+install.packages(
+  "fastsasconvert",
+  repos = c("https://tkragholm.r-universe.dev", "https://cloud.r-project.org")
+)
+```
+
+To build it from a clone of the repository, with R and a Rust toolchain:
 
 ```sh
 R CMD INSTALL --no-staged-install crates/r-convert-plugin

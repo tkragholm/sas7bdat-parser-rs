@@ -11,6 +11,22 @@ license = "MIT"
 license-files = ["LICENSE", "LICENSE-ReadStat"]
 # Built against the CPython stable ABI (abi3, floor 3.12), so one cp312-abi3 wheel runs on 3.12+.
 requires-python = ">=3.12"
+authors = [{ name = "Tobias Kragholm" }]
+keywords = ["sas", "sas7bdat", "polars", "arrow", "parquet", "statistics"]
+# No "License :: OSI Approved :: ..." classifier: PEP 639 makes it mutually
+# exclusive with the `license` SPDX expression above.
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering",
+  "Typing :: Typed",
+]
 # A floor and no ceiling. The compiled extension does not link polars: it hands
 # every batch to Python as an Arrow C stream behind `__arrow_c_stream__`, and
 # the polars API in `python/sas7bdat_polars/` is built on polars' public
@@ -28,6 +44,13 @@ test = ["pytest"]
 # command. It is a separate distribution on purpose: that wheel is a plain
 # binary (`py3-none-<platform>`) with no polars requirement and no Python floor.
 cli = ["sas7bdat-cli>=0.8.0"]
+
+[project.urls]
+Homepage = "https://github.com/tkragholm/sas7bdat-parser-rs"
+Repository = "https://github.com/tkragholm/sas7bdat-parser-rs"
+Documentation = "https://github.com/tkragholm/sas7bdat-parser-rs/tree/main/crates/polars-plugin#readme"
+Issues = "https://github.com/tkragholm/sas7bdat-parser-rs/issues"
+Changelog = "https://github.com/tkragholm/sas7bdat-parser-rs/blob/main/crates/sas7bdat/CHANGELOG.md"
 
 [tool.maturin]
 bindings = "pyo3"

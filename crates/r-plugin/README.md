@@ -16,8 +16,18 @@ attached last wins. Use `read_sas7bdat()` or `fastsas::read_sas()`.
 
 ## Installation
 
-The package is not on CRAN yet. It installs from a clone of the repository
-and needs R and a Rust toolchain (`cargo`, `rustc` 1.89 or later):
+The package is not on CRAN. [R-universe](https://tkragholm.r-universe.dev)
+builds it as a binary package for Windows, macOS and Linux:
+
+```r
+install.packages(
+  "fastsas",
+  repos = c("https://tkragholm.r-universe.dev", "https://cloud.r-project.org")
+)
+```
+
+To build it from a clone of the repository instead, you need R and a Rust
+toolchain (`cargo`, `rustc` 1.89 or later):
 
 ```sh
 R CMD INSTALL --no-staged-install crates/r-plugin
