@@ -461,12 +461,10 @@ fn collect_batches_materializes_columnar_values() {
             offsets,
             data,
             valid,
-            dictionary_ids,
         } => {
             assert_trusted_offsets(offsets, &[0, 2, 6], data.len());
             assert_eq!(data, b"AABBBB");
             assert!(valid.is_none());
-            assert!(dictionary_ids.is_none());
         }
         other => panic!("unexpected utf8 batch column: {other:?}"),
     }
@@ -657,19 +655,16 @@ fn collect_batches_parallel_in_memory_matches_serial_batches() {
                     offsets: parallel_offsets,
                     data: parallel_data,
                     valid: parallel_valid,
-                    dictionary_ids: parallel_dict_ids,
                 },
                 OwnedColumnBuffer::Utf8 {
                     offsets: serial_offsets,
                     data: serial_data,
                     valid: serial_valid,
-                    dictionary_ids: serial_dict_ids,
                 },
             ) => {
                 assert_eq!(parallel_offsets, serial_offsets);
                 assert_eq!(parallel_data, serial_data);
                 assert_eq!(parallel_valid, serial_valid);
-                assert_eq!(parallel_dict_ids, serial_dict_ids);
             }
             other => panic!("unexpected utf8 batch columns: {other:?}"),
         }
@@ -1004,12 +999,10 @@ fn collect_batches_decode_ascii_strings_without_utf8_encoding() {
             offsets,
             data,
             valid,
-            dictionary_ids,
         } => {
             assert_trusted_offsets(offsets, &[0, 4], data.len());
             assert_eq!(data, b"pear");
             assert!(valid.is_none());
-            assert!(dictionary_ids.is_none() || dictionary_ids.as_deref() == Some(&[u32::MAX][..]));
         }
         other => panic!("unexpected utf8 batch column: {other:?}"),
     }
@@ -1183,12 +1176,10 @@ fn collect_batches_decodes_windows1252_single_byte_compressed_row() {
             offsets,
             data,
             valid,
-            dictionary_ids,
         } => {
             assert_trusted_offsets(offsets, &[0, 3], data.len());
             assert_eq!(data, &[0xE2, 0x80, 0x93]);
             assert!(valid.is_none());
-            assert!(dictionary_ids.is_none());
         }
         other => panic!("unexpected utf8 batch column: {other:?}"),
     }

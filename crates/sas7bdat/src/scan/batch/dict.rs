@@ -19,7 +19,6 @@ const DICT_SLOT_MASK: usize = DICT_CAPACITY - 1;
 const MAX_DICT_ENTRIES: usize = 200;
 pub(super) const MAX_STAGED_STRING_WIDTH: u32 = 20;
 const INLINE_DICT_KEY_BYTES: usize = 16;
-pub(super) const DICT_ID_NONE: u32 = u32::MAX;
 const DICT_DISABLE_MIN_LOOKUPS: u32 = 512;
 const DICT_DISABLE_MIN_LOOKUPS_ZERO_PROMOTIONS: u32 = 256;
 const DICT_DISABLE_MIN_PROMOTION_BPS: u32 = 800; // 8%
@@ -274,17 +273,6 @@ impl StagedStringLookup {
         entry.utf8_end = end;
         self.promoted = self.promoted.saturating_add(1);
     }
-}
-
-pub(super) fn push_dictionary_id(dictionary_ids: &mut Option<Vec<u32>>, dictionary_id: u32) {
-    if let Some(ids) = dictionary_ids.as_mut() {
-        ids.push(dictionary_id);
-    }
-}
-
-#[inline]
-pub(super) fn staged_entry_to_dictionary_id(entry_idx: u16) -> u32 {
-    u32::from(entry_idx).saturating_add(1)
 }
 
 #[cfg(test)]

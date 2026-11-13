@@ -154,6 +154,28 @@ pub(super) fn materialize_staged_numeric_column(
     }
 }
 
+/// [`materialize_staged_numeric_column`] for a staged buffer the caller is done with. An
+/// `f64` column takes the buffer over instead of copying it: `u64` and `f64` have the same
+/// size and alignment, so collecting one into the other reuses the allocation.
+pub(super) fn materialize_staged_numeric_column_owned(
+    raw_bits: Vec<u64>,
+    mode: NumericTileMode,
+    has_missing: bool,
+) -> OwnedColumnBuffer {
+    if matches!(mode, NumericTileMode::F64RawBits) {
+        let valid = if has_missing {
+            classify_missing_raw_bits(&raw_bits)
+        } else {
+            None
+        };
+        // The raw bits are kept, special-missing NaN payloads included; see
+        // `materialize_staged_f64_column`.
+        let values: Vec<f64> = raw_bits.into_iter().map(f64::from_bits).collect();
+        return OwnedColumnBuffer::F64 { values, valid };
+    }
+    materialize_staged_numeric_column(&raw_bits, mode, has_missing)
+}
+
 pub(super) fn materialize_staged_f64_column(
     raw_bits: &[u64],
     valid: Option<Vec<u64>>,

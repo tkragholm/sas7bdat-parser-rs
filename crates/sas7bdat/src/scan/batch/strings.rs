@@ -10,12 +10,11 @@
 //! fate of.
 
 use super::{
-    CompiledColumnPlan, CompiledDecodeKernel, DICT_ID_NONE, Error, OwnedBatchColumnBuilder, Result,
+    CompiledColumnPlan, CompiledDecodeKernel, Error, OwnedBatchColumnBuilder, Result,
     RowDecodePlan, StageLookupHit, StagedStringLookup, StringDecodeKernel, TrimMode, TrimmedString,
-    TrustedOffsets, push_dictionary_id, push_variable_valid, push_variable_valid_overcopy,
-    push_variable_valid_without_validity, simd_from_utf8, staged_entry_to_dictionary_id,
+    TrustedOffsets, push_variable_valid, push_variable_valid_overcopy,
+    push_variable_valid_without_validity, simd_from_utf8,
 };
-use crate::columnar::BLANK_ID;
 use crate::scan::DecodedUtf8BatchValue;
 use crate::scan::{is_blank_after_trim_mode, trim_and_classify_for_mode};
 use encoding_rs::WINDOWS_1252;
@@ -97,7 +96,6 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
             },
         ) if column.width == 1 => {
             let byte = row[column.start];
@@ -113,14 +111,6 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
 
             if slice.is_empty() || byte.is_ascii() {
                 push_variable_valid(offsets, data, valid, slice)?;
-                push_dictionary_id(
-                    dictionary_ids,
-                    if slice.is_empty() {
-                        BLANK_ID
-                    } else {
-                        DICT_ID_NONE
-                    },
-                );
                 return Ok(true);
             }
 
@@ -131,7 +121,6 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                 )
             {
                 append_windows_1252_single_byte_utf8(offsets, data, valid, byte)?;
-                push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 return Ok(true);
             }
 
@@ -140,7 +129,6 @@ pub(super) fn append_direct_utf8_single_byte_batch_column(
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
                 slice,
                 utf8_decode_scratch,
             )?;
@@ -156,7 +144,6 @@ fn append_non_ascii_single_byte_utf8(
     offsets: &mut TrustedOffsets,
     data: &mut Vec<u8>,
     valid: &mut Option<Vec<u64>>,
-    dictionary_ids: &mut Option<Vec<u32>>,
     slice: &[u8],
     utf8_decode_scratch: &mut String,
 ) -> Result<()> {
@@ -179,7 +166,6 @@ fn append_non_ascii_single_byte_utf8(
                     push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
                 }
             }
-            push_dictionary_id(dictionary_ids, DICT_ID_NONE);
             Ok(())
         }
         StringDecodeKernel::EncodedStrict => {
@@ -194,7 +180,6 @@ fn append_non_ascii_single_byte_utf8(
                     push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
                 }
             }
-            push_dictionary_id(dictionary_ids, DICT_ID_NONE);
             Ok(())
         }
         StringDecodeKernel::EncodedLenient => {
@@ -208,7 +193,6 @@ fn append_non_ascii_single_byte_utf8(
                     push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
                 }
             }
-            push_dictionary_id(dictionary_ids, DICT_ID_NONE);
             Ok(())
         }
     }
@@ -299,12 +283,10 @@ pub(super) fn append_direct_utf8_borrowed_batch_column(
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
             },
         ) => {
             let bytes = row_plan.decode_string_bytes_for_batch_borrowed(slice)?;
             push_variable_valid(offsets, data, valid, bytes)?;
-            push_dictionary_id(dictionary_ids, DICT_ID_NONE);
             Ok(true)
         }
         _ => Ok(false),
@@ -316,7 +298,6 @@ type Utf8BuilderParts<'a> = (
     &'a mut TrustedOffsets,
     &'a mut Vec<u8>,
     &'a mut Option<Vec<u64>>,
-    &'a mut Option<Vec<u32>>,
 );
 
 /// The ASCII arm of the owned path, lifted out so its caller stays inside the line budget.
@@ -326,12 +307,11 @@ fn push_ascii_cell(
     start: usize,
     keep: usize,
 ) -> Result<bool> {
-    let (offsets, data, valid, dictionary_ids) = builder;
+    let (offsets, data, valid) = builder;
     // No width gate. Gating on a small cell width measured worse on the very fixtures it
     // would protect: the fixed move beats the `memcpy` call even when most of what it moves
     // is discarded.
     push_variable_valid_overcopy(offsets, data, valid, row, start, keep)?;
-    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
     Ok(true)
 }
 
@@ -357,21 +337,19 @@ pub(super) fn append_direct_utf8_owned_batch_column(
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
             },
         ) => {
             let (trimmed, slice) =
                 match classify_trimmed_cell(slice, row_plan.string_options.trim_mode) {
                     TrimmedCellClass::Blank => {
                         push_variable_valid(offsets, data, valid, &[])?;
-                        push_dictionary_id(dictionary_ids, BLANK_ID);
                         return Ok(true);
                     }
                     TrimmedCellClass::Ascii(bytes) => {
                         // The dominant case on register data: every cell is ASCII, so this
                         // is the arm that runs 158,000 times for a single lmdb year.
                         return push_ascii_cell(
-                            (offsets, data, valid, dictionary_ids),
+                            (offsets, data, valid),
                             row,
                             column.start,
                             bytes.len(),
@@ -382,7 +360,6 @@ pub(super) fn append_direct_utf8_owned_batch_column(
 
             if fast_valid_utf8_non_ascii && simd_from_utf8(slice).is_ok() {
                 push_variable_valid(offsets, data, valid, slice)?;
-                push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 return Ok(true);
             }
 
@@ -396,10 +373,6 @@ pub(super) fn append_direct_utf8_owned_batch_column(
                             let interned = dict.interned_utf8(entry_idx);
                             push_variable_valid(offsets, data, valid, interned)?;
                             breakdown.interned_hits = breakdown.interned_hits.saturating_add(1);
-                            push_dictionary_id(
-                                dictionary_ids,
-                                staged_entry_to_dictionary_id(entry_idx),
-                            );
                             return Ok(true);
                         }
                         StageLookupHit::SeenOnce(entry_idx) => {
@@ -410,20 +383,12 @@ pub(super) fn append_direct_utf8_owned_batch_column(
                                     // Append once from freshly decoded bytes, then promote for subsequent hits.
                                     push_variable_valid(offsets, data, valid, bytes)?;
                                     dict.promote_interned(entry_idx, bytes, bytes == slice);
-                                    push_dictionary_id(
-                                        dictionary_ids,
-                                        staged_entry_to_dictionary_id(entry_idx),
-                                    );
                                 }
                                 DecodedUtf8BatchValue::Scratch => {
                                     // Avoid reloading from dictionary arena on the promotion row.
                                     let promoted_utf8 = utf8_decode_scratch.as_bytes();
                                     push_variable_valid(offsets, data, valid, promoted_utf8)?;
                                     dict.promote_interned(entry_idx, promoted_utf8, false);
-                                    push_dictionary_id(
-                                        dictionary_ids,
-                                        staged_entry_to_dictionary_id(entry_idx),
-                                    );
                                 }
                             }
                             return Ok(true);
@@ -438,14 +403,12 @@ pub(super) fn append_direct_utf8_owned_batch_column(
                         let _ = dict.insert_seen_once(slice);
                     }
                     push_variable_valid(offsets, data, valid, bytes)?;
-                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 }
                 DecodedUtf8BatchValue::Scratch => {
                     if let Some(dict) = staged_lookup.as_mut() {
                         let _ = dict.insert_seen_once(slice);
                     }
                     push_variable_valid(offsets, data, valid, utf8_decode_scratch.as_bytes())?;
-                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                 }
             }
             Ok(true)

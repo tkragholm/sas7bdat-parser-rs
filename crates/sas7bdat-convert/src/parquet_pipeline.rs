@@ -457,7 +457,6 @@ mod tests {
                         offsets,
                         data,
                         valid: None,
-                        dictionary_ids: None,
                     }
                 }
             })

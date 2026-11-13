@@ -27,6 +27,7 @@ Minor rather than patch because the `arrow` feature moves to arrow 60. Its funct
 ### Changed
 
 - **Breaking:** the `arrow` feature depends on arrow 60 instead of 59. `into_arrow_array`, `into_arrow_record_batch`, `arrow_schema` and `collect_arrow_batches` use its types.
+- **Breaking:** `OwnedColumnBuffer::Utf8` no longer has a `dictionary_ids` field. It held codes into an internal staging table that callers could not see, so nothing could use them, and it cost 4 bytes per string cell in files with a single-byte encoding.
 - The `simd` feature uses fearless_simd 1.2 instead of 0.7. The kernels and their results are unchanged.
 - An ordered parallel scan claims a chunk only while it is at most twice the number of decode threads ahead of the next chunk to deliver. A slow chunk no longer lets the other threads fill memory with every batch behind it. Memory-mapped scans split the file into chunks of one batch each, cut by the row counts of the pages, so uneven page fill no longer leaves a short extra batch at the end of a chunk.
 - `Parallelism::Auto` takes no more threads than the estimated decoded size of their batches allows in 1 GiB. With the default batch sizes this changes nothing. With large batches of a wide table it avoids a slowdown: a 4,096-row read of a 2 GiB file with 4,041 columns went from 1.2 s on 12 threads to 0.75 s on 5.
@@ -35,6 +36,7 @@ Minor rather than patch because the `arrow` feature moves to arrow 60. Its funct
 
 - Parallel scans of compressed files sized their chunks from the declared rows per page, which counts uncompressed rows. A chunk then held several batches, and a file could have fewer chunks than decode threads. The larger of the declared figure and the file's average is used now for read extents, and memory-mapped chunks are cut by row count.
 - An I/O error prints the path of the file it came from, which it already recorded.
+- A floating-point column takes over its staged buffer instead of copying it, which makes a single-threaded read of the AHS survey files 6 to 8 percent faster.
 
 ## [0.9.3] - 2026-10-20
 

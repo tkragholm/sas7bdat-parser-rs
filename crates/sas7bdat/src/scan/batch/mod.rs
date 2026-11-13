@@ -3,8 +3,9 @@ use super::{
     NumericTileMode, OwnedColumnBuffer, OwnedColumnarBatch, PlannedCell, Result, RowDecodePlan,
     SAS_NUMERIC_MISSING_SENTINEL, SasDate, SasDateTime, SasTime, ScanBuilder, StringDecodeKernel,
     TrimMode, TrimmedString, TypedNumericValue, classify_typed_numeric_value,
-    f64_is_i64_representable, materialize_staged_numeric_column, numeric_bits,
-    numeric_bits_is_missing, staged_numeric_raw_bits_from_planned_cell,
+    f64_is_i64_representable, materialize_staged_numeric_column,
+    materialize_staged_numeric_column_owned, numeric_bits, numeric_bits_is_missing,
+    staged_numeric_raw_bits_from_planned_cell,
 };
 use crate::columnar::{ColumnBuffer, ColumnarBatch, TrustedOffsets};
 use crate::define_owned_column_enum;
@@ -25,10 +26,7 @@ use strings::{
     append_direct_utf8_single_byte_batch_column, push_utf8_bytes_fast,
 };
 
-use dict::{
-    DICT_ID_NONE, MAX_STAGED_STRING_WIDTH, StageLookupHit, StagedStringLookup, push_dictionary_id,
-    staged_entry_to_dictionary_id,
-};
+use dict::{MAX_STAGED_STRING_WIDTH, StageLookupHit, StagedStringLookup};
 
 /// Ceiling on one column's pre-allocated variable-width buffer.
 ///
@@ -86,7 +84,7 @@ impl BatchAccumulator {
         for &idx in &plan.staged_string_lookup_indices {
             staged_string_lookups[idx] = Some(StagedStringLookup::new());
         }
-        let mut columns: Vec<OwnedBatchColumnBuilder> = plan
+        let columns: Vec<OwnedBatchColumnBuilder> = plan
             .row_plan
             .columns
             .iter()
@@ -110,14 +108,6 @@ impl BatchAccumulator {
                 )
             })
             .collect();
-        for &idx in &plan.families.direct_utf8_owned {
-            if staged_string_lookups.get(idx).is_some_and(Option::is_some)
-                && let Some(OwnedBatchColumnBuilder::Utf8 { dictionary_ids, .. }) =
-                    columns.get_mut(idx)
-            {
-                dictionary_ids.replace(Vec::with_capacity(capacity_hint_rows.max(1)));
-            }
-        }
         Self {
             plan,
             target_rows: target_rows.max(1),
@@ -696,17 +686,6 @@ impl BatchAccumulator {
                 )
             })
             .collect();
-        for &idx in &self.plan.families.direct_utf8_owned {
-            if self
-                .staged_string_lookups
-                .get(idx)
-                .is_some_and(Option::is_some)
-                && let Some(OwnedBatchColumnBuilder::Utf8 { dictionary_ids, .. }) =
-                    self.columns.get_mut(idx)
-            {
-                dictionary_ids.replace(Vec::with_capacity(self.capacity_hint_rows.max(1)));
-            }
-        }
         self.owned_strings.clear();
         self.utf8_decode_scratch.clear();
     }
@@ -740,22 +719,6 @@ impl BatchAccumulator {
                     column.numeric_tile,
                     utf8_mult,
                 );
-            }
-        }
-        for &idx in &self.plan.families.direct_utf8_owned {
-            if self
-                .staged_string_lookups
-                .get(idx)
-                .is_some_and(Option::is_some)
-                && let Some(OwnedBatchColumnBuilder::Utf8 { dictionary_ids, .. }) =
-                    self.columns.get_mut(idx)
-            {
-                match dictionary_ids {
-                    None => {
-                        dictionary_ids.replace(Vec::with_capacity(self.capacity_hint_rows.max(1)));
-                    }
-                    Some(ids) => ids.clear(),
-                }
             }
         }
         self.owned_strings.clear();
@@ -941,7 +904,6 @@ impl OwnedBatchColumnBuilder {
                 offsets: TrustedOffsets::with_capacity_for_rows(target_rows),
                 data: Vec::with_capacity(utf8_variable_capacity),
                 valid: None,
-                dictionary_ids: None,
             },
             ColumnMaterializationKind::RawBytes => Self::RawBytes {
                 offsets: TrustedOffsets::with_capacity_for_rows(target_rows),
@@ -1133,16 +1095,13 @@ impl OwnedBatchColumnBuilder {
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
             } => match cell {
                 PlannedCell::Null => {
                     push_variable_null(offsets, data, valid);
-                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                     Ok(())
                 }
                 PlannedCell::StrBorrowed(value) => {
                     push_utf8_bytes_fast(offsets, data, valid, value.as_bytes())?;
-                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                     Ok(())
                 }
                 PlannedCell::StrOwned(index) => {
@@ -1155,7 +1114,6 @@ impl OwnedBatchColumnBuilder {
                             .ok_or_else(|| Error::internal("owned string index out of range"))?
                             .as_bytes(),
                     )?;
-                    push_dictionary_id(dictionary_ids, DICT_ID_NONE);
                     Ok(())
                 }
                 other => Err(unexpected_batch_cell("utf8", other)),
@@ -1277,12 +1235,10 @@ impl OwnedBatchColumnBuilder {
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
             } => Some(ColumnBuffer::Utf8(Utf8Buffer {
                 offsets: offsets.as_slice(),
                 data,
                 valid: valid.as_deref(),
-                dictionary_ids: dictionary_ids.as_deref(),
             })),
             Self::RawBytes {
                 offsets,
@@ -1344,16 +1300,8 @@ impl OwnedBatchColumnBuilder {
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
-            } => {
-                offsets.clear_for_reuse();
-                data.clear();
-                *valid = None;
-                if let Some(ids) = dictionary_ids {
-                    ids.clear();
-                }
             }
-            Self::RawBytes {
+            | Self::RawBytes {
                 offsets,
                 data,
                 valid,
@@ -1382,7 +1330,7 @@ impl OwnedBatchColumnBuilder {
                 raw_bits,
                 mode,
                 has_missing,
-            } => materialize_staged_numeric_column(&raw_bits, mode, has_missing),
+            } => materialize_staged_numeric_column_owned(raw_bits, mode, has_missing),
             Self::Date { values, valid } => OwnedColumnBuffer::Date { values, valid },
             Self::DateTime { values, valid } => OwnedColumnBuffer::DateTime { values, valid },
             Self::Time { values, valid } => OwnedColumnBuffer::Time { values, valid },
@@ -1390,12 +1338,10 @@ impl OwnedBatchColumnBuilder {
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
             } => OwnedColumnBuffer::Utf8 {
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
             },
             Self::RawBytes {
                 offsets,

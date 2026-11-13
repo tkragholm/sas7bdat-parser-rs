@@ -18,7 +18,6 @@ use arrow_buffer::{BooleanBuffer, Buffer, NullBuffer, OffsetBuffer, ScalarBuffer
 use arrow_schema::{DataType, SchemaRef, TimeUnit};
 #[cfg(feature = "arrow")]
 use std::sync::Arc;
-pub const BLANK_ID: u32 = 0;
 
 /// Bit-packed validity slice: each `u64` word holds 64 row-validity bits (LSB = first row).
 /// Bit `i % 64` of word `i / 64` is 1 if row `i` is valid, 0 if null.
@@ -195,10 +194,6 @@ pub struct Utf8Buffer<'a> {
     pub data: &'a [u8],
     /// Bit-packed validity: each `u64` holds 64 row-validity bits (LSB = first row).
     pub valid: Option<&'a [u64]>,
-    // IDs into the decoder's internal dictionary staging table; only populated when
-    // dictionary staging is active. Exposed for tests and diagnostic tooling.
-    #[allow(dead_code)]
-    pub(crate) dictionary_ids: Option<&'a [u32]>,
 }
 
 /// A borrowed column of uninterpreted byte strings.
@@ -379,8 +374,6 @@ macro_rules! define_owned_column_enum {
                 data: Vec<u8>,
                 /// Validity mask, as in [`Self::I32`].
                 valid: Option<Vec<u64>>,
-                /// Codes into a value dictionary, one per row, when dictionary staging produced them.
-                dictionary_ids: Option<Vec<u32>>,
             },
             /// Uninterpreted bytes.
             RawBytes {
@@ -434,16 +427,8 @@ impl OwnedColumnBuffer {
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
-            } => {
-                offsets.len() * size_of::<i64>()
-                    + data.len()
-                    + validity(valid.as_ref())
-                    + dictionary_ids
-                        .as_ref()
-                        .map_or(0, |ids| ids.len() * size_of::<u32>())
             }
-            Self::RawBytes {
+            | Self::RawBytes {
                 offsets,
                 data,
                 valid,
@@ -483,12 +468,10 @@ impl OwnedColumnBuffer {
                 offsets,
                 data,
                 valid,
-                dictionary_ids,
             } => ColumnBuffer::Utf8(Utf8Buffer {
                 offsets: offsets.as_slice(),
                 data,
                 valid: valid.as_deref(),
-                dictionary_ids: dictionary_ids.as_deref(),
             }),
             Self::RawBytes {
                 offsets,
@@ -592,7 +575,6 @@ impl OwnedColumnBuffer {
                 offsets,
                 mut data,
                 valid,
-                dictionary_ids: _,
             } => {
                 let rows = offsets.len().saturating_sub(1);
                 // The scanner sizes a string buffer for the column's full width
@@ -716,7 +698,6 @@ impl ColumnBuffer<'_> {
                 offsets,
                 data,
                 valid,
-                dictionary_ids: _,
             }) => build_utf8_array(offsets, data, valid),
             Self::RawBytes(BytesBuffer {
                 offsets,
@@ -1133,7 +1114,6 @@ mod arrow_tests {
                 offsets,
                 data: data.clone(),
                 valid: Some(vec![VALID]),
-                dictionary_ids: None,
             },
             &DataType::Utf8,
         );
@@ -1163,7 +1143,6 @@ mod arrow_tests {
                 offsets,
                 data: vec![],
                 valid: None,
-                dictionary_ids: None,
             },
             &DataType::Utf8,
         );

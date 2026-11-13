@@ -55,7 +55,6 @@ fn make(cols: usize) -> (SchemaRef, OwnedColumnarBatch) {
                     offsets,
                     data,
                     valid: None,
-                    dictionary_ids: None,
                 });
             }
         }
