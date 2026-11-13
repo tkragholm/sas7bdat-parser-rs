@@ -34,10 +34,12 @@ class SasDataset:
         io_backend: str | None = ...,
         encoding: str | None = ...,
         strict: bool = ...,
+        apply_labels: bool = ...,
     ) -> None: ...
     @property
     def column_names(self) -> list[str]: ...
     def info(self) -> dict[str, Any]: ...
+    def value_labels(self) -> dict[str, dict[Any, str]]: ...
     def schema(
         self,
         columns: Sequence[str] | None = ...,
@@ -108,6 +110,11 @@ def column_info(
     catalog_path: str | os.PathLike[str] | None = ...,
     encoding: str | None = ...,
 ) -> pl.DataFrame: ...
+def value_labels(
+    path: str | os.PathLike[str],
+    catalog_path: str | os.PathLike[str] | None = ...,
+    encoding: str | None = ...,
+) -> dict[str, dict[Any, str]]: ...
 def schema_for_file(
     path: str | os.PathLike[str], catalog_path: str | os.PathLike[str] | None = ...
 ) -> pl.Schema:

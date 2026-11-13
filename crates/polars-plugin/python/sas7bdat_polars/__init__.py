@@ -35,6 +35,7 @@ import re
 import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from importlib.metadata import PackageNotFoundError, requires
+from pathlib import Path
 from typing import Any
 
 _SKIP_VERSION_CHECK_ENV = "SAS7BDAT_POLARS_SKIP_VERSION_CHECK"
@@ -315,6 +316,10 @@ class SasDataset:
 
     ``strict=True`` makes a read fail on the first cell that does not decode in
     the file's encoding. By default such bytes are replaced and the read goes on.
+
+    With a catalog, a column whose SAS format has value labels is read as its
+    labels. ``apply_labels=False`` keeps the codes instead, for joins to other
+    registers; :meth:`value_labels` gives the mapping from code to label.
     """
 
     def __init__(
@@ -325,6 +330,7 @@ class SasDataset:
         io_backend: str | None = None,
         encoding: str | None = None,
         strict: bool = False,
+        apply_labels: bool = True,
     ) -> None:
         self.path = str(path)
         self._native = _NativeDataset(
@@ -334,6 +340,7 @@ class SasDataset:
             io_backend,
             encoding,
             bool(strict),
+            not apply_labels,
         )
 
     @property
@@ -343,6 +350,16 @@ class SasDataset:
     def info(self) -> dict[str, Any]:
         """Header-level facts: row and column counts, encoding, compression."""
         return dict(self._native.info())
+
+    def value_labels(self) -> dict[str, dict[Any, str]]:
+        """The value labels of every column that has them, by column name: a dict
+        from each code to its label. Codes are ints, floats or strings as the
+        catalog stores them; a special missing value is its SAS spelling, ``".A"``
+        to ``".Z"``, ``"._"`` or ``"."``. Empty without a catalog."""
+        return {
+            column: dict(labels)
+            for column, labels in self._native.value_labels().items()
+        }
 
     def _categorical(
         self, columns: list[str] | None, categorical: bool | Sequence[str]
@@ -558,6 +575,27 @@ def column_info(
     )
 
 
+def value_labels(
+    path: str | os.PathLike[str],
+    catalog_path: str | os.PathLike[str] | None = None,
+    encoding: str | None = None,
+) -> dict[str, dict[Any, str]]:
+    """The value labels of a file's columns, by column name: a dict from each code
+    to its label, from the catalog without reading any rows.
+
+    Without ``catalog_path``, a catalog beside the file with the same name and
+    the extension ``.sas7bcat`` is used if there is one, as the R package does.
+    The readers attach a catalog only when given one.
+
+    >>> labels = value_labels("data.sas7bdat", "formats.sas7bcat")  # doctest: +SKIP
+    >>> df.with_columns(pl.col("SEX").replace_strict(labels["SEX"]))  # doctest: +SKIP
+    """
+    if catalog_path is None:
+        sibling = Path(path).with_suffix(".sas7bcat")
+        catalog_path = sibling if sibling.exists() else None
+    return SasDataset(path, catalog_path, encoding=encoding).value_labels()
+
+
 def schema_for_file(
     path: str | os.PathLike[str], catalog_path: str | os.PathLike[str] | None = None
 ) -> pl.Schema:
@@ -657,4 +695,5 @@ __all__ = [
     "scan_threads",
     "schema_for_file",
     "set_scan_threads",
+    "value_labels",
 ]

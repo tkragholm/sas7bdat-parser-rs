@@ -125,6 +125,11 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
 
   df <- sas7bdat_read_impl(path, catalog, categorical, io_backend, threads,
                            col_select, skip, n_max, encoding, strict)
+  problem <- attr(df, "fastsas_warning", exact = TRUE)
+  if (!is.null(problem)) {
+    attr(df, "fastsas_warning") <- NULL
+    warning(problem, call. = FALSE)
+  }
   if (requireNamespace("tibble", quietly = TRUE)) {
     tibble::new_tibble(df, nrow = nrow(df))
   } else {

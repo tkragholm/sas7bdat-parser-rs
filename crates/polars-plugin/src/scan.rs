@@ -38,6 +38,8 @@ pub struct ScanSpec {
     pub row_offset: usize,
     /// Fail on the first cell that does not decode in the file's encoding.
     pub strict: bool,
+    /// Leave labelled columns as their codes even when a catalog is attached.
+    pub keep_codes: bool,
     pub batch_size: Option<usize>,
     /// String columns to hand over dictionary-encoded, which polars reads as
     /// `Categorical`: a code per row and the distinct values once per batch.
@@ -50,7 +52,7 @@ pub struct ScanSpec {
 /// is what its batches hold.
 pub fn stream_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
     let core = core_schema(ds, spec)?;
-    let labels = label_sets(ds, &core);
+    let labels = label_sets(ds, &core, spec.keep_codes);
     stream_schema_from(&core, &labels, &spec.categorical)
 }
 
@@ -112,10 +114,11 @@ fn projection(ds: &Dataset, spec: &ScanSpec) -> SasResult<Option<sas7bdat::Proje
 }
 
 /// The value-label set behind each field of `schema`, by the SAS format the
-/// column carries, where the dataset has a catalog attached.
-fn label_sets(ds: &Dataset, schema: &Schema) -> Vec<Option<LabelSet>> {
+/// column carries, where the dataset has a catalog attached. None at all when
+/// `keep_codes` asks for the codes.
+fn label_sets(ds: &Dataset, schema: &Schema, keep_codes: bool) -> Vec<Option<LabelSet>> {
     let label_sets = &ds.metadata().label_sets;
-    if label_sets.is_empty() {
+    if label_sets.is_empty() || keep_codes {
         return vec![None; schema.fields().len()];
     }
     let mut by_name = std::collections::HashMap::with_capacity(ds.columns().len());
@@ -235,7 +238,7 @@ impl ScanReader {
     /// Start the decode of `spec` on its own thread and return the reading end.
     pub fn start(ds: Arc<Dataset>, spec: ScanSpec) -> SasResult<Self> {
         let core = core_schema(&ds, &spec)?;
-        let labels = label_sets(&ds, &core);
+        let labels = label_sets(&ds, &core, spec.keep_codes);
         let schema = stream_schema_from(&core, &labels, &spec.categorical)?;
         // Two batches of slack: enough that the decoder is not stalled by a
         // consumer doing a little work per batch, and the smallest number that

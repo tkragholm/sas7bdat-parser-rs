@@ -304,3 +304,26 @@ def test_strict_fails_where_the_default_replaces():
     with pytest.raises(Exception, match="(?i)decode|utf-8|invalid"):
         sp.read_sas(str(NONASCII), encoding="utf-8", strict=True)
     assert sp.read_sas(str(PEOPLE), strict=True).height == 5
+
+
+def test_apply_labels_false_keeps_the_codes():
+    plain = sp.read_sas(LABELLED)
+    codes = sp.SasDataset(LABELLED, CATALOG, apply_labels=False).read()
+    assert codes.equals(plain)
+
+
+def test_value_labels_map_each_code_to_its_label():
+    labels = sp.SasDataset(LABELLED, CATALOG).value_labels()
+    assert labels, "the catalog labels at least one column"
+    assert any("Male" in mapping.values() for mapping in labels.values())
+    assert sp.value_labels(LABELLED, CATALOG) == labels
+    assert sp.SasDataset(LABELLED).value_labels() == {}
+
+
+def test_value_labels_finds_a_catalog_beside_the_file(tmp_path):
+    import shutil
+
+    data = tmp_path / "survey.sas7bdat"
+    shutil.copy(LABELLED, data)
+    shutil.copy(CATALOG, tmp_path / "survey.sas7bcat")
+    assert sp.value_labels(data) == sp.value_labels(LABELLED, CATALOG)

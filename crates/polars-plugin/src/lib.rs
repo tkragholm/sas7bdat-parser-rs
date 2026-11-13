@@ -66,12 +66,16 @@ struct SasDataset {
     path: String,
     /// Fail a read on the first cell that does not decode, rather than replace it.
     strict: bool,
+    /// Leave labelled columns as their codes even when a catalog is attached.
+    keep_codes: bool,
 }
 
 #[pymethods]
 impl SasDataset {
     #[new]
-    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None, encoding=None, strict=false))]
+    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None, encoding=None, strict=false, keep_codes=false))]
+    // Each is a keyword argument of the Python constructor, which is where they are read.
+    #[allow(clippy::too_many_arguments)]
     fn open(
         py: Python<'_>,
         path: &str,
@@ -80,6 +84,7 @@ impl SasDataset {
         io_backend: Option<&str>,
         encoding: Option<&str>,
         strict: bool,
+        keep_codes: bool,
     ) -> PyResult<Self> {
         let options = open_options(io_backend, encoding)?;
         require_file(path)?;
@@ -101,6 +106,7 @@ impl SasDataset {
             ds: Arc::new(ds),
             path: path.to_owned(),
             strict,
+            keep_codes,
         })
     }
 
@@ -139,6 +145,7 @@ impl SasDataset {
             n_rows,
             row_offset,
             strict: self.strict,
+            keep_codes: self.keep_codes,
             batch_size,
             categorical: categorical.unwrap_or_default(),
         };
@@ -149,6 +156,43 @@ impl SasDataset {
             ds: Arc::clone(&self.ds),
             spec,
         }))
+    }
+
+    /// The value labels of every column that has them, by column name: a dict from
+    /// each code to its label. Codes are ints, floats or strings as the catalog stores
+    /// them; a special missing value is its SAS spelling, `.A` to `.Z`, `._` or `.`.
+    /// Empty without a catalog.
+    fn value_labels<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let out = PyDict::new(py);
+        let label_sets = &self.ds.metadata().label_sets;
+        for column in self.ds.columns() {
+            let Some(set) = column
+                .format
+                .as_deref()
+                .map(sas7bdat::catalog::normalize_format_name)
+                .and_then(|format| label_sets.get(&format))
+            else {
+                continue;
+            };
+            let mapping = PyDict::new(py);
+            for label in &set.labels {
+                match &label.key {
+                    sas7bdat::ValueKey::Integer(code) => mapping.set_item(code, &label.label)?,
+                    sas7bdat::ValueKey::Numeric(code) => mapping.set_item(code, &label.label)?,
+                    sas7bdat::ValueKey::String(code) => mapping.set_item(code, &label.label)?,
+                    sas7bdat::ValueKey::Tagged(tag) => {
+                        let spelling = if *tag == '.' {
+                            ".".to_owned()
+                        } else {
+                            format!(".{tag}")
+                        };
+                        mapping.set_item(spelling, &label.label)?;
+                    }
+                }
+            }
+            out.set_item(&column.name, mapping)?;
+        }
+        Ok(out)
     }
 
     /// A stream with the file's schema and no rows: how a consumer learns the
@@ -184,6 +228,7 @@ impl SasDataset {
             n_rows,
             row_offset,
             strict: self.strict,
+            keep_codes: self.keep_codes,
             batch_size,
             categorical: categorical.unwrap_or_default(),
         };

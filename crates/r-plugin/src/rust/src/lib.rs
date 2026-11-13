@@ -594,13 +594,22 @@ fn read_impl(
     let mut ds =
         Dataset::open_with(path, options).map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
 
+    // A catalog the caller named must load. One found beside the file is used if it
+    // loads, and otherwise reported as a warning, so the read is not silently unlabelled.
+    let mut warning: Option<String> = None;
     if let Some(cat_path) = resolve_catalog(path, catalog) {
         match ds.attach_catalog(&cat_path) {
             Ok(()) => {}
             Err(e) if catalog.is_some() => {
                 return Err(format!("sas7bdat: catalog `{}`: {e}", cat_path.display()));
             }
-            Err(_) => {}
+            Err(e) => {
+                warning = Some(format!(
+                    "the catalog beside the file, `{}`, could not be read, so no value labels \
+                     were applied: {e}",
+                    cat_path.display()
+                ));
+            }
         }
     }
 
@@ -764,10 +773,9 @@ fn read_impl(
         );
     }
     if nrow == 0 {
-        return Ok(build_data_frame(
-            &names,
-            finish_empty_columns(cols, &metas),
-            0,
+        return Ok(with_warning(
+            build_data_frame(&names, finish_empty_columns(cols, &metas), 0),
+            warning,
         ));
     }
     scan.visit_owned_batches(|mut batch| {
@@ -849,7 +857,16 @@ fn read_impl(
     }
 
     let cols: Vec<Robj> = cols.into_iter().map(|c| c.unwrap_or_else(|| ().into())).collect();
-    Ok(build_data_frame(&names, cols, nrow))
+    Ok(with_warning(build_data_frame(&names, cols, nrow), warning))
+}
+
+/// `df` carrying `warning` for the R wrapper to raise; Rust cannot raise an R warning
+/// and carry on.
+fn with_warning(mut df: Robj, warning: Option<String>) -> Robj {
+    if let Some(text) = warning {
+        let _ = df.set_attrib("fastsas_warning", text);
+    }
+    df
 }
 
 /// Read a SAS7BDAT file into a bare R `data.frame`.
