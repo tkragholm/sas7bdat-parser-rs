@@ -98,7 +98,7 @@ pub fn first_non_integral_in_range_index(
 #[inline(always)]
 fn to_i64_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> [i64; 8] {
     let numbers = f64x8::from_slice(simd, &chunk.map(f64::from_bits));
-    simd.cvt_i64_precise_f64x8(numbers).as_array()
+    *simd.cvt_i64_precise_f64x8(numbers).as_array()
 }
 
 #[inline]
@@ -113,7 +113,7 @@ fn to_i64_masked_impl<S: Simd>(simd: S, chunk: &[u64; 8], valid_byte: u8) -> [i6
     // Bit i of `valid_byte` is 1 for present, and `select` takes the mask's true
     // arm first — so build the mask from the bits directly and put the value there.
     let present = mask64x8::from_bitmask(simd, u64::from(valid_byte));
-    present.select(converted, i64x8::splat(simd, 0)).as_array()
+    *present.select(converted, i64x8::splat(simd, 0)).as_array()
 }
 
 #[inline]
