@@ -18,9 +18,9 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1"
-arrow-array = "59"
-arrow-buffer = "59"
-arrow-schema = "59"
+arrow-array = "60"
+arrow-buffer = "60"
+arrow-schema = "60"
 bytemuck = { version = "1.4", features = ["derive"] }
 criterion = "0.8"
 clap = { version = "4", features = ["derive"] }
@@ -40,7 +40,7 @@ num-traits = "0.2"
 # crate only *writes* Parquet, and the one place it reads is a test reading files
 # this crate just wrote. `simdutf8` is kept — it is already in the tree via
 # sas7bdat, so it costs nothing and speeds up parquet's UTF-8 validation.
-parquet = { version = "59", default-features = false, features = [
+parquet = { version = "60", default-features = false, features = [
     "arrow",
     "snap",
     "lz4",

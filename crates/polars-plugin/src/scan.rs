@@ -432,7 +432,7 @@ fn string_views(
     let array = unsafe {
         StringViewArray::new_unchecked(
             ScalarBuffer::from(views),
-            vec![Buffer::from_vec(data)],
+            Arc::from([Buffer::from_vec(data)]),
             nulls,
         )
     };
