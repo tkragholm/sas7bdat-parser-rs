@@ -25,6 +25,25 @@ pub fn open_with(path: &Path, options: OpenOptions) -> Result<Dataset> {
     Dataset::open_with(path, options).map_err(|err| not_a_sas_file(path, &err))
 }
 
+/// Open options for `io_backend`, with the declared encoding replaced by `encoding`.
+///
+/// # Errors
+///
+/// Returns an error if `encoding` is not a recognised encoding label.
+pub fn open_options(
+    io_backend: sas7bdat::IoBackendPreference,
+    encoding: Option<&str>,
+) -> Result<OpenOptions> {
+    let builder = OpenOptions::builder().io_backend(io_backend);
+    Ok(match encoding {
+        None => builder,
+        Some(label) => builder
+            .encoding(label)
+            .map_err(|err| anyhow::anyhow!("--encoding: {err}"))?,
+    }
+    .build())
+}
+
 fn guard_exists(path: &Path) -> Result<()> {
     if !path.exists() {
         bail!("File not found: {}", path.display());
@@ -43,6 +62,10 @@ fn not_a_sas_file(path: &Path, err: &sas7bdat::Error) -> anyhow::Error {
         sas7bdat::Error::Io(io) => anyhow::anyhow!("Could not read '{path}': {}", io.message),
         sas7bdat::Error::Unsupported(_) => anyhow::anyhow!(
             "'{path}' uses a part of the SAS7BDAT format this reader does not support ({err})"
+        ),
+        sas7bdat::Error::Decode(_) => anyhow::anyhow!(
+            "'{path}' has text that does not decode in its encoding ({err}); \
+             --encoding names another, and leaving out --strict replaces such bytes"
         ),
         sas7bdat::Error::Internal(_) => {
             anyhow::anyhow!("Reading '{path}' hit a bug in this reader ({err})")

@@ -276,3 +276,31 @@ def test_row_offset_counts_past_deleted_rows():
 def test_a_negative_row_offset_is_rejected():
     with pytest.raises(ValueError, match="row_offset"):
         sp.read_sas(str(PEOPLE), row_offset=-1)
+
+
+NONASCII = (
+    Path(__file__).resolve().parents[2]
+    / "sas7bdat"
+    / "tests"
+    / "fixtures"
+    / "people_nonascii.sas7bdat"
+)
+
+
+def test_encoding_overrides_the_declared_one():
+    # The file declares windows-1252, where its byte 0xE9 is "é"; in ISO-8859-7 it is "ι".
+    assert sp.read_sas(str(NONASCII))["GENDER"][0] == "é"
+    greek = sp.read_sas(str(NONASCII), encoding="iso-8859-7")
+    assert greek["GENDER"][0] == "ι"
+    assert sp.sas_info(str(NONASCII), encoding="wlatin1")["encoding"] == "windows-1252"
+    with pytest.raises(ValueError, match="encoding"):
+        sp.read_sas(str(NONASCII), encoding="not-an-encoding")
+
+
+def test_strict_fails_where_the_default_replaces():
+    # 0xE9 alone is not UTF-8: replaced by default, an error under strict.
+    lenient = sp.read_sas(str(NONASCII), encoding="utf-8")
+    assert lenient["GENDER"][0] == "�"
+    with pytest.raises(Exception, match="(?i)decode|utf-8|invalid"):
+        sp.read_sas(str(NONASCII), encoding="utf-8", strict=True)
+    assert sp.read_sas(str(PEOPLE), strict=True).height == 5

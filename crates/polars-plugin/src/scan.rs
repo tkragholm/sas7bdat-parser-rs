@@ -36,6 +36,8 @@ pub struct ScanSpec {
     pub n_rows: Option<usize>,
     /// Rows to skip first, counting the rows a read returns.
     pub row_offset: usize,
+    /// Fail on the first cell that does not decode in the file's encoding.
+    pub strict: bool,
     pub batch_size: Option<usize>,
     /// String columns to hand over dictionary-encoded, which polars reads as
     /// `Categorical`: a code per row and the distinct values once per batch.
@@ -326,6 +328,13 @@ fn run_scan(
         scan = scan.with_projection(projection);
     }
     scan = with_rows(scan, spec)?;
+    if spec.strict {
+        scan = scan.with_string_options(
+            sas7bdat::StringDecodeOptions::builder()
+                .utf8_validation(sas7bdat::Utf8ValidationMode::Strict)
+                .build(),
+        );
+    }
     scan = scan.with_batch_hint(BatchHint::Rows(
         spec.batch_size
             .unwrap_or_else(|| default_batch_rows(ds, spec)),

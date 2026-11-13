@@ -77,6 +77,10 @@ pub struct ConvertOptions {
     pub columns: Option<Vec<String>>,
     /// Convert only these columns, by zero-based index.
     pub column_indices: Option<Vec<usize>>,
+    /// Read the text in this encoding instead of the one the file declares.
+    pub encoding: Option<String>,
+    /// Fail on the first cell that does not decode, instead of replacing it.
+    pub strict: bool,
 }
 
 impl Default for ConvertOptions {
@@ -99,6 +103,8 @@ impl Default for ConvertOptions {
             max_rows: None,
             columns: None,
             column_indices: None,
+            encoding: None,
+            strict: false,
         }
     }
 }
@@ -168,9 +174,12 @@ pub fn convert_file(
     }
 
     let staged = staging_path(&output, options.tmp_dir.as_deref())?;
-    let open = OpenOptions::builder()
-        .io_backend(options.io_backend)
-        .build();
+    let open = OpenOptions::builder().io_backend(options.io_backend);
+    let open = match options.encoding.as_deref() {
+        None => open,
+        Some(label) => open.encoding(label)?,
+    }
+    .build();
     let dataset = Dataset::open_with(input, open)?;
 
     let selection = ColumnSelection {
@@ -194,6 +203,7 @@ pub fn convert_file(
         projection: projection.as_ref(),
         parse_threads: options.parse_threads,
         progress: progress.as_ref(),
+        strict: options.strict,
     };
 
     let started = Instant::now();

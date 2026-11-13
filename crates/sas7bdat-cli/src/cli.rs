@@ -116,6 +116,16 @@ pub struct ConvertArgs {
     /// How to read the input: memory-map, sequential reads, or auto.
     #[arg(long = "io-backend", value_enum, default_value_t = IoBackend::Auto, help_heading = "Input")]
     pub io_backend: IoBackend,
+    /// Read the file's text in this encoding instead of the one its header declares,
+    /// e.g. utf-8 for UTF-8 data in a file marked latin1. A WHATWG label or a SAS name
+    /// such as wlatin1.
+    #[arg(long, value_name = "LABEL", help_heading = "Input")]
+    pub encoding: Option<String>,
+
+    /// Fail on the first cell that does not decode in the file's encoding, instead of
+    /// replacing it.
+    #[arg(long, help_heading = "Input")]
+    pub strict: bool,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -399,6 +409,11 @@ pub struct InspectArgs {
     /// How to read the input: memory-map, sequential reads, or auto.
     #[arg(long = "io-backend", value_enum, default_value_t = IoBackend::Auto, help_heading = "Input")]
     pub io_backend: IoBackend,
+    /// Read the file's text in this encoding instead of the one its header declares,
+    /// e.g. utf-8 for UTF-8 data in a file marked latin1. A WHATWG label or a SAS name
+    /// such as wlatin1.
+    #[arg(long, value_name = "LABEL", help_heading = "Input")]
+    pub encoding: Option<String>,
 }
 
 #[derive(Args, Clone)]
@@ -432,6 +447,16 @@ pub struct HeadArgs {
     /// How to read the input: memory-map, sequential reads, or auto.
     #[arg(long = "io-backend", value_enum, default_value_t = IoBackend::Auto, help_heading = "Input")]
     pub io_backend: IoBackend,
+    /// Read the file's text in this encoding instead of the one its header declares,
+    /// e.g. utf-8 for UTF-8 data in a file marked latin1. A WHATWG label or a SAS name
+    /// such as wlatin1.
+    #[arg(long, value_name = "LABEL", help_heading = "Input")]
+    pub encoding: Option<String>,
+
+    /// Fail on the first cell that does not decode in the file's encoding, instead of
+    /// replacing it.
+    #[arg(long, help_heading = "Input")]
+    pub strict: bool,
 }
 
 #[derive(Args, Clone)]

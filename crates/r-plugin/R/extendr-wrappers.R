@@ -9,4 +9,4 @@
 #' @keywords internal
 NULL
 
-sas7bdat_read_impl <- function(path, catalog, categorical, io_backend, threads, col_select, skip, n_max) .Call("wrap__read_sas7bdat", path, catalog, categorical, io_backend, threads, col_select, skip, n_max, PACKAGE = "fastsas")
+sas7bdat_read_impl <- function(path, catalog, categorical, io_backend, threads, col_select, skip, n_max, encoding, strict) .Call("wrap__read_sas7bdat", path, catalog, categorical, io_backend, threads, col_select, skip, n_max, encoding, strict, PACKAGE = "fastsas")

@@ -64,6 +64,13 @@
 #'   counted.
 #' @param n_max The most rows to read. `Inf` (the default) reads to the end;
 #'   `0` reads no rows and returns the columns with their types and labels.
+#' @param encoding Read the file's text in this encoding instead of the one its
+#'   header declares, for files whose header is wrong, a common case being UTF-8
+#'   data in a file marked latin1. A WHATWG label (`"utf-8"`, `"windows-1252"`)
+#'   or SAS's name for a Windows code page (`"wlatin1"`). `NULL` (the default)
+#'   uses the declared encoding.
+#' @param strict If `TRUE`, fail on the first cell that does not decode in the
+#'   file's encoding. By default such bytes are replaced and the read goes on.
 #' @return A tibble (or a base `data.frame` if the `tibble` package is not
 #'   installed).
 #' @export
@@ -91,7 +98,7 @@
 read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
                           io_backend = c("auto", "mmap", "buffered"),
                           threads = NULL, col_select = NULL, skip = 0,
-                          n_max = Inf) {
+                          n_max = Inf, encoding = NULL, strict = FALSE) {
   path <- check_path(path, "path")
   if (!is.null(catalog)) {
     catalog <- check_path(catalog, "catalog")
@@ -107,8 +114,17 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
   skip <- check_row_count(skip, "skip", allow_inf = FALSE)
   n_max <- check_row_count(n_max, "n_max", allow_inf = TRUE)
 
+  if (!is.null(encoding) &&
+      (!is.character(encoding) || length(encoding) != 1L || is.na(encoding))) {
+    stop("`encoding` must be NULL or a single encoding name, not ",
+         deparse1(encoding), call. = FALSE)
+  }
+  if (!is.logical(strict) || length(strict) != 1L || is.na(strict)) {
+    stop("`strict` must be TRUE or FALSE, not ", deparse1(strict), call. = FALSE)
+  }
+
   df <- sas7bdat_read_impl(path, catalog, categorical, io_backend, threads,
-                           col_select, skip, n_max)
+                           col_select, skip, n_max, encoding, strict)
   if (requireNamespace("tibble", quietly = TRUE)) {
     tibble::new_tibble(df, nrow = nrow(df))
   } else {

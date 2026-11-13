@@ -556,6 +556,10 @@ struct Selection {
     skip: u64,
     /// The most rows to read; `None` for no limit.
     n_max: Option<u64>,
+    /// An encoding to read the text in instead of the one the file declares.
+    encoding: Option<String>,
+    /// Fail on the first cell that does not decode, rather than replace it.
+    strict: bool,
 }
 
 enum ColumnChoice {
@@ -579,7 +583,14 @@ fn read_impl(
     let backend: IoBackendPreference = io_backend
         .parse()
         .map_err(|e| format!("sas7bdat: io_backend: {e}"))?;
-    let options = OpenOptions::builder().io_backend(backend).build();
+    let builder = OpenOptions::builder().io_backend(backend);
+    let builder = match &selection.encoding {
+        None => builder,
+        Some(label) => builder
+            .encoding(label)
+            .map_err(|e| format!("sas7bdat: encoding: {e}"))?,
+    };
+    let options = builder.build();
     let mut ds =
         Dataset::open_with(path, options).map_err(|e| format!("sas7bdat: open `{path}`: {e}"))?;
 
@@ -745,6 +756,13 @@ fn read_impl(
     if selected {
         scan = scan.select(sas7bdat::RowSelection::range(first, first + rows));
     }
+    if selection.strict {
+        scan = scan.with_string_options(
+            sas7bdat::StringDecodeOptions::builder()
+                .utf8_validation(sas7bdat::Utf8ValidationMode::Strict)
+                .build(),
+        );
+    }
     if nrow == 0 {
         return Ok(build_data_frame(
             &names,
@@ -849,6 +867,8 @@ fn read_sas7bdat(
     col_select: Robj,
     skip: f64,
     n_max: f64,
+    encoding: Option<String>,
+    strict: bool,
 ) -> Robj {
     let threads = match threads {
         None => None,
@@ -873,6 +893,8 @@ fn read_sas7bdat(
         columns,
         skip: skip as u64,
         n_max: n_max.is_finite().then_some(n_max as u64),
+        encoding,
+        strict,
     };
     match read_impl(
         path,

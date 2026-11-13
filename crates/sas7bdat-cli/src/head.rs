@@ -27,9 +27,7 @@ pub struct PreviewTable {
 pub fn run_head(args: &HeadArgs) -> Result<()> {
     let dataset = friendly::open_with(
         &args.input,
-        sas7bdat::OpenOptions::builder()
-            .io_backend(args.io_backend.preference())
-            .build(),
+        friendly::open_options(args.io_backend.preference(), args.encoding.as_deref())?,
     )?;
     let selection = ColumnSelection {
         names: args.columns.as_deref(),
@@ -39,7 +37,13 @@ pub fn run_head(args: &HeadArgs) -> Result<()> {
     let indices = resolve_column_indices(&dataset, selection)?;
     let projection = projection_from_selection(&dataset, selection)?;
     let headers = header_names(&dataset, indices.as_deref());
-    let table = collect_preview(&dataset, projection.as_ref(), headers, args.rows)?;
+    let table = collect_preview(
+        &dataset,
+        projection.as_ref(),
+        headers,
+        args.rows,
+        args.strict,
+    )?;
     print!(
         "{}",
         render_table(&table, Style::for_stdout(), terminal_width())
@@ -78,6 +82,7 @@ pub fn collect_preview(
     projection: Option<&Projection>,
     headers: Vec<String>,
     limit: u64,
+    strict: bool,
 ) -> Result<PreviewTable> {
     let total_rows = dataset.metadata().row_count;
     // Logical type per output column, in scan order — lets the formatter render a temporal
@@ -98,6 +103,9 @@ pub fn collect_preview(
         let mut scan = dataset.scan().select(RowSelection::First(limit));
         if let Some(projection) = projection {
             scan = scan.with_projection(projection);
+        }
+        if strict {
+            scan = scan.with_string_options(sas7bdat_convert::export::strict_strings());
         }
         scan.visit_rows(|row| {
             rows.push(

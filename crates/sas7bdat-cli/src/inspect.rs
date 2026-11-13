@@ -20,9 +20,7 @@ const SAMPLE_ROWS: u64 = 5;
 pub fn run_inspect(args: &InspectArgs) -> Result<()> {
     let dataset = friendly::open_with(
         &args.input,
-        sas7bdat::OpenOptions::builder()
-            .io_backend(args.io_backend.preference())
-            .build(),
+        friendly::open_options(args.io_backend.preference(), args.encoding.as_deref())?,
     )?;
     let selection = ColumnSelection {
         names: args.columns.as_deref(),
@@ -71,7 +69,7 @@ pub fn run_inspect(args: &InspectArgs) -> Result<()> {
             },
         )?;
         let headers = header_names(&dataset, sample_cols);
-        let table = collect_preview(&dataset, projection.as_ref(), headers, SAMPLE_ROWS)?;
+        let table = collect_preview(&dataset, projection.as_ref(), headers, SAMPLE_ROWS, false)?;
         println!("\n{}", style.bold("Sample:"));
         print!("{}", render_table(&table, style, terminal_width()));
     }

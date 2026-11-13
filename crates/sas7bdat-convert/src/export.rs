@@ -278,6 +278,8 @@ pub struct ScanOptions<'a> {
     pub parse_threads: Option<usize>,
     /// Borrowed rather than owned so `ScanOptions` stays `Copy`.
     pub progress: Option<&'a ScanProgressObserver>,
+    /// Fail on the first cell that does not decode, instead of replacing it.
+    pub strict: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -307,6 +309,7 @@ impl WriteOptions<'_> {
                 projection: None,
                 parse_threads: None,
                 progress: None,
+                strict: false,
             },
             catalog: None,
             embed_metadata: false,
@@ -705,7 +708,19 @@ fn apply_scan_options<'a>(dataset: &'a Dataset, options: ScanOptions<'a>) -> Sca
     if let Some(observer) = options.progress {
         scan = scan.with_progress_observer(Arc::clone(observer));
     }
+    if options.strict {
+        scan = scan.with_string_options(strict_strings());
+    }
     scan
+}
+
+/// String options that fail a scan on the first cell that does not decode in the file's
+/// encoding, instead of replacing the bytes.
+#[must_use]
+pub fn strict_strings() -> sas7bdat::StringDecodeOptions {
+    sas7bdat::StringDecodeOptions::builder()
+        .utf8_validation(sas7bdat::Utf8ValidationMode::Strict)
+        .build()
 }
 
 fn apply_catalog_metadata(

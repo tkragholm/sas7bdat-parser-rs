@@ -307,6 +307,14 @@ class SasDataset:
     for a ``String``. ``True`` means every string column; a sequence names them.
     Right for codes and labels, wrong for identifiers, where the dictionary is
     as large as the data.
+
+    ``encoding`` reads the file's text in another encoding than its header
+    declares, for files whose header is wrong, a common case being UTF-8 data in
+    a file marked latin1. It takes a WHATWG label (``"utf-8"``,
+    ``"windows-1252"``) or SAS's name for a Windows code page (``"wlatin1"``).
+
+    ``strict=True`` makes a read fail on the first cell that does not decode in
+    the file's encoding. By default such bytes are replaced and the read goes on.
     """
 
     def __init__(
@@ -315,6 +323,8 @@ class SasDataset:
         catalog_path: str | os.PathLike[str] | None = None,
         schema_overrides: Mapping[str, Any] | None = None,
         io_backend: str | None = None,
+        encoding: str | None = None,
+        strict: bool = False,
     ) -> None:
         self.path = str(path)
         self._native = _NativeDataset(
@@ -322,6 +332,8 @@ class SasDataset:
             None if catalog_path is None else str(catalog_path),
             _override_names(schema_overrides),
             io_backend,
+            encoding,
+            bool(strict),
         )
 
     @property
@@ -491,6 +503,7 @@ def sas_info(
     path: str | os.PathLike[str],
     catalog_path: str | os.PathLike[str] | None = None,
     io_backend: str | None = None,
+    encoding: str | None = None,
 ) -> dict[str, Any]:
     """Header-level facts about a file, without decoding any rows.
 
@@ -508,7 +521,10 @@ def sas_info(
     """
     return dict(
         _native_sas_info(
-            str(path), None if catalog_path is None else str(catalog_path), io_backend
+            str(path),
+            None if catalog_path is None else str(catalog_path),
+            io_backend,
+            encoding,
         )
     )
 
@@ -516,6 +532,7 @@ def sas_info(
 def column_info(
     path: str | os.PathLike[str],
     catalog_path: str | os.PathLike[str] | None = None,
+    encoding: str | None = None,
 ) -> pl.DataFrame:
     """One row per column: ``name``, ``label``, ``format``, ``type`` and
     ``width``, read from the file header without decoding any rows.
@@ -527,7 +544,7 @@ def column_info(
     >>> column_info("airline.sas7bdat").columns  # doctest: +SKIP
     ['name', 'label', 'format', 'type', 'width']
     """
-    columns = sas_info(path, catalog_path)["columns"]
+    columns = sas_info(path, catalog_path, encoding=encoding)["columns"]
     return pl.DataFrame(
         columns,
         schema={
@@ -558,6 +575,8 @@ def scan_sas(
     predicate: pl.Expr | None = None,
     io_backend: str | None = None,
     row_offset: int = 0,
+    encoding: str | None = None,
+    strict: bool = False,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file into a ``pl.LazyFrame``.
 
@@ -567,7 +586,9 @@ def scan_sas(
     ``schema_overrides`` re-types columns at schema time, e.g.
     ``{"ID": pl.Int64}`` for an integer-coded numeric column.
     """
-    return SasDataset(path, catalog_path, schema_overrides, io_backend).scan_sas(
+    return SasDataset(
+        path, catalog_path, schema_overrides, io_backend, encoding, strict
+    ).scan_sas(
         columns, n_rows, predicate, categorical, row_offset=row_offset
     )
 
@@ -582,13 +603,17 @@ def read_sas(
     io_backend: str | None = None,
     categorical: bool | Sequence[str] = False,
     row_offset: int = 0,
+    encoding: str | None = None,
+    strict: bool = False,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a ``pl.DataFrame``.
 
     ``row_offset`` rows are skipped and at most ``n_rows`` read after them; both
     count the rows a read returns, so rows SAS marked as deleted are not counted.
     """
-    return SasDataset(path, catalog_path, schema_overrides, io_backend).read(
+    return SasDataset(
+        path, catalog_path, schema_overrides, io_backend, encoding, strict
+    ).read(
         columns, n_rows, predicate, categorical, row_offset=row_offset
     )
 
@@ -604,9 +629,13 @@ def batch_reader(
     io_backend: str | None = None,
     categorical: bool | Sequence[str] = False,
     row_offset: int = 0,
+    encoding: str | None = None,
+    strict: bool = False,
 ) -> BatchReader:
     """Iterate a file one ``pl.DataFrame`` per decoded batch."""
-    return SasDataset(path, catalog_path, schema_overrides, io_backend).batch_reader(
+    return SasDataset(
+        path, catalog_path, schema_overrides, io_backend, encoding, strict
+    ).batch_reader(
         with_columns, predicate, n_rows, batch_size, categorical, row_offset=row_offset
     )
 

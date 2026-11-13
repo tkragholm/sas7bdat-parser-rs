@@ -13,7 +13,9 @@ read_sas7bdat(
   threads = NULL,
   col_select = NULL,
   skip = 0,
-  n_max = Inf
+  n_max = Inf,
+  encoding = NULL,
+  strict = FALSE
 )
 
 read_sas(
@@ -24,7 +26,9 @@ read_sas(
   threads = NULL,
   col_select = NULL,
   skip = 0,
-  n_max = Inf
+  n_max = Inf,
+  encoding = NULL,
+  strict = FALSE
 )
 }
 \arguments{
@@ -63,6 +67,15 @@ counted.}
 
 \item{n_max}{The most rows to read. \code{Inf} (the default) reads to the end;
 \code{0} reads no rows and returns the columns with their types and labels.}
+
+\item{encoding}{Read the file's text in this encoding instead of the one its
+header declares, for files whose header is wrong, a common case being UTF-8
+data in a file marked latin1. A WHATWG label (\code{"utf-8"},
+\code{"windows-1252"}) or SAS's name for a Windows code page
+(\code{"wlatin1"}). \code{NULL} (the default) uses the declared encoding.}
+
+\item{strict}{If \code{TRUE}, fail on the first cell that does not decode in the
+file's encoding. By default such bytes are replaced and the read goes on.}
 }
 \value{
 A tibble (or a base \code{data.frame} if the \pkg{tibble} package is not

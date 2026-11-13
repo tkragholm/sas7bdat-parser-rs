@@ -64,20 +64,24 @@ fn require_file(path: &str) -> PyResult<()> {
 struct SasDataset {
     ds: Arc<Dataset>,
     path: String,
+    /// Fail a read on the first cell that does not decode, rather than replace it.
+    strict: bool,
 }
 
 #[pymethods]
 impl SasDataset {
     #[new]
-    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None))]
+    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None, encoding=None, strict=false))]
     fn open(
         py: Python<'_>,
         path: &str,
         catalog_path: Option<&str>,
         schema_overrides: Option<HashMap<String, String>>,
         io_backend: Option<&str>,
+        encoding: Option<&str>,
+        strict: bool,
     ) -> PyResult<Self> {
-        let options = open_options(io_backend)?;
+        let options = open_options(io_backend, encoding)?;
         require_file(path)?;
         let mut ds = py
             .detach(|| Dataset::open_with(path, options))
@@ -96,6 +100,7 @@ impl SasDataset {
         Ok(Self {
             ds: Arc::new(ds),
             path: path.to_owned(),
+            strict,
         })
     }
 
@@ -133,6 +138,7 @@ impl SasDataset {
             columns,
             n_rows,
             row_offset,
+            strict: self.strict,
             batch_size,
             categorical: categorical.unwrap_or_default(),
         };
@@ -177,6 +183,7 @@ impl SasDataset {
             columns,
             n_rows,
             row_offset,
+            strict: self.strict,
             batch_size,
             categorical: categorical.unwrap_or_default(),
         };
@@ -194,7 +201,7 @@ impl SasDataset {
 /// holds a bounded window, which on a multi-gigabyte file is the
 /// difference between a working set the size of the file and one the size of
 /// the result.
-fn open_options(io_backend: Option<&str>) -> PyResult<OpenOptions> {
+fn open_options(io_backend: Option<&str>, encoding: Option<&str>) -> PyResult<OpenOptions> {
     let named = match io_backend {
         Some(name) => Some(name.to_owned()),
         None => std::env::var("SAS7BDAT_IO_BACKEND").ok(),
@@ -211,7 +218,12 @@ fn open_options(io_backend: Option<&str>) -> PyResult<OpenOptions> {
             ))
         })?,
     };
-    Ok(OpenOptions::builder().io_backend(preference).build())
+    let builder = OpenOptions::builder().io_backend(preference);
+    let builder = match encoding {
+        None => builder,
+        Some(label) => builder.encoding(label).map_err(value_error)?,
+    };
+    Ok(builder.build())
 }
 
 fn logical_type_from_name(name: &str) -> PyResult<LogicalType> {
@@ -397,14 +409,15 @@ impl BatchIterator {
 
 /// Header-level facts about a file, without opening a dataset object.
 #[pyfunction]
-#[pyo3(signature = (path, catalog_path=None, io_backend=None))]
+#[pyo3(signature = (path, catalog_path=None, io_backend=None, encoding=None))]
 fn sas_info<'py>(
     py: Python<'py>,
     path: &str,
     catalog_path: Option<&str>,
     io_backend: Option<&str>,
+    encoding: Option<&str>,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let options = open_options(io_backend)?;
+    let options = open_options(io_backend, encoding)?;
     require_file(path)?;
     let mut ds = py
         .detach(|| Dataset::open_with(path, options))

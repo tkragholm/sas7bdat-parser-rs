@@ -38,6 +38,8 @@ impl ConvertArgs {
             max_rows: self.max_rows,
             columns: self.columns.clone(),
             column_indices: self.column_indices.clone(),
+            encoding: self.encoding.clone(),
+            strict: self.strict,
         }
     }
 }
@@ -494,6 +496,8 @@ mod tests {
                 fail_fast: false,
             },
             io_backend: crate::cli::IoBackend::Auto,
+            encoding: None,
+            strict: false,
             ui: UiOptions {
                 quiet: false,
                 progress: ProgressMode::Always,
