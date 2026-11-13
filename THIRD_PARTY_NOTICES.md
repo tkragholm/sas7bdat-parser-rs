@@ -10,11 +10,13 @@ The first prototype of this reader, written in October 2025, began as a
 translation of [ReadStat](https://github.com/WizardMac/ReadStat)'s SAS reader
 from C to Rust with [c2rust](https://github.com/immunant/c2rust), and was then
 rewritten as Rust within two weeks. The present code base is a second rewrite,
-begun in March 2026. Its catalog reader (`crates/sas7bdat/src/catalog.rs`),
-file probe (`probe.rs`) and encoding table (`encoding.rs`) descend from the
-first rewrite. None of the translated code remains, but because those parts
-derive from ReadStat, ReadStat's licence and copyright notice
-(copyright Evan Miller) are reproduced in
+begun in March 2026. It replaced this repository's earlier history, which is
+why the commit history starts on 29 March 2026 while crates.io holds releases
+from January 2026. In the present code base, the catalog reader
+(`crates/sas7bdat/src/catalog.rs`), file probe (`probe.rs`) and encoding table
+(`encoding.rs`) descend from the first rewrite. None of the translated code
+remains, but because those parts derive from ReadStat, ReadStat's licence and
+copyright notice (copyright Evan Miller) are reproduced in
 [LICENSES/MIT-ReadStat.txt](LICENSES/MIT-ReadStat.txt).
 
 The code was written with AI coding assistants: OpenAI Codex, Claude Code and
