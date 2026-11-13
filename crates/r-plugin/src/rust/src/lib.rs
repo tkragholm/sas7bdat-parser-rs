@@ -244,10 +244,10 @@ fn fill_real_slice(dst: &mut [f64], class: RealClass, buffer: &OwnedColumnBuffer
 /// # Safety
 /// `sexp` is a live STRSXP of length >= `base + batch_rows`, on the main thread.
 unsafe fn fill_text_sexp(
-    sexp: libR_sys::SEXP,
+    sexp: extendr_ffi::SEXP,
     base: usize,
     buffer: &OwnedColumnBuffer,
-    dict: &mut HashMap<Box<[u8]>, libR_sys::SEXP>,
+    dict: &mut HashMap<Box<[u8]>, extendr_ffi::SEXP>,
 ) {
     let (offsets, data, valid) = match buffer {
         OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => (offsets, data, valid),
@@ -263,17 +263,17 @@ unsafe fn fill_text_sexp(
             let charsxp = if let Some(&cs) = dict.get(bytes) {
                 cs
             } else {
-                let cs = libR_sys::Rf_mkCharLenCE(
+                let cs = extendr_ffi::Rf_mkCharLenCE(
                     bytes.as_ptr().cast::<std::os::raw::c_char>(),
                     bytes.len() as std::os::raw::c_int,
-                    libR_sys::cetype_t::CE_UTF8,
+                    extendr_ffi::cetype_t::CE_UTF8,
                 );
                 dict.insert(bytes.into(), cs);
                 cs
             };
-            libR_sys::SET_STRING_ELT(sexp, idx, charsxp);
+            extendr_ffi::SET_STRING_ELT(sexp, idx, charsxp);
         } else {
-            libR_sys::SET_STRING_ELT(sexp, idx, libR_sys::R_NaString);
+            extendr_ffi::SET_STRING_ELT(sexp, idx, extendr_ffi::R_NaString);
         }
     }
 }
@@ -310,12 +310,12 @@ fn factor_from_dict(dict: DictionaryColumn, nrow: usize) -> Robj {
     let lsexp = unsafe { levels.get() };
     for (i, s) in dict.dictionary.iter().enumerate() {
         unsafe {
-            let cs = libR_sys::Rf_mkCharLenCE(
+            let cs = extendr_ffi::Rf_mkCharLenCE(
                 s.as_ptr().cast::<std::os::raw::c_char>(),
                 s.len() as std::os::raw::c_int,
-                libR_sys::cetype_t::CE_UTF8,
+                extendr_ffi::cetype_t::CE_UTF8,
             );
-            libR_sys::SET_STRING_ELT(lsexp, i as isize, cs);
+            extendr_ffi::SET_STRING_ELT(lsexp, i as isize, cs);
         }
     }
     col.set_attrib("levels", levels).unwrap();
@@ -554,7 +554,7 @@ fn read_impl(
     // One CHARSXP cache per string column, alive across batches. A wide SAS file
     // has millions of string cells over few distinct values, so this caps
     // `Rf_mkCharLenCE` at each column's cardinality.
-    let mut caches: Vec<HashMap<Box<[u8]>, libR_sys::SEXP>> =
+    let mut caches: Vec<HashMap<Box<[u8]>, extendr_ffi::SEXP>> =
         (0..metas.len()).map(|_| HashMap::new()).collect();
 
     // Every batch is written at its own `row_base`, so the order batches arrive in does not

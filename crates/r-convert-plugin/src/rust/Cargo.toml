@@ -10,10 +10,10 @@ crate-type = ["staticlib"]
 name = "fastsasconvert"
 
 [dependencies]
-extendr-api = "0.7"
+extendr-api = "0.9"
 # Same version extendr-api 0.7 depends on, so `SEXP` is the identical type. Used
 # for the interrupt flags, which extendr does not wrap.
-libR-sys = "0.7.1"
+extendr-ffi = "0.9"
 # Depended on by version, not by path, so that a package built with `R CMD build`
 # — which copies these sources out of the workspace — can still resolve them. The
 # repository redirects them back to the working tree via `src/.cargo/config.toml`;

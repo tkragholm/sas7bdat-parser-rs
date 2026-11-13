@@ -10,11 +10,11 @@ crate-type = ["staticlib"]
 name = "fastsas"
 
 [dependencies]
-extendr-api = "0.7"
+extendr-api = "0.9"
 # Same version extendr-api 0.7 depends on, so `SEXP` is the identical type.
 # Used for the hot string path (raw SET_STRING_ELT / Rf_mkCharLenCE), bypassing
 # extendr's per-call thread-guard + bounds-check overhead.
-libR-sys = "0.7.1"
+extendr-ffi = "0.9"
 # Depended on by version, not by path, so that a package built with `R CMD build`
 # — which copies these sources out of the workspace — can still resolve it. The
 # repository redirects it back to the working tree via `src/.cargo/config.toml`;

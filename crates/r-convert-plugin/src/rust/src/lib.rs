@@ -24,6 +24,13 @@ use sas7bdat_convert::{
 };
 use std::path::PathBuf;
 
+// R's interrupt flags, from `Rinterface.h`. extendr-ffi binds R's API only, and these
+// are outside it, so they are declared here with the types R gives them.
+unsafe extern "C" {
+    static mut R_interrupts_suspended: extendr_ffi::Rboolean;
+    static mut R_interrupts_pending: std::os::raw::c_int;
+}
+
 /// Makes Ctrl-C observable without letting R unwind through Rust.
 ///
 /// `R_CheckUserInterrupt` handles an interrupt by `longjmp`-ing straight to R's
@@ -36,7 +43,7 @@ use std::path::PathBuf;
 /// The guard restores the previous state on drop, including on panic, so an R
 /// session is never left unable to interrupt.
 struct Interrupts {
-    previous: libR_sys::Rboolean,
+    previous: extendr_ffi::Rboolean,
 }
 
 impl Interrupts {
@@ -44,8 +51,8 @@ impl Interrupts {
         // SAFETY: single-threaded R main thread; these are plain globals in R's
         // C API and this is the documented way to defer interrupt handling.
         unsafe {
-            let previous = libR_sys::R_interrupts_suspended;
-            libR_sys::R_interrupts_suspended = libR_sys::Rboolean::TRUE;
+            let previous = R_interrupts_suspended;
+            R_interrupts_suspended = extendr_ffi::Rboolean::TRUE;
             Self { previous }
         }
     }
@@ -53,7 +60,7 @@ impl Interrupts {
     /// True once the user has asked to stop.
     fn requested(&self) -> bool {
         // SAFETY: as above — a read of an `int` R sets from its signal handler.
-        unsafe { libR_sys::R_interrupts_pending != 0 }
+        unsafe { R_interrupts_pending != 0 }
     }
 }
 
@@ -61,7 +68,7 @@ impl Drop for Interrupts {
     fn drop(&mut self) {
         // SAFETY: as above. Restoring rather than clearing, so nesting is sound.
         unsafe {
-            libR_sys::R_interrupts_suspended = self.previous;
+            R_interrupts_suspended = self.previous;
         }
     }
 }
