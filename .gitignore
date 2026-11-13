@@ -41,3 +41,7 @@ crates/sas7bdat/fuzz/Cargo.lock
 # testthat writes these when a test fails.
 /crates/r-plugin/tests/testthat/_problems/
 /crates/r-plugin/tests/testthat/testthat-problems.rds
+
+# Benchmark runs stay local, except the one the paper and benchmarks/README.md cite.
+/benchmarks/results/*
+!/benchmarks/results/2026-11-13/
