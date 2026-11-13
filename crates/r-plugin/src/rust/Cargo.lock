@@ -155,6 +155,7 @@ dependencies = [
 name = "fastsas"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "extendr-api",
  "extendr-ffi",
  "sas7bdat",

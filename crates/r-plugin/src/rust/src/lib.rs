@@ -24,7 +24,6 @@ use sas7bdat::{
     OpenOptions, OwnedColumnBuffer, Parallelism, SasDate, SasDateTime, TemporalDecodeOptions,
     ValueKey, ValueType,
 };
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Which R class an assembled double column carries. The epoch shift is applied
@@ -256,13 +255,17 @@ fn before_nul_str(text: &str) -> &str {
 /// check. CHARSXPs created here live in R's global string cache, so dict entries
 /// stay valid; `sexp` is kept alive by its owning `Robj` in the caller.
 ///
+/// An empty cell is not written: R allocates a character vector with every element
+/// already `""`, and in survey extracts most cells are empty (70% of the AHS file's).
+///
 /// # Safety
-/// `sexp` is a live STRSXP of length >= `base + batch_rows`, on the main thread.
+/// `sexp` is a live STRSXP of length >= `base + batch_rows`, on the main thread, and
+/// its rows from `base` on have not been written since R allocated it.
 unsafe fn fill_text_sexp(
     sexp: extendr_ffi::SEXP,
     base: usize,
     buffer: &OwnedColumnBuffer,
-    dict: &mut HashMap<Box<[u8]>, extendr_ffi::SEXP>,
+    dict: &mut TextCache,
 ) {
     let (offsets, data, valid) = match buffer {
         OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => (offsets, data, valid),
@@ -271,26 +274,103 @@ unsafe fn fill_text_sexp(
     };
     let offs = offsets.as_slice();
     let valid = valid.as_deref();
+    // Survey and register columns often repeat a value down consecutive rows, so a cell
+    // equal to the one before it reuses that CHARSXP without a lookup. Short cells are
+    // compared by their packed key, which avoids a `memcmp` call per cell.
+    let mut previous: Option<(u64, extendr_ffi::SEXP)> = None;
     for i in 0..offs.len().saturating_sub(1) {
         let idx = (base + i) as isize;
         if is_valid(valid, i) {
             let bytes = before_nul(&data[offs[i] as usize..offs[i + 1] as usize]);
-            let charsxp = if let Some(&cs) = dict.get(bytes) {
-                cs
-            } else {
-                let cs = extendr_ffi::Rf_mkCharLenCE(
-                    bytes.as_ptr().cast::<std::os::raw::c_char>(),
-                    bytes.len() as std::os::raw::c_int,
-                    extendr_ffi::cetype_t::CE_UTF8,
-                );
-                dict.insert(bytes.into(), cs);
-                cs
+            if bytes.is_empty() {
+                continue;
+            }
+            let charsxp = match short_key(bytes) {
+                Some(key) => match previous {
+                    Some((last, cs)) if last == key => cs,
+                    _ => {
+                        let cs = dict.short_charsxp(key, bytes);
+                        previous = Some((key, cs));
+                        cs
+                    }
+                },
+                None => dict.long_charsxp(bytes),
             };
             extendr_ffi::SET_STRING_ELT(sexp, idx, charsxp);
         } else {
             extendr_ffi::SET_STRING_ELT(sexp, idx, extendr_ffi::R_NaString);
         }
     }
+}
+
+/// One string column's CHARSXPs, one per distinct value, kept across batches.
+///
+/// A register extract has millions of string cells over few distinct values, so this
+/// caps `Rf_mkCharLenCE` at the column's cardinality. The lookup happens once per cell on
+/// the main thread, which makes it the serial part of a read. A cell of up to 7 bytes is
+/// keyed by its bytes and length packed into one `u64`, and both maps hash with aHash
+/// rather than SipHash: it is several times faster on short keys, and it is still keyed
+/// at random, so a crafted file cannot choose values that collide.
+///
+/// The CHARSXPs live in R's global string cache and each is stored in the column's
+/// STRSXP as soon as it is made, so the vector keeps it alive while it is cached here.
+#[derive(Default)]
+struct TextCache {
+    short: ahash::AHashMap<u64, extendr_ffi::SEXP>,
+    long: ahash::AHashMap<Box<[u8]>, extendr_ffi::SEXP>,
+}
+
+/// A cell of up to 7 bytes as one `u64`: the bytes, then the length in the top byte, so
+/// that cells differing only in trailing zero bytes or in length get different keys.
+fn short_key(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() >= 8 {
+        return None;
+    }
+    let mut key = [0u8; 8];
+    key[..bytes.len()].copy_from_slice(bytes);
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        key[7] = bytes.len() as u8;
+    }
+    Some(u64::from_le_bytes(key))
+}
+
+impl TextCache {
+    /// The CHARSXP for a short cell, whose [`short_key`] is `key`, made on first use.
+    ///
+    /// # Safety
+    /// On R's main thread. `bytes` holds no NUL.
+    unsafe fn short_charsxp(&mut self, key: u64, bytes: &[u8]) -> extendr_ffi::SEXP {
+        *self.short.entry(key).or_insert_with(|| make_charsxp(bytes))
+    }
+
+    /// The CHARSXP for a cell of 8 bytes or more, made on first use.
+    ///
+    /// # Safety
+    /// On R's main thread. `bytes` holds no NUL.
+    unsafe fn long_charsxp(&mut self, bytes: &[u8]) -> extendr_ffi::SEXP {
+        if let Some(&cs) = self.long.get(bytes) {
+            cs
+        } else {
+            let cs = make_charsxp(bytes);
+            self.long.insert(bytes.into(), cs);
+            cs
+        }
+    }
+}
+
+/// A UTF-8 CHARSXP for `bytes`.
+///
+/// # Safety
+/// On R's main thread. `bytes` holds no NUL.
+unsafe fn make_charsxp(bytes: &[u8]) -> extendr_ffi::SEXP {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    let len = bytes.len() as std::os::raw::c_int;
+    extendr_ffi::Rf_mkCharLenCE(
+        bytes.as_ptr().cast::<std::os::raw::c_char>(),
+        len,
+        extendr_ffi::cetype_t::CE_UTF8,
+    )
 }
 
 /// Rows in a string buffer. Offsets are one longer than the cell count, so an
@@ -557,23 +637,30 @@ fn read_impl(
     // A factor column gets an INTSXP of codes, not a STRSXP, so allocating one
     // here would be a whole extra vector's worth of allocate-and-discard per
     // column — 1.4 GB of it on the AHS fixture's 2,573 factor columns.
-    let mut cols: Vec<Option<Robj>> = Vec::with_capacity(metas.len());
-    for (ci, meta) in metas.iter().enumerate() {
-        cols.push(if wants_factor[ci] {
-            None
-        } else {
-            Some(match meta.class {
+    //
+    // Numeric columns are allocated before character ones. Allocating this much
+    // makes R collect garbage several times, and each collection traces every
+    // character vector already allocated, element by element; numeric vectors it
+    // skips. Allocating the character vectors last means fewer collections see
+    // them: for the AHS fixture's 2,574 character and 1,467 numeric columns this
+    // takes 0.7 s in plain R, against 1.7 s with the character vectors first.
+    let mut cols: Vec<Option<Robj>> = (0..metas.len()).map(|_| None).collect();
+    for want_text in [false, true] {
+        for (ci, meta) in metas.iter().enumerate() {
+            if wants_factor[ci] || matches!(meta.class, ColClass::Text) != want_text {
+                continue;
+            }
+            cols[ci] = Some(match meta.class {
                 ColClass::Text => Strings::new(nrow).into(),
                 ColClass::Real(_) => Doubles::new(nrow).into(),
-            })
-        });
+            });
+        }
     }
 
     // One CHARSXP cache per string column, alive across batches. A wide SAS file
     // has millions of string cells over few distinct values, so this caps
     // `Rf_mkCharLenCE` at each column's cardinality.
-    let mut caches: Vec<HashMap<Box<[u8]>, extendr_ffi::SEXP>> =
-        (0..metas.len()).map(|_| HashMap::new()).collect();
+    let mut caches: Vec<TextCache> = (0..metas.len()).map(|_| TextCache::default()).collect();
 
     // Every batch is written at its own `row_base`, so the order batches arrive in does not
     // matter, and asking for none spares the core its reorder buffer. Two cases keep file
@@ -616,7 +703,8 @@ fn read_impl(
                     ColClass::Text => {
                         // SAFETY: `col` owns the STRSXP and keeps it alive; every
                         // write is on this (main) thread, since the visitor is called
-                        // serially; and `base + row_count <= nrow` was checked above.
+                        // serially; `base + row_count <= nrow` was checked above; and
+                        // each batch covers rows no other batch does.
                         let sexp = unsafe { col.get() };
                         unsafe { fill_text_sexp(sexp, base, &buffer, &mut caches[ci]) };
                     }
@@ -658,6 +746,7 @@ fn read_impl(
             let sexp = unsafe { col.get() };
             let mut base = 0usize;
             for buffer in &held[ci] {
+                // SAFETY: a fresh STRSXP of `nrow`, written once per row in order.
                 unsafe { fill_text_sexp(sexp, base, buffer, &mut caches[ci]) };
                 base += buffer_rows(buffer);
             }

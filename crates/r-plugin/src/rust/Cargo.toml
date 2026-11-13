@@ -20,6 +20,9 @@ extendr-ffi = "0.9"
 # repository redirects it back to the working tree via `src/.cargo/config.toml`;
 # `.Rbuildignore` strips that file, so a tarball gets the published crate.
 sas7bdat = { version = "0.10", features = ["dictionary"] }
+# The string cache's hasher. Already in the dependency tree through `dictionary`, so
+# it adds nothing to the vendored crates.
+ahash = "0.8"
 
 # Detach from the parent cargo workspace: an R package's Rust crate builds
 # standalone (and is copied in isolation by R CMD INSTALL).
