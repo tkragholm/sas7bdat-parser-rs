@@ -15,6 +15,7 @@ use arrow_array::{
 };
 use arrow_buffer::{BooleanBuffer, Buffer, NullBuffer, ScalarBuffer};
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
+use rayon::prelude::*;
 use sas7bdat::OwnedColumnBuffer;
 use sas7bdat::{
     BatchHint, ColumnMajorDecode, Dataset, Error, LabelSet, Parallelism, Result as SasResult,
@@ -279,6 +280,13 @@ impl RecordBatchReader for ScanReader {
     }
 }
 
+/// One column of a batch to convert: its buffer and field, and its value labels
+/// and interner if it has them.
+type ColumnWork<'a> = (
+    (OwnedColumnBuffer, &'a arrow_schema::FieldRef),
+    (&'a Option<LabelSet>, &'a mut Option<Interner>),
+);
+
 fn run_scan(
     ds: &Dataset,
     spec: &ScanSpec,
@@ -305,24 +313,35 @@ fn run_scan(
     ));
     // One interner per categorical column for the whole scan, so a value keeps
     // its code from batch to batch and each batch's dictionary extends the last.
-    let mut interners: HashMap<String, Interner> = spec
-        .categorical
+    // Held by column position, so each column's conversion owns its own.
+    let mut interners: Vec<Option<Interner>> = core
+        .fields()
         .iter()
-        .map(|name| (name.clone(), Interner::default()))
+        .map(|field| {
+            spec.categorical
+                .iter()
+                .any(|name| name == field.name())
+                .then(Interner::default)
+        })
         .collect();
+    // Batches arrive on one thread, and converting a wide batch's columns there
+    // took longer than decoding them on all the others: 0.5 s of the 0.95 s read
+    // of the 4,041-column AHS file. The columns are independent, so they convert
+    // in parallel, on as many threads as the scan decodes with.
+    let workers = scan_workers();
+    let pool = (workers > 1)
+        .then(|| rayon::ThreadPoolBuilder::new().num_threads(workers).build())
+        .transpose()
+        .map_err(|err| Error::internal(format!("conversion thread pool: {err}")))?;
     scan.visit_owned_batches(|batch| {
         // The core moves a numeric or temporal buffer into its array; a string
         // buffer becomes views here, in one pass over its bytes; a labelled
         // column is rebuilt from its values to their labels; a categorical
         // column becomes codes against its interner's dictionary.
         let rows = batch.row_count;
-        let columns = batch
-            .columns
-            .into_iter()
-            .zip(core.fields())
-            .zip(labels)
-            .map(|((column, field), label)| {
-                let interner = interners.get_mut(field.name());
+        let convert =
+            |((column, field), (label, interner)): ColumnWork<'_>| -> SasResult<ArrayRef> {
+                let interner = interner.as_mut();
                 match (label, column, interner) {
                     (
                         None,
@@ -359,8 +378,21 @@ fn run_scan(
                         }
                     }
                 }
-            })
-            .collect::<SasResult<Vec<_>>>()?;
+            };
+        let work = batch
+            .columns
+            .into_iter()
+            .zip(core.fields().iter())
+            .zip(labels.iter().zip(interners.iter_mut()));
+        let columns = match &pool {
+            Some(pool) => pool.install(|| {
+                work.collect::<Vec<_>>()
+                    .into_par_iter()
+                    .map(convert)
+                    .collect::<SasResult<Vec<_>>>()
+            }),
+            None => work.map(convert).collect::<SasResult<Vec<_>>>(),
+        }?;
         let batch = RecordBatch::try_new(Arc::clone(stream_schema), columns)
             .map_err(|err| Error::arrow(err.to_string()))?;
         // The receiver is gone: the consumer released the stream. Stop decoding.
@@ -405,12 +437,11 @@ fn string_views(
     u32::try_from(end).map_err(|_| {
         Error::unsupported("a string batch over 4 GB; ask for a smaller batch_size")
     })?;
-    // Cut to contents: the scanner sized the buffer for the column's full width.
     data.truncate(end);
-    data.shrink_to_fit();
     let text = std::str::from_utf8(&data).map_err(|err| Error::arrow(err.to_string()))?;
     let mut views: Vec<u128> = Vec::with_capacity(rows);
     let mut previous = 0usize;
+    let mut longest = 0usize;
     for &offset in &offsets[1..] {
         let offset = usize::try_from(offset).map_err(|_| Error::arrow("negative offset"))?;
         if offset < previous || !text.is_char_boundary(offset) {
@@ -418,24 +449,35 @@ fn string_views(
                 "string offsets are not monotone character boundaries",
             ));
         }
+        longest = longest.max(offset - previous);
         #[allow(clippy::cast_possible_truncation)]
         views.push(make_view(&data[previous..offset], 0, previous as u32));
         previous = offset;
     }
+    // A view holds a string of up to twelve bytes itself. When every string in
+    // the batch is that short, which is most SAS category columns, no view points
+    // into the buffer and it is dropped. Otherwise it is cut to its contents,
+    // since the scanner sized it for the column's full width, unless that would
+    // free little: shrinking copies the buffer.
+    let buffers: Arc<[Buffer]> = if longest <= 12 {
+        Arc::from([])
+    } else {
+        if data.capacity() > end + end / 4 {
+            data.shrink_to_fit();
+        }
+        Arc::from([Buffer::from_vec(data)])
+    };
     let nulls =
         valid.map(|words| NullBuffer::new(BooleanBuffer::new(Buffer::from_vec(words), 0, rows)));
     // SAFETY: every view was built by `make_view` from a slice of `data` at the
     // offset it records, within `end <= data.len()`; `data` is valid UTF-8 as a
     // whole and every string starts and ends on a character boundary, so every
-    // string is valid UTF-8; buffer index 0 is the one buffer passed.
+    // string is valid UTF-8. A view of more than twelve bytes refers to buffer
+    // index 0, which is `data`, passed whenever such a view exists; shorter views
+    // hold their bytes and refer to no buffer.
     #[allow(unsafe_code)]
-    let array = unsafe {
-        StringViewArray::new_unchecked(
-            ScalarBuffer::from(views),
-            Arc::from([Buffer::from_vec(data)]),
-            nulls,
-        )
-    };
+    let array =
+        unsafe { StringViewArray::new_unchecked(ScalarBuffer::from(views), buffers, nulls) };
     Ok(Arc::new(array))
 }
 

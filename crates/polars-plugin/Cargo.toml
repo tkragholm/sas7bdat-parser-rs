@@ -23,6 +23,7 @@ arrow-array = { workspace = true, features = ["ffi"] }
 arrow-buffer = { workspace = true }
 arrow-schema = { workspace = true }
 pyo3 = { workspace = true, features = ["abi3-py312"] }
+rayon = { workspace = true }
 sas7bdat = { path = "../sas7bdat", features = ["arrow"] }
 
 [build-dependencies]
