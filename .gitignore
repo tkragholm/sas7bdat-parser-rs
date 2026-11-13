@@ -42,6 +42,6 @@ crates/sas7bdat/fuzz/Cargo.lock
 /crates/r-plugin/tests/testthat/_problems/
 /crates/r-plugin/tests/testthat/testthat-problems.rds
 
-# Benchmark runs stay local, except the one the paper and benchmarks/README.md cite.
+# Benchmark runs stay local, except the one benchmarks/README.md reports.
 /benchmarks/results/*
 !/benchmarks/results/2026-11-13/
