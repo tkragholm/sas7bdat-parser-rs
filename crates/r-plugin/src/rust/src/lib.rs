@@ -232,6 +232,21 @@ fn fill_real_slice(dst: &mut [f64], class: RealClass, buffer: &OwnedColumnBuffer
     }
 }
 
+/// The part of `bytes` before the first NUL.
+///
+/// An R string cannot hold NUL, and making one from bytes that contain it raises an R
+/// error, which would unwind through Rust frames. Text is therefore cut at the first NUL,
+/// as it would be if read as a C string. SAS pads with spaces, so this only touches text
+/// that holds a NUL in the middle.
+fn before_nul(bytes: &[u8]) -> &[u8] {
+    bytes.iter().position(|&b| b == 0).map_or(bytes, |end| &bytes[..end])
+}
+
+/// [`before_nul`] for metadata text: names, labels and value-label keys.
+fn before_nul_str(text: &str) -> &str {
+    text.find('\0').map_or(text, |end| &text[..end])
+}
+
 /// Intern one batch's strings into a STRSXP (`sexp`) starting at row `base`,
 /// deduplicating distinct values via a per-column `dict` of cached CHARSXPs.
 ///
@@ -259,7 +274,7 @@ unsafe fn fill_text_sexp(
     for i in 0..offs.len().saturating_sub(1) {
         let idx = (base + i) as isize;
         if is_valid(valid, i) {
-            let bytes = &data[offs[i] as usize..offs[i + 1] as usize];
+            let bytes = before_nul(&data[offs[i] as usize..offs[i + 1] as usize]);
             let charsxp = if let Some(&cs) = dict.get(bytes) {
                 cs
             } else {
@@ -341,7 +356,7 @@ fn numeric_labels_robj(ls: &LabelSet) -> Option<Robj> {
             ValueKey::String(_) => continue,
         };
         codes.push(code);
-        names.push(vl.label.clone());
+        names.push(before_nul_str(&vl.label).to_owned());
     }
     if codes.is_empty() {
         return None;
@@ -357,8 +372,8 @@ fn string_labels_robj(ls: &LabelSet) -> Option<Robj> {
     let mut names: Vec<String> = Vec::new();
     for vl in &ls.labels {
         if let ValueKey::String(s) = &vl.key {
-            codes.push(s.clone());
-            names.push(vl.label.clone());
+            codes.push(before_nul_str(s).to_owned());
+            names.push(before_nul_str(&vl.label).to_owned());
         }
     }
     if codes.is_empty() {
@@ -472,14 +487,15 @@ fn read_impl(
         }
     }
 
-    let names: Vec<String> = ds.columns().iter().map(|c| c.name.clone()).collect();
+    let names: Vec<String> =
+        ds.columns().iter().map(|c| before_nul_str(&c.name).to_owned()).collect();
     let metas: Vec<ColMeta> = {
         let label_sets = &ds.metadata().label_sets;
         ds.columns()
             .iter()
             .map(|c| ColMeta {
                 class: col_class(c.logical_type),
-                var_label: c.label.clone(),
+                var_label: c.label.as_deref().map(|label| before_nul_str(label).to_owned()),
                 value_labels: c
                     .format
                     .as_deref()
@@ -623,7 +639,11 @@ fn read_impl(
             // which case it falls back to the `character` fill from the same
             // buffers rather than re-reading the file.
             let bufs: Vec<&OwnedColumnBuffer> = held[ci].iter().collect();
-            if let Some(dict) = dictionary_encode(&bufs, &DictionaryPolicy::default()) {
+            // A level holding a NUL would be cut, and two levels could then be equal,
+            // which R does not allow in a factor; such a column stays `character`.
+            if let Some(dict) = dictionary_encode(&bufs, &DictionaryPolicy::default())
+                .filter(|dict| !dict.dictionary.iter().any(|level| level.contains('\0')))
+            {
                 let mut col = factor_from_dict(dict, nrow);
                 if let Some(label) = &meta.var_label {
                     col.set_attrib("label", label.as_str()).unwrap();
