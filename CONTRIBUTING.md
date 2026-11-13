@@ -80,5 +80,28 @@ regenerated once the new crates are on crates.io. `just release` works out the
 order from the manifests, shows which steps are done, and can be rerun after
 an interruption.
 
+## Support and maintenance
+
+The project is maintained by Tobias Kragholm (Mary Elizabeth's Hospital,
+Copenhagen). It was written for register research on Statistics Denmark's
+research servers and is used there, so a file that fails to parse is treated
+as a bug and fixed first. Maintenance continues after the maintainer's PhD
+ends in June 2027.
+
+Issues and pull requests get a first answer within two weeks. Report all
+problems as public issues, including a file that crashes the reader. If the
+file is confidential, the `sas7bdat info` output described above is enough
+to start from.
+
+Each crate and package is versioned on its own and follows semantic
+versioning. Breaking changes in the core are listed in
+[`crates/sas7bdat/CHANGELOG.md`](crates/sas7bdat/CHANGELOG.md) under the
+release that makes them. The minimum supported Rust version is 1.89, checked
+in CI, and is raised only in a minor release.
+
+Decisions about format support and the public APIs are made by the
+maintainer, in the open on the issue tracker. Regular contributors can be
+given commit access.
+
 By contributing, you agree that your contributions are licensed under the
 project's [MIT licence](LICENSE).
