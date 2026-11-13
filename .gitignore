@@ -37,3 +37,7 @@ INDEX.md
 # The fuzz jobs run `cargo fuzz run` with no `--locked`, so this one is churn with
 # nothing reading it.
 crates/sas7bdat/fuzz/Cargo.lock
+
+# testthat writes these when a test fails.
+/crates/r-plugin/tests/testthat/_problems/
+/crates/r-plugin/tests/testthat/testthat-problems.rds
