@@ -38,7 +38,9 @@
 #' `haven` decodes those as controls, so the two packages differ on exactly
 #' those bytes.
 #'
-#' @param path Path to a `.sas7bdat` file.
+#' @param path Path to a `.sas7bdat` file, or several paths to files with the
+#'   same columns, which are read in order and stacked; `skip` and `n_max` then
+#'   count across them. Stacking needs the vctrs package.
 #' @param catalog Optional path to a `.sas7bcat` value-label catalog. If `NULL`
 #'   (the default), a same-stem `.sas7bcat` sibling next to `path` is used when
 #'   present.
@@ -71,6 +73,8 @@
 #'   uses the declared encoding.
 #' @param strict If `TRUE`, fail on the first cell that does not decode in the
 #'   file's encoding. By default such bytes are replaced and the read goes on.
+#' @param id The name of a column to add first, holding each row's file path.
+#'   `NULL` (the default) adds none.
 #' @return A tibble (or a base `data.frame` if the `tibble` package is not
 #'   installed).
 #' @export
@@ -98,8 +102,15 @@
 read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
                           io_backend = c("auto", "mmap", "buffered"),
                           threads = NULL, col_select = NULL, skip = 0,
-                          n_max = Inf, encoding = NULL, strict = FALSE) {
-  path <- check_path(path, "path")
+                          n_max = Inf, encoding = NULL, strict = FALSE,
+                          id = NULL) {
+  if (!is.character(path) || length(path) == 0L || anyNA(path)) {
+    abort_argument("`path` must be one or more file paths, not ", deparse1(path))
+  }
+  path <- path.expand(path)
+  if (!is.null(id) && (!is.character(id) || length(id) != 1L || is.na(id))) {
+    abort_argument("`id` must be NULL or a single column name, not ", deparse1(id))
+  }
   if (!is.null(catalog)) {
     catalog <- check_path(catalog, "catalog")
   }
@@ -123,13 +134,25 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
     abort_argument("`strict` must be TRUE or FALSE, not ", deparse1(strict))
   }
 
-  df <- raise_classed(sas7bdat_read_impl(path, catalog, categorical, io_backend,
-                                         threads, col_select, skip, n_max,
-                                         encoding, strict))
-  problem <- attr(df, "fastsas_warning", exact = TRUE)
-  if (!is.null(problem)) {
-    attr(df, "fastsas_warning") <- NULL
-    warning(problem, call. = FALSE)
+  read_one <- function(file, skip, n_max) {
+    df <- raise_classed(sas7bdat_read_impl(file, catalog, categorical, io_backend,
+                                           threads, col_select, skip, n_max,
+                                           encoding, strict))
+    problem <- attr(df, "fastsas_warning", exact = TRUE)
+    if (!is.null(problem)) {
+      attr(df, "fastsas_warning") <- NULL
+      warning(problem, call. = FALSE)
+    }
+    if (!is.null(id)) {
+      df <- add_id_column(df, id, file)
+    }
+    df
+  }
+
+  df <- if (length(path) == 1L) {
+    read_one(path, skip, n_max)
+  } else {
+    read_many(path, read_one, skip, n_max)
   }
   if (requireNamespace("tibble", quietly = TRUE)) {
     tibble::new_tibble(df, nrow = nrow(df))
@@ -145,6 +168,46 @@ read_sas <- read_sas7bdat
 # `threads` reaches Rust as an integer, so reject the values R would otherwise
 # coerce silently: 0, negatives, fractions and NA all mean something the reader
 # cannot act on.
+# Several files read in order and stacked. `skip` and `n_max` count across them, and
+# each file's row count is read from its header first, so a file wholly outside the
+# range is not read.
+read_many <- function(paths, read_one, skip, n_max) {
+  if (!requireNamespace("vctrs", quietly = TRUE)) {
+    abort_argument("reading several files needs the vctrs package, to stack ",
+                   "labelled and factor columns: install.packages(\"vctrs\")")
+  }
+  pieces <- list()
+  for (file in paths) {
+    if (n_max <= 0) {
+      break
+    }
+    rows <- sas_info(file)$n_rows
+    if (skip >= rows) {
+      skip <- skip - rows
+      next
+    }
+    piece <- read_one(file, skip, n_max)
+    skip <- 0
+    n_max <- n_max - nrow(piece)
+    pieces[[length(pieces) + 1L]] <- piece
+  }
+  if (length(pieces) == 0L) {
+    return(read_one(paths[[1]], 0, 0))
+  }
+  df <- do.call(vctrs::vec_rbind, pieces)
+  attr(df, "row.names") <- c(NA_integer_, -nrow(df))
+  df
+}
+
+# `df` with a first column `name` holding `file` on every row.
+add_id_column <- function(df, name, file) {
+  rows <- nrow(df)
+  out <- c(stats::setNames(list(rep(file, rows)), name), as.list(df))
+  attributes(out) <- c(attributes(out),
+                       list(row.names = c(NA_integer_, -rows), class = "data.frame"))
+  out
+}
+
 check_col_select <- function(value) {
   if (is.null(value)) {
     return(NULL)

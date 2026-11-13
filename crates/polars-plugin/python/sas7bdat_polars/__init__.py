@@ -603,8 +603,32 @@ def schema_for_file(
     return SasDataset(path, catalog_path).schema()
 
 
+def _expand_paths(
+    path: str | os.PathLike[str] | Sequence[str | os.PathLike[str]], glob: bool
+) -> list[str] | None:
+    """The files ``path`` names when it names several: a sequence of paths, or a
+    glob pattern such as ``"lmdb*.sas7bdat"``. ``None`` for a single path."""
+    if isinstance(path, (str, os.PathLike)):
+        text = os.fspath(path)
+        if not glob or os.path.exists(text) or not _GLOB_CHARS.search(text):
+            return None
+        import glob as globbing
+
+        matches = sorted(globbing.glob(text))
+        if not matches:
+            raise FileNotFoundError(f"no file matches {text!r}")
+        return matches
+    paths = [os.fspath(p) for p in path]
+    if not paths:
+        raise ValueError("path is an empty sequence")
+    return paths
+
+
+_GLOB_CHARS = re.compile(r"[*?\[]")
+
+
 def scan_sas(
-    path: str | os.PathLike[str],
+    path: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
     catalog_path: str | os.PathLike[str] | None = None,
     schema_overrides: Mapping[str, Any] | None = None,
     categorical: bool | Sequence[str] = False,
@@ -615,6 +639,8 @@ def scan_sas(
     row_offset: int = 0,
     encoding: str | None = None,
     strict: bool = False,
+    include_file_paths: str | None = None,
+    glob: bool = True,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file into a ``pl.LazyFrame``.
 
@@ -623,16 +649,38 @@ def scan_sas(
     rows a read returns, so rows SAS marked as deleted are not counted.
     ``schema_overrides`` re-types columns at schema time, e.g.
     ``{"ID": pl.Int64}`` for an integer-coded numeric column.
+
+    ``path`` may also name several files with the same columns, as a sequence
+    or a glob pattern (``glob=False`` reads such a name literally). They are
+    scanned in that order, sorted for a pattern, and concatenated; ``row_offset``
+    and ``n_rows`` then count across them. ``include_file_paths`` adds a column
+    of that name holding each row's file.
     """
-    return SasDataset(
-        path, catalog_path, schema_overrides, io_backend, encoding, strict
-    ).scan_sas(
-        columns, n_rows, predicate, categorical, row_offset=row_offset
-    )
+    paths = _expand_paths(path, glob)
+    if paths is None:
+        lf = SasDataset(
+            path, catalog_path, schema_overrides, io_backend, encoding, strict
+        ).scan_sas(columns, n_rows, predicate, categorical, row_offset=row_offset)
+        if include_file_paths is not None:
+            lf = lf.with_columns(pl.lit(os.fspath(path)).alias(include_file_paths))
+        return lf
+    frames = []
+    for one in paths:
+        lf = SasDataset(
+            one, catalog_path, schema_overrides, io_backend, encoding, strict
+        ).scan_sas(columns, None, predicate, categorical)
+        if include_file_paths is not None:
+            lf = lf.with_columns(pl.lit(one).alias(include_file_paths))
+        frames.append(lf)
+    combined = pl.concat(frames, how="vertical")
+    _offset(row_offset)
+    if row_offset or n_rows is not None:
+        combined = combined.slice(row_offset, n_rows)
+    return combined
 
 
 def read_sas(
-    path: str | os.PathLike[str],
+    path: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
     columns: Sequence[str] | None = None,
     n_rows: int | None = None,
     predicate: pl.Expr | None = None,
@@ -643,17 +691,38 @@ def read_sas(
     row_offset: int = 0,
     encoding: str | None = None,
     strict: bool = False,
+    include_file_paths: str | None = None,
+    glob: bool = True,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a ``pl.DataFrame``.
 
     ``row_offset`` rows are skipped and at most ``n_rows`` read after them; both
     count the rows a read returns, so rows SAS marked as deleted are not counted.
+    ``path`` may name several files with the same columns, as a sequence or a
+    glob pattern; see :func:`scan_sas`.
     """
-    return SasDataset(
+    if _expand_paths(path, glob) is not None:
+        return scan_sas(
+            path,
+            catalog_path,
+            schema_overrides,
+            categorical,
+            columns,
+            n_rows,
+            predicate,
+            io_backend,
+            row_offset,
+            encoding,
+            strict,
+            include_file_paths,
+            glob,
+        ).collect()
+    df = SasDataset(
         path, catalog_path, schema_overrides, io_backend, encoding, strict
-    ).read(
-        columns, n_rows, predicate, categorical, row_offset=row_offset
-    )
+    ).read(columns, n_rows, predicate, categorical, row_offset=row_offset)
+    if include_file_paths is not None:
+        df = df.with_columns(pl.lit(os.fspath(path)).alias(include_file_paths))
+    return df
 
 
 def batch_reader(

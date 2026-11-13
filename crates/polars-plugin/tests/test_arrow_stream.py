@@ -327,3 +327,38 @@ def test_value_labels_finds_a_catalog_beside_the_file(tmp_path):
     shutil.copy(LABELLED, data)
     shutil.copy(CATALOG, tmp_path / "survey.sas7bcat")
     assert sp.value_labels(data) == sp.value_labels(LABELLED, CATALOG)
+
+
+def _two_deliveries(tmp_path):
+    import shutil
+
+    first, second = tmp_path / "people_2020.sas7bdat", tmp_path / "people_2021.sas7bdat"
+    shutil.copy(PEOPLE, first)
+    shutil.copy(PEOPLE, second)
+    return first, second
+
+
+def test_several_files_read_as_one_frame(tmp_path):
+    first, second = _two_deliveries(tmp_path)
+    one = sp.read_sas(str(PEOPLE))
+    both = sp.read_sas([first, second])
+    assert both.equals(pl.concat([one, one]))
+    by_pattern = sp.read_sas(str(tmp_path / "people_*.sas7bdat"))
+    assert by_pattern.equals(both)
+    lazy = sp.scan_sas([first, second], columns=["ID"]).collect()
+    assert lazy.columns == ["ID"] and lazy.height == 10
+
+
+def test_file_paths_column_and_ranges_across_files(tmp_path):
+    first, second = _two_deliveries(tmp_path)
+    both = sp.read_sas([first, second], include_file_paths="source")
+    assert both["source"].to_list() == [str(first)] * 5 + [str(second)] * 5
+    window = sp.read_sas([first, second], row_offset=3, n_rows=4)
+    assert window.equals(both.drop("source").slice(3, 4))
+    single = sp.read_sas(str(PEOPLE), include_file_paths="source")
+    assert single["source"].unique().to_list() == [str(PEOPLE)]
+
+
+def test_a_pattern_that_matches_nothing_is_file_not_found(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        sp.read_sas(str(tmp_path / "none_*.sas7bdat"))

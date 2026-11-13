@@ -121,7 +121,7 @@ def schema_for_file(
     """A file's polars schema from its header."""
 
 def scan_sas(
-    path: str | os.PathLike[str],
+    path: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
     catalog_path: str | os.PathLike[str] | None = ...,
     schema_overrides: Mapping[str, Any] | None = ...,
     categorical: bool | Sequence[str] = ...,
@@ -132,11 +132,13 @@ def scan_sas(
     row_offset: int = ...,
     encoding: str | None = ...,
     strict: bool = ...,
+    include_file_paths: str | None = ...,
+    glob: bool = ...,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file. Pass ``columns`` to project at the reader."""
 
 def read_sas(
-    path: str | os.PathLike[str],
+    path: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
     columns: Sequence[str] | None = ...,
     n_rows: int | None = ...,
     predicate: pl.Expr | None = ...,
@@ -147,6 +149,8 @@ def read_sas(
     row_offset: int = ...,
     encoding: str | None = ...,
     strict: bool = ...,
+    include_file_paths: str | None = ...,
+    glob: bool = ...,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a DataFrame."""
 

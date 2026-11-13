@@ -15,7 +15,8 @@ read_sas7bdat(
   skip = 0,
   n_max = Inf,
   encoding = NULL,
-  strict = FALSE
+  strict = FALSE,
+  id = NULL
 )
 
 read_sas(
@@ -28,11 +29,14 @@ read_sas(
   skip = 0,
   n_max = Inf,
   encoding = NULL,
-  strict = FALSE
+  strict = FALSE,
+  id = NULL
 )
 }
 \arguments{
-\item{path}{Path to a \code{.sas7bdat} file.}
+\item{path}{Path to a \code{.sas7bdat} file, or several paths to files with the
+same columns, which are read in order and stacked; \code{skip} and \code{n_max}
+then count across them. Stacking needs the \pkg{vctrs} package.}
 
 \item{catalog}{Optional path to a \code{.sas7bcat} value-label catalog. If
 \code{NULL} (the default), a same-stem \code{.sas7bcat} sibling next to
@@ -76,6 +80,9 @@ data in a file marked latin1. A WHATWG label (\code{"utf-8"},
 
 \item{strict}{If \code{TRUE}, fail on the first cell that does not decode in the
 file's encoding. By default such bytes are replaced and the read goes on.}
+
+\item{id}{The name of a column to add first, holding each row's file path.
+\code{NULL} (the default) adds none.}
 }
 \value{
 A tibble (or a base \code{data.frame} if the \pkg{tibble} package is not

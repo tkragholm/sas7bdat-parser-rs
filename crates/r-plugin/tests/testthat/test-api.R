@@ -18,8 +18,10 @@ test_that("bad arguments are rejected by name", {
   # A bad `catalog` is reported as `catalog`, not as an invalid 'path'.
   expect_error(read_sas7bdat(f, catalog = 42), "`catalog`")
   expect_error(read_sas7bdat(42), "`path`")
-  expect_error(read_sas7bdat(c(f, f)), "`path`")
+  expect_error(read_sas7bdat(character(0)), "`path`")
+  expect_error(read_sas7bdat(c(f, NA)), "`path`")
   expect_error(read_sas7bdat(NA_character_), "`path`")
+  expect_error(read_sas7bdat(f, id = 1), "`id`")
 })
 
 test_that("valid arguments still work", {
