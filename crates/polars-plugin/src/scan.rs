@@ -38,6 +38,10 @@ pub struct ScanSpec {
     pub row_offset: usize,
     /// Fail on the first cell that does not decode in the file's encoding.
     pub strict: bool,
+    /// Leave date, datetime and time columns as the numbers SAS stores: days since
+    /// 1960-01-01 for a date, seconds since then for a datetime, seconds since
+    /// midnight for a time.
+    pub temporal_as_numbers: bool,
     /// Leave labelled columns as their codes even when a catalog is attached.
     pub keep_codes: bool,
     /// Numeric columns that each get a `<name>_missing` column with the tag of every
@@ -197,11 +201,20 @@ fn missing_tags_of(buffer: &OwnedColumnBuffer, rows: usize) -> ArrayRef {
 
 fn core_schema(ds: &Dataset, spec: &ScanSpec) -> SasResult<SchemaRef> {
     let projection = projection(ds, spec)?;
-    let mut scan = ds.scan();
+    let mut scan = ds.scan().with_temporal_options(temporal_options(spec));
     if let Some(ref projection) = projection {
         scan = scan.with_projection(projection);
     }
     scan.arrow_schema()
+}
+
+fn temporal_options(spec: &ScanSpec) -> sas7bdat::TemporalDecodeOptions {
+    let decode = !spec.temporal_as_numbers;
+    sas7bdat::TemporalDecodeOptions::builder()
+        .decode_dates(decode)
+        .decode_datetimes(decode)
+        .decode_times(decode)
+        .build()
 }
 
 fn projection(ds: &Dataset, spec: &ScanSpec) -> SasResult<Option<sas7bdat::Projection>> {
@@ -434,7 +447,8 @@ fn run_scan(
     let mut scan = ds
         .scan()
         .with_parallelism(scan_parallelism())
-        .with_column_major_decode(column_major_decode());
+        .with_column_major_decode(column_major_decode())
+        .with_temporal_options(temporal_options(spec));
     if let Some(ref projection) = projection {
         scan = scan.with_projection(projection);
     }

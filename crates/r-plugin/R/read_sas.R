@@ -75,6 +75,10 @@
 #'   file's encoding. By default such bytes are replaced and the read goes on.
 #' @param id The name of a column to add first, holding each row's file path.
 #'   `NULL` (the default) adds none.
+#' @param temporal_as_numbers If `TRUE`, read date, datetime and time columns
+#'   as the plain numbers SAS stores: days since 1 January 1960 for a date,
+#'   seconds since then for a datetime, and seconds since midnight for a time.
+#'   By default they are `Date`, `POSIXct` (UTC) and `hms`.
 #' @return A tibble (or a base `data.frame` if the `tibble` package is not
 #'   installed).
 #' @export
@@ -103,7 +107,7 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
                           io_backend = c("auto", "mmap", "buffered"),
                           threads = NULL, col_select = NULL, skip = 0,
                           n_max = Inf, encoding = NULL, strict = FALSE,
-                          id = NULL) {
+                          id = NULL, temporal_as_numbers = FALSE) {
   if (!is.character(path) || length(path) == 0L || anyNA(path)) {
     abort_argument("`path` must be one or more file paths, not ", deparse1(path))
   }
@@ -133,11 +137,17 @@ read_sas7bdat <- function(path, catalog = NULL, categorical = FALSE,
   if (!is.logical(strict) || length(strict) != 1L || is.na(strict)) {
     abort_argument("`strict` must be TRUE or FALSE, not ", deparse1(strict))
   }
+  if (!is.logical(temporal_as_numbers) || length(temporal_as_numbers) != 1L ||
+      is.na(temporal_as_numbers)) {
+    abort_argument("`temporal_as_numbers` must be TRUE or FALSE, not ",
+                   deparse1(temporal_as_numbers))
+  }
 
   read_one <- function(file, skip, n_max) {
     df <- raise_classed(sas7bdat_read_impl(file, catalog, categorical, io_backend,
                                            threads, col_select, skip, n_max,
-                                           encoding, strict))
+                                           encoding, strict,
+                                           temporal_as_numbers))
     problem <- attr(df, "fastsas_warning", exact = TRUE)
     if (!is.null(problem)) {
       attr(df, "fastsas_warning") <- NULL

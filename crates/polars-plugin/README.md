@@ -50,6 +50,9 @@ df = sp.read_sas("lmdb_*.sas7bdat", include_file_paths="source")
 # SAS special missing values (.A to .Z, ._): a Q1_missing column with each tag.
 df = sp.read_sas("survey.sas7bdat", missing_tags=["Q1", "Q2"])
 
+# Dates, datetimes and times as SAS's numbers (days or seconds from 1960-01-01).
+df = sp.read_sas("data.sas7bdat", temporal_as_numbers=True)
+
 # SAS stores every number as a float. Declare integer-coded columns to get Int64.
 lf = sp.scan_sas("data.sas7bdat", schema_overrides={"region": pl.Int64})
 

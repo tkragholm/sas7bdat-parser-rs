@@ -332,6 +332,10 @@ class SasDataset:
     the tag as SAS writes it, ``".A"`` to ``".Z"`` or ``"._"``, ``"."`` for a
     plain missing value, and null where the value is present. Without it every
     missing value is a null.
+
+    ``temporal_as_numbers=True`` leaves date, datetime and time columns as the
+    numbers SAS stores, as ``Float64``: days since 1 January 1960 for a date,
+    seconds since then for a datetime, and seconds since midnight for a time.
     """
 
     def __init__(
@@ -344,6 +348,7 @@ class SasDataset:
         strict: bool = False,
         apply_labels: bool = True,
         missing_tags: Sequence[str] | None = None,
+        temporal_as_numbers: bool = False,
     ) -> None:
         self.path = str(path)
         self._missing_tags = list(missing_tags or [])
@@ -356,6 +361,7 @@ class SasDataset:
             bool(strict),
             not apply_labels,
             self._missing_tags,
+            bool(temporal_as_numbers),
         )
 
     @property
@@ -680,6 +686,7 @@ def scan_sas(
     include_file_paths: str | None = None,
     glob: bool = True,
     missing_tags: Sequence[str] | None = None,
+    temporal_as_numbers: bool = False,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file into a ``pl.LazyFrame``.
 
@@ -694,6 +701,9 @@ def scan_sas(
     scanned in that order, sorted for a pattern, and concatenated; ``row_offset``
     and ``n_rows`` then count across them. ``include_file_paths`` adds a column
     of that name holding each row's file.
+
+    ``temporal_as_numbers=True`` leaves date, datetime and time columns as the
+    numbers SAS stores; see :class:`SasDataset`.
     """
     paths = _expand_paths(path, glob)
     if paths is None:
@@ -705,6 +715,7 @@ def scan_sas(
             encoding,
             strict,
             missing_tags=missing_tags,
+            temporal_as_numbers=temporal_as_numbers,
         ).scan_sas(columns, n_rows, predicate, categorical, row_offset=row_offset)
         if include_file_paths is not None:
             lf = lf.with_columns(pl.lit(os.fspath(path)).alias(include_file_paths))
@@ -719,6 +730,7 @@ def scan_sas(
             encoding,
             strict,
             missing_tags=missing_tags,
+            temporal_as_numbers=temporal_as_numbers,
         ).scan_sas(columns, None, predicate, categorical)
         if include_file_paths is not None:
             lf = lf.with_columns(pl.lit(one).alias(include_file_paths))
@@ -745,6 +757,7 @@ def read_sas(
     include_file_paths: str | None = None,
     glob: bool = True,
     missing_tags: Sequence[str] | None = None,
+    temporal_as_numbers: bool = False,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a ``pl.DataFrame``.
 
@@ -769,6 +782,7 @@ def read_sas(
             include_file_paths,
             glob,
             missing_tags,
+            temporal_as_numbers,
         ).collect()
     df = SasDataset(
         path,
@@ -778,6 +792,7 @@ def read_sas(
         encoding,
         strict,
         missing_tags=missing_tags,
+        temporal_as_numbers=temporal_as_numbers,
     ).read(columns, n_rows, predicate, categorical, row_offset=row_offset)
     if include_file_paths is not None:
         df = df.with_columns(pl.lit(os.fspath(path)).alias(include_file_paths))
@@ -798,6 +813,7 @@ def batch_reader(
     encoding: str | None = None,
     strict: bool = False,
     missing_tags: Sequence[str] | None = None,
+    temporal_as_numbers: bool = False,
 ) -> BatchReader:
     """Iterate a file one ``pl.DataFrame`` per decoded batch."""
     return SasDataset(
@@ -808,6 +824,7 @@ def batch_reader(
         encoding,
         strict,
         missing_tags=missing_tags,
+        temporal_as_numbers=temporal_as_numbers,
     ).batch_reader(
         with_columns, predicate, n_rows, batch_size, categorical, row_offset=row_offset
     )

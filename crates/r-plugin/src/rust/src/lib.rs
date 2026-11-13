@@ -542,6 +542,8 @@ struct Selection {
     encoding: Option<String>,
     /// Fail on the first cell that does not decode, rather than replace it.
     strict: bool,
+    /// Read date, datetime and time columns as the plain numbers SAS stores.
+    temporal_as_numbers: bool,
 }
 
 enum ColumnChoice {
@@ -631,7 +633,12 @@ fn read_impl(
         chosen
             .iter()
             .map(|c| ColMeta {
-                class: col_class(c.logical_type),
+                class: match col_class(c.logical_type) {
+                    ColClass::Real(_) if selection.temporal_as_numbers => {
+                        ColClass::Real(RealClass::Plain)
+                    }
+                    class => class,
+                },
                 var_label: c.label.as_deref().map(|label| before_nul_str(label).to_owned()),
                 format_sas: c.format_spec().map(|spec| before_nul_str(&spec).to_owned()),
                 value_labels: c
@@ -872,6 +879,7 @@ fn read_sas7bdat(
     n_max: f64,
     encoding: Option<String>,
     strict: bool,
+    temporal_as_numbers: bool,
 ) -> Robj {
     let threads = match threads {
         None => None,
@@ -904,6 +912,7 @@ fn read_sas7bdat(
         n_max: n_max.is_finite().then_some(n_max as u64),
         encoding,
         strict,
+        temporal_as_numbers,
     };
     match read_impl(
         path,

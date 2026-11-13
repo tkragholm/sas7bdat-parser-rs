@@ -66,6 +66,8 @@ struct SasDataset {
     path: String,
     /// Fail a read on the first cell that does not decode, rather than replace it.
     strict: bool,
+    /// Leave date, datetime and time columns as SAS's numbers.
+    temporal_as_numbers: bool,
     /// Leave labelled columns as their codes even when a catalog is attached.
     keep_codes: bool,
     /// Numeric columns read with a `<name>_missing` column of special-missing tags.
@@ -75,7 +77,7 @@ struct SasDataset {
 #[pymethods]
 impl SasDataset {
     #[new]
-    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None, encoding=None, strict=false, keep_codes=false, missing_tags=None))]
+    #[pyo3(signature = (path, catalog_path=None, schema_overrides=None, io_backend=None, encoding=None, strict=false, keep_codes=false, missing_tags=None, temporal_as_numbers=false))]
     // Each is a keyword argument of the Python constructor, which is where they are read.
     #[allow(clippy::too_many_arguments)]
     fn open(
@@ -88,6 +90,7 @@ impl SasDataset {
         strict: bool,
         keep_codes: bool,
         missing_tags: Option<Vec<String>>,
+        temporal_as_numbers: bool,
     ) -> PyResult<Self> {
         let options = open_options(io_backend, encoding)?;
         require_file(path)?;
@@ -125,6 +128,7 @@ impl SasDataset {
             ds: Arc::new(ds),
             path: path.to_owned(),
             strict,
+            temporal_as_numbers,
             keep_codes,
             missing_tags,
         })
@@ -165,6 +169,7 @@ impl SasDataset {
             n_rows,
             row_offset,
             strict: self.strict,
+            temporal_as_numbers: self.temporal_as_numbers,
             keep_codes: self.keep_codes,
             missing_tags: self.missing_tags.clone(),
             batch_size,
@@ -227,6 +232,7 @@ impl SasDataset {
         let spec = ScanSpec {
             columns,
             categorical: categorical.unwrap_or_default(),
+            temporal_as_numbers: self.temporal_as_numbers,
             keep_codes: self.keep_codes,
             missing_tags: self.missing_tags.clone(),
             ..ScanSpec::default()
@@ -251,6 +257,7 @@ impl SasDataset {
             n_rows,
             row_offset,
             strict: self.strict,
+            temporal_as_numbers: self.temporal_as_numbers,
             keep_codes: self.keep_codes,
             missing_tags: self.missing_tags.clone(),
             batch_size,

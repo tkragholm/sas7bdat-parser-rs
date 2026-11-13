@@ -75,6 +75,9 @@ A tibble with these column types:
 - `encoding`: read the text in another encoding than the file declares, for
   files whose header is wrong; `strict = TRUE` fails on bytes that do not
   decode instead of replacing them.
+- `temporal_as_numbers = TRUE`: dates, datetimes and times as the numbers SAS
+  stores, days or seconds from 1 January 1960, rather than `Date`, `POSIXct`
+  and `hms`.
 
 `sas_info()` gives a file's row count, encoding, table name and a data frame of
 its columns with their labels and formats, without reading any rows.

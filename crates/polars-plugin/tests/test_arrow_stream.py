@@ -399,3 +399,25 @@ def test_module_readers_take_missing_tags():
     df = sp.read_sas(MISSING, missing_tags=["var1"])
     assert df["var1_missing"].to_list() == [".A"]
     assert sp.scan_sas(MISSING, missing_tags=["var1"]).collect().equals(df)
+
+
+TRACKED = Path(__file__).resolve().parents[2] / "sas7bdat" / "tests" / "fixtures" / "corpus"
+
+
+def test_temporal_as_numbers_gives_the_stored_numbers():
+    import datetime as dt
+
+    epoch = dt.datetime(1960, 1, 1)
+    path = TRACKED / "pandas" / "datetime.sas7bdat"
+    decoded = sp.read_sas(path)
+    raw = sp.read_sas(path, temporal_as_numbers=True)
+    assert sp.scan_sas(path, temporal_as_numbers=True).collect_schema() == raw.schema
+    assert all(dtype == pl.Float64 for dtype in raw.dtypes)
+    for name in ("Date1", "Date2", "Taiw"):
+        days = [None if d is None else (d - epoch.date()).days for d in decoded[name]]
+        assert raw[name].to_list() == days, name
+    seconds = [None if d is None else (d - epoch).total_seconds() for d in decoded["DateTime"]]
+    assert raw["DateTime"].to_list() == pytest.approx(seconds, abs=1e-6)
+
+    times = sp.read_sas(TRACKED / "parso" / "time_formats.sas7bdat", temporal_as_numbers=True)
+    assert times["TIME"].to_list() == [10 * 3600 + 10 * 60 + 10]

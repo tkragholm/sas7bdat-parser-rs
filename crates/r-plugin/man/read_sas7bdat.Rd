@@ -16,7 +16,8 @@ read_sas7bdat(
   n_max = Inf,
   encoding = NULL,
   strict = FALSE,
-  id = NULL
+  id = NULL,
+  temporal_as_numbers = FALSE
 )
 
 read_sas(
@@ -30,7 +31,8 @@ read_sas(
   n_max = Inf,
   encoding = NULL,
   strict = FALSE,
-  id = NULL
+  id = NULL,
+  temporal_as_numbers = FALSE
 )
 }
 \arguments{
@@ -83,6 +85,11 @@ file's encoding. By default such bytes are replaced and the read goes on.}
 
 \item{id}{The name of a column to add first, holding each row's file path.
 \code{NULL} (the default) adds none.}
+
+\item{temporal_as_numbers}{If \code{TRUE}, read date, datetime and time columns
+as the plain numbers SAS stores: days since 1 January 1960 for a date,
+seconds since then for a datetime, and seconds since midnight for a time.
+By default they are \code{Date}, \code{POSIXct} (UTC) and \code{hms}.}
 }
 \value{
 A tibble (or a base \code{data.frame} if the \pkg{tibble} package is not

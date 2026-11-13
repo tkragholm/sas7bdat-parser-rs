@@ -41,6 +41,7 @@ class SasDataset:
         strict: bool = ...,
         apply_labels: bool = ...,
         missing_tags: Sequence[str] | None = ...,
+        temporal_as_numbers: bool = ...,
     ) -> None: ...
     @property
     def column_names(self) -> list[str]: ...
@@ -141,6 +142,7 @@ def scan_sas(
     include_file_paths: str | None = ...,
     glob: bool = ...,
     missing_tags: Sequence[str] | None = ...,
+    temporal_as_numbers: bool = ...,
 ) -> pl.LazyFrame:
     """Lazily scan a SAS7BDAT file. Pass ``columns`` to project at the reader."""
 
@@ -159,6 +161,7 @@ def read_sas(
     include_file_paths: str | None = ...,
     glob: bool = ...,
     missing_tags: Sequence[str] | None = ...,
+    temporal_as_numbers: bool = ...,
 ) -> pl.DataFrame:
     """Read a SAS7BDAT file eagerly into a DataFrame."""
 
@@ -176,6 +179,7 @@ def batch_reader(
     encoding: str | None = ...,
     strict: bool = ...,
     missing_tags: Sequence[str] | None = ...,
+    temporal_as_numbers: bool = ...,
 ) -> BatchReader:
     """Iterate a file one DataFrame per decoded batch."""
 
