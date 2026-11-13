@@ -1,0 +1,180 @@
+# Figures for the JOSS paper on sas7bdat-parser-rs.
+#
+#   just -f .../figures/justfile all      build every figure to figures/build/
+#   just -f .../figures/justfile one fig_wildcopy
+#
+# SELF-CONTAINED ON PURPOSE. `--root` is this directory, and nothing here imports
+# anything outside it. `paper/` is copied wholesale into a checkout of the public
+# repository when the paper goes out (see ../../README.md), so these have to build
+# in both homes without a path fixup.
+#
+# No font path and no install either: the figures are set in Libertinus Serif,
+# which Typst bundles. See the note in style.typ for why that is deliberate.
+
+set shell := ["bash", "-uc"]
+ROOT := justfile_directory()
+BUILD := "build"
+
+_default:
+    @just -f "{{justfile()}}" --list
+
+# One figure, to figures/build/<name>.pdf
+one name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    mkdir -p "{{BUILD}}"
+    typst compile --root "{{ROOT}}" --input fig={{name}} _preview.typ "{{BUILD}}/{{name}}.pdf"
+    echo "wrote figures/{{BUILD}}/{{name}}.pdf"
+
+# Every figure
+all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    mkdir -p "{{BUILD}}"
+    for f in fig_*.typ; do
+      n="${f%.typ}"
+      typst compile --root "{{ROOT}}" --input fig="$n" _preview.typ "{{BUILD}}/$n.pdf"
+      echo "  $n"
+    done
+    echo "wrote $(ls {{BUILD}}/*.pdf | wc -l) figures to figures/{{BUILD}}/"
+
+# PNG previews at 200 dpi, for looking at without a PDF viewer
+png: all
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    for f in {{BUILD}}/*.pdf; do
+      pdftoppm -r 200 -png -singlefile "$f" "${f%.pdf}"
+    done
+    echo "wrote PNGs beside the PDFs"
+
+# Does every figure still build?
+check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+    fail=0
+    for f in fig_*.typ; do
+      n="${f%.typ}"
+      if typst compile --root "{{ROOT}}" --input fig="$n" _preview.typ "$out/$n.pdf" 2>"$out/$n.err"; then
+        printf 'ok: %s\n' "$n"
+      else
+        printf 'FAILED: %s\n' "$n" >&2; sed 's/^/    /' "$out/$n.err" >&2; fail=1
+      fi
+      if grep -q "unknown font family" "$out/$n.err" 2>/dev/null; then
+        printf 'FONT FALLBACK in %s -- the figure is not rendering as designed\n' "$n" >&2; fail=1
+      fi
+    done
+    [ "$fail" -eq 0 ]
+
+# Does any figure run off the page? A cetz canvas wider than FIG-W is not an
+# error -- it draws past the block, the page cuts it, and the source looks fine.
+# So this is measured from the rendered pixels: render each figure and look for
+# ink inside the 8pt margin band. Needs poppler (pdftoppm) and python3.
+bleed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+    for f in fig_*.typ; do
+      n="${f%.typ}"
+      typst compile --root "{{ROOT}}" --input fig="$n" _preview.typ "$out/$n.pdf"
+      pdftoppm -r 150 -f 1 -l 1 "$out/$n.pdf" "$out/$n"
+    done
+    python3 - "$out" <<'PY'
+    import glob, os, sys
+    def ppm(fn):
+        d = open(fn, 'rb').read(); t = []; i = 2
+        while len(t) < 3:
+            while d[i:i + 1].isspace(): i += 1
+            if d[i:i + 1] == b'#':
+                while d[i:i + 1] != b'\n': i += 1
+                continue
+            j = i
+            while not d[j:j + 1].isspace(): j += 1
+            t.append(int(d[i:j])); i = j
+        return t[0], t[1], d[i + 1:]
+    M = 17  # the 8pt page margin at 150ppi
+    bad = 0
+    for fn in sorted(glob.glob(os.path.join(sys.argv[1], "*.ppm"))):
+        w, h, px = ppm(fn)
+        xs = [x for y in range(h) for x in range(w)
+              if any(px[(y * w + x) * 3 + k] < 250 for k in (0, 1, 2))]
+        ys = [y for y in range(h) for x in range(w)
+              if any(px[(y * w + x) * 3 + k] < 250 for k in (0, 1, 2))]
+        over = max(M - min(xs), max(xs) - (w - 1 - M), M - min(ys), max(ys) - (h - 1 - M))
+        name = os.path.basename(fn).rsplit('-', 1)[0]
+        if over > 3:
+            print(f"BLEEDS: {name} -- ink {over}px past the margin"); bad = 1
+        else:
+            print(f"ok: {name}")
+    raise SystemExit(bad)
+    PY
+
+# Render every figure the way a mono printer would. There is no automatic test
+# for "can a reader still tell these apart", so this produces the images and you
+# look. What it caught: fig_mojibake_band separated its five surviving codepoints
+# from the other twenty-seven by hue alone, and in greyscale the two fills are
+# TWO levels apart out of 255. Needs ImageMagick.
+grey:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    mkdir -p "{{BUILD}}/grey"
+    for f in fig_*.typ; do
+      n="${f%.typ}"
+      typst compile --root "{{ROOT}}" --input fig="$n" _preview.typ "{{BUILD}}/$n.pdf"
+      magick -density 150 "{{BUILD}}/$n.pdf" -colorspace Gray "{{BUILD}}/grey/$n.png"
+      echo "  {{BUILD}}/grey/$n.png"
+    done
+    echo
+    echo "Look at these. A figure fails if anything it encodes by colour alone"
+    echo "has become indistinguishable -- and if its own caption says 'the grey"
+    echo "one' or 'the blue line', that sentence has to go too."
+
+# EJPH asks for .tif at 1200 dpi for line art at acceptance. Everything here is
+# line art. LZW because these are lossless and large; -flatten because a TIFF
+# with alpha is rejected by some production systems.
+tiff:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    mkdir -p "{{BUILD}}/tiff"
+    for f in fig_*.typ; do
+      n="${f%.typ}"
+      typst compile --root "{{ROOT}}" --input fig="$n" _preview.typ "{{BUILD}}/$n.pdf"
+      magick -density 1200 "{{BUILD}}/$n.pdf" -background white -flatten \
+             -compress lzw -depth 8 "{{BUILD}}/tiff/$n.tif"
+      echo "  $(du -h "{{BUILD}}/tiff/$n.tif" | cut -f1)  {{BUILD}}/tiff/$n.tif"
+    done
+
+# One meaning per token. Two of these tokens share a hex on purpose -- the palette
+# has no free hue -- and what makes that safe is that they never meet. This fails
+# if they do, which is the check the colour audit asked for.
+tokens:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    python3 - <<'PY'
+    import glob, re, sys
+    hexes = {}
+    for line in open("style.typ"):
+        m = re.match(r'#let ([a-z-]+) = rgb\("(#[0-9A-Fa-f]{6})"\)', line.strip())
+        if m: hexes.setdefault(m.group(2), []).append(m.group(1))
+    clash = {h: t for h, t in hexes.items() if len(t) > 1}
+    bad = 0
+    for fn in sorted(glob.glob("fig_*.typ")):
+        src = open(fn).read()
+        for h, toks in clash.items():
+            seen = [t for t in toks if re.search(r'(?<![\w-])%s(?![\w-])' % t, src)]
+            if len(seen) > 1:
+                print("CLASH: %s uses %s, which are all %s" % (fn, " and ".join(seen), h)); bad = 1
+        print("ok: %s" % fn[:-4])
+    sys.exit(bad)
+    PY
+
+clean:
+    rm -rf "{{justfile_directory()}}/{{BUILD}}"
