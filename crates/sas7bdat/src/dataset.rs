@@ -687,7 +687,7 @@ fn should_try_mmap(preference: IoBackendPreference, path: &Path) -> bool {
     }
 }
 
-// The crate's single `unsafe`: a read-only mmap. Explicitly allowed so it stands out.
+// A read-only mmap, one of the crate's marked `unsafe` sites. Explicitly allowed so it stands out.
 #[allow(unsafe_code)]
 fn try_map_file(path: &Path, file: &File) -> Result<Option<Mmap>> {
     // SAFETY: The mapping is created read-only from an open file descriptor and stored
