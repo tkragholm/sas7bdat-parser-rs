@@ -57,21 +57,24 @@
 //!
 //! # What the x86-64 sweep says
 //!
-//! Measured with `benches/simd_backends.rs` on an AVX-512 x86-64 server CPU, GiB/s,
-//! `portable` = `std::simd`:
+//! Measured with `benches/simd_backends.rs` on an AMD EPYC 9V74 (AVX-512), GiB/s,
+//! `portable` = `std::simd`, `avx2` = `fearless` held to AVX2 with
+//! `SAS7BDAT_SIMD_LEVEL`, the path an AVX2-only CPU takes (simd-matrix run of 14 Nov
+//! 2026, fearless_simd 1.2):
 //!
-//! | kernel                 | baseline (SSE2)      | x86-64-v3 (AVX2)     | x86-64-v4 (AVX-512)  |
-//! |------------------------|----------------------|----------------------|----------------------|
-//! |                        | scal / fear / port   | scal / fear / port   | scal / fear / port   |
-//! | `classify_missing`     | 10.0 / **59.3** / 12.5 | 16.4 / **58.9** / 54.4 | 33.7 / 59.0 / **60.3** |
-//! | `convert_column_i64`   |  8.8 / **28.8** /  8.0 |  8.7 / **26.1** /  8.4 |  8.2 / **22.0** /  9.3 |
-//! | `is_ascii/width_256`   | 23.7 / 62.5 / **71.3** | 23.4 / 58.2 / **89.1** | 23.9 / 64.6 / **72.6** |
-//! | `is_ascii/width_16`    | **10.9** / 4.6 / 7.8 | **10.9** / 5.5 / 7.8 | **10.9** / 5.4 / 7.8 |
+//! | kernel                 | baseline (SSE2)                | x86-64-v3 (AVX2)               |
+//! |------------------------|--------------------------------|--------------------------------|
+//! |                        | scal / fear / avx2 / port      | scal / fear / avx2 / port      |
+//! | `classify_missing`     |  9.9 / **60.8** / 44.2 / 12.4  | 16.5 / **61.3** / 44.6 / 55.0  |
+//! | `convert_column_i64`   |  8.8 / **28.3** / 18.0 /  7.9  |  9.2 / **30.3** / 19.3 /  8.5  |
+//! | `is_ascii/width_256`   | 43.2 / 54.2 / 62.7 / **69.4**  | **83.0** / 56.1 / 70.8 / 80.5  |
+//! | `is_ascii/width_16`    | **10.9** / 5.0 / 4.5 / 7.8     | **10.9** / 4.9 / 7.8 / 7.8     |
 //!
-//! `fearless` is nearly flat across the three levels — it picks at runtime, so it
-//! does not care what the build enabled. `portable` swings by 4x, because it lowers
-//! to whatever `-C target-cpu` allowed. That is the whole argument for the default:
-//! a crate consumed from crates.io, a wheel, or an R tarball is built at baseline.
+//! `fearless` is nearly flat across the levels: it picks at runtime, so it does not
+//! care what the build enabled. `portable` swings by 4x, because it lowers to whatever
+//! `-C target-cpu` allowed. That is the whole argument for the default: a crate
+//! consumed from crates.io, a wheel built elsewhere, or an R tarball is built at
+//! baseline.
 //!
 //! Where `portable` still wins is the wide string kernels once `target-cpu` is set,
 //! which is the case for this repository's own CLI and server builds.
