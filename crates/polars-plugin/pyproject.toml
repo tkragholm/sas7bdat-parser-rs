@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sas7bdat-polars"
-version = "0.10.2"
+version = "0.10.3"
 description = "SAS7BDAT files as Arrow streams, with a Polars API on top"
 readme = "README.md"
 license = "MIT"
