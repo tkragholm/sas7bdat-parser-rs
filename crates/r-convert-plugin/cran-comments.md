@@ -10,7 +10,7 @@
 
 ## R CMD check results
 
-One WARNING and three NOTEs, all explained below.
+One WARNING and four NOTEs, all explained below.
 
 ### WARNING: `checking compiled code` finds `_abort` (not on Windows)
 
@@ -57,6 +57,19 @@ This file does not ship in the package. It is written into the build directory a
 compile time by `zstd-sys`'s build script, which uses it to probe whether a compiler
 flag is accepted. It exists only because `R CMD check` inspects the source tree after
 the build has run.
+
+### NOTE: installed package size
+
+```
+installed size is  6.1Mb
+sub-directories of 1Mb or more:
+  libs   6.0Mb
+```
+
+The size is the compiled library. The package writes Parquet, so it links the
+Apache Arrow and Parquet Rust crates, and their code is most of the library. It is
+already built with fat link-time optimisation and one codegen unit, with local
+symbols stripped at link time, which together halve it.
 
 ### NOTE: New submission
 

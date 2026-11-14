@@ -356,8 +356,12 @@ jobs:
   #     only, and a linker that rejected either flag would fail the install outright.
   #   * the offline vendored build works. The prune could drop a file some crate
   #     reads, and `vendor-r-package.sh` only test-builds for the host it runs on.
-  #   * installed size stays under the 5 MB that `R CMD check` NOTEs. The fat-LTO
-  #     profile exists for this, and the size would regress silently.
+  #   * installed size. fastsas stays under the 5 MB that `R CMD check` NOTEs.
+  #     fastsasconvert carries arrow and parquet and is about 6.1 MB on Linux since
+  #     arrow 60. Per-crate size settings do not reach arrow's generic code under
+  #     fat LTO, so only size-optimising the Parquet writer itself would bring it
+  #     under 5 MB. Its NOTE is answered in cran-comments.md, and a ceiling of 7 MB
+  #     still catches losing the strip flags, which are worth about 4 MB.
   #
   # Not gated on `Status: OK`: both packages carry a known `_abort` WARNING from
   # Rust's std that cannot be removed while extendr needs unwinding, and it is
@@ -436,17 +440,21 @@ jobs:
               echo "::error::$name: a WARNING other than the known _abort one"; exit 1
             fi
 
-            grep -q 'checking installed package size \.\.\. OK' "$log" \
-              || { echo "::error::$name: installed size is no longer OK"; exit 1; }
+            if [ "$name" = fastsasconvert ]; then
+              size=$(sed -n 's/^ *installed size is *\([0-9.]*\)Mb.*/\1/p' "$log")
+              if [ -n "$size" ] && awk -v s="$size" 'BEGIN { exit !(s > 7) }'; then
+                echo "::error::$name: installed size is ${size} MB, over 7 MB"; exit 1
+              fi
+            else
+              grep -q 'checking installed package size \.\.\. OK' "$log" \
+                || { echo "::error::$name: installed size is no longer OK"; exit 1; }
+            fi
             grep -q 'checking Rust compilation \.\.\. OK' "$log" \
               || { echo "::error::$name: Rust compilation check regressed"; exit 1; }
             grep -q 'checking for GNU extensions in Makefiles \.\.\. OK' "$log" \
               || { echo "::error::$name: a vendored Makefile came back"; exit 1; }
 
-            # Reported, not asserted. `checking installed package size ... OK`
-            # above is the authoritative bound and already covers this; a second
-            # hard-coded byte ceiling would sit a few KB from the real figure on
-            # Linux and flip on unrelated changes.
+            # Reported, not asserted: the size check above is the bound.
             so=$(find "${name}.Rcheck/${name}/libs" -name '*.so')
             echo "$name: $so is $(stat -c%s "$so") bytes"
             echo "::endgroup::"
