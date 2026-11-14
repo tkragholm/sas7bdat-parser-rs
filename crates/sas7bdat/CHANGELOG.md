@@ -15,6 +15,12 @@ hand.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-14
+
+### Fixed
+
+- Finding the missing values in a numeric column ran about 7 times slower than plain code on x86-64 CPUs with AVX2 but not AVX-512, in builds without `-C target-cpu`, which is how a dependency from crates.io is usually built. It now runs at the vector speed. Builds for `x86-64-v3` or higher, AVX-512 CPUs and aarch64 were not affected.
+
 ## [0.10.0] - 2026-11-13
 
 Minor rather than patch because the `arrow` feature moves to arrow 60. Its functions take and return arrow types, so code built against arrow 59 has to move with it.
@@ -244,7 +250,8 @@ different implementation with a `dataset`/`parser`/`cell` module layout and a bu
      `v0.7.0` in particular was a wheel release in July, unrelated to 0.7.0 here.
      `sas7bdat-v0.5.0` was never created, so 0.5.0 has no release to link to. -->
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.10.0...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.10.1...HEAD
+[0.10.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.10.1
 [0.10.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.10.0
 [0.9.3]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.3
 [0.9.2]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.2
