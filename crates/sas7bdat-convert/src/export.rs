@@ -342,7 +342,9 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
     // trip, and parquet-rs's own sink buffer is the 8 KiB default that large column chunks skip
     // straight past.
     let file = BufWriter::with_capacity(OUTPUT_BUFFER_BYTES, File::create(output)?);
-    let mut scan = apply_scan_options(dataset, options.scan);
+    // The encoders are the slower side, so batches decoded far ahead would only wait in
+    // memory, as for CSV.
+    let mut scan = apply_scan_options(dataset, options.scan).with_read_ahead(ReadAhead::Narrow);
     if let Some(rows) = options.batch_rows {
         scan = scan.with_batch_hint(BatchHint::Rows(rows.max(1)));
     }

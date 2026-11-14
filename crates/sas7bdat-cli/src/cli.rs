@@ -291,7 +291,7 @@ pub struct ExecutionOptions {
     /// This is what decides how many row groups encode at once, and so how the work splits
     /// between the row-group and column axes. The column axis tops out at the column count, so
     /// on a narrow table this is what fills a large host: raise it when cores sit idle at a
-    /// large `--parquet-row-group-size`. Defaults to 1 GiB.
+    /// large `--parquet-row-group-size`. Defaults to 512 MiB.
     #[arg(
         long = "encode-in-flight-bytes",
         value_name = "BYTES",

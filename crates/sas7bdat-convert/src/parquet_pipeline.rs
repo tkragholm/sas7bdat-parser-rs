@@ -45,7 +45,13 @@ const ROW_GROUP_INPUT_BYTE_CAP: usize = 256 * 1024 * 1024;
 
 /// Decoded rows held by row groups that are encoding but not yet written. This is what decides
 /// how many run at once, and so how the work splits between row groups and columns.
-const IN_FLIGHT_INPUT_BUDGET: usize = 1024 * 1024 * 1024;
+///
+/// 512 MiB rather than 1 GiB. On the 4,041-column AHS national file 1 GiB let four 256 MiB
+/// row groups encode at once, each holding its input and its encoders' buffers, and the peak
+/// was 3.7 GB; at 512 MiB it is 2.1 GB, about 3 percent slower. A narrow table does not miss
+/// the rest: its row groups are a few tens of MiB, so a dozen or more still fit, and a 552 MB
+/// file of 82 columns and 3 million rows converted in the same time at either budget.
+const IN_FLIGHT_INPUT_BUDGET: usize = 512 * 1024 * 1024;
 
 /// Parquet records a row group's ordinal in an `i16`, so a file cannot hold more than this
 /// many however large it is.
