@@ -232,11 +232,19 @@ pub fn is_ascii_wide(slice: &[u8]) -> bool {
 // implementation removes that entirely: the shared loops in the parent module are
 // `#[inline(always)]` and generic over the per-chunk kernel, so the closures below
 // fold into the target-feature body.
+//
+// The closures need `#[inline(always)]` themselves. A closure does not inherit the
+// target features of the function it ends up running in, only of the one it is
+// written in, which here has none; so the kernels it calls cannot be inlined into
+// it, and only the closure being inlined into the loop lets them inline there. Left
+// to LLVM's cost model, that fails where 512-bit vectors are split into halves: on
+// AVX2 and SSE4.2 in a build without `-C target-cpu`, `classify_missing_raw_bits`
+// made 19 calls per 8 rows and ran at 1.3 GiB/s, against 9.9 for scalar.
 
 /// See [`super::classify_missing_with`].
 pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
     dispatch!(level(), simd =>
-        super::classify_missing_with(raw_bits, |chunk| missing_bitmask_impl(simd, chunk)))
+        super::classify_missing_with(raw_bits, #[inline(always)] |chunk| missing_bitmask_impl(simd, chunk)))
 }
 
 /// See [`super::convert_column_with`].
@@ -247,7 +255,7 @@ pub fn convert_column_i64<T>(
     wrap: impl Fn(i64) -> T,
 ) {
     dispatch!(level(), simd =>
-    super::convert_column_with(raw_bits, valid, out, wrap, |chunk, valid_byte| {
+    super::convert_column_with(raw_bits, valid, out, wrap, #[inline(always)] |chunk, valid_byte| {
         to_i64_masked_impl(simd, chunk, valid_byte)
     }));
 }
@@ -260,7 +268,7 @@ pub fn convert_column_i32<T>(
     wrap: impl Fn(i32) -> T,
 ) {
     dispatch!(level(), simd =>
-    super::convert_column_with(raw_bits, valid, out, wrap, |chunk, valid_byte| {
+    super::convert_column_with(raw_bits, valid, out, wrap, #[inline(always)] |chunk, valid_byte| {
         to_i32_masked_impl(simd, chunk, valid_byte)
     }));
 }
@@ -274,7 +282,7 @@ pub fn gather_missing(
     raw_bits: &mut Vec<u64>,
 ) -> bool {
     dispatch!(level(), simd =>
-    super::gather_missing_with(page, base, stride, len, raw_bits, |lane| {
+    super::gather_missing_with(page, base, stride, len, raw_bits, #[inline(always)] |lane| {
         any_missing_impl(simd, lane)
     }))
 }
