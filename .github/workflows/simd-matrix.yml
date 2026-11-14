@@ -9,6 +9,9 @@
 # much of that gap the compile-time flag closes, and therefore whether shipping a
 # nightly-only backend is worth the toolchain cost.
 #
+# It also measures `fearless_simd` held to AVX2, the path an AVX2-only CPU takes,
+# because the runner pool mixes AVX-512 and AVX2-only parts and cannot be chosen.
+#
 # Manual only. It is a measurement, not a gate, and it takes tens of minutes.
 name: simd-matrix
 
@@ -78,6 +81,7 @@ jobs:
             cpus="$cpus $c"
           done
           echo "sweeping:$cpus"
+          set -o pipefail
           # shellcheck disable=SC2086
           ./scripts/simd-matrix.sh $cpus | tee matrix.txt
 

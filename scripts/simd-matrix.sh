@@ -11,6 +11,13 @@
 # Backends are compiled one at a time (they are mutually exclusive), so results are
 # compared across runs. Same machine, same bench code, so that is sound.
 #
+# `fearless-avx2` is `fearless` held to AVX2 with SAS7BDAT_SIMD_LEVEL, which only
+# the benchmark build reads. It is the path an AVX2-only CPU takes (most desktop
+# and laptop CPUs, and older servers), measured on whichever runner this gets.
+#
+# A backend that fails to build or run leaves a "-" in the table and makes the
+# script exit non-zero after printing it.
+#
 # Usage: scripts/simd-matrix.sh [target-cpu ...]      default: baseline x86-64-v3 x86-64-v4
 set -uo pipefail
 
@@ -21,10 +28,11 @@ CPUS=("$@")
 
 # --warm-up-time/--measurement-time keep a 3x3 sweep inside a runner's patience
 # without making the samples meaningless.
-CRIT_ARGS=(--warm-up-time 1 --measurement-time 3 --sample-size 20)
+CRIT_ARGS=(--warm-up-time 1 --measurement-time "${MEASUREMENT_TIME:-3}" --sample-size 20)
 
 results=$(mktemp)
 trap 'rm -f "$results"' EXIT
+failed=0
 
 for cpu in "${CPUS[@]}"; do
   if [ "$cpu" = baseline ]; then
@@ -33,16 +41,20 @@ for cpu in "${CPUS[@]}"; do
     export RUSTFLAGS="-C target-cpu=$cpu"
   fi
 
-  for backend in scalar fearless portable; do
+  for backend in scalar fearless fearless-avx2 portable; do
+    level=""
     case "$backend" in
       scalar)   toolchain=""; features="internal-bench"; extra="--no-default-features" ;;
       fearless) toolchain=""; features="internal-bench"; extra="" ;;
+      fearless-avx2)
+        [ "$(uname -m)" = x86_64 ] || continue
+        toolchain=""; features="internal-bench"; extra=""; level="avx2" ;;
       portable) toolchain="+nightly-2026-07-27"; features="internal-bench,nightly-simd"; extra="" ;;
     esac
 
     echo "::group::$cpu / $backend" >&2
     # shellcheck disable=SC2086
-    out=$(cargo $toolchain bench -p sas7bdat --bench simd_backends \
+    out=$(SAS7BDAT_SIMD_LEVEL="$level" cargo $toolchain bench -p sas7bdat --bench simd_backends \
             --features "$features" $extra -- "${CRIT_ARGS[@]}" 2>&1)
     status=$?
     echo "$out" >&2
@@ -50,19 +62,20 @@ for cpu in "${CPUS[@]}"; do
 
     if [ $status -ne 0 ]; then
       echo "FAILED: $cpu / $backend" >&2
+      failed=1
       continue
     fi
 
     # Criterion prints `<backend>/<kernel>/kernel` on its own line, then a
     # `thrpt:` line holding [lower estimate upper]; keep the middle estimate.
-    echo "$out" | awk -v cpu="$cpu" '
+    echo "$out" | awk -v cpu="$cpu" -v name="$backend" '
       /^(scalar|fearless|portable)\// { id = $1; next }
       /thrpt:/ && id != "" {
         for (i = 1; i <= NF; i++) {
           if ($i ~ /^\[/) { v = $(i+2); u = $(i+3); break }
         }
         n = split(id, seg, "/")
-        backend = seg[1]
+        backend = name
         kernel = seg[2]; for (j = 3; j < n; j++) kernel = kernel "/" seg[j]
         if (u ~ /^MiB/) v = v / 1024
         if (u ~ /^KiB/) v = v / 1048576
@@ -83,14 +96,17 @@ echo "=== throughput, GiB/s (higher is better) — $cpu ==="
 awk -F'\t' '
   { key = $1 "|" $2; seen[key] = 1; val[key "|" $3] = $4; order[++n] = key }
   END {
-    printf "%-12s %-26s %9s %9s %9s\n", "target-cpu", "kernel", "scalar", "fearless", "portable"
+    printf "%-12s %-26s %9s %9s %9s %9s\n", "target-cpu", "kernel", "scalar", "fearless", "fl-avx2", "portable"
     for (i = 1; i <= n; i++) {
       key = order[i]
       if (done[key]++) continue
       split(key, k, "|")
-      printf "%-12s %-26s %9s %9s %9s\n", k[1], k[2],
-        (key "|scalar"   in val ? val[key "|scalar"]   : "-"),
-        (key "|fearless" in val ? val[key "|fearless"] : "-"),
-        (key "|portable" in val ? val[key "|portable"] : "-")
+      printf "%-12s %-26s %9s %9s %9s %9s\n", k[1], k[2],
+        (key "|scalar"        in val ? val[key "|scalar"]        : "-"),
+        (key "|fearless"      in val ? val[key "|fearless"]      : "-"),
+        (key "|fearless-avx2" in val ? val[key "|fearless-avx2"] : "-"),
+        (key "|portable"      in val ? val[key "|portable"]      : "-")
     }
   }' "$results"
+
+exit $failed

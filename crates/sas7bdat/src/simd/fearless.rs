@@ -21,6 +21,32 @@ use super::{NUMERIC_EXP_MASK, NUMERIC_FRACTION_MASK, scalar};
 use fearless_simd::{Level, Select, Simd, SimdBase, SimdFloat, SimdInto, SimdMask, dispatch};
 use fearless_simd::{f64x4, f64x8, i64x8, mask64x8, u8x64, u64x4, u64x8};
 
+/// The instruction set the kernels dispatch on: the CPU's best.
+#[cfg(not(feature = "internal-bench"))]
+#[inline(always)]
+fn level() -> Level {
+    Level::new()
+}
+
+/// The instruction set the kernels dispatch on. The benchmark build can lower it with
+/// `SAS7BDAT_SIMD_LEVEL` (`avx2` or `sse4.2`, x86-64 only), so the AVX2 path is
+/// measurable on a CPU that also has AVX-512. A level the CPU lacks, or any other
+/// value, gives the CPU's best.
+#[cfg(feature = "internal-bench")]
+fn level() -> Level {
+    static LEVEL: std::sync::OnceLock<Level> = std::sync::OnceLock::new();
+    *LEVEL.get_or_init(|| {
+        let best = Level::new();
+        match std::env::var("SAS7BDAT_SIMD_LEVEL").as_deref() {
+            #[cfg(target_arch = "x86_64")]
+            Ok("avx2") => best.as_avx2().map_or(best, Level::Avx2),
+            #[cfg(target_arch = "x86_64")]
+            Ok("sse4.2") => best.as_sse4_2().map_or(best, Level::Sse4_2),
+            _ => best,
+        }
+    })
+}
+
 #[inline(always)]
 fn missing_bitmask_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> u8 {
     let lanes = u64x8::from_slice(simd, chunk);
@@ -35,7 +61,7 @@ fn missing_bitmask_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> u8 {
 
 #[inline]
 pub fn missing_bitmask_x8(chunk: &[u64; 8]) -> u8 {
-    dispatch!(Level::new(), simd => missing_bitmask_impl(simd, chunk))
+    dispatch!(level(), simd => missing_bitmask_impl(simd, chunk))
 }
 
 #[inline(always)]
@@ -50,7 +76,7 @@ fn any_missing_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> bool {
 
 #[inline]
 pub fn any_missing_x8(chunk: &[u64; 8]) -> bool {
-    dispatch!(Level::new(), simd => any_missing_impl(simd, chunk))
+    dispatch!(level(), simd => any_missing_impl(simd, chunk))
 }
 
 #[inline(always)]
@@ -88,7 +114,7 @@ pub fn first_non_integral_in_range_index(
     min: f64,
     max: f64,
 ) -> Option<usize> {
-    dispatch!(Level::new(), simd => first_non_integral_impl(simd, raw_bits, valid, min, max))
+    dispatch!(level(), simd => first_non_integral_impl(simd, raw_bits, valid, min, max))
 }
 
 /// `cvt_i64_precise` rather than `cvt_i64`: it matches Rust's saturating `as i64`
@@ -103,7 +129,7 @@ fn to_i64_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> [i64; 8] {
 
 #[inline]
 pub fn chunk_to_i64(chunk: &[u64; 8]) -> [i64; 8] {
-    dispatch!(Level::new(), simd => to_i64_impl(simd, chunk))
+    dispatch!(level(), simd => to_i64_impl(simd, chunk))
 }
 
 #[inline(always)]
@@ -118,7 +144,7 @@ fn to_i64_masked_impl<S: Simd>(simd: S, chunk: &[u64; 8], valid_byte: u8) -> [i6
 
 #[inline]
 pub fn chunk_to_i64_masked(chunk: &[u64; 8], valid_byte: u8) -> [i64; 8] {
-    dispatch!(Level::new(), simd => to_i64_masked_impl(simd, chunk, valid_byte))
+    dispatch!(level(), simd => to_i64_masked_impl(simd, chunk, valid_byte))
 }
 
 #[inline(always)]
@@ -130,7 +156,7 @@ fn to_i32_impl<S: Simd>(simd: S, chunk: &[u64; 8]) -> [i32; 8] {
 
 #[inline]
 pub fn chunk_to_i32(chunk: &[u64; 8]) -> [i32; 8] {
-    dispatch!(Level::new(), simd => to_i32_impl(simd, chunk))
+    dispatch!(level(), simd => to_i32_impl(simd, chunk))
 }
 
 #[inline(always)]
@@ -142,7 +168,7 @@ fn to_i32_masked_impl<S: Simd>(simd: S, chunk: &[u64; 8], valid_byte: u8) -> [i3
 
 #[inline]
 pub fn chunk_to_i32_masked(chunk: &[u64; 8], valid_byte: u8) -> [i32; 8] {
-    dispatch!(Level::new(), simd => to_i32_masked_impl(simd, chunk, valid_byte))
+    dispatch!(level(), simd => to_i32_masked_impl(simd, chunk, valid_byte))
 }
 
 #[inline(always)]
@@ -167,7 +193,7 @@ fn trim_impl<S: Simd>(simd: S, slice: &[u8]) -> usize {
 }
 
 pub fn trim_trailing_space_or_nul_wide(slice: &[u8]) -> &[u8] {
-    let end = dispatch!(Level::new(), simd => trim_impl(simd, slice));
+    let end = dispatch!(level(), simd => trim_impl(simd, slice));
     &slice[..end]
 }
 
@@ -191,7 +217,7 @@ fn is_ascii_impl<S: Simd>(simd: S, slice: &[u8]) -> bool {
 }
 
 pub fn is_ascii_wide(slice: &[u8]) -> bool {
-    dispatch!(Level::new(), simd => is_ascii_impl(simd, slice))
+    dispatch!(level(), simd => is_ascii_impl(simd, slice))
 }
 
 // ---------------------------------------------------------------- column entry points
@@ -209,7 +235,7 @@ pub fn is_ascii_wide(slice: &[u8]) -> bool {
 
 /// See [`super::classify_missing_with`].
 pub fn classify_missing_raw_bits(raw_bits: &[u64]) -> Option<Vec<u64>> {
-    dispatch!(Level::new(), simd =>
+    dispatch!(level(), simd =>
         super::classify_missing_with(raw_bits, |chunk| missing_bitmask_impl(simd, chunk)))
 }
 
@@ -220,7 +246,7 @@ pub fn convert_column_i64<T>(
     out: &mut Vec<T>,
     wrap: impl Fn(i64) -> T,
 ) {
-    dispatch!(Level::new(), simd =>
+    dispatch!(level(), simd =>
     super::convert_column_with(raw_bits, valid, out, wrap, |chunk, valid_byte| {
         to_i64_masked_impl(simd, chunk, valid_byte)
     }));
@@ -233,7 +259,7 @@ pub fn convert_column_i32<T>(
     out: &mut Vec<T>,
     wrap: impl Fn(i32) -> T,
 ) {
-    dispatch!(Level::new(), simd =>
+    dispatch!(level(), simd =>
     super::convert_column_with(raw_bits, valid, out, wrap, |chunk, valid_byte| {
         to_i32_masked_impl(simd, chunk, valid_byte)
     }));
@@ -247,7 +273,7 @@ pub fn gather_missing(
     len: usize,
     raw_bits: &mut Vec<u64>,
 ) -> bool {
-    dispatch!(Level::new(), simd =>
+    dispatch!(level(), simd =>
     super::gather_missing_with(page, base, stride, len, raw_bits, |lane| {
         any_missing_impl(simd, lane)
     }))
