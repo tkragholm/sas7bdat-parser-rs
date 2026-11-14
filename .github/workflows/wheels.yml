@@ -22,6 +22,10 @@ on:
     tags: ['sas7bdat-polars-v*', 'sas7bdat-cli-v*']
   pull_request:
   workflow_dispatch:
+  # Weekly, so a new polars release that breaks the plugin shows up without a push:
+  # the compat matrix's `highest` resolves to whatever polars is newest that day.
+  schedule:
+    - cron: '23 5 * * 1'
 
 permissions:
   contents: read
@@ -200,8 +204,9 @@ jobs:
   # wheel was run against its ends, and this is where the promise is kept: the
   # Linux wheel, installed under the oldest and the newest CPython the abi3 tag
   # claims, against the lowest and the highest polars the range admits, running
-  # a file-backed round trip. A bound moves only with this job green on the new
-  # value. Both ends are read from pyproject.toml, so the range is written once.
+  # the plugin's test suite on the tracked fixtures. A bound moves only with this
+  # job green on the new value. Both ends are read from pyproject.toml, so the
+  # range is written once. Tests whose fixtures are not tracked skip themselves.
   compat:
     name: compat-py${{ matrix.python }}-polars-${{ matrix.polars }}
     runs-on: ubuntu-22.04
@@ -209,7 +214,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.12', '3.13']
+        python: ['3.12', '3.13', '3.14']
         polars: [lowest, highest]
     steps:
       - uses: actions/checkout@v6
@@ -249,13 +254,25 @@ jobs:
           mkdir -p fixtures/raw_data/pandas
           curl -sSfL -o fixtures/raw_data/pandas/airline.sas7bdat \
             https://raw.githubusercontent.com/pandas-dev/pandas/v2.2.3/pandas/tests/io/sas/data/airline.sas7bdat
-      - name: Round trip
-        run: >
-          python -m pytest -p no:cacheprovider
-          crates/polars-plugin/tests/test_compat.py
-          crates/polars-plugin/tests/test_arrow_stream.py
-          crates/polars-plugin/tests/test_version_check.py
-          crates/polars-plugin/tests/test_smoke.py::test_public_api_contract_is_exposed
+      - name: Test suite
+        run: python -m pytest -p no:cacheprovider crates/polars-plugin/tests
+
+  # The core and the plugin's Rust side, tested on the commit being built. ci.yml
+  # runs the same on every push to main, but a tag can point at any commit, and a
+  # tag pushed right after main does not wait for that run. The publish jobs need
+  # this, as release-crate.yml re-tests before uploading to crates.io.
+  core-tests:
+    name: core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # PyO3 needs a Python to link the plugin's test binary.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test -p sas7bdat -p sas7bdat-polars -p sas7bdat-cli
 
   # Every built wheel, installed and run on its own platform: the extension module
   # imported and read through, the CLI wheel's `sas7bdat` run on a file. Linux
@@ -315,15 +332,17 @@ jobs:
     name: publish-pypi
     runs-on: ubuntu-latest
     if: ${{ needs.check-tag.outputs.package == 'sas7bdat-polars' }}
-    needs: [check-tag, linux, windows, macos, compat, smoke]
+    needs: [check-tag, linux, windows, macos, compat, smoke, core-tests]
     permissions:
       # Mints the OIDC token PyPI Trusted Publishing exchanges for a short-lived upload token.
       id-token: write
     steps:
-      - uses: actions/download-artifact@v7
+      # The publish jobs hold an upload token, so their actions are pinned to a
+      # commit; Dependabot moves the pins.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: wheels-*
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Publish to PyPI
         run: >
           uv publish --trusted-publishing always
@@ -334,14 +353,14 @@ jobs:
     name: publish-pypi-cli
     runs-on: ubuntu-latest
     if: ${{ needs.check-tag.outputs.package == 'sas7bdat-cli' }}
-    needs: [check-tag, linux, windows, macos, compat, smoke]
+    needs: [check-tag, linux, windows, macos, compat, smoke, core-tests]
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: cli-wheels-*
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Publish to PyPI
         run: >
           uv publish --trusted-publishing always

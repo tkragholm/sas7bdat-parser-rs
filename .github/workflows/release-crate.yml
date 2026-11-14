@@ -5,8 +5,9 @@
 #   sas7bdat-v0.7.0           the reader
 #   sas7bdat-convert-v0.1.0   conversion to Parquet/CSV/TSV
 #
-# The patterns are disjoint from each other and from the bare `v*` tags wheels.yml
-# claims for the Python packages, so no tag can start two releases. `sas7bdat-cli`
+# The patterns are disjoint from each other and from the `sas7bdat-polars-v*` and
+# `sas7bdat-cli-v*` tags wheels.yml claims for the Python packages, so no tag can
+# start two releases. `sas7bdat-cli`
 # and `sas7bdat-polars` are `publish = false` and ship as wheels instead.
 #
 # Publishing is irreversible: crates.io has no unpublish, only `cargo yank`, which
@@ -205,7 +206,8 @@ jobs:
       - name: Authenticate to crates.io
         id: auth
         if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.dry_run == false }}
-        uses: rust-lang/crates-io-auth-action@v1
+        # Pinned to a commit, since it mints the upload token; Dependabot moves it.
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
 
       # The only irreversible step.
       - name: Publish to crates.io

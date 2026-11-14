@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly, for what changes without a push: new advisories for cargo audit, a new
+  # R release for the CRAN checks, and runner images being retired.
+  schedule:
+    - cron: '17 5 * * 1'
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -118,6 +122,22 @@ jobs:
           cargo clippy -p sas7bdat --all-targets --no-default-features -- -D warnings
           cargo test -p sas7bdat --no-default-features
 
+      # The build a crate from crates.io and the R packages get: no -C target-cpu,
+      # which the repository's .cargo/config.toml would otherwise set to x86-64-v3,
+      # and fearless_simd dispatching at run time. The runner usually has AVX-512, so
+      # SAS7BDAT_SIMD_LEVEL (read only with `internal-bench`) holds the dispatch to
+      # the AVX2 and the SSE4.2 paths in turn, which an AVX2-only or older CPU takes.
+      # The differential tests in src/simd/tests.rs then hold each against scalar.
+      - name: Test (baseline build, AVX2 and SSE4.2 dispatch)
+        env:
+          RUSTFLAGS: ""
+        run: |
+          for level in avx2 sse4.2; do
+            echo "::group::$level"
+            SAS7BDAT_SIMD_LEVEL=$level cargo test -p sas7bdat --features internal-bench
+            echo "::endgroup::"
+          done
+
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack,cargo-machete
@@ -138,6 +158,22 @@ jobs:
         run: >
           cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
           --exclude-features nightly-simd
+
+  # The core on the platforms test-lint does not run: aarch64, where fearless_simd
+  # takes its NEON path, and Windows, where the reader detects network drives and
+  # paths differ. The bindings reach both only through their own suites.
+  core-platforms:
+    name: core tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test -p sas7bdat -p sas7bdat-convert
 
   # The only job that compiles and links the R bindings on Windows.
   #
@@ -557,9 +593,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       # Fails on vulnerabilities; "unmaintained" advisories stay non-fatal warnings.
+      # The R packages have their own lockfiles, and their dependencies ship inside
+      # the source tarballs, so they are audited too.
       - name: Audit
-        run: cargo audit
+        run: |
+          cargo audit
+          cargo audit --file crates/r-plugin/src/rust/Cargo.lock
+          cargo audit --file crates/r-convert-plugin/src/rust/Cargo.lock

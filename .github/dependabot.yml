@@ -1,0 +1,12 @@
+# Keeps the workflows' actions current, including the commit pins on the publish
+# jobs, which Dependabot moves together with their version comments. One grouped
+# pull request a week.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
