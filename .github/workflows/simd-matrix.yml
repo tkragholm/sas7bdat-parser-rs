@@ -37,7 +37,7 @@ jobs:
     name: SIMD matrix (x86-64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Which machine this ran on decides how to read the numbers — an AVX-512 part
       # and an AVX2-only part give completely different answers, so record it.
@@ -98,7 +98,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: simd-matrix

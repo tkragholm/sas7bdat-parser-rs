@@ -46,7 +46,7 @@ jobs:
     outputs:
       package: ${{ steps.versions.outputs.package }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Tag must match the package's version
         id: versions
         run: |
@@ -75,7 +75,7 @@ jobs:
         # to a native ARM runner (e.g. ubuntu-22.04-arm) to speed it up.
         target: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # maturin-action takes the toolchain as an input and cannot read
       # rust-toolchain.toml itself, so the channel is read out of that file here.
       # One copy of the version, in the file rustup honours; a bump there is a
@@ -85,7 +85,7 @@ jobs:
         id: toolchain
         shell: bash
         run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Build wheel
@@ -96,7 +96,7 @@ jobs:
           rust-toolchain: ${{ steps.toolchain.outputs.channel }}
           args: --profile dist-py --manifest-path crates/polars-plugin/Cargo.toml --out dist -i python3.12
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-linux-${{ matrix.target }}
           path: dist/*.whl
@@ -109,7 +109,7 @@ jobs:
           rust-toolchain: ${{ steps.toolchain.outputs.channel }}
           args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-wheels-linux-${{ matrix.target }}
           path: dist-cli/*.whl
@@ -118,7 +118,7 @@ jobs:
     name: windows-x64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # maturin-action takes the toolchain as an input and cannot read
       # rust-toolchain.toml itself, so the channel is read out of that file here.
       # One copy of the version, in the file rustup honours; a bump there is a
@@ -128,7 +128,7 @@ jobs:
         id: toolchain
         shell: bash
         run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Build wheel
@@ -138,7 +138,7 @@ jobs:
           rust-toolchain: ${{ steps.toolchain.outputs.channel }}
           args: --profile dist-py --manifest-path crates/polars-plugin/Cargo.toml --out dist
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-windows-x64
           path: dist/*.whl
@@ -149,7 +149,7 @@ jobs:
           rust-toolchain: ${{ steps.toolchain.outputs.channel }}
           args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-wheels-windows-x64
           path: dist-cli/*.whl
@@ -164,7 +164,7 @@ jobs:
           - target: aarch64
             runner: macos-15   # Apple Silicon
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # maturin-action takes the toolchain as an input and cannot read
       # rust-toolchain.toml itself, so the channel is read out of that file here.
       # One copy of the version, in the file rustup honours; a bump there is a
@@ -174,7 +174,7 @@ jobs:
         id: toolchain
         shell: bash
         run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Build wheel
@@ -184,7 +184,7 @@ jobs:
           rust-toolchain: ${{ steps.toolchain.outputs.channel }}
           args: --profile dist-py --manifest-path crates/polars-plugin/Cargo.toml --out dist
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-macos-${{ matrix.target }}
           path: dist/*.whl
@@ -195,7 +195,7 @@ jobs:
           rust-toolchain: ${{ steps.toolchain.outputs.channel }}
           args: --profile dist --manifest-path crates/sas7bdat-cli/Cargo.toml --out dist-cli
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-wheels-macos-${{ matrix.target }}
           path: dist-cli/*.whl
@@ -217,11 +217,11 @@ jobs:
         python: ['3.12', '3.13', '3.14']
         polars: [lowest, highest]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: wheels-linux-x86_64
           path: dist
@@ -265,9 +265,9 @@ jobs:
     name: core tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # PyO3 needs a Python to link the plugin's test binary.
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
@@ -295,14 +295,14 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: wheels-${{ matrix.platform }}
           path: dist
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: cli-wheels-${{ matrix.platform }}
           path: dist-cli
@@ -339,10 +339,10 @@ jobs:
     steps:
       # The publish jobs hold an upload token, so their actions are pinned to a
       # commit; Dependabot moves the pins.
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: wheels-*
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Publish to PyPI
         run: >
           uv publish --trusted-publishing always
@@ -357,10 +357,10 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: cli-wheels-*
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Publish to PyPI
         run: >
           uv publish --trusted-publishing always
