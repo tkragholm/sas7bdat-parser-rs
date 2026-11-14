@@ -137,6 +137,10 @@ done
 # `<name>-v<version>`. The two Python packages were tagged `v<version>` up to
 # sas7bdat-polars 0.10.1 and sas7bdat-cli 0.9.4, so for them the plain `v` tag is
 # accepted when the prefixed one does not exist.
+#
+# `examples/` and `benches/` are left out of the comparison: they are developer
+# tools (the ReadStat comparison, the SIMD benchmark) and do not change what a
+# dependent compiles against, so a change there owes no version.
 released_code() {
   local dir="$1" prefix="$2" legacy="${3:-}"
   local v tag
@@ -148,7 +152,8 @@ released_code() {
   fi
   if ! git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null 2>&1; then
     printf '  ok %-46s %s has no tag %s yet: an unreleased bump\n' "crates/$dir" "$v" "$tag"
-  elif git diff --quiet "$tag" HEAD -- "crates/$dir"; then
+  elif git diff --quiet "$tag" HEAD -- "crates/$dir" \
+      ":(exclude)crates/$dir/examples" ":(exclude)crates/$dir/benches"; then
     printf '  ok %-46s %s is what %s tagged\n' "crates/$dir" "$v" "$tag"
   else
     echo "  ✗  crates/$dir changed since $tag and still claims $v; bump it (just bump $dir <next>)" >&2
