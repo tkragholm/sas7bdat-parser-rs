@@ -155,7 +155,7 @@ rustversion 1.0.23
   Licence: MIT OR Apache-2.0
   Authors: David Tolnay <dtolnay@gmail.com>
 
-sas7bdat 0.10.0
+sas7bdat 0.10.1
   Licence: MIT
   Authors: (no authors field; see crate sources)
 
