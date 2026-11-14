@@ -3,9 +3,9 @@ use super::raw::{scan_raw_rows_with_plan, scan_row_bytes_with_plan};
 use super::{
     BatchAccumulator, BatchDecodePlan, BatchHint, ColumnBuffer, ColumnMajorDecode, ColumnarBatch,
     ControlFlow, Dataset, DecodeMode, Error, FileSource, OrderingMode, OwnedBatchScanBreakdown,
-    OwnedColumnarBatch, OwnedRow, Parallelism, Projection, RawRow, Result, RowSelection, RowView,
-    ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions, TemporalDecodeOptions,
-    materialize_planned_cells,
+    OwnedColumnarBatch, OwnedRow, Parallelism, Projection, RawRow, ReadAhead, Result, RowSelection,
+    RowView, ScanProgress, ScanProgressObserver, ScanStats, StringDecodeOptions,
+    TemporalDecodeOptions, materialize_planned_cells,
 };
 #[cfg(feature = "arrow")]
 use arrow_array::RecordBatch;
@@ -441,6 +441,7 @@ pub struct ScanBuilder<'a> {
     pub(crate) string_options: StringDecodeOptions,
     pub(crate) temporal_options: TemporalDecodeOptions,
     pub(crate) ordering: OrderingMode,
+    pub(crate) read_ahead: ReadAhead,
     pub(crate) parallelism: Parallelism,
     pub(crate) batch_hint: BatchHint,
     pub(crate) row_limit: Option<u64>,
@@ -481,6 +482,7 @@ impl<'a> ScanBuilder<'a> {
             string_options: StringDecodeOptions::default(),
             temporal_options: TemporalDecodeOptions::default(),
             ordering: OrderingMode::Stable,
+            read_ahead: ReadAhead::Wide,
             parallelism: Parallelism::Auto,
             batch_hint: BatchHint::Auto,
             row_limit: None,
@@ -538,6 +540,14 @@ impl<'a> ScanBuilder<'a> {
     #[must_use]
     pub const fn with_ordering(mut self, mode: OrderingMode) -> Self {
         self.ordering = mode;
+        self
+    }
+
+    /// Sets how far an ordered parallel scan decodes ahead of the consumer. The default is
+    /// [`ReadAhead::Wide`]; [`ReadAhead::Narrow`] holds less memory for a slow consumer.
+    #[must_use]
+    pub const fn with_read_ahead(mut self, read_ahead: ReadAhead) -> Self {
+        self.read_ahead = read_ahead;
         self
     }
 
@@ -1747,8 +1757,9 @@ impl ScanBuilder<'_> {
         // Declared outside `thread::scope` so the shared references satisfy the `'scope` bound.
         let gate = super::gate::ChunkGate::new(
             chunk_count,
-            matches!(self.ordering, OrderingMode::Stable)
-                .then(|| super::gate::ordered_window_for(workers, plan.batch_bytes)),
+            matches!(self.ordering, OrderingMode::Stable).then(|| {
+                super::gate::ordered_window_for(workers, plan.batch_bytes, self.read_ahead)
+            }),
         );
         let descriptor_table = descriptors.as_ref();
         let counters = ProgressCounters::default();
@@ -1761,7 +1772,7 @@ impl ScanBuilder<'_> {
         };
 
         let total_stats = std::thread::scope(|scope| -> Result<ScanStats> {
-            let channel_bound = super::gate::channel_bound(workers, plan.batch_bytes);
+            let channel_bound = super::gate::channel_bound(plan.batch_bytes);
             let (tx, rx) = sync_channel(channel_bound);
             let stop = Arc::new(AtomicBool::new(false));
             let gate = &gate;

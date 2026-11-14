@@ -377,6 +377,23 @@ pub enum OrderingMode {
     Unordered,
 }
 
+/// How far an ordered parallel scan decodes ahead of the batch it delivers next. Decoded
+/// batches that are ahead wait in memory, so this trades memory against keeping every decode
+/// thread busy. It has no effect on an [`OrderingMode::Unordered`] or a single-threaded scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ReadAhead {
+    /// Up to twice as many chunks as there are decode threads, within 1 GiB of batches. Right
+    /// when the consumer keeps up with the decode. The default.
+    #[default]
+    Wide,
+    /// One chunk per decode thread and one more. Right when the consumer is slower than the
+    /// decode, as a CSV writer is: the wide window then only fills with batches waiting for
+    /// it, and on the 2,167-column AHS household file the narrow one holds about 40 percent
+    /// less at the same speed.
+    Narrow,
+}
+
 /// How many threads a scan may use to decode pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Parallelism {

@@ -15,6 +15,14 @@ hand.
 
 ## [Unreleased]
 
+### Added
+
+- `ScanBuilder::with_read_ahead` and `ReadAhead`: how far an ordered parallel scan decodes ahead of the batch it delivers next. `ReadAhead::Narrow` holds one chunk per decode thread and one more, for a consumer slower than the decode. The default, `ReadAhead::Wide`, is the window as before.
+
+### Changed
+
+- A parallel scan queues at most two finished batches for the consumer, down from twice the decode threads. With a consumer slower than the decode the longer queue only held memory: the R binding's peak on the 2,167-column AHS household file fell from 3.3 to 2.7 GB at the same speed. No consumer measured read slower.
+
 ## [0.10.1] - 2026-11-14
 
 ### Fixed

@@ -125,8 +125,8 @@ pub use metadata::{
 };
 pub use options::{
     BatchHint, ColumnMajorDecode, DecodeMode, DictionaryStaging, IoBackendPreference,
-    MojibakePolicy, OpenOptions, OpenOptionsBuilder, OrderingMode, Parallelism, RowSelection,
-    StringDecodeOptions, StringDecodeOptionsBuilder, TemporalDecodeOptions,
+    MojibakePolicy, OpenOptions, OpenOptionsBuilder, OrderingMode, Parallelism, ReadAhead,
+    RowSelection, StringDecodeOptions, StringDecodeOptionsBuilder, TemporalDecodeOptions,
     TemporalDecodeOptionsBuilder, TrimMode, Utf8ValidationMode,
 };
 pub use pages::DescriptorBreakdown;

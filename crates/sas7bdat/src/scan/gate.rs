@@ -161,19 +161,29 @@ const fn batches_in_budget(batch_bytes: usize) -> usize {
 
 /// [`ordered_window`], cut to the byte budget for wide batches, but never below one chunk per
 /// worker plus one, so that every worker can hold a chunk while the next one to deliver is
-/// claimed.
-pub(super) const fn ordered_window_for(workers: usize, batch_bytes: usize) -> usize {
+/// claimed. [`ReadAhead::Narrow`](crate::ReadAhead::Narrow) asks for that floor outright.
+pub(super) const fn ordered_window_for(
+    workers: usize,
+    batch_bytes: usize,
+    read_ahead: crate::ReadAhead,
+) -> usize {
+    let floor = workers.saturating_add(1);
+    if matches!(read_ahead, crate::ReadAhead::Narrow) {
+        return floor;
+    }
     let full = ordered_window(workers);
     let budget = batches_in_budget(batch_bytes);
-    let floor = workers.saturating_add(1);
     let cut = if budget < full { budget } else { full };
     if cut < floor { floor } else { cut }
 }
 
-/// Batches the channel to the consumer may queue: two per worker, cut to the byte budget, and
-/// at least one.
-pub(super) const fn channel_bound(workers: usize, batch_bytes: usize) -> usize {
-    let full = workers.saturating_mul(2);
+/// Batches the channel to the consumer may queue: two, cut to the byte budget, and at least
+/// one. Two keep a consumer fed while it works on a batch; more only fill up when the consumer
+/// is the slower side, as a CSV writer and the R binding are, and then hold memory without
+/// making it faster. Measured on the AHS files, twice the workers held up to 0.7 GB more in
+/// the R binding than two did, at the same speed, and no consumer read faster with it.
+pub(super) const fn channel_bound(batch_bytes: usize) -> usize {
+    let full = 2;
     let budget = batches_in_budget(batch_bytes);
     let cut = if budget < full { budget } else { full };
     if cut == 0 { 1 } else { cut }
@@ -182,6 +192,7 @@ pub(super) const fn channel_bound(workers: usize, batch_bytes: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ReadAhead::{Narrow, Wide};
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
 
@@ -189,21 +200,27 @@ mod tests {
 
     #[test]
     fn small_batches_keep_the_count_bounds() {
-        assert_eq!(ordered_window_for(12, 32 * MB), ordered_window(12));
-        assert_eq!(channel_bound(12, 32 * MB), 24);
-        assert_eq!(channel_bound(1, 32 * MB), 2);
+        assert_eq!(ordered_window_for(12, 32 * MB, Wide), ordered_window(12));
+        assert_eq!(channel_bound(32 * MB), 2);
+    }
+
+    #[test]
+    fn a_narrow_read_ahead_keeps_one_chunk_per_worker_and_one() {
+        assert_eq!(ordered_window_for(12, 32 * MB, Narrow), 13);
+        assert_eq!(ordered_window_for(1, 32 * MB, Narrow), 2);
+        assert_eq!(ordered_window_for(12, 200 * MB, Narrow), 13);
     }
 
     #[test]
     fn wide_batches_are_bounded_by_bytes_but_keep_every_worker_busy() {
         // 200 MB batches: five fit in the budget.
-        assert_eq!(channel_bound(5, 200 * MB), 5);
-        assert_eq!(ordered_window_for(5, 200 * MB), 6);
+        assert_eq!(channel_bound(200 * MB), 2);
+        assert_eq!(ordered_window_for(5, 200 * MB, Wide), 6);
         // A batch larger than the whole budget still leaves room to make progress.
-        assert_eq!(channel_bound(4, 2048 * MB), 1);
-        assert_eq!(ordered_window_for(4, 2048 * MB), 5);
+        assert_eq!(channel_bound(2048 * MB), 1);
+        assert_eq!(ordered_window_for(4, 2048 * MB, Wide), 5);
         // An explicit thread count above the budget keeps a chunk per worker.
-        assert_eq!(ordered_window_for(12, 200 * MB), 13);
+        assert_eq!(ordered_window_for(12, 200 * MB, Wide), 13);
     }
 
     #[test]

@@ -64,6 +64,7 @@ struct FusedRun<'a> {
     /// The estimated decoded size of one batch, which bounds the queues.
     batch_bytes: usize,
     ordering: super::OrderingMode,
+    read_ahead: crate::ReadAhead,
     observer: Option<&'a super::ScanProgressObserver>,
     total_pages: u64,
     decode: DescriptorChunkContext<'a>,
@@ -215,6 +216,7 @@ where
         workers,
         batch_bytes: plan.batch_bytes,
         ordering: builder.ordering,
+        read_ahead: builder.read_ahead,
         observer: builder.progress.as_ref(),
         total_pages: page_count,
         decode: DescriptorChunkContext {
@@ -271,7 +273,7 @@ where
     let gate = super::gate::ChunkGate::new(
         run.parse.chunk_count,
         matches!(run.ordering, super::OrderingMode::Stable)
-            .then(|| super::gate::ordered_window_for(workers, run.batch_bytes)),
+            .then(|| super::gate::ordered_window_for(workers, run.batch_bytes, run.read_ahead)),
     );
     let counters = ProgressCounters::default();
     let counters = &counters;
@@ -285,10 +287,8 @@ where
     };
 
     std::thread::scope(|scope| -> Result<(ScanStats, u64)> {
-        let (tx, rx) = sync_channel::<StreamedBatchMessage>(super::gate::channel_bound(
-            workers,
-            run.batch_bytes,
-        ));
+        let (tx, rx) =
+            sync_channel::<StreamedBatchMessage>(super::gate::channel_bound(run.batch_bytes));
         let stop = Arc::new(AtomicBool::new(false));
         // Readers get their own stop flag. `stop` means the consumer asked to quit, which
         // decode workers honour mid-chunk; the readers must also stop once the parse stage

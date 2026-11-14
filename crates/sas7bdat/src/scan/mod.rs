@@ -62,7 +62,8 @@ use crate::{
     metadata::{ColumnMeta, Endianness, LogicalType, SasDate, SasDateTime, SasTime},
     options::{
         BatchHint, ColumnMajorDecode, DecodeMode, MojibakePolicy, OrderingMode, Parallelism,
-        RowSelection, StringDecodeOptions, TemporalDecodeOptions, TrimMode, Utf8ValidationMode,
+        ReadAhead, RowSelection, StringDecodeOptions, TemporalDecodeOptions, TrimMode,
+        Utf8ValidationMode,
     },
     projection::Projection,
     row::{OwnedRow, RawRow, RowView},
