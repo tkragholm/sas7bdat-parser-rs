@@ -60,7 +60,7 @@
 //! Measured with `benches/simd_backends.rs` on an AMD EPYC 9V74 (AVX-512), GiB/s,
 //! `portable` = `std::simd`, `avx2` = `fearless` held to AVX2 with
 //! `SAS7BDAT_SIMD_LEVEL`, the path an AVX2-only CPU takes (simd-matrix run of 14 Nov
-//! 2026, fearless_simd 1.2):
+//! 2026, `fearless_simd` 1.2):
 //!
 //! | kernel                 | baseline (SSE2)                | x86-64-v3 (AVX2)               |
 //! |------------------------|--------------------------------|--------------------------------|
