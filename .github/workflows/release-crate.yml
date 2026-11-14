@@ -53,7 +53,7 @@ jobs:
       version: ${{ steps.target.outputs.version }}
       published: ${{ steps.published.outputs.published }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # The tag is the only thing a human types, so it is the only thing that can
       # disagree with the manifest. A tag is `<crate>-v<version>`; splitting on the
@@ -144,7 +144,7 @@ jobs:
       # successful publish look like a failed one.
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Show toolchain
         run: rustup show && cargo --version
@@ -190,7 +190,7 @@ jobs:
       # artifact survives a failed publish), `if-no-files-found: error` would fail the
       # release. The recursive glob works for both.
       - name: Upload the packaged crate as a build artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.check.outputs.crate }}-crate
           path: target/package/**/*.crate
