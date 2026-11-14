@@ -36,7 +36,9 @@ classifiers = [
 # newest release polars has published, so a new polars that breaks the public
 # API shows there rather than on a user. The import-time check in `__init__.py`
 # reads this specifier from the installed metadata, so it is written once.
-dependencies = ["polars>=1.41"]
+# 1.41.1 rather than 1.41: polars-runtime-32 1.41.0 was yanked, which uv refuses
+# to install.
+dependencies = ["polars>=1.41.1"]
 
 [project.optional-dependencies]
 test = ["pytest"]

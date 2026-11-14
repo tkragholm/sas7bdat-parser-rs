@@ -5,7 +5,7 @@ Read SAS7BDAT files into [Polars](https://pola.rs/), using the
 Python as Arrow C streams, so pyarrow, pandas and DuckDB can read them too.
 
 ```sh
-pip install sas7bdat-polars           # needs Python 3.12+ and polars 1.41+
+pip install sas7bdat-polars           # needs Python 3.12+ and polars 1.41.1+
 pip install "sas7bdat-polars[cli]"    # also the `sas7bdat` command-line tool
 ```
 

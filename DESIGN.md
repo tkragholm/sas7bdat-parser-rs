@@ -172,7 +172,7 @@ on recent Intel consumer processors.
 
 **Polars.** The plugin hands each batch to Python as an Arrow C stream
 through the PyCapsule interface and builds the Polars API in Python on top.
-It does not link Polars, so it works with any Polars from 1.41 on rather than
+It does not link Polars, so it works with any Polars from 1.41.1 on rather than
 one pinned version. Projection and row limits are pushed into the scan;
 filters are applied by Polars per batch. Columns requested as categorical
 become Arrow dictionary columns with one dictionary per batch.
