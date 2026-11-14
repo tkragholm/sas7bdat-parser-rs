@@ -728,9 +728,9 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sas7bdat"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a49e8fe4312cda6ab911d6c81b38d7a4b4a999016f04daaf7a90cbd19da57b89"
+checksum = "0965e86b9509cbb77dea439ac49c286fc03b8a5cf561317324f3ce69ffb2a17a"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -747,9 +747,9 @@ dependencies = [
 
 [[package]]
 name = "sas7bdat-convert"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdf71229970ab03b6ec3f01ca8353e159e2a4187a09c2a111f2de8b8d60f0ee4"
+checksum = "09e175cbae71af3c81cae99b8366a2a139530857fd6696a67ab06e62fad7d714"
 dependencies = [
  "anyhow",
  "arrow-array",
