@@ -9,8 +9,8 @@ authors:
     affiliation: "Mary Elizabeth's Hospital, Rigshospitalet, Copenhagen University Hospital, University of Copenhagen"
 license: MIT
 repository-code: "https://github.com/tkragholm/sas7bdat-parser-rs"
-version: 0.10.0
-date-released: 2026-11-13
+version: 0.10.1
+date-released: 2026-11-14
 keywords:
   - SAS
   - sas7bdat
