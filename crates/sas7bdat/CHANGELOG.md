@@ -15,6 +15,8 @@ hand.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-14
+
 ### Added
 
 - `ScanBuilder::with_read_ahead` and `ReadAhead`: how far an ordered parallel scan decodes ahead of the batch it delivers next. `ReadAhead::Narrow` holds one chunk per decode thread and one more, for a consumer slower than the decode. The default, `ReadAhead::Wide`, is the window as before.
@@ -258,7 +260,8 @@ different implementation with a `dataset`/`parser`/`cell` module layout and a bu
      `v0.7.0` in particular was a wheel release in July, unrelated to 0.7.0 here.
      `sas7bdat-v0.5.0` was never created, so 0.5.0 has no release to link to. -->
 
-[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.10.1...HEAD
+[Unreleased]: https://github.com/tkragholm/sas7bdat-parser-rs/compare/sas7bdat-v0.10.2...HEAD
+[0.10.2]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.10.2
 [0.10.1]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.10.1
 [0.10.0]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.10.0
 [0.9.3]: https://github.com/tkragholm/sas7bdat-parser-rs/releases/tag/sas7bdat-v0.9.3
