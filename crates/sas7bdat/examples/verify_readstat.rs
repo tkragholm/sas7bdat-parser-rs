@@ -193,6 +193,11 @@ fn main() {
 
     let mut compared = 0usize;
     let mut skipped = 0usize;
+    // The corpus holds some files twice: test files that several readers' suites
+    // ship, and links into it. Each content is compared once, so the counts below
+    // are distinct files.
+    let mut seen = std::collections::HashSet::new();
+    let mut duplicates = 0usize;
     let mut total_cells = 0u64;
     let mut string_cells = 0u64;
     let mut failures: Vec<String> = Vec::new();
@@ -201,6 +206,16 @@ fn main() {
         let Ok(bytes) = std::fs::read(path) else {
             continue;
         };
+        let digest = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            bytes.hash(&mut hasher);
+            (bytes.len(), hasher.finish())
+        };
+        if !seen.insert(digest) {
+            duplicates += 1;
+            continue;
+        }
         let Ok(ds) = Dataset::from_bytes(bytes) else {
             skipped += 1;
             continue;
@@ -268,6 +283,7 @@ fn main() {
     println!("fixtures fully matched: {compared}");
     println!("cells compared:        {total_cells} (of which strings: {string_cells})");
     println!("skipped (unreadable):  {skipped}");
+    println!("duplicates skipped:    {duplicates}");
     println!("failures:              {}", failures.len());
     for f in failures.iter().take(60) {
         println!("  FAIL {f}");

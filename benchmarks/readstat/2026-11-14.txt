@@ -1,0 +1,33 @@
+Cell-by-cell comparison with ReadStat, 14 November 2026
+
+  this reader:  sas7bdat 0.10.1, the library as at 3f25739; the harness as committed
+                with this file
+  ReadStat:     WizardMac/ReadStat dev branch, f1f6826 (11 Nov 2026), built from source
+  harness:      cargo run -p sas7bdat --release --example verify_readstat
+                with that ReadStat first on PATH; this reader's repair of
+                double-encoded text off (MojibakePolicy::Off)
+  corpus:       335 .sas7bdat files under fixtures/ (local, not redistributed), 331
+                of them distinct: the test suites of ReadStat, pandas, Parso and
+                other readers, public-use survey files, and the five benchmark
+                files. The harness compares each content once.
+
+Result, as the harness printed it:
+
+fixtures fully matched: 327
+cells compared:        501951584 (of which strings: 270955206)
+skipped (unreadable):  4
+duplicates skipped:    4
+failures:              0
+
+The four files not compared:
+
+  pandas/test16.sas7bdat         left out by the harness: declares ISO-8859-1, which
+                                 this reader maps to Windows-1252 (WHATWG) and
+                                 ReadStat maps strictly
+  pandas/corrupt.sas7bdat        rejected by both readers (deliberately corrupt)
+  pandas/zero_variables.sas7bdat rejected by ReadStat ("Error parsing page 0")
+  csharp/charset_zpce.sas7bdat   rejected by ReadStat (CP1381 encoding)
+
+Duplicates, compared once: pandas/airline and principlesofeco/airline, pandas/cars
+and principlesofeco/cars, ahs2013/topical and benchmark/ahs2013_topical, and the
+national AHS file, linked twice into fixtures/.
