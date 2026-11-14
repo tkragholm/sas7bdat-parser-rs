@@ -190,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     print("\nnext:")
     print(f"  just release-preflight {name}")
     print(f"  git commit -am 'chore(release): {name} {args.version}'")
-    tag = f"{name}-v{args.version}" if not pyproject.is_file() else f"v{args.version}"
+    tag = f"{name}-v{args.version}"
     print(f"  git tag -a {tag} -m '{name} {args.version}' && git push origin main {tag}")
     return 0
 
