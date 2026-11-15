@@ -442,6 +442,7 @@ pub struct ScanBuilder<'a> {
     pub(crate) temporal_options: TemporalDecodeOptions,
     pub(crate) ordering: OrderingMode,
     pub(crate) read_ahead: ReadAhead,
+    pub(crate) max_threads: usize,
     pub(crate) parallelism: Parallelism,
     pub(crate) batch_hint: BatchHint,
     pub(crate) row_limit: Option<u64>,
@@ -483,6 +484,7 @@ impl<'a> ScanBuilder<'a> {
             temporal_options: TemporalDecodeOptions::default(),
             ordering: OrderingMode::Stable,
             read_ahead: ReadAhead::Wide,
+            max_threads: usize::MAX,
             parallelism: Parallelism::Auto,
             batch_hint: BatchHint::Auto,
             row_limit: None,
@@ -556,6 +558,39 @@ impl<'a> ScanBuilder<'a> {
     pub const fn with_parallelism(mut self, parallelism: Parallelism) -> Self {
         self.parallelism = parallelism;
         self
+    }
+
+    /// Caps the threads [`Parallelism::Auto`] takes, keeping its judgement of when a file is
+    /// too small to repay any. An explicit [`Parallelism::Threads`] is not capped.
+    ///
+    /// For a consumer slower than the decode. Each decode thread holds a finished batch until
+    /// the consumer takes it, so threads the consumer cannot keep up with only hold memory.
+    /// The R binding fills R vectors on R's one thread: on the 2,167-column AHS household
+    /// file it peaked at 2.6 GB with twelve decode threads and 2.0 GB with four, in the same
+    /// time.
+    #[must_use]
+    pub const fn with_max_threads(mut self, max_threads: usize) -> Self {
+        self.max_threads = if max_threads == 0 { 1 } else { max_threads };
+        self
+    }
+
+    /// The decode workers for this scan: [`resolved_parallel_workers`] under the cap
+    /// [`Self::with_max_threads`] sets on [`Parallelism::Auto`].
+    pub(super) fn decode_workers(&self, work_items: usize, rows: u64, batch_bytes: usize) -> usize {
+        let workers = resolved_parallel_workers(self.parallelism, work_items, rows, batch_bytes);
+        match self.parallelism {
+            Parallelism::Auto => workers.min(self.max_threads),
+            _ => workers,
+        }
+    }
+
+    /// The threads that materialise a batch, under the same cap as [`Self::decode_workers`].
+    fn materialize_threads(&self) -> usize {
+        let threads = resolved_batch_materialize_threads(self.parallelism);
+        match self.parallelism {
+            Parallelism::Auto => threads.min(self.max_threads),
+            _ => threads,
+        }
     }
 
     /// Sets the target batch size of batch scans. The default is [`BatchHint::Auto`].
@@ -1579,12 +1614,7 @@ impl ScanBuilder<'_> {
             .saturating_mul(u64::try_from(page_count).unwrap_or(u64::MAX))
             .checked_div(total_pages)
             .unwrap_or(0);
-        let workers = resolved_parallel_workers(
-            self.parallelism,
-            page_count,
-            windowed_rows,
-            plan.batch_bytes,
-        );
+        let workers = self.decode_workers(page_count, windowed_rows, plan.batch_bytes);
 
         // Mapped and in-memory sources decode straight out of one contiguous buffer. A path
         // source has no buffer to decode from, so pages arrive as extents streamed by a small
@@ -1693,7 +1723,7 @@ impl ScanBuilder<'_> {
                 // Fanning it out anyway measured 1.33x slower on a 5,000-row register extract.
                 materialize_threads: match (workers, self.parallelism) {
                     (1, Parallelism::Auto) => 1,
-                    (1, requested) => resolved_batch_materialize_threads(requested),
+                    (1, _) => self.materialize_threads(),
                     _ => 1,
                 },
                 // The column-major fill ignores row selection, so it only applies to whole-file
@@ -1933,7 +1963,7 @@ impl ScanBuilder<'_> {
             plan.batch_row_capacity,
             plan.capacity_hint_rows,
         )
-        .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
+        .with_materialize_threads(self.materialize_threads());
         let mut staged_scratch: Vec<crate::OwnedColumnBuffer> =
             Vec::with_capacity(batcher.staged_numeric_count());
         let mut decode_batches = 0u64;
@@ -1985,7 +2015,7 @@ impl ScanBuilder<'_> {
             plan.batch_row_capacity,
             plan.capacity_hint_rows,
         )
-        .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
+        .with_materialize_threads(self.materialize_threads());
         let mut decode_batches = 0u64;
         let mut stop_after_current_batch = false;
 
@@ -2041,7 +2071,7 @@ impl ScanBuilder<'_> {
             plan.batch_row_capacity,
             plan.capacity_hint_rows,
         )
-        .with_materialize_threads(resolved_batch_materialize_threads(self.parallelism));
+        .with_materialize_threads(self.materialize_threads());
         let mut decode_batches = 0u64;
         let mut push_row_ns = 0u128;
         let mut take_batch_ns = 0u128;

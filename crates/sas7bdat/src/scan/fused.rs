@@ -23,7 +23,7 @@ use super::{
     ControlFlow, Error, FileSource, OwnedColumnarBatch, Result, ScanBuilder, ScanStats,
     builder::{
         DescriptorChunkContext, ProgressCounters, ProgressReport, StreamedBatchMessage,
-        collect_streamed_batches, merge_scan_stats, pages_per_batch, resolved_parallel_workers,
+        collect_streamed_batches, merge_scan_stats, pages_per_batch,
         stream_batches_for_descriptor_chunk,
     },
     extent::{Extent, ExtentStream, ReadPlan, plan_spans_from_geometry},
@@ -142,8 +142,7 @@ pub(super) fn plan_fused_stream<'a>(
         return Err(FusedDecline::PageHeaderOutOfRange);
     }
 
-    let workers = resolved_parallel_workers(
-        builder.parallelism,
+    let workers = builder.decode_workers(
         usize::try_from(page_count).unwrap_or(usize::MAX),
         // Whole-file is a precondition here, so the declared total is the count.
         builder.ds.metadata().row_count,

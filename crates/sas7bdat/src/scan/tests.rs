@@ -2609,6 +2609,30 @@ mod auto_grain {
             12
         );
     }
+
+    #[test]
+    fn a_thread_cap_bounds_auto_and_leaves_its_gate_and_explicit_counts_alone() {
+        let ds = super::make_f64_dataset(&[1.0, 2.0, 3.0]);
+        let capped = ds.scan().with_max_threads(2);
+        assert_eq!(
+            capped.decode_workers(140, 46_641, MB),
+            budget().min(140).min(2)
+        );
+        // Below the grain gate `Auto` still takes one worker.
+        assert_eq!(capped.decode_workers(34, 1_081, MB), 1);
+        let explicit = ds
+            .scan()
+            .with_parallelism(Parallelism::Threads(8))
+            .with_max_threads(2);
+        assert_eq!(explicit.decode_workers(140, 46_641, MB), 8);
+        // Zero is read as one rather than as no decode at all.
+        assert_eq!(
+            ds.scan()
+                .with_max_threads(0)
+                .decode_workers(140, 46_641, MB),
+            1
+        );
+    }
 }
 
 /// A declared rows-per-page of zero, which is what `topical` carries and what cost that file
