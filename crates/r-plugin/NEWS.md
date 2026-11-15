@@ -1,3 +1,11 @@
+# fastsas 0.3.1
+
+## Performance
+
+- `read_sas7bdat()` uses at most four decode threads unless `threads` is set. More did not read faster, because the R vectors are filled on one thread, and each further thread held a batch in memory. The AHS household file peaks at 2.0 GB, down from 2.6 to 2.8 GB; haven peaks at 1.9 GB.
+
+Built with sas7bdat 0.10.3.
+
 # fastsas 0.3.0
 
 ## New features

@@ -1339,7 +1339,7 @@ dependencies = [
 
 [[package]]
 name = "sas7bdat"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "ahash",
  "arrow-array",
@@ -1364,7 +1364,7 @@ dependencies = [
 
 [[package]]
 name = "sas7bdat-cli"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "arrow-schema",
@@ -1407,7 +1407,7 @@ dependencies = [
 
 [[package]]
 name = "sas7bdat-polars"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "ahash",
  "arrow-array",

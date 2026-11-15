@@ -1,3 +1,7 @@
+# fastsasconvert 0.3.1
+
+No change in behaviour. Built with sas7bdat 0.10.3 and sas7bdat-convert 0.4.2.
+
 # fastsasconvert 0.3.0
 
 ## New features

@@ -19,7 +19,7 @@ extendr-ffi = "0.9"
 # — which copies these sources out of the workspace — can still resolve it. The
 # repository redirects it back to the working tree via `src/.cargo/config.toml`;
 # `.Rbuildignore` strips that file, so a tarball gets the published crate.
-sas7bdat = { version = "0.10", features = ["dictionary"] }
+sas7bdat = { version = "0.10.3", features = ["dictionary"] }
 # The string cache's hasher. Already in the dependency tree through `dictionary`, so
 # it adds nothing to the vendored crates.
 ahash = "0.8"

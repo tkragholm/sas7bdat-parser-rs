@@ -14,6 +14,16 @@ New entries are drafted from the Conventional Commits history by `just release
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-11-15
+
+### Added
+
+- `ScanBuilder::with_max_threads` caps the threads `Parallelism::Auto` takes, keeping its rule that a small file decodes on one thread. Each decode thread holds a finished batch until the consumer takes it, so a consumer slower than the decode gains nothing from more threads. An explicit `Parallelism::Threads` is not capped.
+
+### Changed
+
+- The `std::simd` backend is removed, and the `nightly-simd` feature is accepted and does nothing. Its one measured win was in a baseline build on a nightly toolchain, and with AVX2 enabled plain scalar code was faster there too.
+
 ## [0.10.2] - 2026-11-14
 
 ### Added
