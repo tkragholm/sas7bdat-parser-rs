@@ -75,16 +75,25 @@ warning.
 ## Releases
 
 ```sh
-just release sas7bdat 0.10.0                      # print the plan; changes nothing
-just release sas7bdat 0.10.0 --execute            # do the local steps and push main
-just release sas7bdat 0.10.0 --execute --publish  # also push the tags, which publishes
+just release            # what is owed, and at what version; changes nothing
+just release --execute  # write the versions, lockfiles and changelog drafts
+just release --publish  # commit, push, tag and upload; publishes for good
+just release-status     # where every package stands
 ```
 
-A release touches several packages: `sas7bdat-convert` and both R packages
-depend on the core by version, and the R packages' `inst/AUTHORS` can only be
-regenerated once the new crates are on crates.io. `just release` works out the
-order from the manifests, shows which steps are done, and can be rerun after
-an interruption.
+The repository ships six packages: the `sas7bdat` and `sas7bdat-convert`
+crates, the `sas7bdat-polars` and `sas7bdat-cli` wheels, and the `fastsas` and
+`fastsasconvert` R packages. Each has its own version and its own
+`<name>-v<version>` tag. A package owes a release when the code it ships has
+changed since its tag, which for the wheels includes the crates they compile
+in, and for the R packages the crates they vendor.
+
+`--execute` drafts a changelog entry for each package from the commit
+subjects. Edit it and delete its marker line; `--publish` will not run while
+one is left. `--publish` then uploads the crates and the wheels, refreshes the
+R packages' vendored set once the crates are on crates.io, and publishes a
+GitHub release for each tag. Every step checks whether it has already
+happened, so an interrupted run resumes when run again.
 
 ## Support and maintenance
 

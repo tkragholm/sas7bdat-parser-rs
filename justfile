@@ -167,13 +167,21 @@ install-hooks:
 doctor:
     @python3 scripts/doctor.py
 
-#   just release sas7bdat 0.10.0                      # plan only
-#   just release sas7bdat 0.10.0 --execute            # local work, and push main
-#   just release sas7bdat 0.10.0 --execute --publish  # also push tags
-#
-# Plan or run a release and everything it forces. Prints the plan; re-run to resume.
-release crate version *flags:
-    @python3 scripts/release.py {{crate}} {{version}} {{flags}}
+# Release every package whose shipped code changed since its last tag, in order:
+#   just release                    # the plan; changes nothing
+#   just release sas7bdat=0.11.0    # the plan, with a version of your choosing
+#   just release --execute          # write versions, lockfiles, changelog drafts
+#   just release --publish          # commit, push, tag, upload, vendor R, release
+# Re-run any of them to resume. See scripts/release.py for what each step does.
+[doc("plan or run the release of every package that has changed")]
+release *args:
+    @python3 scripts/release.py {{args}}
+
+# Every package's version here and on its registry, its GitHub release, what is
+# owed, CI on HEAD, and the commit R-universe last built.
+[doc("where every package stands: versions, releases, CI, R-universe")]
+release-status:
+    @python3 scripts/release.py --status
 
 # Bump one crate's version and everything coupled to it: the Python package's
 # pyproject.toml, the lockfiles that pin it -- two of which live outside the

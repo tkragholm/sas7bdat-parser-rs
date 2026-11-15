@@ -20,8 +20,8 @@ cd "$(dirname "$0")/.." || exit 1
 
 status=0
 
-# The `major.minor` of a workspace crate, which is what a caret requirement on a 0.x
-# crate must match: `^0.7` does not accept 0.8.0.
+# The version of a workspace crate. A caret requirement on a 0.x crate has to name
+# its `major.minor`, "0.7" or "0.7.2": `^0.7` does not accept 0.8.0.
 crate_version() {
   awk -F'"' '/^version = /{print $2; exit}' "crates/$1/Cargo.toml"
 }
@@ -62,8 +62,13 @@ check() {
     return
   fi
 
-  if [ "$req" != "$want" ]; then
-    echo "  ✗  $manifest wants $dep \"$req\", but crates/$crate is $(crate_version "$crate") (needs \"$want\")" >&2
+  # "0.7" accepts every 0.7.x; "0.7.2" accepts 0.7.2 and later, so its patch
+  # must not be ahead of the crate.
+  local have patch
+  have="$(crate_version "$crate")"
+  patch="${req#"$want".}"
+  if [ "$req" != "$want" ] && { [ "$patch" = "$req" ] || ! [[ "$patch" =~ ^[0-9]+$ ]] || [ "$patch" -gt "${have##*.}" ]; }; then
+    echo "  ✗  $manifest wants $dep \"$req\", but crates/$crate is $have (needs \"$want\" or \"$want.N\" with N <= ${have##*.})" >&2
     status=1
   else
     printf '  ok %-46s %s = "%s"\n' "$manifest" "$dep" "$req"
@@ -131,45 +136,20 @@ for dir in polars-plugin sas7bdat-cli; do
   fi
 done
 
-# A crate whose files changed since the tag of the version its manifest claims is
-# two codes under one number: the published one and this one. A bump is what says
-# the code moved, and this says when the bump is owed. Every package is tagged
-# `<name>-v<version>`. The two Python packages were tagged `v<version>` up to
-# sas7bdat-polars 0.10.1 and sas7bdat-cli 0.9.4, so for them the plain `v` tag is
-# accepted when the prefixed one does not exist.
-#
-# `examples/` and `benches/` are left out of the comparison: they are developer
-# tools (the ReadStat comparison, the SIMD benchmark) and do not change what a
-# dependent compiles against, so a change there owes no version.
-released_code() {
-  local dir="$1" prefix="$2" legacy="${3:-}"
-  local v tag
-  v="$(crate_version "$dir")"
-  tag="${prefix}${v}"
-  if [ -n "$legacy" ] && ! git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null 2>&1 \
-    && git rev-parse -q --verify "refs/tags/${legacy}${v}^{commit}" >/dev/null 2>&1; then
-    tag="${legacy}${v}"
-  fi
-  if ! git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null 2>&1; then
-    printf '  ok %-46s %s has no tag %s yet: an unreleased bump\n' "crates/$dir" "$v" "$tag"
-  elif git diff --quiet "$tag" HEAD -- "crates/$dir" \
-      ":(exclude)crates/$dir/examples" ":(exclude)crates/$dir/benches"; then
-    printf '  ok %-46s %s is what %s tagged\n' "crates/$dir" "$v" "$tag"
-  else
-    echo "  ✗  crates/$dir changed since $tag and still claims $v; bump it (just bump $dir <next>)" >&2
-    status=1
-  fi
-}
-
+# A package whose shipped code changed since its last tag owes a release. That is
+# reported, not failed: the version moves when the release is made, by `just
+# release`, which works the list out the same way. The wheels count the source of
+# the crates they compile in, and the R packages count their vendored set.
 echo
-echo "Crate versions vs the code their tags released:"
-if [ -z "$(git tag --list 'v*' 'sas7bdat-*v*' 2>/dev/null)" ]; then
-  echo "  ?  no release tags in this clone (shallow checkout?); nothing to compare against"
+echo "Releases owed (just release):"
+owed="$(python3 scripts/release.py --owed)"
+if [ -z "$owed" ]; then
+  echo "  ok every package matches its last release"
 else
-  released_code sas7bdat         sas7bdat-v
-  released_code sas7bdat-convert sas7bdat-convert-v
-  released_code polars-plugin    sas7bdat-polars-v v
-  released_code sas7bdat-cli     sas7bdat-cli-v    v
+  printf '%s\n' "$owed"
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    printf '%s\n' "$owed" | sed 's/^ *owed  /::notice title=release owed::/'
+  fi
 fi
 
 if [ $status -ne 0 ]; then
@@ -184,7 +164,7 @@ version from crates.io:
     cd crates/r-plugin/src         && cargo update --manifest-path rust/Cargo.toml -p sas7bdat
     cd crates/r-convert-plugin/src && cargo update --manifest-path rust/Cargo.toml -p sas7bdat
 
-`just bump <crate> <version>` does all of that in the right order.
+`just release --execute` does all of that in the right order.
 
 Note this is checked, not fixed automatically, on purpose. Bumping a binding to a
 core version that is not on crates.io yet breaks R-universe, which builds from a
