@@ -163,14 +163,22 @@ fn fill_real_slice(dst: &mut [f64], class: RealClass, buffer: &OwnedColumnBuffer
             fill!(values, valid, |v: i32| f64::from(v) - shift)
         }
         OwnedColumnBuffer::Date { values, valid } => {
-            fill!(values, valid, |d: sas7bdat::SasDate| f64::from(d.days_since_sas_epoch) - shift)
+            fill!(values, valid, |d: sas7bdat::SasDate| f64::from(
+                d.days_since_sas_epoch
+            ) - shift)
         }
         #[allow(clippy::cast_precision_loss)]
         OwnedColumnBuffer::DateTime { values, valid } => {
-            fill!(values, valid, |dt: sas7bdat::SasDateTime| dt.seconds_since_sas_epoch as f64 - shift)
+            fill!(
+                values,
+                valid,
+                |dt: sas7bdat::SasDateTime| dt.seconds_since_sas_epoch as f64 - shift
+            )
         }
         OwnedColumnBuffer::Time { values, valid } => {
-            fill!(values, valid, |t: sas7bdat::SasTime| f64::from(t.seconds_since_midnight) - shift)
+            fill!(values, valid, |t: sas7bdat::SasTime| f64::from(
+                t.seconds_since_midnight
+            ) - shift)
         }
         // A numeric/temporal logical type never yields a string buffer.
         OwnedColumnBuffer::Utf8 { .. } | OwnedColumnBuffer::RawBytes { .. } => {}
@@ -184,7 +192,10 @@ fn fill_real_slice(dst: &mut [f64], class: RealClass, buffer: &OwnedColumnBuffer
 /// as it would be if read as a C string. SAS pads with spaces, so this only touches text
 /// that holds a NUL in the middle.
 fn before_nul(bytes: &[u8]) -> &[u8] {
-    bytes.iter().position(|&b| b == 0).map_or(bytes, |end| &bytes[..end])
+    bytes
+        .iter()
+        .position(|&b| b == 0)
+        .map_or(bytes, |end| &bytes[..end])
 }
 
 /// [`before_nul`] for metadata text: names, labels and value-label keys.
@@ -214,8 +225,17 @@ unsafe fn fill_text_sexp(
     dict: &mut TextCache,
 ) {
     let (offsets, data, valid) = match buffer {
-        OwnedColumnBuffer::Utf8 { offsets, data, valid, .. } => (offsets, data, valid),
-        OwnedColumnBuffer::RawBytes { offsets, data, valid } => (offsets, data, valid),
+        OwnedColumnBuffer::Utf8 {
+            offsets,
+            data,
+            valid,
+            ..
+        } => (offsets, data, valid),
+        OwnedColumnBuffer::RawBytes {
+            offsets,
+            data,
+            valid,
+        } => (offsets, data, valid),
         _ => return,
     };
     let offs = offsets.as_slice();
@@ -425,7 +445,8 @@ fn finalize_column(mut col: Robj, meta: &ColMeta) -> Robj {
                 if ls.value_type == ValueType::Numeric {
                     if let Some(labels) = numeric_labels_robj(ls) {
                         col.set_attrib("labels", labels).unwrap();
-                        col.set_class(&["haven_labelled", "vctrs_vctr", "double"]).unwrap();
+                        col.set_class(&["haven_labelled", "vctrs_vctr", "double"])
+                            .unwrap();
                     }
                 }
             }
@@ -446,7 +467,8 @@ fn finalize_column(mut col: Robj, meta: &ColMeta) -> Robj {
                 if ls.value_type == ValueType::String {
                     if let Some(labels) = string_labels_robj(ls) {
                         col.set_attrib("labels", labels).unwrap();
-                        col.set_class(&["haven_labelled", "vctrs_vctr", "character"]).unwrap();
+                        col.set_class(&["haven_labelled", "vctrs_vctr", "character"])
+                            .unwrap();
                     }
                 }
             }
@@ -488,7 +510,8 @@ fn build_data_frame(names: &[String], cols: Vec<Robj>, nrow: usize) -> Robj {
     } else {
         #[allow(clippy::cast_precision_loss)]
         let seq: Vec<f64> = (1..=nrow).map(|i| i as f64).collect();
-        df.set_attrib("row.names", Doubles::from_values(seq)).unwrap();
+        df.set_attrib("row.names", Doubles::from_values(seq))
+            .unwrap();
     }
     df.set_class(&["data.frame"]).unwrap();
     df
@@ -551,6 +574,9 @@ enum ColumnChoice {
     Positions(Vec<usize>),
 }
 
+/// The most decode threads a read takes when the caller does not set `threads`.
+const AUTO_DECODE_THREADS: usize = 4;
+
 fn read_impl(
     path: &str,
     catalog: Option<&str>,
@@ -575,8 +601,7 @@ fn read_impl(
             .map_err(|e| tagged(ARGUMENT, format!("sas7bdat: encoding: {e}")))?,
     };
     let options = builder.build();
-    let mut ds =
-        Dataset::open_with(path, options)
+    let mut ds = Dataset::open_with(path, options)
         .map_err(|e| tagged(class_of(&e), format!("sas7bdat: open `{path}`: {e}")))?;
 
     // A catalog the caller named must load. One found beside the file is used if it
@@ -639,7 +664,10 @@ fn read_impl(
                     }
                     class => class,
                 },
-                var_label: c.label.as_deref().map(|label| before_nul_str(label).to_owned()),
+                var_label: c
+                    .label
+                    .as_deref()
+                    .map(|label| before_nul_str(label).to_owned()),
                 format_sas: c.format_spec().map(|spec| before_nul_str(&spec).to_owned()),
                 value_labels: c
                     .format
@@ -681,6 +709,11 @@ fn read_impl(
     // cost more than the work. `Parallelism::Auto` carries a gate calibrated on those
     // measurements, and a single worker runs the same chunk decode inline and still
     // reaches the tiled fill.
+    //
+    // Left to `Auto`, the scan takes at most `AUTO_DECODE_THREADS`. The batches are written
+    // into R vectors on this one thread, so more decode threads only queue more batches:
+    // on the AHS household file, four threads read it in 1.5 s at a 2.0 GB peak, twelve
+    // in 1.6 s at 2.6 GB. haven peaked at 1.9 GB.
     let parallelism = threads.map_or(Parallelism::Auto, Parallelism::Threads);
     let temporal = TemporalDecodeOptions::builder()
         .decode_dates(false)
@@ -752,6 +785,7 @@ fn read_impl(
     let mut scan = ds
         .scan()
         .with_parallelism(parallelism)
+        .with_max_threads(AUTO_DECODE_THREADS)
         .with_temporal_options(temporal)
         .with_ordering(ordering);
     if let Some(projection) = &projection {
@@ -774,46 +808,46 @@ fn read_impl(
         ));
     }
     scan.visit_owned_batches(|mut batch| {
-            let row_count = batch.row_count;
-            let base = if positional {
-                usize::try_from(batch.row_base.0).unwrap_or(usize::MAX)
-            } else {
-                next_row
-            };
-            next_row = next_row.saturating_add(row_count);
-            if base.checked_add(row_count).is_none_or(|end| end > nrow) {
-                return Err(sas7bdat::Error::corruption(format!(
-                    "the scan delivered more rows than the {nrow} the header declares"
-                )));
+        let row_count = batch.row_count;
+        let base = if positional {
+            usize::try_from(batch.row_base.0).unwrap_or(usize::MAX)
+        } else {
+            next_row
+        };
+        next_row = next_row.saturating_add(row_count);
+        if base.checked_add(row_count).is_none_or(|end| end > nrow) {
+            return Err(sas7bdat::Error::corruption(format!(
+                "the scan delivered more rows than the {nrow} the header declares"
+            )));
+        }
+        for (ci, buffer) in std::mem::take(&mut batch.columns).into_iter().enumerate() {
+            let Some(meta) = metas.get(ci) else { continue };
+            if wants_factor[ci] {
+                held[ci].push(buffer);
+                continue;
             }
-            for (ci, buffer) in std::mem::take(&mut batch.columns).into_iter().enumerate() {
-                let Some(meta) = metas.get(ci) else { continue };
-                if wants_factor[ci] {
-                    held[ci].push(buffer);
-                    continue;
+            let col = cols[ci].as_mut().expect("allocated above");
+            match meta.class {
+                ColClass::Text => {
+                    // SAFETY: `col` owns the STRSXP and keeps it alive; every
+                    // write is on this (main) thread, since the visitor is called
+                    // serially; `base + row_count <= nrow` was checked above; and
+                    // each batch covers rows no other batch does.
+                    let sexp = unsafe { col.get() };
+                    unsafe { fill_text_sexp(sexp, base, &buffer, &mut caches[ci]) };
                 }
-                let col = cols[ci].as_mut().expect("allocated above");
-                match meta.class {
-                    ColClass::Text => {
-                        // SAFETY: `col` owns the STRSXP and keeps it alive; every
-                        // write is on this (main) thread, since the visitor is called
-                        // serially; `base + row_count <= nrow` was checked above; and
-                        // each batch covers rows no other batch does.
-                        let sexp = unsafe { col.get() };
-                        unsafe { fill_text_sexp(sexp, base, &buffer, &mut caches[ci]) };
-                    }
-                    ColClass::Real(class) => {
-                        let slice = col.as_real_slice_mut().expect("REALSXP slice");
-                        let end = (base + row_count).min(slice.len());
-                        if base < end {
-                            fill_real_slice(&mut slice[base..end], class, &buffer);
-                        }
+                ColClass::Real(class) => {
+                    let slice = col.as_real_slice_mut().expect("REALSXP slice");
+                    let end = (base + row_count).min(slice.len());
+                    if base < end {
+                        fill_real_slice(&mut slice[base..end], class, &buffer);
                     }
                 }
             }
-            Ok(std::ops::ControlFlow::Continue(()))
-        })
-        .map_err(|e| tagged(class_of(&e), format!("sas7bdat: scan `{path}`: {e}")))?;
+        }
+        Ok(std::ops::ControlFlow::Continue(()))
+    })
+    .map_err(|e| tagged(class_of(&e), format!("sas7bdat: scan `{path}`: {e}")))?;
 
     for (ci, meta) in metas.iter().enumerate() {
         if wants_factor[ci] {
@@ -849,7 +883,10 @@ fn read_impl(
         cols[ci] = Some(finalize_column(col, meta));
     }
 
-    let cols: Vec<Robj> = cols.into_iter().map(|c| c.unwrap_or_else(|| ().into())).collect();
+    let cols: Vec<Robj> = cols
+        .into_iter()
+        .map(|c| c.unwrap_or_else(|| ().into()))
+        .collect();
     Ok(with_warning(build_data_frame(&names, cols, nrow), warning))
 }
 
@@ -948,11 +985,17 @@ fn strings_with_na<'a>(values: impl Iterator<Item = Option<&'a str>>) -> Robj {
 
 /// A `POSIXct` in UTC, `NA` when absent.
 fn posixct(time: Option<std::time::SystemTime>) -> Robj {
-    let seconds = time.map_or(f64::NAN, |time| match time.duration_since(std::time::UNIX_EPOCH) {
-        Ok(after) => after.as_secs_f64(),
-        Err(before) => -before.duration().as_secs_f64(),
+    let seconds = time.map_or(f64::NAN, |time| {
+        match time.duration_since(std::time::UNIX_EPOCH) {
+            Ok(after) => after.as_secs_f64(),
+            Err(before) => -before.duration().as_secs_f64(),
+        }
     });
-    let value = if seconds.is_nan() { Rfloat::na() } else { Rfloat::from(seconds) };
+    let value = if seconds.is_nan() {
+        Rfloat::na()
+    } else {
+        Rfloat::from(seconds)
+    };
     let mut out: Robj = Doubles::from_values([value]).into();
     out.set_class(&["POSIXct", "POSIXt"]).unwrap();
     out.set_attrib("tzone", "UTC").unwrap();
@@ -979,13 +1022,20 @@ fn info_impl(
     }
     let meta = ds.metadata();
     let columns = ds.columns();
-    let names: Vec<String> = columns.iter().map(|c| before_nul_str(&c.name).to_owned()).collect();
+    let names: Vec<String> = columns
+        .iter()
+        .map(|c| before_nul_str(&c.name).to_owned())
+        .collect();
     let formats: Vec<Option<String>> = columns.iter().map(|c| c.format_spec()).collect();
     let column_frame = build_data_frame(
         &["name", "label", "format", "type", "width"].map(str::to_owned),
         vec![
             strings_with_na(names.iter().map(|name| Some(name.as_str()))),
-            strings_with_na(columns.iter().map(|c| c.label.as_deref().map(before_nul_str))),
+            strings_with_na(
+                columns
+                    .iter()
+                    .map(|c| c.label.as_deref().map(before_nul_str)),
+            ),
             strings_with_na(formats.iter().map(|f| f.as_deref().map(before_nul_str))),
             strings_with_na(columns.iter().map(|c| Some(r_class_name(c.logical_type)))),
             Doubles::from_values(columns.iter().map(|c| f64::from(c.physical_width))).into(),

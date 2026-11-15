@@ -52,12 +52,14 @@
 #'   files and reads network shares sequentially, `"mmap"` always memory-maps,
 #'   `"buffered"` always reads sequentially. See the "Network drives" section.
 #' @param threads Decode threads. `NULL` (the default) lets the reader decide from
-#'   the file: it uses every logical core on a file with enough rows and pages to
-#'   repay the threads, and one otherwise. That is not a slower path for small
-#'   files, it is a faster one -- spawning twelve threads for a few thousand rows
-#'   costs more than it saves. Set a number to override, to leave the machine room
-#'   for other work, or to bound memory: in-flight batches scale with it. Read
-#'   concurrency is capped separately by the reader and is not affected.
+#'   the file: it uses up to four threads on a file with enough rows and pages to
+#'   repay them, and one otherwise. More than four does not read faster, because
+#'   the R vectors are filled on one thread, and each extra thread holds a batch
+#'   in memory. One thread is not a slower path for small files, it is a faster
+#'   one -- spawning twelve threads for a few thousand rows costs more than it
+#'   saves. Set a number to override, to leave the machine room for other work,
+#'   or to bound memory: in-flight batches scale with it. Read concurrency is
+#'   capped separately by the reader and is not affected.
 #' @param col_select Columns to read: a character vector of names, or a numeric
 #'   vector of 1-based positions, in the order they should appear. `NULL` (the
 #'   default) reads every column. Unlike haven, tidyselect helpers are not
