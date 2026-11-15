@@ -312,9 +312,9 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "sas7bdat"
-version = "0.10.2"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0965e86b9509cbb77dea439ac49c286fc03b8a5cf561317324f3ce69ffb2a17a"
+checksum = "49853fac7d5c255dac4dcd7553f22b2bdbcc9943507c470c1d96cd22645cca9a"
 dependencies = [
  "ahash",
  "bytemuck",

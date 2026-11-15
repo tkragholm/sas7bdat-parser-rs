@@ -728,9 +728,9 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sas7bdat"
-version = "0.10.2"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0965e86b9509cbb77dea439ac49c286fc03b8a5cf561317324f3ce69ffb2a17a"
+checksum = "49853fac7d5c255dac4dcd7553f22b2bdbcc9943507c470c1d96cd22645cca9a"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
