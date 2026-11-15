@@ -2,8 +2,7 @@
 //!
 //! Only one vector backend compiles at a time, so this compares the selected one
 //! against the scalar reference. Under the default feature set that is
-//! `fearless` vs `scalar`; with `--features nightly-simd` it is `portable` vs
-//! `scalar`; with `--no-default-features` it is a tautology, which is fine — the
+//! `fearless` vs `scalar`; with `--no-default-features` it is a tautology, which is fine — the
 //! point is that whichever backend ships was checked against the reference.
 //!
 //! These kernels decide column types and null masks, so a divergence would be

@@ -84,14 +84,14 @@ required-features = ["internal-bench"]
 
 [features]
 default = ["simd"]
-# SIMD backend selection. The kernels in `src/simd` have three implementations and
-# exactly one is live; see that module for the precedence rule and for which
-# kernels each backend actually wins on.
+# SIMD backend selection. The kernels in `src/simd` have two implementations and
+# exactly one is live; see that module for which kernels each wins on.
 #
 #   (neither)      scalar, stable, std-only. The correctness oracle, and the path
 #                  for anyone on a toolchain older than fearless_simd's 1.89.
 #   simd           fearless_simd — stable (needs 1.89), runtime-dispatched.
-#   nightly-simd   std::simd — requires a nightly toolchain. Overrides `simd`.
+#   nightly-simd   does nothing. It selected a `std::simd` backend; removing the
+#                  feature would break builds that still name it.
 simd = ["dep:fearless_simd"]
 nightly-simd = []
 arrow = ["dep:arrow-array", "dep:arrow-buffer", "dep:arrow-schema"]

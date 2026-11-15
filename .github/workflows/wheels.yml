@@ -84,8 +84,7 @@ jobs:
       # maturin-action takes the toolchain as an input and cannot read
       # rust-toolchain.toml itself, so the channel is read out of that file here.
       # One copy of the version, in the file rustup honours; a bump there is a
-      # bump everywhere. The default SIMD backend builds on stable; only the
-      # opt-in `nightly-simd` feature needs a nightly, and wheels do not enable it.
+      # bump everywhere.
       - name: Read the pinned toolchain
         id: toolchain
         shell: bash
@@ -127,8 +126,7 @@ jobs:
       # maturin-action takes the toolchain as an input and cannot read
       # rust-toolchain.toml itself, so the channel is read out of that file here.
       # One copy of the version, in the file rustup honours; a bump there is a
-      # bump everywhere. The default SIMD backend builds on stable; only the
-      # opt-in `nightly-simd` feature needs a nightly, and wheels do not enable it.
+      # bump everywhere.
       - name: Read the pinned toolchain
         id: toolchain
         shell: bash
@@ -173,8 +171,7 @@ jobs:
       # maturin-action takes the toolchain as an input and cannot read
       # rust-toolchain.toml itself, so the channel is read out of that file here.
       # One copy of the version, in the file rustup honours; a bump there is a
-      # bump everywhere. The default SIMD backend builds on stable; only the
-      # opt-in `nightly-simd` feature needs a nightly, and wheels do not enable it.
+      # bump everywhere.
       - name: Read the pinned toolchain
         id: toolchain
         shell: bash

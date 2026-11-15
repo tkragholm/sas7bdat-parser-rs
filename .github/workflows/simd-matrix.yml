@@ -1,13 +1,10 @@
-# Measures the three SIMD backends on x86-64, which no other job and no dev machine
-# here covers — development is on aarch64, where there is only one instruction set
-# and runtime dispatch buys nothing by construction.
+# Measures the SIMD backends on x86-64, which no other job and no dev machine here
+# covers — development is on aarch64, where there is only one instruction set and
+# runtime dispatch buys nothing by construction.
 #
-# The question is whether the `nightly-simd` backend still earns its keep. On x86-64
-# `std::simd` has no runtime dispatch: it lowers to whatever target features were
-# enabled at compile time, so a portable build runs 512-bit logical vectors as SSE2.
-# `fearless_simd` detects AVX2/AVX-512 at runtime. Sweeping `-C target-cpu` shows how
-# much of that gap the compile-time flag closes, and therefore whether shipping a
-# nightly-only backend is worth the toolchain cost.
+# `fearless_simd` detects AVX2/AVX-512 at runtime, while the scalar code
+# autovectorizes to whatever `-C target-cpu` enabled. Sweeping the level shows, per
+# kernel, whether the vector backend still beats plain code.
 #
 # It also measures `fearless_simd` held to AVX2, the path an AVX2-only CPU takes,
 # because the runner pool mixes AVX-512 and AVX2-only parts and cannot be chosen.
@@ -55,10 +52,6 @@ jobs:
             *)             echo "avx512=no"  >> "$GITHUB_OUTPUT" ;;
           esac
           echo "model=$model" >> "$GITHUB_OUTPUT"
-
-      # The pinned nightly is needed for the `portable` leg only.
-      - name: Install the nightly used by the portable backend
-        run: rustup toolchain install nightly-2026-07-27 --profile minimal
 
       - uses: Swatinem/rust-cache@v2
         with:

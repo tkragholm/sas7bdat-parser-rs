@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 # Sweep the SIMD backends across -C target-cpu levels and print one table.
 #
-# The axis that matters on x86-64 is target-cpu. `std::simd` has no runtime
-# dispatch: it lowers to whatever target features were enabled at compile time, so
-# a portable build executes 512-bit logical vectors as SSE2. `fearless_simd`
-# detects AVX2/AVX-512 at runtime instead. The question this answers is how much of
-# that gap `-C target-cpu` closes, and therefore whether the nightly `std::simd`
-# backend still earns its place.
+# The axis that matters on x86-64 is target-cpu. `fearless_simd` detects
+# AVX2/AVX-512 at runtime, so it should be nearly flat across levels, while the
+# scalar code autovectorizes to whatever the build enabled. The table shows, per
+# kernel and level, whether the vector backend still beats plain code.
 #
 # Backends are compiled one at a time (they are mutually exclusive), so results are
 # compared across runs. Same machine, same bench code, so that is sound.
@@ -41,20 +39,19 @@ for cpu in "${CPUS[@]}"; do
     export RUSTFLAGS="-C target-cpu=$cpu"
   fi
 
-  for backend in scalar fearless fearless-avx2 portable; do
+  for backend in scalar fearless fearless-avx2; do
     level=""
     case "$backend" in
-      scalar)   toolchain=""; features="internal-bench"; extra="--no-default-features" ;;
-      fearless) toolchain=""; features="internal-bench"; extra="" ;;
+      scalar)   features="internal-bench"; extra="--no-default-features" ;;
+      fearless) features="internal-bench"; extra="" ;;
       fearless-avx2)
         [ "$(uname -m)" = x86_64 ] || continue
-        toolchain=""; features="internal-bench"; extra=""; level="avx2" ;;
-      portable) toolchain="+nightly-2026-07-27"; features="internal-bench,nightly-simd"; extra="" ;;
+        features="internal-bench"; extra=""; level="avx2" ;;
     esac
 
     echo "::group::$cpu / $backend" >&2
     # shellcheck disable=SC2086
-    out=$(SAS7BDAT_SIMD_LEVEL="$level" cargo $toolchain bench -p sas7bdat --bench simd_backends \
+    out=$(SAS7BDAT_SIMD_LEVEL="$level" cargo bench -p sas7bdat --bench simd_backends \
             --features "$features" $extra -- "${CRIT_ARGS[@]}" 2>&1)
     status=$?
     echo "$out" >&2
@@ -69,7 +66,7 @@ for cpu in "${CPUS[@]}"; do
     # Criterion prints `<backend>/<kernel>/kernel` on its own line, then a
     # `thrpt:` line holding [lower estimate upper]; keep the middle estimate.
     echo "$out" | awk -v cpu="$cpu" -v name="$backend" '
-      /^(scalar|fearless|portable)\// { id = $1; next }
+      /^(scalar|fearless)\// { id = $1; next }
       /thrpt:/ && id != "" {
         for (i = 1; i <= NF; i++) {
           if ($i ~ /^\[/) { v = $(i+2); u = $(i+3); break }
@@ -96,16 +93,15 @@ echo "=== throughput, GiB/s (higher is better) — $cpu ==="
 awk -F'\t' '
   { key = $1 "|" $2; seen[key] = 1; val[key "|" $3] = $4; order[++n] = key }
   END {
-    printf "%-12s %-26s %9s %9s %9s %9s\n", "target-cpu", "kernel", "scalar", "fearless", "fl-avx2", "portable"
+    printf "%-12s %-26s %9s %9s %9s\n", "target-cpu", "kernel", "scalar", "fearless", "fl-avx2"
     for (i = 1; i <= n; i++) {
       key = order[i]
       if (done[key]++) continue
       split(key, k, "|")
-      printf "%-12s %-26s %9s %9s %9s %9s\n", k[1], k[2],
+      printf "%-12s %-26s %9s %9s %9s\n", k[1], k[2],
         (key "|scalar"        in val ? val[key "|scalar"]        : "-"),
         (key "|fearless"      in val ? val[key "|fearless"]      : "-"),
-        (key "|fearless-avx2" in val ? val[key "|fearless-avx2"] : "-"),
-        (key "|portable"      in val ? val[key "|portable"]      : "-")
+        (key "|fearless-avx2" in val ? val[key "|fearless-avx2"] : "-")
     }
   }' "$results"
 

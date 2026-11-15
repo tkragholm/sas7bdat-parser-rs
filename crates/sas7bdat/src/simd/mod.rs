@@ -1,22 +1,18 @@
 //! The vectorized kernels, behind one backend-agnostic boundary.
 //!
-//! Three implementations exist and exactly one is live:
+//! Two implementations exist and exactly one is live:
 //!
 //! | backend    | feature        | needs        | notes                                    |
 //! |------------|----------------|--------------|------------------------------------------|
 //! | [`scalar`] | *(none)*       | stable, 1.88 | Always compiled. The correctness oracle. |
 //! | [`fearless`] | `simd`       | stable, 1.89 | Runtime-dispatched. The default.         |
-//! | [`portable`] | `nightly-simd` | nightly    | `std::simd`. Overrides `simd`.           |
 //!
 //! The scalar figure is the crate's own floor (`slice::as_chunks`, stable in 1.88),
 //! not something the backend chooses; leaving `simd` off only avoids
 //! `fearless_simd`'s 1.89. One version between them, so a low MSRV is a weak reason
 //! to pick `scalar` — see below for the real ones.
 //!
-//! `nightly-simd` wins when both are on, so `--all-features` resolves to a single
-//! coherent backend rather than failing to compile.
-//!
-//! # Why the default is not `std::simd`
+//! # Why not `std::simd`
 //!
 //! `std::simd` has no runtime dispatch: it lowers to whatever target features were
 //! enabled at compile time, which for a portable binary on x86-64 is SSE2. Every
@@ -25,7 +21,8 @@
 //! but cargo only finds that file by walking up from the working directory — a crate
 //! consumed from crates.io, a wheel, or an R package tarball never sees it.
 //! `fearless_simd` detects AVX2/AVX-512 at runtime instead, so a portable build gets
-//! the wide path without the caller setting anything.
+//! the wide path without the caller setting anything. `std::simd` also needs a
+//! nightly toolchain. The `port` column below measures it for comparison.
 //!
 //! # Kernel rankings do not survive a change of architecture
 //!
@@ -34,9 +31,9 @@
 //! `to_bitmask()` lowers to a multi-instruction emulation that LLVM's autovectoriser
 //! routes around.
 //!
-//! On x86-64 that reverses: scalar is the *slowest* of the three there
-//! (9.1 GiB/s, against 22.7 for `fearless` and 10.9 for `portable`, at baseline on an
-//! AVX-512 x86-64 server CPU). Take no ranking here as architecture-independent.
+//! On x86-64 that reverses: scalar is the slowest there (9.1 GiB/s, against 22.7 for
+//! `fearless` and 10.9 for `std::simd`, at baseline on an AVX-512 x86-64 server CPU).
+//! Take no ranking here as architecture-independent.
 //!
 //! What does hold across both: the narrow-string kernels are best left to `scalar`,
 //! which is why [`crate::scan::string`] gates on `< 64` rather than calling a
@@ -58,7 +55,7 @@
 //! # What the x86-64 sweep says
 //!
 //! Measured with `benches/simd_backends.rs` on an AMD EPYC 9V74 (AVX-512), GiB/s,
-//! `portable` = `std::simd`, `avx2` = `fearless` held to AVX2 with
+//! `port` = `std::simd`, `avx2` = `fearless` held to AVX2 with
 //! `SAS7BDAT_SIMD_LEVEL`, the path an AVX2-only CPU takes (simd-matrix run of 14 Nov
 //! 2026, `fearless_simd` 1.2):
 //!
@@ -71,13 +68,11 @@
 //! | `is_ascii/width_16`    | **10.9** / 5.0 / 4.5 / 7.8     | **10.9** / 4.9 / 7.8 / 7.8     |
 //!
 //! `fearless` is nearly flat across the levels: it picks at runtime, so it does not
-//! care what the build enabled. `portable` swings by 4x, because it lowers to whatever
+//! care what the build enabled. `std::simd` swings by 4x, because it lowers to whatever
 //! `-C target-cpu` allowed. That is the whole argument for the default: a crate
 //! consumed from crates.io, a wheel built elsewhere, or an R tarball is built at
-//! baseline.
-//!
-//! Where `portable` still wins is the wide string kernels once `target-cpu` is set,
-//! which is the case for this repository's own CLI and server builds.
+//! baseline. Its one win, the 256-byte ASCII check at baseline, is a build nothing
+//! ships, and with AVX2 enabled plain scalar code beats it there.
 //!
 //! Re-measure with `scripts/simd-matrix.sh` or the `simd-matrix` workflow.
 
@@ -93,19 +88,13 @@
 
 pub mod scalar;
 
-#[cfg(all(feature = "simd", not(feature = "nightly-simd")))]
+#[cfg(feature = "simd")]
 pub mod fearless;
 
-#[cfg(feature = "nightly-simd")]
-pub mod portable;
-
-#[cfg(feature = "nightly-simd")]
-pub use portable as backend;
-
-#[cfg(all(feature = "simd", not(feature = "nightly-simd")))]
+#[cfg(feature = "simd")]
 pub use fearless as backend;
 
-#[cfg(not(any(feature = "simd", feature = "nightly-simd")))]
+#[cfg(not(feature = "simd"))]
 pub use scalar as backend;
 
 // The per-chunk kernels. Production goes through the column entry points below

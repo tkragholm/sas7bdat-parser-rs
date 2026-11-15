@@ -24,7 +24,7 @@ decoded, scheduled or read.
 
 The workspace builds on stable Rust. The exact toolchain is pinned in
 `rust-toolchain.toml`, so with [rustup](https://rustup.rs) installed, `cargo`
-picks it up. Only the opt-in `nightly-simd` feature needs a nightly toolchain.
+picks it up. Only fuzzing needs a nightly toolchain.
 
 ```sh
 git clone https://github.com/tkragholm/sas7bdat-parser-rs

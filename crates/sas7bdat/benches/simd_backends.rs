@@ -7,13 +7,11 @@
 //! ```sh
 //! cargo bench --bench simd_backends --features internal-bench --no-default-features
 //! cargo bench --bench simd_backends --features internal-bench
-//! cargo bench --bench simd_backends --features internal-bench,nightly-simd   # nightly
 //! ```
 //!
 //! `scripts/simd-matrix.sh` drives that sweep across `-C target-cpu` levels, which is
-//! the axis that matters on x86-64: `std::simd` has no runtime dispatch and lowers to
-//! whatever was enabled at compile time, while `fearless_simd` picks at runtime. The
-//! interesting question is how much of the gap `target-cpu` closes.
+//! the axis that matters on x86-64: `fearless_simd` picks its instruction set at
+//! runtime, while the scalar code autovectorizes to whatever the build enabled.
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use sas7bdat::simd;
@@ -27,9 +25,7 @@ const STRIDE: usize = 24;
 /// Which backend this binary was built with, for the report header.
 // Single token, no spaces: it is the first path segment of every criterion
 // benchmark id, and scripts/simd-matrix.sh splits on it.
-const BACKEND: &str = if cfg!(feature = "nightly-simd") {
-    "portable"
-} else if cfg!(feature = "simd") {
+const BACKEND: &str = if cfg!(feature = "simd") {
     "fearless"
 } else {
     "scalar"

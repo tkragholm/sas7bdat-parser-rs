@@ -149,13 +149,13 @@ decode; the bindings do not expose it yet.
 ## Vector instructions
 
 The vector kernels (missing-value tests, integer conversion, trimming, ASCII
-checks) sit behind one interface with three backends (`src/simd/mod.rs`). The
-scalar backend is always compiled and is the reference the others are tested
+checks) sit behind one interface with two backends (`src/simd/mod.rs`). The
+scalar backend is always compiled and is the reference the other is tested
 against. The default, `fearless_simd`, builds each kernel for several
 instruction sets and picks one at run time, so a wheel or an R package built
 for a baseline CPU still uses AVX2 or AVX-512 where the machine has them.
-`std::simd`, available on nightly behind a feature flag, does not dispatch at
-run time and lowers to whatever the build enabled, which for a portable build
+`std::simd` is not used: it needs a nightly toolchain, does not dispatch at
+run time, and lowers to whatever the build enabled, which for a portable build
 on x86-64 is SSE2.
 
 Two lessons from measuring are recorded there. Kernel rankings change between

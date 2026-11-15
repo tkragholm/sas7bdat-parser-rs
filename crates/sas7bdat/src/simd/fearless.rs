@@ -5,8 +5,7 @@
 //! monomorphises once per instruction set, selecting between them on first use.
 //! [`Level::new()`] is a cheap cached lookup, so taking it per call is fine.
 //!
-//! Widths here match the `nightly-simd` backend exactly — `u8x64`, `u64x8`,
-//! `u64x4` — so the two backends stay comparable. On a 128-bit target these are
+//! The vectors are `u8x64`, `u64x8` and `u64x4`. On a 128-bit target these are
 //! logical vectors that lower to four native registers; on AVX-512 they are one.
 
 // `#[inline(always)]` on the per-chunk kernels: they are called from a hot loop

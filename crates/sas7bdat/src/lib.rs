@@ -29,8 +29,8 @@
 //!
 //! - **`simd`** (default): vectorised string and numeric kernels through
 //!   `fearless_simd`, on stable Rust 1.89 or later, with the instruction set chosen at
-//!   run time. Without it the crate uses scalar code. **`nightly-simd`** uses
-//!   `std::simd` instead and needs a nightly toolchain.
+//!   run time. Without it the crate uses scalar code. **`nightly-simd`** is
+//!   accepted for compatibility and does nothing.
 //! - **`arrow`**: enables [`ScanBuilder::visit_arrow_batches`] and
 //!   [`ScanBuilder::arrow_schema`]. When active, the crate pulls in `arrow-array`,
 //!   `arrow-buffer` and `arrow-schema` and exposes Arrow `RecordBatch` conversion
@@ -46,10 +46,6 @@
 //! `internal-bench` (exposes `test_utils` to the `wide_table` benchmark) and
 //! `fixture-catalog` (corpus profiling used by the benchmark harness and the
 //! `sas7bdat-cli` dev-tools binaries).
-
-// Only the `nightly-simd` backend needs a nightly toolchain; the default `simd`
-// backend and the scalar fallback both build on stable. See `src/simd`.
-#![cfg_attr(feature = "nightly-simd", feature(portable_simd))]
 
 /// The version of this crate, as declared in its manifest.
 ///

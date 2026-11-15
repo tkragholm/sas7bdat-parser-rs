@@ -156,13 +156,9 @@ jobs:
       # combination would otherwise only surface at release time. Use
       # `--feature-powerset` locally for the exhaustive version; it is ~16 builds per
       # crate and too slow to gate every PR.
-      # `nightly-simd` is excluded because it gates `#![feature(portable_simd)]` and
-      # cannot compile on the pinned stable at all. The `nightly-simd` job below is
-      # what covers it.
       - name: Feature combinations
         run: >
           cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
-          --exclude-features nightly-simd
 
   # The core on the platforms test-lint does not run: aarch64, where fearless_simd
   # takes its NEON path, and Windows, where the reader detects network drives and
@@ -319,40 +315,6 @@ jobs:
             ( cd "${name}/tests" && Rscript testthat.R )
             echo "::endgroup::"
           done
-
-  # The only job that needs a nightly toolchain, and the only one that compiles the
-  # `nightly-simd` backend.
-  #
-  # `RUSTUP_TOOLCHAIN` rather than `cargo +nightly`: it overrides rust-toolchain.toml
-  # for every tool in the job, including the ones that shell out to cargo themselves.
-  #
-  # Pinned to a date, like the stable channel is pinned to a version. A floating
-  # `nightly` turns this job red whenever clippy grows a lint.
-  #
-  # The default features are left on deliberately. `nightly-simd` is documented to
-  # override `simd` (see crates/sas7bdat/src/simd/mod.rs), so building with both
-  # enabled checks that the precedence rule resolves to one backend rather than
-  # failing to compile. `--all-features` would hit the same case.
-  nightly-simd:
-    name: nightly std::simd backend
-    runs-on: ubuntu-latest
-    env:
-      RUSTUP_TOOLCHAIN: nightly-2026-07-27
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install nightly
-        run: rustup toolchain install nightly-2026-07-27 --profile minimal --component clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: nightly-simd
-      - name: Show toolchain
-        run: rustup show && cargo --version
-      - name: Clippy
-        run: cargo clippy -p sas7bdat --all-targets --features nightly-simd -- -D warnings
-      # Runs the differential tests in src/simd/tests.rs with `portable` as the live
-      # backend, so std::simd is held against the scalar reference on every kernel.
-      - name: Test
-        run: cargo test -p sas7bdat --features nightly-simd
 
   # Coverage of the published library only. The plugins are exercised through their
   # Python/R test suites, and the CLI has no integration tests to measure.
