@@ -1,0 +1,2 @@
+# The compiled extension submodule is private; the public API is typed in __init__.pyi.
+sas7bdat_polars.sas7bdat_polars

@@ -67,13 +67,18 @@ jobs:
 
   linux:
     name: linux-${{ matrix.target }}
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        # aarch64 builds run under QEMU emulation and are slow; swap the runner
-        # to a native ARM runner (e.g. ubuntu-22.04-arm) to speed it up.
-        target: [x86_64, aarch64]
+        # Each target builds on a runner of its own architecture, so nothing is
+        # cross-compiled or emulated. maturin-action runs the manylinux_2_28
+        # container for that architecture.
+        include:
+          - target: x86_64
+            runner: ubuntu-22.04
+          - target: aarch64
+            runner: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v7
       # maturin-action takes the toolchain as an input and cannot read
@@ -256,6 +261,15 @@ jobs:
             https://raw.githubusercontent.com/pandas-dev/pandas/v2.2.3/pandas/tests/io/sas/data/airline.sas7bdat
       - name: Test suite
         run: python -m pytest -p no:cacheprovider crates/polars-plugin/tests
+      # __init__.pyi is hand-written, so it is compared with the installed module
+      # on every push. One matrix leg is enough: the stub does not depend on the
+      # Python or polars version under test. The allowlist holds the entries that
+      # cannot be matched, each with its reason.
+      - name: Type stubs match the runtime module
+        if: matrix.python == '3.12' && matrix.polars == 'highest'
+        run: |
+          python -m pip install mypy==2.4.1
+          python -m mypy.stubtest --allowlist crates/polars-plugin/stubtest_allowlist.txt sas7bdat_polars
 
   # The core and the plugin's Rust side, tested on the commit being built. ci.yml
   # runs the same on every push to main, but a tag can point at any commit, and a
@@ -275,8 +289,7 @@ jobs:
         run: cargo test -p sas7bdat -p sas7bdat-polars -p sas7bdat-cli
 
   # Every built wheel, installed and run on its own platform: the extension module
-  # imported and read through, the CLI wheel's `sas7bdat` run on a file. Linux
-  # aarch64 is left out; it would need an arm runner.
+  # imported and read through, the CLI wheel's `sas7bdat` run on a file.
   smoke:
     name: smoke-${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
@@ -287,6 +300,8 @@ jobs:
         include:
           - platform: linux-x86_64
             runner: ubuntu-22.04
+          - platform: linux-aarch64
+            runner: ubuntu-22.04-arm
           - platform: windows-x64
             runner: windows-latest
           - platform: macos-aarch64

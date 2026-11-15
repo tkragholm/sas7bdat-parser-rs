@@ -2,19 +2,41 @@
 
 import os
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, final
 
 import polars as pl
+
+__all__ = [
+    "PLUGIN_CONTRACT_VERSION",
+    "ArrowStream",
+    "BatchIterator",
+    "BatchReader",
+    "SasDataset",
+    "SasIoSource",
+    "batch_reader",
+    "check_polars_version",
+    "column_info",
+    "polars_requirement",
+    "read_sas",
+    "sas_info",
+    "scan_sas",
+    "scan_threads",
+    "schema_for_file",
+    "set_scan_threads",
+    "value_labels",
+]
 
 __version__: str
 __core_version__: str
 PLUGIN_CONTRACT_VERSION: str
 
+@final
 class ArrowStream:
     """An Arrow C stream, importable once through ``__arrow_c_stream__``."""
 
     def __arrow_c_stream__(self, requested_schema: object = ...) -> object: ...
 
+@final
 class BatchIterator(Iterator[ArrowStream]):
     def __iter__(self) -> BatchIterator: ...
     def __next__(self) -> ArrowStream: ...
