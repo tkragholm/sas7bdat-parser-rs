@@ -164,15 +164,14 @@ reverse-engineering work and on other open readers:
   Polars plugin for SAS, Stata and SPSS files.
 
 Decoded output is compared cell by cell with ReadStat built from its main
-branch. On a local corpus of 329 public SAS files, 325 match on every cell.
-ReadStat rejects three of the others, and one is left out because the two
-readers map ISO-8859-1 differently.
+branch. On a local corpus of 331 public SAS files, 327 match on every cell,
+502 million cells in all. ReadStat rejects three of the others, and one is left
+out because the two readers map ISO-8859-1 differently. The record of the run
+is in [`benchmarks/readstat/`](benchmarks/readstat/).
 
-The one deliberate difference is deleted rows. SAS marks a deleted row instead
-of removing it. This reader excludes those rows, as ReadStat does since
-[#366](https://github.com/WizardMac/ReadStat/pull/366). The ReadStat 1.1.9
-release, which haven and pyreadstat ship, returns them, so those packages
-report more rows on such files.
+Rows that SAS has marked as deleted are left out. haven and pyreadstat, which
+ship ReadStat 1.1.9, still return them, so on such files they report more rows.
+ReadStat's main branch leaves them out too.
 
 ## License
 
