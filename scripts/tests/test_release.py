@@ -195,7 +195,9 @@ def test_feat_in_vendored_source_is_not_a_feature_of_the_r_package(release, repo
     assert moves["fastsas"].target == "0.3.1"
 
 
-def test_breaking_commit_in_vendored_source_is_not_breaking_for_the_wheel(release, repo):
+def test_breaking_commit_in_vendored_source_is_not_breaking_for_the_wheel(
+    release, repo
+):
     repo.change("crates/sas7bdat/src/lib.rs", "feat!: rename")
     moves = owed(release)
     assert moves["sas7bdat"].target == "0.11.0"
@@ -736,3 +738,18 @@ def test_check_versions_reports_what_is_owed(checked, repo):
     assert result.returncode == 0
     assert "owed  sas7bdat 0.10.3 -> 0.10.4" in result.stdout
     assert "owed  sas7bdat-polars" in result.stdout
+
+
+def test_last_tag_orders_by_version_not_by_name(release, repo):
+    repo.git("tag", "-a", "v0.10.1", "-m", "legacy")
+    pkg = release.BY_NAME["sas7bdat-polars"]
+    assert release.last_tag(pkg) == "sas7bdat-polars-v0.10.3"
+
+
+def test_draft_skips_a_commit_that_only_touched_the_changelog(release, repo):
+    repo.change("crates/sas7bdat/CHANGELOG.md", "fix(convert): a header line")
+    repo.change("crates/sas7bdat/src/lib.rs", "fix: a real fix")
+    move = release.Move(release.BY_NAME["sas7bdat"], "0.10.3", "0.10.4", "")
+    entry = release.draft_entry(move, {})
+    assert "A real fix" in entry
+    assert "A header line" not in entry

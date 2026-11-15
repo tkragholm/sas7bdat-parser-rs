@@ -221,13 +221,23 @@ def released_tag(pkg: Package) -> str | None:
     return None
 
 
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version))
+
+
 def last_tag(pkg: Package) -> str | None:
-    """The newest release tag of this package, whatever the manifest says now."""
+    """The newest release tag of this package, whatever the manifest says now.
+
+    Ordered by the version in the tag, not by the tag's name: a legacy `v0.10.1`
+    sorts after `sas7bdat-polars-v0.10.3` as text.
+    """
     patterns = [f"{pkg.prefix}[0-9]*"] + (
         [f"{pkg.legacy_prefix}[0-9]*"] if pkg.legacy_prefix else []
     )
-    tags = git("tag", "-l", *patterns, "--sort=-v:refname").split()
-    return tags[0] if tags else None
+    tags = git("tag", "-l", *patterns).split()
+    if not tags:
+        return None
+    return max(tags, key=lambda tag: _version_key(tag.rsplit("v", 1)[-1]))
 
 
 def _shipped_manifest(text: str) -> str:
@@ -303,7 +313,10 @@ class Plan:
 
 def shipped_paths(pkg: Package) -> list[str]:
     """Where the commits that change what a package ships are found."""
-    paths = [str(pkg.path.relative_to(ROOT))]
+    paths = [
+        str(pkg.path.relative_to(ROOT)),
+        f":(exclude){pkg.changelog.relative_to(ROOT)}",
+    ]
     if pkg.kind != "crate":
         paths += [f"crates/{d.dir}/src" for d in vendored(pkg)]
     return paths
