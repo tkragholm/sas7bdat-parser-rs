@@ -9,9 +9,8 @@ This file covers the Rust crate only. The Python packages built from this reposi
 `sas7bdat-polars-v*` and `sas7bdat-cli-v*`; up to sas7bdat-polars 0.10.1 and
 sas7bdat-cli 0.9.4 they were tagged plain `v*`. This crate's tags are `sas7bdat-v*`.
 
-New entries are drafted from the Conventional Commits history with
-[git-cliff](https://git-cliff.org) (`cliff.toml` at the repository root) and edited by
-hand.
+New entries are drafted from the Conventional Commits history by `just release
+--execute` and edited by hand.
 
 ## [Unreleased]
 

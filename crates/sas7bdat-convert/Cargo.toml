@@ -19,7 +19,7 @@ csv = { workspace = true }
 glob = { workspace = true }
 parquet = { workspace = true }
 rayon = { workspace = true }
-sas7bdat = { path = "../sas7bdat", version = "0.10", features = ["arrow"] }
+sas7bdat = { path = "../sas7bdat", version = "0.10.2", features = ["arrow"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # No `walkdir` here on purpose: it reaches windows-sys, which is 1.9 MB compressed in
