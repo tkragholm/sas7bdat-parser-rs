@@ -525,9 +525,9 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lz4_flex"
-version = "0.14.1"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f5af6ecc17202a60aebe8502b4e8160bd745820e5a8417c8e5d048af838aec5"
+checksum = "f56455fff36934a9500d69062aec1c77037179b6f0669e4d5d6b72b84722d6a3"
 dependencies = [
  "twox-hash",
 ]
@@ -747,9 +747,9 @@ dependencies = [
 
 [[package]]
 name = "sas7bdat-convert"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09e175cbae71af3c81cae99b8366a2a139530857fd6696a67ab06e62fad7d714"
+checksum = "adf25c7d9b219b34db4cbe6591d2eebbdb7f1a88facef9b4345daa57d1969fdb"
 dependencies = [
  "anyhow",
  "arrow-array",
