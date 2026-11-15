@@ -228,13 +228,13 @@ def _version_key(version: str) -> tuple[int, ...]:
 def last_tag(pkg: Package) -> str | None:
     """The newest release tag of this package, whatever the manifest says now.
 
-    Ordered by the version in the tag, not by the tag's name: a legacy `v0.10.1`
-    sorts after `sas7bdat-polars-v0.10.3` as text.
+    Ordered by the version in the tag, not by the tag's name. The plain `v*` tags
+    were shared by both wheels, so they count only for a package that has no tag
+    under its own prefix yet.
     """
-    patterns = [f"{pkg.prefix}[0-9]*"] + (
-        [f"{pkg.legacy_prefix}[0-9]*"] if pkg.legacy_prefix else []
-    )
-    tags = git("tag", "-l", *patterns).split()
+    tags = git("tag", "-l", f"{pkg.prefix}[0-9]*").split()
+    if not tags and pkg.legacy_prefix:
+        tags = git("tag", "-l", f"{pkg.legacy_prefix}[0-9]*").split()
     if not tags:
         return None
     return max(tags, key=lambda tag: _version_key(tag.rsplit("v", 1)[-1]))

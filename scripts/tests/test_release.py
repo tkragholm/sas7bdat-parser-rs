@@ -753,3 +753,9 @@ def test_draft_skips_a_commit_that_only_touched_the_changelog(release, repo):
     entry = release.draft_entry(move, {})
     assert "A real fix" in entry
     assert "A header line" not in entry
+
+
+def test_a_legacy_tag_of_the_other_wheel_is_not_this_wheels_last(release, repo):
+    repo.git("tag", "-a", "v0.10.1", "-m", "the plugin, under the shared prefix")
+    pkg = release.BY_NAME["sas7bdat-cli"]
+    assert release.last_tag(pkg).startswith("sas7bdat-cli-v")
