@@ -322,10 +322,12 @@ def bump_for(pkg: Package, tag: str) -> tuple[str, str]:
 
     A breaking commit is a minor release. So is a new feature in an R package:
     a 0.x crate may add API in a patch release under Cargo's rules, which R
-    has no counterpart for.
+    has no counterpart for. Only a package's own commits count here: a crate
+    it compiles in or vendors can add API without changing the package's own.
     """
     current = version_of(pkg)
-    log = commits_since(pkg, tag)
+    span = f"{tag}..HEAD"
+    log = git("log", "--format=%s%n%b%x00", span, "--", str(pkg.path.relative_to(ROOT)))
     if re.search(r"^\w+(\([^)]*\))?!:|^BREAKING CHANGE", log, re.MULTILINE):
         return bump_minor(current), " (a breaking commit: minor)"
     if pkg.kind == "r" and re.search(r"^feat(\([^)]*\))?:", log, re.MULTILINE):

@@ -167,6 +167,12 @@ install-hooks:
 doctor:
     @python3 scripts/doctor.py
 
+# The decision logic of scripts/release.py and scripts/check-versions.sh, run against
+# throwaway git repositories. Needs no network and no cargo.
+[doc("test the release scripts")]
+test-scripts:
+    @uvx pytest -q scripts/tests
+
 # Release every package whose shipped code changed since its last tag, in order:
 #   just release                    # the plan; changes nothing
 #   just release sas7bdat=0.11.0    # the plan, with a version of your choosing
