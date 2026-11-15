@@ -301,13 +301,36 @@ class Plan:
         return next((m for m in self.moves if m.pkg is pkg), None)
 
 
-def breaking_since(pkg: Package, tag: str) -> bool:
-    subjects = git(
-        "log", "--format=%s%n%b", f"{tag}..HEAD", "--", str(pkg.path.relative_to(ROOT))
+def shipped_paths(pkg: Package) -> list[str]:
+    """Where the commits that change what a package ships are found."""
+    paths = [str(pkg.path.relative_to(ROOT))]
+    if pkg.kind != "crate":
+        paths += [f"crates/{d.dir}/src" for d in vendored(pkg)]
+    return paths
+
+
+def commits_since(pkg: Package, tag: str | None) -> str:
+    """Subjects and bodies of the commits since `tag` that touch what `pkg` ships."""
+    span = f"{tag}..HEAD" if tag else "HEAD"
+    return git(
+        "log", "--reverse", "--format=%s%n%b%x00", span, "--", *shipped_paths(pkg)
     )
-    return bool(
-        re.search(r"^\w+(\([^)]*\))?!:|^BREAKING CHANGE", subjects, re.MULTILINE)
-    )
+
+
+def bump_for(pkg: Package, tag: str) -> tuple[str, str]:
+    """The version a package's next release should have, and why.
+
+    A breaking commit is a minor release. So is a new feature in an R package:
+    a 0.x crate may add API in a patch release under Cargo's rules, which R
+    has no counterpart for.
+    """
+    current = version_of(pkg)
+    log = commits_since(pkg, tag)
+    if re.search(r"^\w+(\([^)]*\))?!:|^BREAKING CHANGE", log, re.MULTILINE):
+        return bump_minor(current), " (a breaking commit: minor)"
+    if pkg.kind == "r" and re.search(r"^feat(\([^)]*\))?:", log, re.MULTILINE):
+        return bump_minor(current), " (new features: minor)"
+    return bump_patch(current), ""
 
 
 def owed() -> list[Move]:
@@ -329,19 +352,8 @@ def owed() -> list[Move]:
             continue
         reasons = changed_since(pkg, tag)
         if reasons:
-            if breaking_since(pkg, tag):
-                moves.append(
-                    Move(
-                        pkg,
-                        current,
-                        bump_minor(current),
-                        "; ".join(reasons) + " (a breaking commit: minor)",
-                    )
-                )
-            else:
-                moves.append(
-                    Move(pkg, current, bump_patch(current), "; ".join(reasons))
-                )
+            target, note = bump_for(pkg, tag)
+            moves.append(Move(pkg, current, target, "; ".join(reasons) + note))
     return moves
 
 
@@ -499,11 +511,9 @@ def draft_entry(move: Move, targets: dict[str, str]) -> str:
     """
     pkg = move.pkg
     since = released_tag(pkg) or last_tag(pkg)
-    paths = [str(pkg.path.relative_to(ROOT))]
-    if pkg.kind != "crate":
-        paths += [f"crates/{d.dir}/src" for d in vendored(pkg)]
-    span = f"{since}..HEAD" if since else "HEAD"
-    subjects = git("log", "--reverse", "--format=%s", span, "--", *paths).splitlines()
+    subjects = [
+        c.strip().split("\n", 1)[0] for c in commits_since(pkg, since).split("\0")
+    ]
     grouped: dict[str, list[str]] = {}
     for subject in subjects:
         match = re.match(r"^(\w+)(?:\(([^)]*)\))?(!)?: (.+)$", subject)
