@@ -243,12 +243,14 @@ def changed_since(pkg: Package, tag: str) -> list[str]:
 
     Compared against the working tree, so the plan sees edits not yet committed.
 
-    A crate's examples and benches are developer tools and do not ship. A wheel
+    A crate's examples and benches are developer tools and do not ship, and
+    the changelog is written by the release itself. A wheel
     also ships the source of the crates it compiles in, but not their version
     lines: a crate's own release would otherwise owe every wheel one too.
     """
     reasons = []
     own = [str(pkg.path.relative_to(ROOT))]
+    own.append(f":(exclude){pkg.changelog.relative_to(ROOT)}")
     if pkg.kind == "crate":
         own += [f":(exclude){own[0]}/examples", f":(exclude){own[0]}/benches"]
     if git("diff", "--name-only", tag, "--", *own).strip():
