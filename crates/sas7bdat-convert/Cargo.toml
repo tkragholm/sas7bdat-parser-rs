@@ -1,6 +1,6 @@
 [package]
 name = "sas7bdat-convert"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.89"
 description = "Convert SAS7BDAT files to Parquet, CSV or TSV, one file or a directory tree"
