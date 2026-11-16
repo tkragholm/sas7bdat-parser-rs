@@ -18,6 +18,7 @@ they vendor is released, and whenever their own directory changes.
 
     just release                     # the plan: what is owed, and at what version
     just release sas7bdat=0.11.0     # the same, with a version of your choosing
+    just release sas7bdat-cli=skip   # the same, leaving an owed package out
     just release --execute           # bump, draft the changelogs; changes files only
     just release --publish           # commit, push, tag, upload, vendor R, release
     just release-status              # where every package stands right now
@@ -373,6 +374,14 @@ def owed() -> list[Move]:
 
 
 def build_plan(overrides: dict[str, str]) -> Plan:
+    """The release: what is owed, with `overrides` applied.
+
+    An override is a version, or `skip` to leave an owed package out of this
+    run. A skipped package stays owed. It cannot be one that another package's
+    requirement forces, since leaving it out would break that package.
+    """
+    skipped = {name for name, version in overrides.items() if version == "skip"}
+    overrides = {n: v for n, v in overrides.items() if n not in skipped}
     moves = {m.pkg.name: m for m in owed()}
     for name, version in overrides.items():
         pkg = BY_NAME[name]
@@ -426,8 +435,20 @@ def build_plan(overrides: dict[str, str]) -> Plan:
                 pkg, current, bump_patch(current), f"vendors {', '.join(released)}"
             )
 
-    ordered = [moves[p.name] for p in PACKAGES if p.name in moves]
+    forced = {package_of(path) for path, *_ in edits} & skipped
+    if forced:
+        raise SystemExit(
+            f"cannot skip {', '.join(sorted(forced))}: a requirement edit forces it"
+        )
+    ordered = [
+        moves[p.name] for p in PACKAGES if p.name in moves and p.name not in skipped
+    ]
     return Plan(ordered, edits)
+
+
+def package_of(manifest: Path) -> str:
+    """The package whose manifest, or R binding manifest, this is."""
+    return next(p.name for p in PACKAGES if cargo_manifest(p) == manifest)
 
 
 # ---------------------------------------------------------------- registries
@@ -970,7 +991,7 @@ def main() -> int:
         "versions",
         nargs="*",
         metavar="PACKAGE=VERSION",
-        help="a version other than the proposed one",
+        help="a version other than the proposed one, or skip to leave it out",
     )
     ap.add_argument(
         "--execute",
@@ -1000,9 +1021,9 @@ def main() -> int:
     overrides = {}
     for item in args.versions:
         name, _, version = item.partition("=")
-        if name not in BY_NAME or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        if name not in BY_NAME or not re.fullmatch(r"\d+\.\d+\.\d+|skip", version):
             raise SystemExit(
-                f"expected PACKAGE=VERSION with a package from {', '.join(p.name for p in PACKAGES)}: {item}"
+                f"expected PACKAGE=VERSION or PACKAGE=skip with a package from {', '.join(p.name for p in PACKAGES)}: {item}"
             )
         overrides[BY_NAME[name].name] = version
 

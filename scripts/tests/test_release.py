@@ -759,3 +759,18 @@ def test_a_legacy_tag_of_the_other_wheel_is_not_this_wheels_last(release, repo):
     repo.git("tag", "-a", "v0.10.1", "-m", "the plugin, under the shared prefix")
     pkg = release.BY_NAME["sas7bdat-cli"]
     assert release.last_tag(pkg).startswith("sas7bdat-cli-v")
+
+
+def test_skip_leaves_an_owed_package_out(release, repo):
+    repo.change("crates/sas7bdat/src/lib.rs", "fix: a fix")
+    plan = release.build_plan({"sas7bdat-polars": "skip", "sas7bdat-cli": "skip"})
+    names = [m.pkg.name for m in plan.moves]
+    assert "sas7bdat" in names
+    assert "sas7bdat-polars" not in names and "sas7bdat-cli" not in names
+
+
+def test_skip_refuses_a_package_a_requirement_forces(release, repo):
+    import pytest
+
+    with pytest.raises(SystemExit, match="cannot skip sas7bdat-convert"):
+        release.build_plan({"sas7bdat": "0.11.0", "sas7bdat-convert": "skip"})
