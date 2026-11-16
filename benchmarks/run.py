@@ -8,9 +8,9 @@ interleaved, in an order that rotates each repetition, so drift on the machine
 spreads over all of them. Each file is read twice before its runs so that every
 tool starts from a warm page cache.
 
-Before each run it waits until other processes are quiet, and on Linux it also
-measures what they used during the run, from the machine's busy CPU time less the
-benchmark's own. A run during which they used more than --max-other-cpu is kept in
+Before each run it waits until other processes are quiet and reads the file once
+more, so the page cache is warm for every run. On Linux it also measures what
+other user-space processes used during the run, from /proc. A run during which they used more than --max-other-cpu is kept in
 runs.jsonl marked `discarded` and done again, up to --retries times, so a burst of
 background work cannot move a median. Summaries give each median a 95% bootstrap
 confidence interval.
@@ -53,11 +53,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-
-try:
-    import resource
-except ImportError:  # Windows
-    resource = None
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "fixtures" / "benchmark"
@@ -243,28 +238,50 @@ def other_cpu() -> tuple[float, str]:
     return total, f"{busiest[1].rsplit('/', 1)[-1]} {busiest[0]:.0f}%"
 
 
-def busy_cpu_seconds() -> float | None:
-    """CPU time the whole machine has spent busy, summed over cores, from /proc/stat.
+def user_cpu_by_process() -> dict[tuple[int, int], float] | None:
+    """CPU seconds used so far by each user-space process outside this benchmark.
 
-    None where there is no /proc/stat. Idle and I/O wait are left out.
+    Keyed by (pid, start time) so a reused pid is not mistaken for the same
+    process. Kernel threads are left out: they include the page-cache, swap and
+    disk-encryption workers that a large read sets off, which is the
+    benchmark's own work, not interference. None where there is no /proc.
     """
-    try:
-        fields = Path("/proc/stat").read_text().split("\n", 1)[0].split()[1:]
-    except OSError:
+    proc = Path("/proc")
+    if not (proc / "self" / "stat").exists():
         return None
-    user, nice, system, _idle, _iowait, irq, softirq, steal = (int(x) for x in fields[:8])
-    return (user + nice + system + irq + softirq + steal) / os.sysconf("SC_CLK_TCK")
+    tick = os.sysconf("SC_CLK_TCK")
+    stats: dict[int, tuple[int, int, float]] = {}
+    for stat in proc.glob("[0-9]*/stat"):
+        try:
+            raw = stat.read_text()
+        except OSError:
+            continue
+        fields = raw[raw.rindex(")") + 2:].split()
+        pid, ppid = int(stat.parent.name), int(fields[1])
+        if pid == 2 or ppid == 2:
+            continue
+        stats[pid] = (ppid, int(fields[19]), (int(fields[11]) + int(fields[12])) / tick)
+    me = os.getpid()
+
+    def ours(pid: int) -> bool:
+        while pid > 1:
+            if pid == me:
+                return True
+            pid = stats[pid][0] if pid in stats else 1
+        return False
+
+    return {(pid, start): cpu for pid, (_, start, cpu) in stats.items() if not ours(pid)}
 
 
-def own_cpu_seconds() -> float:
-    """CPU time used by this process and every child it has waited for."""
-    if resource is None:
-        return 0.0
-    total = 0.0
-    for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN):
-        usage = resource.getrusage(who)
-        total += usage.ru_utime + usage.ru_stime
-    return total
+def others_cpu_during(before: dict | None, after: dict | None) -> float | None:
+    """CPU seconds used between two snapshots by processes outside the benchmark.
+
+    A process that started in between counts with all of its time; one that
+    started and exited in between is missed.
+    """
+    if before is None or after is None:
+        return None
+    return sum(cpu - before.get(key, 0.0) for key, cpu in after.items())
 
 
 class Busy(Exception):
@@ -283,8 +300,8 @@ def wait_quiet(limit: float, minutes: float) -> None:
         time.sleep(2)
 
 
-def warm(path: Path) -> None:
-    for _ in range(2):
+def warm(path: Path, passes: int = 2) -> None:
+    for _ in range(passes):
         with path.open("rb") as f:
             while f.read(1 << 24):
                 pass
@@ -341,17 +358,17 @@ def run_one(tool: str, path: Path, scratch: Path, checksum: bool = False,
         out = None
         cmd = build(path)
     wait_quiet(limit, wait_minutes)
+    # Read the file once more, so a large reader that ran just before cannot have
+    # pushed it out of the page cache on a machine short of memory.
+    warm(path, passes=1)
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
     others, _ = other_cpu()
     env = dict(os.environ, BENCH_CHECKSUM="1" if checksum else "0")
-    busy_before, own_before, t0 = busy_cpu_seconds(), own_cpu_seconds(), time.perf_counter()
+    before, t0 = user_cpu_by_process(), time.perf_counter()
     proc = _run_group([sys.executable, str(MEASURE), *cmd], timeout=1800, env=env)
     elapsed = time.perf_counter() - t0
-    busy_after = busy_cpu_seconds()
-    during = None
-    if busy_before is not None and busy_after is not None and elapsed > 0:
-        others_s = (busy_after - busy_before) - (own_cpu_seconds() - own_before)
-        during = max(0.0, others_s / elapsed * 100)
+    others_s = others_cpu_during(before, user_cpu_by_process())
+    during = others_s / elapsed * 100 if others_s is not None and elapsed > 0 else None
     lines = proc.stdout.strip().splitlines()
     measured = json.loads(lines.pop()[len("MEASURE "):]) if lines and lines[-1].startswith(
         "MEASURE ") else {"wall_s": None, "peak_rss_bytes": None, "peak_footprint_bytes": None,
