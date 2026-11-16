@@ -31,8 +31,8 @@ open implementations rest on public reverse engineering [@shotwell2013].
 
 `sas7bdat` is a SAS7BDAT reader written in Rust. It decodes pages in parallel,
 handles strings with vector instructions, and produces Apache Arrow [@arrow]
-record batches or rows. On a 12-core laptop it reads a 2.15 GB file in 0.47 s,
-where pandas, pyreadstat, and haven take 13 to 65 s. A Polars [@polars] IO
+record batches or rows. On a 6-core desktop it reads a 2.15 GB file in 1.2 s,
+where pandas, pyreadstat, and haven take 22 to 53 s. A Polars [@polars] IO
 plugin (`scan_sas`) brings lazy scanning with projection and slice pushdown to
 Python, and an R package (`fastsas`) returns haven-compatible tibbles. The
 reader handles both SAS compression schemes, 32- and 64-bit files of either
@@ -140,35 +140,37 @@ five marked places.
 
 Each measurement is one fresh process that reads one file once into the
 reader's own in-memory table, timed inside the process so that interpreter
-start-up is excluded. The page cache is warm, the readers run interleaved,
-and the table gives the median of 10 runs. Every reader runs with its
-defaults, and its result is checked against the Rust core's. The files are
+start-up is excluded. The page cache is warm for every run, the readers run
+interleaved, a run disturbed by other processes is repeated, and the table
+gives the median of 10 runs. Every reader runs with its defaults, and its
+result is checked against the Rust core's. The files are
 four public-use survey files: the 2013 American Housing Survey national file
 (2.15 GB, 70,044 rows by 4,041 columns), household file (613 MB, 2,167
 columns), and person file (26 MB, 82 columns), and the 2021 Medical
 Expenditure Panel Survey full-year file (338 MB, 1,488 columns). The machine
-is an Apple M3 Pro with 12 cores. The method, versions, and records are in
-the repository's `benchmarks/` directory.
+is an AMD Ryzen 5 3600 desktop with 6 cores (12 threads) and 16 GB of memory,
+running Linux. The method, versions, records, and a 95% interval for every
+median are in the repository's `benchmarks/` directory.
 
 | Reader | AHS national | AHS household | MEPS | AHS person |
 |---|---:|---:|---:|---:|
-| `sas7bdat` core | **0.47 s** | **0.23 s** | **0.058 s** | **0.013 s** |
-| `sas7bdat` core, one thread | 1.53 s | 0.71 s | 0.085 s | 0.077 s |
-| Polars plugin | 0.65 s | 0.27 s | 0.071 s | 0.020 s |
-| polars-readstat | 0.82 s | 0.38 s | 0.113 s | 0.027 s |
-| `fastsas` (R) | 2.74 s | 1.34 s | 0.27 s | 0.31 s |
-| ReadStat C library | 5.07 s | 2.33 s | 0.55 s | 0.23 s |
-| pandas | 13.1 s | 5.37 s | 0.21 s | 0.73 s |
-| pyreadstat | 15.7 s | 6.90 s | 1.66 s | 0.55 s |
-| pyreadstat, 12 processes | 9.17 s | 3.34 s | 0.96 s | 0.59 s |
-| haven (R) | 64.7 s | 28.6 s | 2.98 s | 3.41 s |
+| `sas7bdat` core | **1.17 s** | **0.50 s** | **0.12 s** | **0.035 s** |
+| `sas7bdat` core, one thread | 4.55 s | 2.04 s | 0.29 s | 0.19 s |
+| Polars plugin | 1.61 s | 0.66 s | 0.15 s | 0.061 s |
+| polars-readstat | 1.76 s | 0.87 s | 0.24 s | 0.064 s |
+| `fastsas` (R) | 4.71 s | 2.36 s | 0.61 s | 0.58 s |
+| ReadStat C library | 32.5 s | 12.4 s | 1.63 s | 0.69 s |
+| pandas | 22.4 s | 10.2 s | 0.38 s | 1.37 s |
+| pyreadstat | 30.2 s | 15.1 s | 4.52 s | 1.27 s |
+| pyreadstat, 12 processes | 14.5 s | 6.34 s | 1.23 s | 0.59 s |
+| haven (R) | 53.2 s | 25.7 s | 4.98 s | 2.71 s |
 
-On one thread the core is 3 to 6 times faster than the ReadStat C library, so
+On one thread the core is 4 to 7 times faster than the ReadStat C library, so
 parallel decoding is not the only source of the difference. The Polars plugin
-is 1.3 to 1.6 times faster than polars-readstat, which by default does not
-keep the file's row order. `fastsas` is 11 to 24 times faster than haven;
+is 1.05 to 1.6 times faster than polars-readstat, which by default does not
+keep the file's row order. `fastsas` is 5 to 11 times faster than haven;
 building the R data frame takes longer than decoding the file. On the
-national file, `fastsas` peaks at 3.7 GB of physical memory, against 2.4 GB
+national file, `fastsas` peaks at 2.5 GB of physical memory, against 2.4 GB
 for haven.
 
 # Research impact statement
