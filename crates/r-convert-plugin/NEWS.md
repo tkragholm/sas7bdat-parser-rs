@@ -1,3 +1,11 @@
+# fastsasconvert 0.3.2
+
+## Bug fixes
+
+- Builds for Windows on ARM64. The link failed on a flag its linker does not accept.
+
+Built with sas7bdat 0.10.4 and sas7bdat-convert 0.4.2.
+
 # fastsasconvert 0.3.1
 
 No change in behaviour. Built with sas7bdat 0.10.3 and sas7bdat-convert 0.4.2.

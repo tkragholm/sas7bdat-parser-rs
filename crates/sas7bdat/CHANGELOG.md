@@ -14,6 +14,12 @@ New entries are drafted from the Conventional Commits history by `just release
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-11-16
+
+### Fixed
+
+- The `dictionary` feature builds on 32-bit targets, WebAssembly among them. Its check of whether a text column is low-cardinality used `cardinality-estimator`, which compiles only on 64-bit targets. It now counts the distinct values in its sample of at most 8,192 cells exactly, and the dependency is gone.
+
 ## [0.10.3] - 2026-11-15
 
 ### Added

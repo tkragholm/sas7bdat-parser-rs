@@ -1,3 +1,11 @@
+# fastsas 0.3.2
+
+## Bug fixes
+
+- Builds for WebAssembly (webR) and for Windows on ARM64. The WebAssembly build failed on a dependency that compiles only on 64-bit targets, and the Windows ARM64 link on a flag its linker does not accept.
+
+Built with sas7bdat 0.10.4.
+
 # fastsas 0.3.1
 
 ## Performance
