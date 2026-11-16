@@ -36,7 +36,6 @@ simdutf8 = { workspace = true }
 # Optional string-column dictionary encoding (feature = "dictionary").
 ahash = { version = "0.8.7", optional = true }
 lasso2 = { version = "0.8", optional = true }
-cardinality-estimator = { version = "1.0.1", optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -102,8 +101,9 @@ internal-bench = []
 # dev-tools CLI binaries). Off by default: it is in-repo tooling, not reader API,
 # and consumers of the crate have no fixture corpus to point it at.
 fixture-catalog = []
-# String-column dictionary encoding: HLL cardinality gate + lasso2 interner.
-dictionary = ["dep:ahash", "dep:lasso2", "dep:cardinality-estimator"]
+# String-column dictionary encoding: a distinct-value count on a sample, then a
+# lasso2 interner.
+dictionary = ["dep:ahash", "dep:lasso2"]
 
 # Build docs.rs with both public features so their APIs — and the intra-doc links to
 # them from the crate-level docs — resolve. The remaining features are internal tooling

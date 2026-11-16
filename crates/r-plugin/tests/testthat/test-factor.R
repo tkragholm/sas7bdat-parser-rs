@@ -9,7 +9,7 @@ test_that("categorical = TRUE round-trips; low-card cols become factors", {
   for (nm in names(ch)) {
     if (is.character(ch[[nm]])) {
       # Either a factor (low cardinality) or still character (high-cardinality
-      # vetoed by the HLL gate) — both must reconstruct the original strings.
+      # vetoed by the cardinality check) — both must reconstruct the original strings.
       expect_identical(as.character(fa[[nm]]), as.character(ch[[nm]]))
       if (is.factor(fa[[nm]])) any_factor <- TRUE
     } else {

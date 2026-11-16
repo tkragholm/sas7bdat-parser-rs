@@ -851,7 +851,7 @@ fn read_impl(
 
     for (ci, meta) in metas.iter().enumerate() {
         if wants_factor[ci] {
-            // The HLL gate can still veto a genuinely high-cardinality column, in
+            // The cardinality check can still veto a genuinely high-cardinality column, in
             // which case it falls back to the `character` fill from the same
             // buffers rather than re-reading the file.
             let bufs: Vec<&OwnedColumnBuffer> = held[ci].iter().collect();

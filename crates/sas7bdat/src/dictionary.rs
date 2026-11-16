@@ -7,15 +7,18 @@
 //! speeding up group-by / join.
 //!
 //! The risk is free-text / ID columns (high cardinality), where building a
-//! dictionary just wastes memory. So a cheap [`CardinalityEstimator`] probe over
-//! a stride sample vetoes dictionary encoding for those columns before we commit
-//! to interning ([`dictionary_encode`] returns `None` → caller keeps plain Utf8).
+//! dictionary just wastes memory. So an exact count of the distinct values in a
+//! stride sample of at most [`DictionaryPolicy::sample_rows`] cells vetoes dictionary
+//! encoding for those columns before we commit to interning ([`dictionary_encode`]
+//! returns `None` → caller keeps plain Utf8). A sample that small is counted exactly
+//! for less than an estimator would cost, and the count needs nothing that 32-bit
+//! targets such as WebAssembly lack.
 //!
 //! Inputs are the core's already-decoded `Utf8` buffers — strings are UTF-8 and
 //! right-trimmed (`TrimMode::RTrim`), so no re-normalization happens here.
 
 use crate::columnar::OwnedColumnBuffer;
-use cardinality_estimator::CardinalityEstimator;
+use ahash::AHashSet;
 use lasso2::{Key, Rodeo};
 
 /// Thresholds for the Dictionary-vs-Plain decision.
@@ -153,21 +156,23 @@ pub fn dictionary_encode(
         (rows / policy.sample_rows.max(1)).max(1)
     };
     let buf_rows: Vec<usize> = buffers.iter().copied().map(buffer_rows).collect();
-    let mut est = CardinalityEstimator::<str>::new();
+    let mut distinct: AHashSet<&str> = AHashSet::new();
     let mut sampled = 0usize;
     let mut gidx = 0usize;
     while sampled < policy.sample_rows && gidx < rows {
         if let Some(s) = cell_at(buffers, &buf_rows, gidx) {
-            est.insert(s);
+            distinct.insert(s);
+            if distinct.len() >= policy.max_abs_cardinality {
+                return None; // high cardinality → keep plain Utf8
+            }
         }
         sampled += 1;
         gidx += stride;
     }
     if sampled > 0 {
-        let estimate = est.estimate();
         #[allow(clippy::cast_precision_loss)]
-        let ratio = estimate as f64 / sampled as f64;
-        if ratio > policy.max_card_ratio || estimate >= policy.max_abs_cardinality {
+        let ratio = distinct.len() as f64 / sampled as f64;
+        if ratio > policy.max_card_ratio {
             return None; // high cardinality → keep plain Utf8
         }
     }
