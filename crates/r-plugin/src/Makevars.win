@@ -31,8 +31,13 @@ STATLIB = $(LIBDIR)/libfastsas.a
 # libraries Rust's windows-gnu std depends on have to be named explicitly.
 #
 # `-Wl,-x -Wl,-S` discard local symbols and debug info; see `Makevars` for why the
-# strip has to happen at link time rather than in cargo's profile.
-PKG_LIBS = -L$(LIBDIR) -lfastsas -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll -Wl,-x -Wl,-S
+# strip has to happen at link time rather than in cargo's profile, and for the sizes.
+# The gnullvm targets link with lld, which has no `-x`, so they get `-Wl,-S` alone;
+# R passes `-s` on that link, which removes the local symbols as well.
+STRIP_GNU = -Wl,-x -Wl,-S
+STRIP_LLD = -Wl,-S
+STRIP_FLAGS = $(if $(findstring gnullvm,$(TARGET)),$(STRIP_LLD),$(STRIP_GNU))
+PKG_LIBS = -L$(LIBDIR) -lfastsas -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll $(STRIP_FLAGS)
 
 CARGO_BUILD_ARGS = --lib --release --target=$(TARGET) --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
 
