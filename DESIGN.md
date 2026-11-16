@@ -143,8 +143,9 @@ a file that declares a single-byte encoding but holds UTF-8 is read as UTF-8.
 That second case is common in Nordic register data. The repair reads the
 row's bytes as UTF-8 directly instead of undoing a wrong decode, which an
 earlier version did and which failed on the whole upper half of Latin-1
-(2568491). A strict mode in the Rust API fails on the first cell that does not
-decode; the bindings do not expose it yet.
+(2568491). A strict mode fails on the first cell that does not decode instead;
+the Rust API, both bindings and the command-line tool offer it. A file whose
+header names the wrong encoding can be read in another one.
 
 ## Vector instructions
 
@@ -166,7 +167,8 @@ that is not; the column-level entry points exist to dispatch once per column.
 
 The rest of the code in the x86-64 wheels is compiled for AVX2
 (`.cargo/config.toml`), since a binary compiled for AVX-512 fails at import
-on recent Intel consumer processors.
+on recent Intel consumer processors. Apple Silicon builds target the M1, which
+every Apple Silicon Mac supports.
 
 ## Bindings
 
@@ -202,7 +204,9 @@ and pyreadstat, returns deleted rows; its main branch now skips them too.
 The reference is ReadStat. `examples/verify_readstat.rs` decodes each file in
 a local corpus with both readers and compares every cell. Where the two
 differ on purpose, the README says so: deleted rows against ReadStat 1.1.9,
-and ISO-8859-1 text. That comparison needs the full corpus and runs locally.
+and ISO-8859-1 text. That comparison needs the full corpus and runs locally;
+each run's record, with the tolerances and the files left out, is in
+`benchmarks/readstat/`.
 
 Continuous integration runs the rest. Twenty-two files from the pandas and
 Parso test suites are tracked, one for each format feature: both byte orders
@@ -230,4 +234,3 @@ and use unsafe code where Rust writes into R vectors.
 - The pipelines in `src/scan/mod.rs` overlap. Two of them plan page sources
   separately, and their measured difference is small; whether both earn
   their keep is not settled.
-- Strict decoding is not yet reachable from Python, R or the command line.
