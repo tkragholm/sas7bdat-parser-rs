@@ -8,6 +8,13 @@ interleaved, in an order that rotates each repetition, so drift on the machine
 spreads over all of them. Each file is read twice before its runs so that every
 tool starts from a warm page cache.
 
+Before each run it waits until other processes are quiet, and on Linux it also
+measures what they used during the run, from the machine's busy CPU time less the
+benchmark's own. A run during which they used more than --max-other-cpu is kept in
+runs.jsonl marked `discarded` and done again, up to --retries times, so a burst of
+background work cannot move a median. Summaries give each median a 95% bootstrap
+confidence interval.
+
 Every finished run is appended to runs.jsonl at once. Stopped with Ctrl-C or
 SIGTERM, the run in progress is discarded and the command to continue is printed;
 `--resume` then skips what is recorded, with the first session's plan.
@@ -37,6 +44,7 @@ import hashlib
 import json
 import os
 import platform
+import random
 import shutil
 import signal
 import statistics
@@ -45,6 +53,11 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+try:
+    import resource
+except ImportError:  # Windows
+    resource = None
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "fixtures" / "benchmark"
@@ -230,6 +243,46 @@ def other_cpu() -> tuple[float, str]:
     return total, f"{busiest[1].rsplit('/', 1)[-1]} {busiest[0]:.0f}%"
 
 
+def busy_cpu_seconds() -> float | None:
+    """CPU time the whole machine has spent busy, summed over cores, from /proc/stat.
+
+    None where there is no /proc/stat. Idle and I/O wait are left out.
+    """
+    try:
+        fields = Path("/proc/stat").read_text().split("\n", 1)[0].split()[1:]
+    except OSError:
+        return None
+    user, nice, system, _idle, _iowait, irq, softirq, steal = (int(x) for x in fields[:8])
+    return (user + nice + system + irq + softirq + steal) / os.sysconf("SC_CLK_TCK")
+
+
+def own_cpu_seconds() -> float:
+    """CPU time used by this process and every child it has waited for."""
+    if resource is None:
+        return 0.0
+    total = 0.0
+    for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN):
+        usage = resource.getrusage(who)
+        total += usage.ru_utime + usage.ru_stime
+    return total
+
+
+class Busy(Exception):
+    """Other processes stayed busier than the limit for longer than the wait allows."""
+
+
+def wait_quiet(limit: float, minutes: float) -> None:
+    """Return once other processes use at most `limit` percent of one core."""
+    deadline = time.monotonic() + 60 * minutes
+    while True:
+        total, busiest = other_cpu()
+        if total <= limit:
+            return
+        if time.monotonic() > deadline:
+            raise Busy(f"other processes use {total:.0f}% CPU (busiest: {busiest})")
+        time.sleep(2)
+
+
 def warm(path: Path) -> None:
     for _ in range(2):
         with path.open("rb") as f:
@@ -267,7 +320,8 @@ def _stop(signum, frame):
     raise KeyboardInterrupt
 
 
-def run_one(tool: str, path: Path, scratch: Path, checksum: bool = False) -> dict:
+def run_one(tool: str, path: Path, scratch: Path, checksum: bool = False,
+            limit: float = 50.0, wait_minutes: float = 15.0) -> dict:
     group, build = TOOLS[tool]
     if tool == "sas7bdat-cli-csv":
         out = scratch / "ours.csv"
@@ -286,10 +340,18 @@ def run_one(tool: str, path: Path, scratch: Path, checksum: bool = False) -> dic
     else:
         out = None
         cmd = build(path)
+    wait_quiet(limit, wait_minutes)
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
     others, _ = other_cpu()
     env = dict(os.environ, BENCH_CHECKSUM="1" if checksum else "0")
+    busy_before, own_before, t0 = busy_cpu_seconds(), own_cpu_seconds(), time.perf_counter()
     proc = _run_group([sys.executable, str(MEASURE), *cmd], timeout=1800, env=env)
+    elapsed = time.perf_counter() - t0
+    busy_after = busy_cpu_seconds()
+    during = None
+    if busy_before is not None and busy_after is not None and elapsed > 0:
+        others_s = (busy_after - busy_before) - (own_cpu_seconds() - own_before)
+        during = max(0.0, others_s / elapsed * 100)
     lines = proc.stdout.strip().splitlines()
     measured = json.loads(lines.pop()[len("MEASURE "):]) if lines and lines[-1].startswith(
         "MEASURE ") else {"wall_s": None, "peak_rss_bytes": None, "peak_footprint_bytes": None,
@@ -304,6 +366,8 @@ def run_one(tool: str, path: Path, scratch: Path, checksum: bool = False) -> dic
         "wall_s": wall,
         "load1": load,
         "other_cpu": others,
+        "other_cpu_during": during,
+        "discarded": during is not None and during > limit,
         "peak_rss_mb": peak / 1e6 if peak is not None else None,
         "peak_footprint_mb": footprint / 1e6 if footprint is not None else None,
         "ok": ok,
@@ -425,22 +489,34 @@ def environment(files: list[str]) -> dict:
     }
 
 
+def median_ci(values: list[float], level: float = 0.95, resamples: int = 4000) -> tuple[float, float]:
+    """A percentile bootstrap interval for the median, seeded so a summary is stable."""
+    if len(values) < 2:
+        return values[0], values[0]
+    rng = random.Random(0)
+    medians = sorted(statistics.median(rng.choices(values, k=len(values)))
+                     for _ in range(resamples))
+    tail = (1 - level) / 2
+    return medians[int(tail * resamples)], medians[int((1 - tail) * resamples) - 1]
+
+
 def summarise(rows: list[dict], files: list[str], tools: list[str]) -> str:
     lines = [
-        "| File | Tool | Read, median (s) | IQR (s) | Process (s) | Peak footprint (MB) "
-        "| Peak RSS (MB) | MB/s |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
+        "| File | Tool | Read, median (s) | 95% CI (s) | IQR (s) | Process (s) "
+        "| Peak footprint (MB) | Peak RSS (MB) | MB/s |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for f in files:
         size = (DATA / FILES[f][0]).stat().st_size / 1e6
         for t in tools:
             runs = [r for r in rows if r["file"] == f and r["tool"] == t and r["ok"]]
             if not runs:
-                lines.append(f"| {f} | {t} | failed | | | | | |")
+                lines.append(f"| {f} | {t} | failed | | | | | | |")
                 continue
             reads = sorted(r["read_s"] for r in runs)
             q = statistics.quantiles(reads, n=4) if len(reads) > 1 else [reads[0]] * 3
             med = statistics.median(reads)
+            lo, hi = median_ci(reads)
             # Process time and memory from the runs that did not compute a checksum.
             clean = [r for r in runs if not r.get("checksummed")] or runs
             wall = statistics.median(r["wall_s"] for r in clean)
@@ -449,7 +525,7 @@ def summarise(rows: list[dict], files: list[str], tools: list[str]) -> str:
             fps = [r["peak_footprint_mb"] for r in clean if r.get("peak_footprint_mb") is not None]
             fp_cell = f"{statistics.median(fps):.0f}" if fps else "n/a"
             lines.append(
-                f"| {f} | {t} | {med:.3f} | {q[2] - q[0]:.3f} | {wall:.3f} | "
+                f"| {f} | {t} | {med:.3f} | {lo:.3f}-{hi:.3f} | {q[2] - q[0]:.3f} | {wall:.3f} | "
                 f"{fp_cell} | {rss_cell} | {size / med:.0f} |"
             )
     return "\n".join(lines)
@@ -488,8 +564,11 @@ def main() -> None:
     ap.add_argument("--wait-idle", type=float, default=15.0,
                     help="minutes to wait for other processes to settle before giving up")
     ap.add_argument("--max-other-cpu", type=float, default=50.0,
-                    help="refuse to start when other processes use more CPU than this "
-                         "(percent of one core)")
+                    help="the CPU other processes may use, in percent of one core: the "
+                         "run waits before each measurement until they use less, and "
+                         "redoes a measurement during which they used more")
+    ap.add_argument("--retries", type=int, default=5,
+                    help="times to redo a measurement disturbed by other processes")
     args = ap.parse_args()
     signal.signal(signal.SIGTERM, _stop)
 
@@ -544,7 +623,8 @@ def main() -> None:
                                  "environment": env})
     (out_dir / "environment.json").write_text(json.dumps(env, indent=2))
 
-    done = {(r["file"], r["rep"], r["tool"]) for r in read_jsonl(runs_path)}
+    done = {(r["file"], r["rep"], r["tool"]) for r in read_jsonl(runs_path)
+            if not r.get("discarded")}
     remaining = sum(1 for f in files for rep in range(reps) for t in tools
                     if (f, rep, t) not in done)
     print(f"session {session}: {remaining} of {len(files) * reps * len(tools)} runs to do",
@@ -561,26 +641,42 @@ def main() -> None:
                     continue
                 warm(path)
                 for rep, t in todo:
-                    # Only the first repetition computes the checksum, so the other
-                    # nine measure process time and peak memory without it.
-                    row = run_one(t, path, scratch, checksum=rep == 0)
-                    row["checksummed"] = rep == 0
-                    row.update(file=f, rep=rep, session=session,
-                               at=dt.datetime.now().astimezone().isoformat(timespec="seconds"))
-                    append_jsonl(runs_path, row)
-                    status = (f"{row['read_s']:.3f}s" if row["ok"]
-                              else f"FAILED {row.get('error')}")
-                    print(f"{f} rep {rep + 1}/{reps} {t}: {status}", flush=True)
+                    for attempt in range(args.retries + 1):
+                        # Only the first repetition computes the checksum, so the other
+                        # nine measure process time and peak memory without it.
+                        row = run_one(t, path, scratch, checksum=rep == 0,
+                                      limit=args.max_other_cpu, wait_minutes=args.wait_idle)
+                        row["checksummed"] = rep == 0
+                        row.update(file=f, rep=rep, session=session, attempt=attempt,
+                                   at=dt.datetime.now().astimezone().isoformat(timespec="seconds"))
+                        append_jsonl(runs_path, row)
+                        status = (f"{row['read_s']:.3f}s" if row["ok"]
+                                  else f"FAILED {row.get('error')}")
+                        if row["discarded"]:
+                            status += (f", discarded: others used "
+                                       f"{row['other_cpu_during']:.0f}% CPU during it")
+                        print(f"{f} rep {rep + 1}/{reps} {t}: {status}", flush=True)
+                        if not row["discarded"]:
+                            break
+                    else:
+                        raise Busy(f"{f} rep {rep + 1} {t} was disturbed "
+                                   f"{args.retries + 1} times")
+    except Busy as busy:
+        sys.exit(f"\nstopped: {busy}; continue with: "
+                 f"benchmarks/run.py --out {out_dir} --resume")
     except KeyboardInterrupt:
         sys.exit(f"\nstopped; continue with: benchmarks/run.py --out {out_dir} --resume")
 
-    rows = read_jsonl(runs_path)
+    attempts = read_jsonl(runs_path)
+    rows = [r for r in attempts if not r.get("discarded")]
+    discarded = len(attempts) - len(rows)
     fields = ["file", "rep", "tool", "group", "ok", "read_s", "wall_s", "peak_footprint_mb", "peak_rss_mb",
-              "rows", "cols", "load1", "other_cpu", "checksummed", "session", "at"]
+              "rows", "cols", "load1", "other_cpu", "other_cpu_during", "discarded",
+              "attempt", "checksummed", "session", "at"]
     with (out_dir / "runs.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
-        w.writerows(rows)
+        w.writerows(attempts)
 
     report = ["# Correctness", "",
               "Each reader's first successful run, compared with the Rust core's "
@@ -610,7 +706,10 @@ def main() -> None:
     header = (f"{reps} repetitions per tool and file, recorded in {n_sessions} "
               f"session{'s' if n_sessions > 1 else ''}; see sessions.jsonl. Read time is the "
               "median of all repetitions; process time and peak memory are from the "
-              "repetitions that did not compute the correctness checksum.\n\n")
+              "repetitions that did not compute the correctness checksum. The confidence "
+              "interval is a 95% bootstrap interval for the median read time. "
+              f"{discarded} measurement{'' if discarded == 1 else 's'} disturbed by other "
+              "processes were discarded and done again.\n\n")
     complete = all(any(r["file"] == f and r["rep"] == rep and r["tool"] == t for r in rows)
                    for f in files for rep in range(reps) for t in tools)
     if not complete:
