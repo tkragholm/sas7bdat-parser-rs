@@ -8,8 +8,8 @@ with a Polars plugin for Python, an R package, and a command-line tool.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 The reader memory-maps the file, decodes data pages in parallel, and handles
-strings with vectorised routines. On a 12-core laptop it reads a 2.15 GB survey
-file in 0.67 s, against 21 s for pyreadstat and 67 s for haven; see
+strings with vectorised routines. On a 6-core desktop it reads a 2.15 GB survey
+file in 1.2 s, against 30 s for pyreadstat and 53 s for haven; see
 [benchmarks](benchmarks/README.md). It is used to read SAS register extracts on
 Statistics Denmark's research servers.
 

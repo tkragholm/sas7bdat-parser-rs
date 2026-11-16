@@ -1,0 +1,59 @@
+# Correctness
+
+Each reader's first successful run, compared with the Rust core's (`sas7bdat-core`).
+
+- ahs2013n / sas7bdat-core-1t: match (4041 columns compared)
+- ahs2013n / readstat-c: match (4041 columns compared)
+- ahs2013n / sas7bdat-polars: match (4041 columns compared)
+- ahs2013n / polars-readstat: match (4041 columns compared)
+- ahs2013n / pyreadstat: match (4041 columns compared)
+- ahs2013n / pyreadstat-mp: match (4041 columns compared)
+- ahs2013n / pandas: match (4041 columns compared)
+- ahs2013n / fastsas: match (4041 columns compared)
+- ahs2013n / haven: match (4041 columns compared)
+- ahs2013n / sas7bdat-cli-csv: match
+- ahs2013n / readstat-cli-csv: match
+- ahs2013_household / sas7bdat-core-1t: match (2167 columns compared)
+- ahs2013_household / readstat-c: match (2167 columns compared)
+- ahs2013_household / sas7bdat-polars: match (2167 columns compared)
+- ahs2013_household / polars-readstat: match (2167 columns compared)
+- ahs2013_household / pyreadstat: match (2167 columns compared)
+- ahs2013_household / pyreadstat-mp: match (2167 columns compared)
+- ahs2013_household / pandas: match (2167 columns compared)
+- ahs2013_household / fastsas: match (2167 columns compared)
+- ahs2013_household / haven: match (2167 columns compared)
+- ahs2013_household / sas7bdat-cli-csv: match
+- ahs2013_household / readstat-cli-csv: match
+- meps2021_h233 / sas7bdat-core-1t: match (1488 columns compared)
+- meps2021_h233 / readstat-c: match (1488 columns compared)
+- meps2021_h233 / sas7bdat-polars: match (1488 columns compared)
+- meps2021_h233 / polars-readstat: match (1488 columns compared)
+- meps2021_h233 / pyreadstat: match (1488 columns compared)
+- meps2021_h233 / pyreadstat-mp: match (1488 columns compared)
+- meps2021_h233 / pandas: match (1488 columns compared)
+- meps2021_h233 / fastsas: match (1488 columns compared)
+- meps2021_h233 / haven: match (1488 columns compared)
+- meps2021_h233 / sas7bdat-cli-csv: match
+- meps2021_h233 / readstat-cli-csv: match
+- ahs2013_person / sas7bdat-core-1t: match (82 columns compared)
+- ahs2013_person / readstat-c: match (82 columns compared)
+- ahs2013_person / sas7bdat-polars: match (82 columns compared)
+- ahs2013_person / polars-readstat: match (82 columns compared)
+- ahs2013_person / pyreadstat: match (82 columns compared)
+- ahs2013_person / pyreadstat-mp: match (82 columns compared)
+- ahs2013_person / pandas: match (82 columns compared)
+- ahs2013_person / fastsas: match (82 columns compared)
+- ahs2013_person / haven: match (82 columns compared)
+- ahs2013_person / sas7bdat-cli-csv: match
+- ahs2013_person / readstat-cli-csv: match
+- ahs2013_topical / sas7bdat-core-1t: match (114 columns compared)
+- ahs2013_topical / readstat-c: match (114 columns compared)
+- ahs2013_topical / sas7bdat-polars: match (114 columns compared)
+- ahs2013_topical / polars-readstat: match (114 columns compared)
+- ahs2013_topical / pyreadstat: match (114 columns compared)
+- ahs2013_topical / pyreadstat-mp: match (114 columns compared)
+- ahs2013_topical / pandas: match (114 columns compared)
+- ahs2013_topical / fastsas: match (114 columns compared)
+- ahs2013_topical / haven: match (114 columns compared)
+- ahs2013_topical / sas7bdat-cli-csv: match
+- ahs2013_topical / readstat-cli-csv: match

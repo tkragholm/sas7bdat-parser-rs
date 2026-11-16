@@ -10,11 +10,14 @@ pandas and haven, and the `readstat` command-line program for CSV output.
 `run.py` runs every measurement as one fresh process that reads one file once
 into the reader's own in-memory table, with the reader's defaults. The read is
 timed inside the process, so interpreter start-up and imports are left out; the
-whole process's wall time and peak memory are recorded too. Each file is read
-twice before its runs so the page cache is warm, and the readers are
-interleaved in an order that rotates between repetitions, so drift on the
-machine spreads over all of them. Before starting, it waits until other
-processes use less than half a core.
+whole process's wall time and peak memory are recorded too. The file is read
+before every measurement, so the page cache is warm even after a reader that
+needed most of the memory, and the readers are interleaved in an order that
+rotates between repetitions, so drift on the machine spreads over all of them.
+Before each measurement it waits until other processes use less than half a
+core. On Linux it also measures what other user-space processes used during
+the measurement, and repeats a measurement during which they used more. Each
+median is reported with a 95% bootstrap interval.
 
 After the timed runs, each reader's result is compared with the Rust core's:
 row and column counts, and per column the sum and missing count of a numeric
@@ -24,7 +27,9 @@ removed. Date and time columns are left out of the comparison.
 Peak memory is recorded twice (see `measure.py`). Peak resident set counts the
 pages of a memory-mapped file, which this project's readers use and the others
 do not, so it overstates their memory. Peak physical footprint is the memory
-the process itself holds, and is the fairer comparison on macOS.
+the process itself holds, and is the fairer comparison: on macOS the kernel's
+own figure, on Linux the anonymous and shared memory of the process tree,
+sampled every 10 ms.
 
 ## Files
 
@@ -45,60 +50,62 @@ results below.
 
 ## Results
 
-Run of 13 November 2026 at commit `cad3e94`: Apple M3 Pro, 12 cores, 18 GB,
-macOS 26.6; ReadStat 1.1.9, polars-readstat 0.25.0, pyreadstat 1.3.7, pandas
-3.1.1, Polars 2.1.0, haven 2.5.5, R 4.6.2. Ten repetitions per reader and
-file. All readers agreed with the Rust core on every file. The run's records
-are in `results/2026-11-13/`.
+Run of 16 November 2026 at commit `440d8d5`: AMD Ryzen 5 3600, 6 cores and 12
+threads, 16 GB, Linux 7.2; ReadStat 1.1.9, polars-readstat 0.25.0, pyreadstat
+1.3.7, pandas 3.1.1, Polars 2.1.0, haven 2.5.5, R 4.6.1, Rust 1.99.1. Ten
+repetitions per reader and file, none of them disturbed by other processes.
+All readers agreed with the Rust core on every file. The run's records,
+including a 95% interval for every median, are in `results/2026-11-16/`.
+ReadStat was built from its 1.1.9 release, whose version string still says
+1.1.8; the string was corrected so the record names the release. An earlier
+run on an Apple M3 Pro, on 13 November, is in `results/2026-11-13/`.
 
 This project's readers and polars-readstat use their default thread counts.
 ReadStat, pyreadstat, pandas and haven are single-threaded, and "pyreadstat,
-12 processes" is `read_file_multiprocessing` with one process per core.
+12 processes" is `read_file_multiprocessing` with one process per thread.
 
 Read time, median in seconds (lower is better):
 
 | Reader | AHS national | AHS household | MEPS | AHS person |
 |---|---:|---:|---:|---:|
-| `sas7bdat` core | **0.474** | **0.233** | **0.058** | **0.013** |
-| `sas7bdat` core, one thread | 1.527 | 0.706 | 0.085 | 0.077 |
-| Polars plugin | 0.646 | 0.272 | 0.071 | 0.020 |
-| polars-readstat | 0.822 | 0.381 | 0.113 | 0.027 |
-| `fastsas` (R) | 2.742 | 1.342 | 0.266 | 0.310 |
-| ReadStat C library | 5.074 | 2.328 | 0.545 | 0.229 |
-| pandas | 13.123 | 5.366 | 0.209 | 0.725 |
-| pyreadstat | 15.701 | 6.900 | 1.663 | 0.550 |
-| pyreadstat, 12 processes | 9.172 | 3.341 | 0.956 | 0.587 |
-| haven (R) | 64.686 | 28.566 | 2.976 | 3.406 |
+| `sas7bdat` core | **1.174** | **0.501** | **0.122** | **0.035** |
+| `sas7bdat` core, one thread | 4.549 | 2.040 | 0.287 | 0.187 |
+| Polars plugin | 1.612 | 0.658 | 0.149 | 0.061 |
+| polars-readstat | 1.760 | 0.874 | 0.244 | 0.064 |
+| `fastsas` (R) | 4.710 | 2.357 | 0.610 | 0.583 |
+| ReadStat C library | 32.486 | 12.374 | 1.626 | 0.686 |
+| pandas | 22.417 | 10.185 | 0.382 | 1.368 |
+| pyreadstat | 30.150 | 15.135 | 4.519 | 1.272 |
+| pyreadstat, 12 processes | 14.482 | 6.338 | 1.227 | 0.589 |
+| haven (R) | 53.239 | 25.663 | 4.979 | 2.705 |
 
 Converting to CSV with the command-line tools, median in seconds:
 
 | Tool | AHS national | AHS household | MEPS | AHS person |
 |---|---:|---:|---:|---:|
-| `sas7bdat` | **1.462** | **0.941** | **0.309** | **0.122** |
-| `readstat` | 35.182 | 25.039 | 7.594 | 1.194 |
+| `sas7bdat` | **4.617** | **2.736** | **0.876** | **0.260** |
+| `readstat` | 45.940 | 34.696 | 14.886 | 1.427 |
 
 Peak physical footprint, MB:
 
 | Reader | AHS national | AHS household | MEPS | AHS person |
 |---|---:|---:|---:|---:|
-| `sas7bdat` core | 4294 | 2480 | 860 | 145 |
-| Polars plugin | 4072 | 2074 | 731 | 287 |
-| polars-readstat | 4402 | 2138 | 531 | 260 |
-| `fastsas` (R) | 3735 | 3331 | 1139 | 294 |
-| ReadStat C library | 6470 | 2866 | 356 | 327 |
-| pandas | 4008 | 1947 | 411 | 315 |
-| pyreadstat | 3293 | 2004 | 746 | 207 |
-| haven (R) | 2443 | 1358 | 452 | 206 |
-| `sas7bdat` to CSV | 1376 | 1878 | 658 | 204 |
+| `sas7bdat` core | 3350 | 1642 | 405 | 100 |
+| Polars plugin | 4618 | 2277 | 505 | 246 |
+| polars-readstat | 4450 | 2185 | 625 | 330 |
+| `fastsas` (R) | 2516 | 1512 | 555 | 181 |
+| ReadStat C library | 9312 | 3961 | 360 | 483 |
+| pandas | 3898 | 1899 | 402 | 295 |
+| pyreadstat | 3218 | 1960 | 684 | 183 |
+| haven (R) | 2360 | 1306 | 429 | 188 |
+| `sas7bdat` to CSV | 935 | 1233 | 759 | 184 |
 
-On one thread the core is 3 to 6 times faster than the ReadStat C library. The
-Polars plugin is 1.3 to 1.6 times faster than polars-readstat, which by
-default does not keep the file's row order. `fastsas` is 11 to 24 times faster
-than haven, and uses more memory: on the national file 3.7 GB against 2.4 GB.
-
-During this run other processes, mostly Spotlight indexing, used about one of
-the twelve cores. The other projects' readers, at the same versions, were
-within 3% of their times in a run on 12 November with an idle machine.
+On one thread the core is 4 to 7 times faster than the ReadStat C library. The
+Polars plugin is 1.05 to 1.6 times faster than polars-readstat, which by
+default does not keep the file's row order. `fastsas` is 5 to 11 times faster
+than haven, and on the national file peaks at 2.5 GB against 2.4 GB for haven.
+pyreadstat's 12 processes cut its time by 52 to 73% on the three larger files.
+Converting to CSV, `sas7bdat` is 5 to 17 times faster than `readstat`.
 
 ## Reproduce
 

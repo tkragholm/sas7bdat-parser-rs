@@ -45,3 +45,4 @@ crates/sas7bdat/fuzz/Cargo.lock
 # Benchmark runs stay local, except the one benchmarks/README.md reports.
 /benchmarks/results/*
 !/benchmarks/results/2026-11-13/
+!/benchmarks/results/2026-11-16/
