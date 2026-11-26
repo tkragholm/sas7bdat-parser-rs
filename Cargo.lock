@@ -1364,6 +1364,7 @@ version = "0.4.2"
 dependencies = [
  "anyhow",
  "arrow-array",
+ "arrow-buffer",
  "arrow-schema",
  "chrono",
  "csv",

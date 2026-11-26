@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 pub mod catalog;
+pub mod columns;
 pub mod driver;
 pub mod export;
 pub mod parquet_pipeline;

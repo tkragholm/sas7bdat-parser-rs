@@ -13,6 +13,7 @@ readme = "README.md"
 [dependencies]
 anyhow = { workspace = true }
 arrow-array = { workspace = true }
+arrow-buffer = { workspace = true }
 arrow-schema = { workspace = true }
 chrono = { workspace = true }
 csv = { workspace = true }

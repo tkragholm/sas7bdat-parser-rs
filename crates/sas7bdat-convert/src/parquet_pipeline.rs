@@ -23,6 +23,7 @@
 //! Row groups reach the file in the order they were filled. Encoding finishes out of order, so
 //! completed ones wait in a small reorder buffer.
 
+use crate::columns::ResolvedColumns;
 use anyhow::{Result, anyhow};
 use arrow_array::RecordBatch;
 use arrow_schema::{DataType, Schema, SchemaRef};
@@ -35,8 +36,8 @@ use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIter
 use sas7bdat::OwnedColumnarBatch;
 use std::collections::HashMap;
 use std::io::Write;
-use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, OnceLock};
 
 /// Decoded rows a single row group may buffer before it is closed early, whatever the row
 /// target says. Without it a table with thousands of columns would hold gigabytes of Arrow
@@ -173,7 +174,13 @@ pub struct RowGroupPipeline<W: Write + Send> {
     writer: SerializedFileWriter<W>,
     factory: ArrowRowGroupWriterFactory,
     pool: &'static rayon::ThreadPool,
+    /// The schema written to the file.
     schema: SchemaRef,
+    /// The schema the scanner's batches convert to, which differs from `schema` when a
+    /// column plan renames or retypes columns.
+    convert_schema: SchemaRef,
+    /// Rewrites each converted batch into `schema`; `None` when the two schemas agree.
+    reshape: Option<Arc<ResolvedColumns>>,
     sizer: RowGroupSizer,
 
     /// Batches for the row group currently being filled, still in the scanner's own
@@ -204,6 +211,7 @@ impl<W: Write + Send> RowGroupPipeline<W> {
         writer: SerializedFileWriter<W>,
         factory: ArrowRowGroupWriterFactory,
         schema: SchemaRef,
+        reshape: Option<Arc<ResolvedColumns>>,
         target_rows: usize,
         threads: Option<usize>,
         in_flight_budget: Option<usize>,
@@ -211,11 +219,17 @@ impl<W: Write + Send> RowGroupPipeline<W> {
         let pool =
             encode_pool(threads).ok_or_else(|| anyhow!("could not start the encoding pool"))?;
         let (tx, rx) = channel();
+        let convert_schema = SchemaRef::clone(&schema);
+        let schema = reshape.as_ref().map_or(convert_schema.clone(), |plan| {
+            SchemaRef::clone(plan.schema())
+        });
         Ok(Self {
             writer,
             factory,
             pool,
             schema,
+            convert_schema,
+            reshape,
             sizer: RowGroupSizer::new(target_rows),
             pending: Vec::new(),
             pending_rows: 0,
@@ -300,13 +314,15 @@ impl<W: Write + Send> RowGroupPipeline<W> {
         }
 
         let schema = SchemaRef::clone(&self.schema);
+        let convert_schema = SchemaRef::clone(&self.convert_schema);
+        let reshape = self.reshape.clone();
         let tx = self.tx.clone();
         self.pool.spawn(move || {
             // The Arrow conversion runs here, on a pool thread, rather than on the thread
             // that called `push`. That caller is the scan's collector: it is the one thread
             // that sees every batch in order, so anything done there is serial no matter how
             // many cores the rest of the pipeline has.
-            let chunks = convert_batches(&schema, batches)
+            let chunks = convert_batches(&convert_schema, batches, reshape.as_deref())
                 .and_then(|converted| encode_row_group(&schema, writers, &converted));
             // The receiver outlives every task it dispatched, so this only fails if the
             // pipeline was already torn down by an earlier error.
@@ -381,13 +397,20 @@ impl<W: Write + Send> RowGroupPipeline<W> {
 fn convert_batches(
     schema: &SchemaRef,
     batches: Vec<OwnedColumnarBatch>,
+    reshape: Option<&ResolvedColumns>,
 ) -> Result<Vec<RecordBatch>, ParquetError> {
     batches
         .into_par_iter()
         .map(|batch| {
-            batch
+            let batch = batch
                 .into_arrow_record_batch(SchemaRef::clone(schema))
-                .map_err(|err| ParquetError::General(err.to_string()))
+                .map_err(|err| ParquetError::General(err.to_string()))?;
+            match reshape {
+                None => Ok(batch),
+                Some(plan) => plan
+                    .apply(&batch)
+                    .map_err(|err| ParquetError::General(err.to_string())),
+            }
         })
         .collect()
 }
@@ -560,6 +583,7 @@ mod tests {
             file_writer,
             factory,
             SchemaRef::clone(&schema),
+            None,
             ROW_GROUP_ROWS,
             None,
             None,

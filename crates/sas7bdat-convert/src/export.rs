@@ -1,5 +1,6 @@
 use crate::CompressionCodec;
 use crate::catalog::{Catalog, LabelSet};
+use crate::columns::{ColumnPlan, ConstantValue, ResolvedColumns};
 use crate::sas_metadata::{DatasetMetaJson, PARQUET_METADATA_KEY};
 use anyhow::Result;
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
@@ -296,6 +297,8 @@ pub struct WriteOptions<'a> {
     pub embed_metadata: bool,
     /// Compression codec for the written Parquet data.
     pub compression: Compression,
+    /// Names and types of the written columns, already filled in for this input.
+    pub columns: Option<&'a ColumnPlan>,
 }
 
 impl WriteOptions<'_> {
@@ -315,6 +318,7 @@ impl WriteOptions<'_> {
             catalog: None,
             embed_metadata: false,
             compression: Compression::UNCOMPRESSED,
+            columns: None,
         }
     }
 }
@@ -330,6 +334,9 @@ pub struct DelimitedWriteOptions<'a> {
     pub delimiter: u8,
     pub headers: bool,
     pub scan: ScanOptions<'a>,
+    /// Names of the written columns and constant columns appended after them, already
+    /// filled in for this input. A plan that converts types is refused: CSV has none.
+    pub columns: Option<&'a ColumnPlan>,
 }
 
 /// # Errors
@@ -348,12 +355,25 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
     if let Some(rows) = options.batch_rows {
         scan = scan.with_batch_hint(BatchHint::Rows(rows.max(1)));
     }
-    let schema = apply_catalog_metadata(
+    // The schema the scanner's batches convert to, and the one written: the two differ
+    // only when a column plan renames, retypes or adds columns.
+    let scan_schema = apply_catalog_metadata(
         scan.arrow_schema()?,
         dataset,
         options.catalog,
         options.scan.projection,
     )?;
+    let reshape = match options.columns {
+        Some(plan) if !plan.is_identity() => Some(Arc::new(
+            plan.resolve(&scan_schema)
+                .map_err(|err| Error::unsupported(err.to_string()))?,
+        )),
+        _ => None,
+    };
+    let schema = reshape.as_ref().map_or_else(
+        || SchemaRef::clone(&scan_schema),
+        |plan| SchemaRef::clone(plan.schema()),
+    );
     let row_group_rows = options
         .row_group_rows
         .unwrap_or_else(|| default_row_group_rows(dataset.metadata().row_count))
@@ -365,18 +385,28 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         // `string_statistics`); page-index stats are already truncated by parquet-rs.
         .set_statistics_truncate_length(Some(STATISTICS_TRUNCATE_LENGTH));
     // Sampled before the writer exists, because parquet needs its properties up front.
-    let high_cardinality = high_cardinality_columns(dataset, &options.scan);
+    // Sampled under the file's own names, then carried over to the written ones.
+    let mut high_cardinality = high_cardinality_columns(dataset, &options.scan);
+    if let Some(plan) = &reshape {
+        for name in &mut high_cardinality {
+            if let Some(index) = scan_schema.fields().iter().position(|f| f.name() == name)
+                && let Some(written) = plan.name_of(index)
+            {
+                *name = written.to_string();
+            }
+        }
+    }
     builder = apply_column_encodings(builder, &schema, &high_cardinality);
     let props = builder.build();
     // Kept for the per-batch conversion below: `visit_owned_batches` hands back raw column
     // buffers, which the writer's schema turns into record batches.
-    let batch_schema = SchemaRef::clone(&schema);
+    let batch_schema = SchemaRef::clone(&scan_schema);
     let mut writer = ArrowWriter::try_new(file, SchemaRef::clone(&schema), Some(props))?;
     if options.embed_metadata {
         // Write as a Parquet file-level key-value pair (not Arrow schema metadata), so it is
         // visible to plain Parquet readers — e.g. DuckDB's `parquet_kv_metadata()`.
         // Recorded on the file writer, so it survives the handover below.
-        let json = sas_metadata_json(dataset, options.scan.projection)?;
+        let json = sas_metadata_json(dataset, options.scan.projection, reshape.as_deref())?;
         writer.append_key_value_metadata(KeyValue::new(PARQUET_METADATA_KEY.to_string(), json));
     }
 
@@ -388,7 +418,8 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         let mut pipeline = parquet_pipeline::RowGroupPipeline::new(
             file_writer,
             factory,
-            schema,
+            scan_schema,
+            reshape,
             row_group_rows,
             options.scan.parse_threads,
             options.encode_in_flight_bytes,
@@ -412,7 +443,12 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
     // a time. The owned path streams extents through the parallel decoder and converts here,
     // which is the same Arrow conversion `visit_arrow_batches` does.
     let stats = scan.visit_owned_batches(|batch| {
-        let record_batch = batch.into_arrow_record_batch(SchemaRef::clone(&batch_schema))?;
+        let mut record_batch = batch.into_arrow_record_batch(SchemaRef::clone(&batch_schema))?;
+        if let Some(plan) = &reshape {
+            record_batch = plan
+                .apply(&record_batch)
+                .map_err(|err| Error::arrow(err.to_string()))?;
+        }
         writer
             .write(&record_batch)
             .map_err(|err| Error::arrow(err.to_string()))?;
@@ -485,6 +521,32 @@ pub fn write_csv_or_tsv(
         },
     );
 
+    let (header_names, constants) = match options.columns {
+        Some(plan) if !plan.is_identity() => {
+            if plan.changes_types() {
+                return Err(Error::unsupported(
+                    "string, timestamp and time types only apply to Parquet output".to_string(),
+                )
+                .into());
+            }
+            let names = plan
+                .output_names(&header_names)
+                .map_err(|err| Error::unsupported(err.to_string()))?;
+            let mut constants = Vec::with_capacity(plan.constants.len());
+            for (name, value) in &plan.constants {
+                let ConstantValue::Text(text) = value else {
+                    return Err(Error::unsupported(format!(
+                        "constant column `{name}` takes the input path, which was not filled in"
+                    ))
+                    .into());
+                };
+                constants.push(text.clone());
+            }
+            (names, constants)
+        }
+        _ => (header_names, Vec::new()),
+    };
+
     // The header is written whether or not any row follows, so an empty dataset still
     // names its columns. A dataset with no columns writes nothing: the csv crate would
     // write an empty record as `""`.
@@ -540,6 +602,9 @@ pub fn write_csv_or_tsv(
                         date_epoch,
                         datetime_epoch,
                     )?;
+                }
+                for text in &constants {
+                    chunk.write_field(text)?;
                 }
                 chunk.write_record(None::<&[u8]>)?;
             }
@@ -781,9 +846,21 @@ fn attach_value_labels<'a>(
 
 /// Serialize SAS dataset/column metadata (name, label, kind, format, width) for the columns
 /// actually written, in output order — so the payload stays correct under projection.
-fn sas_metadata_json(dataset: &Dataset, projection: Option<&Projection>) -> Result<String> {
+fn sas_metadata_json(
+    dataset: &Dataset,
+    projection: Option<&Projection>,
+    reshape: Option<&ResolvedColumns>,
+) -> Result<String> {
     let columns = written_columns(dataset, projection);
-    let payload = DatasetMetaJson::new(dataset, &columns);
+    let mut payload = DatasetMetaJson::new(dataset, &columns);
+    if let Some(plan) = reshape {
+        for (index, column) in payload.columns.iter_mut().enumerate() {
+            column.output_name = plan
+                .name_of(index)
+                .filter(|written| *written != column.name)
+                .map(str::to_string);
+        }
+    }
     Ok(serde_json::to_string(&payload)?)
 }
 

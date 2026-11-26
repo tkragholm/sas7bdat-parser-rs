@@ -101,9 +101,16 @@ fn main() {
     let start = Instant::now();
     let w = ArrowWriter::try_new(Vec::new(), Arc::clone(&schema), Some(props())).unwrap();
     let (fw, factory) = w.into_serialized_writer().unwrap();
-    let mut pipeline =
-        RowGroupPipeline::new(fw, factory, Arc::clone(&schema), ROW_GROUP_ROWS, None, None)
-            .unwrap();
+    let mut pipeline = RowGroupPipeline::new(
+        fw,
+        factory,
+        Arc::clone(&schema),
+        None,
+        ROW_GROUP_ROWS,
+        None,
+        None,
+    )
+    .unwrap();
     for _ in 0..repeats {
         pipeline.push(batch.clone()).unwrap();
     }

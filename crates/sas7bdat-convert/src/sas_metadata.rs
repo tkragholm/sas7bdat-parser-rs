@@ -29,6 +29,9 @@ pub struct ColumnMetaJson {
     pub label: Option<String>,
     /// Optional SAS format (e.g. `"DATE9."`).
     pub format: Option<String>,
+    /// The name the column is written under, when a column plan renames it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_name: Option<String>,
 }
 
 impl ColumnMetaJson {
@@ -41,6 +44,7 @@ impl ColumnMetaJson {
             width: column.physical_width,
             label: column.label.clone(),
             format: column.format.clone(),
+            output_name: None,
         }
     }
 }

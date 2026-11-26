@@ -15,6 +15,7 @@
 //!   input and keeps going; only the caller decides whether to stop.
 
 use crate::catalog::Catalog;
+use crate::columns::ColumnPlan;
 use crate::export::{
     DelimitedWriteOptions, ScanOptions, WriteOptions, resolve_compression, write_csv_or_tsv,
     write_parquet,
@@ -81,6 +82,8 @@ pub struct ConvertOptions {
     pub encoding: Option<String>,
     /// Fail on the first cell that does not decode, instead of replacing it.
     pub strict: bool,
+    /// Names and types of the written columns. The default writes them as read.
+    pub column_plan: ColumnPlan,
 }
 
 impl Default for ConvertOptions {
@@ -105,6 +108,7 @@ impl Default for ConvertOptions {
             column_indices: None,
             encoding: None,
             strict: false,
+            column_plan: ColumnPlan::default(),
         }
     }
 }
@@ -189,6 +193,21 @@ pub fn convert_file(
     // Resolved up front so an unknown column name fails before any file is created.
     resolve_column_indices(&dataset, selection)?;
     let projection = projection_from_selection(&dataset, selection)?;
+    let plan = options.column_plan.for_input(input);
+    if !plan.is_identity() {
+        // Checked here too, so a bad rename or a name collision fails before the
+        // staging file exists.
+        let names: Vec<String> = projection.as_ref().map_or_else(
+            || dataset.columns().iter().map(|c| c.name.clone()).collect(),
+            |proj| proj.columns().iter().map(|c| c.name.clone()).collect(),
+        );
+        plan.output_names(&names)?;
+        if plan.changes_types() && options.layout.sink != SinkKind::Parquet {
+            return Err(anyhow!(
+                "string, timestamp and time types only apply to Parquet output"
+            ));
+        }
+    }
     let columns = projection
         .as_ref()
         .map_or_else(|| dataset.columns().len(), |proj| proj.columns().len());
@@ -207,7 +226,7 @@ pub fn convert_file(
     };
 
     let started = Instant::now();
-    let rows = match write_output(&dataset, &staged, options, scan, catalog) {
+    let rows = match write_output(&dataset, &staged, options, scan, catalog, &plan) {
         Ok(rows) => rows,
         Err(err) => {
             // The staging file is this function's to clean up; leaving one behind
@@ -272,6 +291,7 @@ fn write_output(
     options: &ConvertOptions,
     scan: ScanOptions<'_>,
     catalog: Option<&Catalog>,
+    plan: &ColumnPlan,
 ) -> Result<u64> {
     match options.layout.sink {
         SinkKind::Parquet => {
@@ -297,6 +317,7 @@ fn write_output(
                     catalog,
                     embed_metadata: options.parquet_metadata,
                     compression: resolve_compression(options.compression),
+                    columns: Some(plan),
                 },
             )
         }
@@ -313,6 +334,7 @@ fn write_output(
                     }),
                 headers: !options.no_header,
                 scan,
+                columns: Some(plan),
             },
         ),
     }
