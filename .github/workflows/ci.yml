@@ -166,6 +166,11 @@ jobs:
   core-platforms:
     name: core tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # GitHub's Apple Silicon runners are sometimes not handed out at all, and the
+    # job is cancelled after 15 minutes with nothing run. On pushes to main and the
+    # weekly run the macOS leg reports failure without turning the run red. On pull
+    # requests it still blocks.
+    continue-on-error: ${{ github.event_name != 'pull_request' && startsWith(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:

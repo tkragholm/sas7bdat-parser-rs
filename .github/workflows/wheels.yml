@@ -160,6 +160,12 @@ jobs:
   macos:
     name: macos-${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
+    # GitHub's Apple Silicon runners are sometimes not handed out at all, and the
+    # job is cancelled after 15 minutes with nothing run. On pushes to main and the
+    # weekly run this job and its smoke test report failure without turning the
+    # run red. On pull requests and release tags they block, and the publish jobs
+    # need them.
+    continue-on-error: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') }}
     strategy:
       fail-fast: false
       matrix:
@@ -291,6 +297,7 @@ jobs:
     name: smoke-${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     needs: [linux, windows, macos]
+    continue-on-error: ${{ matrix.platform == 'macos-aarch64' && github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') }}
     strategy:
       fail-fast: false
       matrix:
