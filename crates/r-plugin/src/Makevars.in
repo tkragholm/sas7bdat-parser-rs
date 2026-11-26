@@ -24,7 +24,21 @@ CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --t
 # Without one, a tarball uses whatever rustc is installed, and inside the repository
 # the root pin still applies.
 
+all: $(SHLIB) rust_clean
+
 $(SHLIB): $(STATLIB)
+
+# A tarball build deletes the Rust build tree and the unpacked crates once the
+# shared library is linked. `R CMD check` scans every static library left in the
+# package directory for calls that could end the R session, and the Rust standard
+# library in `libfastsas.a` references `abort` for failures it cannot unwind from,
+# such as running out of memory. This package never calls it, and extendr turns
+# every panic into an R error. With the archive gone, the check scans only the
+# package's own objects. The vendored C sources leave with the unpacked crates, so
+# the source checks do not read them either. A build from the repository keeps
+# both, so that rebuilds stay incremental.
+rust_clean: $(SHLIB)
+	if [ ! -d .cargo ]; then rm -Rf rust/target rust/vendor rust/.cargo; fi
 
 # FORCE, not a bare rule. A rule with no prerequisites leaves an existing
 # `libfastsas.a` looking up to date, so make would link a stale archive after an
@@ -66,6 +80,9 @@ $(STATLIB): FORCE
 	  printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > rust/.cargo/config.toml; \
 	fi
 	cd rust && \
+	  if [ -n "@DEPLOYMENT_TARGET@" ]; then \
+	    MACOSX_DEPLOYMENT_TARGET=@DEPLOYMENT_TARGET@ && export MACOSX_DEPLOYMENT_TARGET; \
+	  fi && \
 	  if [ -d vendor ]; then \
 	    CARGO_HOME="$(TARGET_DIR)/cargo-home" && export CARGO_HOME && \
 	    mkdir -p "$$CARGO_HOME" && \
@@ -82,4 +99,4 @@ clean:
 
 FORCE:
 
-.PHONY: C_clean clean FORCE
+.PHONY: C_clean clean rust_clean FORCE

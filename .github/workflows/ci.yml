@@ -161,20 +161,21 @@ jobs:
           cargo hack check -p sas7bdat -p sas7bdat-cli --each-feature --no-dev-deps
 
   # The core on the platforms test-lint does not run: aarch64, where fearless_simd
-  # takes its NEON path, and Windows, where the reader detects network drives and
-  # paths differ. The bindings reach both only through their own suites.
+  # takes its NEON path, Windows, where the reader detects network drives and
+  # paths differ, and Intel macOS, which CRAN still builds binaries for. The
+  # bindings reach these platforms only through their own suites.
   core-platforms:
     name: core tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # GitHub's Apple Silicon runners are sometimes not handed out at all, and the
-    # job is cancelled after 15 minutes with nothing run. On pushes to main and the
-    # weekly run the macOS leg reports failure without turning the run red. On pull
-    # requests it still blocks.
+    # GitHub's macOS runners are sometimes not handed out at all, and the job is
+    # cancelled after 15 minutes with nothing run. On pushes to main and the weekly
+    # run the macOS legs report failure without turning the run red. On pull
+    # requests they still block.
     continue-on-error: ${{ github.event_name != 'pull_request' && startsWith(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-latest, ubuntu-24.04-arm]
+        os: [macos-15, macos-15-intel, windows-latest, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
@@ -371,10 +372,12 @@ jobs:
   #     under 5 MB. Its NOTE is answered in cran-comments.md, and a ceiling of 7 MB
   #     still catches losing the strip flags, which are worth about 4 MB.
   #
-  # Not gated on `Status: OK`: both packages carry a known `_abort` WARNING from
-  # Rust's std that cannot be removed while extendr needs unwinding, and it is
-  # answered in each package's cran-comments.md. The job fails on any ERROR, on any
-  # other WARNING, and on the specific properties below; the full log is uploaded.
+  # Not gated on `Status: OK`, since fastsasconvert's installed size is reported and
+  # bounded separately below. The job fails on any ERROR, on any WARNING, and on the
+  # specific properties below; the full log is uploaded. `checking compiled code`
+  # stays OK only while Makevars removes the Rust build tree after linking, because
+  # R would otherwise find `abort` in the static library that Rust's std leaves
+  # there.
   #
   # The packages are built and checked in a directory outside the checkout, as
   # CRAN builds them: inside it, the repository's .cargo/config.toml would set
@@ -443,10 +446,11 @@ jobs:
             if grep -qE '\.\.\. ERROR|^ *ERROR$' "$log"; then
               echo "::error::$name: R CMD check reported an ERROR"; exit 1
             fi
-            warnings=$(grep -c '\.\.\. WARNING' "$log" || true)
-            if [ "$warnings" -gt 1 ] || { [ "$warnings" -eq 1 ] && ! grep -q 'checking compiled code \.\.\. WARNING' "$log"; }; then
-              echo "::error::$name: a WARNING other than the known _abort one"; exit 1
+            if grep -q '\.\.\. WARNING' "$log"; then
+              echo "::error::$name: R CMD check reported a WARNING"; exit 1
             fi
+            grep -q 'checking compiled code \.\.\. OK' "$log" \
+              || { echo "::error::$name: compiled code check is no longer OK"; exit 1; }
 
             if [ "$name" = fastsasconvert ]; then
               size=$(sed -n 's/^ *installed size is *\([0-9.]*\)Mb.*/\1/p' "$log")

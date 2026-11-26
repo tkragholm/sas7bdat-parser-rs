@@ -1,8 +1,10 @@
 Package: fastsas
 Title: Fast SAS7BDAT Reader Backed by Rust
 Version: 0.3.2
-Authors@R:
-    person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre"))
+Authors@R: c(
+    person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre")),
+    person("Authors of the bundled Rust crates", role = c("aut", "cph"),
+           comment = "see inst/AUTHORS"))
 Description: High-performance reader for SAS7BDAT files. The parsing core is
     implemented in Rust (the 'sas7bdat' crate) and exposed to R via 'extendr'.
     Returns a 'tibble' with column types compatible with 'haven': Date,

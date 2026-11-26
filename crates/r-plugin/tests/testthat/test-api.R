@@ -79,7 +79,8 @@ test_that("threads bounds decode concurrency without changing results", {
   skip_if(f == "", "bundled fixture not installed")
 
   expect_identical(read_sas7bdat(f, threads = 1), read_sas7bdat(f))
-  expect_identical(read_sas7bdat(f, threads = 4), read_sas7bdat(f))
+  # CRAN's check machines allow a package at most two cores.
+  expect_identical(read_sas7bdat(f, threads = 2), read_sas7bdat(f))
 
   # Values R would otherwise coerce into something meaningless.
   expect_error(read_sas7bdat(f, threads = 0), "`threads`")

@@ -87,7 +87,20 @@ else
   done
 fi
 
+# ------------------------------------------------------- macOS deployment target
+# rustc builds the Rust objects for its own default macOS version, 11.0 on Apple
+# Silicon. C code that crates compile through the `cc` crate gets clang's default
+# instead, which is the SDK's version and can be newer than the macOS that R links
+# for. ld then warns once per object, and `R CMD check` counts those warnings
+# against the install. Exporting rustc's default puts the C objects on the same
+# version as the Rust ones. A target the user has set is left alone.
+DEPLOYMENT_TARGET=""
+if [ "$(uname)" = Darwin ] && [ -z "${MACOSX_DEPLOYMENT_TARGET:-}" ]; then
+  DEPLOYMENT_TARGET=$(rustc --print deployment-target 2>/dev/null | sed -n 's/^MACOSX_DEPLOYMENT_TARGET=//p')
+  [ -n "$DEPLOYMENT_TARGET" ] && echo "* building C dependencies for macOS ${DEPLOYMENT_TARGET}"
+fi
+
 # ------------------------------------------------------------------------ generate
-sed -e "s|@STRIP_FLAGS@|${STRIP_FLAGS}|" src/Makevars.in > src/Makevars
+sed -e "s|@STRIP_FLAGS@|${STRIP_FLAGS}|" -e "s|@DEPLOYMENT_TARGET@|${DEPLOYMENT_TARGET}|" src/Makevars.in > src/Makevars
 echo "* wrote src/Makevars"
 exit 0
