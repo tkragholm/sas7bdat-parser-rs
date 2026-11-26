@@ -56,6 +56,14 @@
 #' @param strict If `TRUE`, a file with a cell that does not decode in its
 #'   encoding fails, with the reason in `error`. By default such bytes are
 #'   replaced.
+#' @param labels If `TRUE`, store the SAS labels, formats and widths as JSON in
+#'   the Parquet file's key-value metadata under `sas7bdat.metadata`. Ignored
+#'   for CSV and TSV.
+#' @param columns How the written columns are named and typed, from
+#'   [sas_columns()]. `NULL` (the default) writes them as read.
+#' @param output_files One output path per input, in the same order, instead of
+#'   names derived from `output`. Every input must then be a file, and `output`
+#'   and `flatten` are not used.
 #' @return A data frame with one row per converted input — zero rows if nothing
 #'   matched, which is not an error: `input`, `output`, `rows`,
 #'   `columns`, `input_bytes`, `output_bytes`, `seconds`, `status` and `error`.
@@ -80,6 +88,12 @@
 #' # Retry only what failed.
 #' convert_sas(result$input[result$status == "error"], "D:/parquet")
 #' }
+#'
+#' # Lower-case names and the input's path in a column of its own
+#' shaped <- convert_sas(
+#'   path, out, overwrite = TRUE, threads = 1,
+#'   columns = sas_columns(names = "lower", source_column = "source_file")
+#' )
 convert_sas <- function(input,
                         output = NULL,
                         recursive = TRUE,
@@ -91,7 +105,10 @@ convert_sas <- function(input,
                         threads = NULL,
                         tmp_dir = NULL,
                         encoding = NULL,
-                        strict = FALSE) {
+                        strict = FALSE,
+                        labels = FALSE,
+                        columns = NULL,
+                        output_files = NULL) {
   if (!is.character(input) || length(input) == 0L || anyNA(input)) {
     stop("`input` must be one or more file paths", call. = FALSE)
   }
@@ -102,7 +119,7 @@ convert_sas <- function(input,
   if (!is.null(tmp_dir)) {
     tmp_dir <- check_scalar_path(tmp_dir, "tmp_dir")
   }
-  for (arg in c("recursive", "flatten", "overwrite", "strict")) {
+  for (arg in c("recursive", "flatten", "overwrite", "strict", "labels")) {
     check_flag(get(arg), arg)
   }
   if (!is.null(encoding) &&
@@ -113,12 +130,139 @@ convert_sas <- function(input,
   sink <- match.arg(sink)
   compression <- match.arg(compression)
   io_backend <- match.arg(io_backend)
+  if (is.null(columns)) {
+    columns <- sas_columns()
+  } else if (!inherits(columns, "fastsasconvert_columns")) {
+    stop("`columns` must be NULL or made by sas_columns()", call. = FALSE)
+  }
+  if (!is.null(output_files)) {
+    if (!is.character(output_files) || anyNA(output_files) ||
+        length(output_files) != length(input)) {
+      stop("`output_files` must be one path per input, not ",
+           deparse1(output_files), call. = FALSE)
+    }
+    if (!is.null(output) || flatten) {
+      stop("`output_files` names each destination, so `output` and `flatten` ",
+           "must be left unset", call. = FALSE)
+    }
+    output_files <- path.expand(output_files)
+  }
 
   convert_sas_impl(
     input, output, recursive, flatten, overwrite,
     sink, compression, io_backend, check_threads(threads), tmp_dir,
-    encoding, strict
+    encoding, strict, labels, output_files,
+    columns$names, names(columns$rename), unname(columns$rename),
+    names(columns$add), unname(columns$add),
+    columns$source_column, columns$strings, columns$timestamps, columns$times,
+    columns$time_unit
   )
+}
+
+#' Name and type the columns that convert_sas() writes
+#'
+#' Builds the `columns` argument of [convert_sas()]. The rules apply to every
+#' file in a run, so one call fits files with different columns.
+#'
+#' @param names Case of the written column names: `"asis"` (default),
+#'   `"lower"` or `"upper"`. `rename` overrides it for the columns it names.
+#' @param rename A named character vector, `c(OLD = "new")`, writing column
+#'   `OLD` as `new`. SAS names are case-insensitive, so `OLD` matches whatever
+#'   case the file uses. A name that matches no column fails that file.
+#' @param add A named character vector of constant columns, appended after the
+#'   file's own, holding the same value in every row.
+#' @param source_column Name of a constant column holding the input file's path,
+#'   as given to [convert_sas()]. `NULL` adds none.
+#' @param strings Arrow type of text columns in Parquet: `"string"` (default)
+#'   or `"large_string"`.
+#' @param timestamps Unit of timestamps in Parquet: `"s"`, `"ms"`, `"us"` or
+#'   `"ns"`. `NULL` (default) keeps microseconds. A coarser unit rounds each
+#'   instant down, towards the past.
+#' @param times How SAS times are written in Parquet. `NULL` (default) and
+#'   `"duration"` keep elapsed times, which may exceed a day, but readers other
+#'   than Arrow see them as integers. `"time_of_day"` writes Parquet's `TIME`,
+#'   which DuckDB and others read as a time, and fails a file holding a value
+#'   outside one day.
+#' @param time_unit Unit for `times`: `"s"`, `"ms"`, `"us"` or `"ns"`. Defaults
+#'   to `"ns"` for durations and `"ms"` for times of day.
+#' @return An object to pass as `columns`.
+#' @details Two written columns may not share a name. A rule that would give
+#'   them one fails that file, with both source columns named in `error`.
+#'   `strings`, `timestamps` and `times` apply only to Parquet, and a CSV or TSV
+#'   run that sets them fails.
+#' @export
+#' @examples
+#' sas_columns(names = "lower", source_column = "source_file")
+#' sas_columns(rename = c(PNR = "person_id"), times = "time_of_day")
+sas_columns <- function(names = c("asis", "lower", "upper"),
+                        rename = NULL,
+                        add = NULL,
+                        source_column = NULL,
+                        strings = c("string", "large_string"),
+                        timestamps = NULL,
+                        times = NULL,
+                        time_unit = NULL) {
+  names <- match.arg(names)
+  strings <- match.arg(strings)
+  rename <- check_named(rename, "rename")
+  add <- check_named(add, "add")
+  if (!is.null(source_column) &&
+      (!is.character(source_column) || length(source_column) != 1L ||
+       is.na(source_column) || !nzchar(source_column))) {
+    stop("`source_column` must be NULL or a single column name, not ",
+         deparse1(source_column), call. = FALSE)
+  }
+  units <- c("s", "ms", "us", "ns")
+  if (!is.null(timestamps)) {
+    timestamps <- match.arg(timestamps, units)
+  }
+  if (!is.null(times)) {
+    times <- match.arg(times, c("duration", "time_of_day"))
+  }
+  if (!is.null(time_unit)) {
+    if (is.null(times)) {
+      stop("`time_unit` needs `times`", call. = FALSE)
+    }
+    time_unit <- match.arg(time_unit, units)
+  }
+  structure(
+    list(names = names, rename = rename, add = add,
+         source_column = source_column, strings = strings,
+         timestamps = timestamps, times = times, time_unit = time_unit),
+    class = "fastsasconvert_columns"
+  )
+}
+
+#' @export
+print.fastsasconvert_columns <- function(x, ...) {
+  cat("<sas_columns>\n")
+  cat("  names:", x$names, "\n")
+  if (length(x$rename)) {
+    cat("  rename:", paste(names(x$rename), x$rename, sep = " -> ", collapse = ", "), "\n")
+  }
+  if (length(x$add)) {
+    cat("  add:", paste(names(x$add), collapse = ", "), "\n")
+  }
+  if (!is.null(x$source_column)) cat("  source_column:", x$source_column, "\n")
+  cat("  strings:", x$strings, "\n")
+  if (!is.null(x$timestamps)) cat("  timestamps:", x$timestamps, "\n")
+  if (!is.null(x$times)) {
+    cat("  times:", x$times, if (!is.null(x$time_unit)) paste0("(", x$time_unit, ")"), "\n")
+  }
+  invisible(x)
+}
+
+check_named <- function(value, arg) {
+  if (is.null(value) || length(value) == 0L) {
+    return(structure(character(), names = character()))
+  }
+  keys <- names(value)
+  if (!is.character(value) || anyNA(value) || is.null(keys) || anyNA(keys) ||
+      !all(nzchar(keys)) || anyDuplicated(keys)) {
+    stop("`", arg, "` must be a named character vector with unique names, not ",
+         deparse1(value), call. = FALSE)
+  }
+  value
 }
 
 # Validate here rather than letting values coerce on the way into Rust, so a

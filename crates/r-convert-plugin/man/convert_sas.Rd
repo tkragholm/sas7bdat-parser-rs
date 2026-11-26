@@ -16,7 +16,10 @@ convert_sas(
   threads = NULL,
   tmp_dir = NULL,
   encoding = NULL,
-  strict = FALSE
+  strict = FALSE,
+  labels = FALSE,
+  columns = NULL,
+  output_files = NULL
 )
 }
 \arguments{
@@ -33,25 +36,23 @@ here. \code{NULL} writes each output beside its input.}
 
 \item{overwrite}{Replace existing outputs instead of reporting them as errors.}
 
-\item{sink}{Output format: \code{"parquet"} (default), \code{"csv"} or
-\code{"tsv"}.}
+\item{sink}{Output format: \code{"parquet"} (default), \code{"csv"} or \code{"tsv"}.}
 
-\item{compression}{Parquet codec: \code{"zstd"} (default), \code{"lz4"},
-\code{"snappy"} or \code{"none"}. Ignored for CSV and TSV.}
+\item{compression}{Parquet codec: \code{"zstd"} (default), \code{"lz4"}, \code{"snappy"} or
+\code{"none"}. Ignored for CSV and TSV.}
 
-\item{io_backend}{How inputs are read: \code{"auto"} (default) memory-maps
-local files and reads network shares sequentially, \code{"mmap"} always
-memory-maps, \code{"buffered"} always reads sequentially. \code{"auto"} can
-only detect a share on Windows, so pass \code{"buffered"} for a mounted share
-elsewhere.}
+\item{io_backend}{How inputs are read: \code{"auto"} (default) memory-maps local
+files and reads network shares sequentially, \code{"mmap"} always memory-maps,
+\code{"buffered"} always reads sequentially. \code{"auto"} can only detect a share on
+Windows, so pass \code{"buffered"} for a mounted share elsewhere.}
 
-\item{threads}{Decode threads per file. \code{NULL} (default) uses every
-logical core.}
+\item{threads}{Decode threads per file. \code{NULL} (default) uses every logical
+core.}
 
 \item{tmp_dir}{Stage outputs here before moving them into place. \code{NULL}
-(default) stages beside the destination, where the move is a rename. Point this
-at a local disk to keep the write off a network link until there is a finished
-file to send — at the cost of copying it afterwards.}
+(default) stages beside the destination, where the move is a rename. Point
+this at a local disk to keep the write off a network link until there is a
+finished file to send — at the cost of copying it afterwards.}
 
 \item{encoding}{Read each file's text in this encoding instead of the one its
 header declares, for files whose header is wrong. A WHATWG label
@@ -61,48 +62,57 @@ header declares, for files whose header is wrong. A WHATWG label
 \item{strict}{If \code{TRUE}, a file with a cell that does not decode in its
 encoding fails, with the reason in \code{error}. By default such bytes are
 replaced.}
+
+\item{labels}{If \code{TRUE}, store the SAS labels, formats and widths as JSON in
+the Parquet file's key-value metadata under \code{sas7bdat.metadata}. Ignored
+for CSV and TSV.}
+
+\item{columns}{How the written columns are named and typed, from
+\code{\link[=sas_columns]{sas_columns()}}. \code{NULL} (the default) writes them as read.}
+
+\item{output_files}{One output path per input, in the same order, instead of
+names derived from \code{output}. Every input must then be a file, and \code{output}
+and \code{flatten} are not used.}
 }
 \value{
-A data frame with one row per converted input — zero rows if nothing matched,
-which is not an error: \code{input}, \code{output}, \code{rows},
-\code{columns}, \code{input_bytes}, \code{output_bytes}, \code{seconds},
-\code{status} and \code{error}. Carries an \code{interrupted} attribute, and
-\code{discovered} — the number of files found, which exceeds \code{nrow()} when
-a run was stopped early.
+A data frame with one row per converted input — zero rows if nothing
+matched, which is not an error: \code{input}, \code{output}, \code{rows},
+\code{columns}, \code{input_bytes}, \code{output_bytes}, \code{seconds}, \code{status} and \code{error}.
+Carries an \code{interrupted} attribute, and \code{discovered} — the number of files
+found, which exceeds \code{nrow()} when a run was stopped early.
 }
 \description{
 Converts one file, several files, or every \code{.sas7bdat} under a directory,
-mirroring the input tree into \code{output}. The data never enters R:
-conversion happens entirely in Rust and only the per-file summary comes back,
-so trees far larger than the session's memory convert fine.
+mirroring the input tree into \code{output}. The data never enters R: conversion
+happens entirely in Rust and only the per-file summary comes back, so trees far
+larger than the session's memory convert fine.
 }
 \section{Failures are rows, not errors}{
 
 A file that cannot be read does not stop the run. It comes back with
-\code{status = "error"} and the reason in \code{error}, and the remaining files
-still convert. Only argument mistakes throw. Retry a failed subset by filtering
-the returned frame and passing \code{result$input} back in.
+\code{status = "error"} and the reason in \code{error}, and the remaining files still
+convert. Only argument mistakes throw. Retry a failed subset by filtering the
+returned frame and passing \code{result$input} back in.
 }
 
 \section{Interrupting a long run}{
 
 Ctrl-C is checked between files, so a large tree can be stopped without losing
 the work already done — the frame returned covers the files that finished, and
-its \code{interrupted} attribute is \code{TRUE}. Interrupting cannot corrupt the
-output: each file is written to a temporary and moved into place only when
-complete, so a partially converted file never appears at its destination.
+its \code{interrupted} attribute is \code{TRUE}. Interrupting cannot corrupt the output:
+each file is written to a temporary and moved into place only when complete, so
+a partially converted file never appears at its destination.
 }
 
 \section{Resuming}{
 
-With \code{overwrite = FALSE} (the default) an existing output is an error
-rather than a silent skip, which keeps a genuine name collision visible. To
-resume an interrupted run, filter out what already converted:
+With \code{overwrite = FALSE} (the default) an existing output is an error rather
+than a silent skip, which keeps a genuine name collision visible. To resume an
+interrupted run, filter out what already converted:
 
-\preformatted{
-out <- file.path("out", sub("\\.sas7bdat$", ".parquet", basename(files)))
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{out <- file.path("out", sub("\\\\.sas7bdat$", ".parquet", basename(files)))
 convert_sas(files[!file.exists(out)], "out", flatten = TRUE)
-}
+}\if{html}{\out{</div>}}
 }
 
 \examples{
@@ -123,4 +133,10 @@ convert_sas("/mnt/share/sas", "out", io_backend = "buffered")
 # Retry only what failed.
 convert_sas(result$input[result$status == "error"], "D:/parquet")
 }
+
+# Lower-case names and the input's path in a column of its own
+shaped <- convert_sas(
+  path, out, overwrite = TRUE, threads = 1,
+  columns = sas_columns(names = "lower", source_column = "source_file")
+)
 }
