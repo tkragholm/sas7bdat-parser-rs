@@ -1,7 +1,7 @@
 # fastsas
 
 Read SAS7BDAT files into R, using the
-[`sas7bdat`](https://crates.io/crates/sas7bdat) Rust reader through
+[`sas7bdat`](https://docs.rs/sas7bdat) Rust reader through
 [extendr](https://extendr.rs/). Results match haven's column types.
 
 ```r
@@ -52,7 +52,7 @@ A tibble with these column types:
   file with the same name, labelled columns are `haven_labelled` vectors.
 - `categorical = TRUE` returns unlabelled character columns as `factor`. On a
   file with 2,574 character columns this read 2.6 times faster and used about
-  a third less memory; see [benchmarks](../../benchmarks/README.md). Columns
+  a third less memory; see [benchmarks](https://github.com/tkragholm/sas7bdat-parser-rs/blob/main/benchmarks/README.md). Columns
   with many distinct values stay `character`.
 
 ## Where results differ from haven

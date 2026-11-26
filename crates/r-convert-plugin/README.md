@@ -11,7 +11,7 @@ result <- convert_sas("//server/share/sas", "D:/parquet")
 sum(result$status == "error")
 ```
 
-Companion to [`fastsas`](../r-plugin), which reads SAS files *into* R. This
+Companion to [`fastsas`](https://github.com/tkragholm/sas7bdat-parser-rs/tree/main/crates/r-plugin), which reads SAS files *into* R. This
 package does the opposite: it converts files on disk and returns only a summary,
 so trees far larger than the session's memory convert fine. It has no R-level
 dependency on `fastsas`; the two share only the Rust core.

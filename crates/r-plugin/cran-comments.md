@@ -3,6 +3,7 @@
 * macOS 26.6 (arm64), R 4.6.2, rustc 1.97.1, local
 * Ubuntu 24.04 (x86_64), R release, GitHub Actions
 * Windows Server 2022 (x86_64), R release with Rtools, GitHub Actions
+* win-builder, R 4.6.2 and R-devel (2026-11-17 r90926)
 
 ## R CMD check results
 
@@ -10,9 +11,8 @@
 
 * This is a new submission.
 
-The words flagged as possibly misspelled are spelled correctly. SAS7BDAT is the
-file format the package reads, and POSIXct and hms are the R classes of the
-columns it returns.
+POSIXct, flagged as possibly misspelled, is the R class of the date-time
+columns the package returns.
 
 ## Rust
 
