@@ -109,6 +109,9 @@ pub struct ConvertArgs {
     )]
     pub column_indices: Option<Vec<usize>>,
 
+    #[command(flatten)]
+    pub shape: ColumnShapeOptions,
+
     /// Value-label catalog (.sas7bcat) used to attach labels to the output.
     #[arg(long, value_name = "FILE", help_heading = "Input")]
     pub catalog: Option<PathBuf>,
@@ -126,6 +129,94 @@ pub struct ConvertArgs {
     /// replacing it.
     #[arg(long, help_heading = "Input")]
     pub strict: bool,
+}
+
+/// How the written columns are named and typed.
+#[derive(Args, Clone, Default)]
+pub struct ColumnShapeOptions {
+    /// Case of the written column names. `--rename` overrides it for the columns it names.
+    #[arg(long, value_enum, default_value_t = NameCaseArg::AsIs, help_heading = "Columns")]
+    pub names: NameCaseArg,
+
+    /// Write column OLD as NEW. OLD matches regardless of case; repeat for more columns.
+    #[arg(long, value_name = "OLD=NEW", value_parser = parse_pair, help_heading = "Columns")]
+    pub rename: Vec<(String, String)>,
+
+    /// Append a column NAME holding VALUE in every row; repeat for more columns.
+    #[arg(long = "add-column", value_name = "NAME=VALUE", value_parser = parse_pair, help_heading = "Columns")]
+    pub add_column: Vec<(String, String)>,
+
+    /// Append a column NAME holding the input file's path, as given, in every row.
+    #[arg(long = "source-column", value_name = "NAME", help_heading = "Columns")]
+    pub source_column: Option<String>,
+
+    /// Arrow type of text columns in Parquet output.
+    #[arg(long = "string-type", value_enum, default_value_t = StringTypeArg::String, help_heading = "Columns")]
+    pub string_type: StringTypeArg,
+
+    /// Unit of timestamps in Parquet output. Default: microseconds.
+    #[arg(
+        long = "timestamp-unit",
+        value_enum,
+        value_name = "UNIT",
+        help_heading = "Columns"
+    )]
+    pub timestamp_unit: Option<TimeUnitArg>,
+
+    /// How SAS times are written in Parquet output. `duration` keeps values past 24 hours
+    /// but reads as an integer outside Arrow; `time-of-day` is Parquet's TIME and fails on
+    /// a value outside one day. Default: duration.
+    #[arg(long = "time-type", value_enum, help_heading = "Columns")]
+    pub time_type: Option<TimeTypeArg>,
+
+    /// Unit for --time-type. Default: ns for duration, ms for time-of-day.
+    #[arg(
+        long = "time-unit",
+        value_enum,
+        value_name = "UNIT",
+        requires = "time_type",
+        help_heading = "Columns"
+    )]
+    pub time_unit: Option<TimeUnitArg>,
+}
+
+fn parse_pair(text: &str) -> Result<(String, String), String> {
+    match text.split_once('=') {
+        Some((key, value)) if !key.is_empty() => Ok((key.to_string(), value.to_string())),
+        _ => Err(format!("expected NAME=VALUE, got `{text}`")),
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum NameCaseArg {
+    /// As stored in the file.
+    #[default]
+    AsIs,
+    Lower,
+    Upper,
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum StringTypeArg {
+    /// `string`, 32-bit offsets.
+    #[default]
+    String,
+    /// `large_string`, 64-bit offsets.
+    LargeString,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum TimeUnitArg {
+    S,
+    Ms,
+    Us,
+    Ns,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum TimeTypeArg {
+    Duration,
+    TimeOfDay,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -522,6 +613,58 @@ impl From<CompressionCodec> for sas7bdat_convert::CompressionCodec {
             CompressionCodec::Lz4 => Self::Lz4,
             CompressionCodec::Snappy => Self::Snappy,
             CompressionCodec::None => Self::None,
+        }
+    }
+}
+
+impl From<TimeUnitArg> for arrow_schema::TimeUnit {
+    fn from(unit: TimeUnitArg) -> Self {
+        match unit {
+            TimeUnitArg::S => Self::Second,
+            TimeUnitArg::Ms => Self::Millisecond,
+            TimeUnitArg::Us => Self::Microsecond,
+            TimeUnitArg::Ns => Self::Nanosecond,
+        }
+    }
+}
+
+impl ColumnShapeOptions {
+    /// These flags as the conversion library's column plan.
+    #[must_use]
+    pub fn column_plan(&self) -> sas7bdat_convert::columns::ColumnPlan {
+        use arrow_schema::TimeUnit;
+        use sas7bdat_convert::columns::{
+            ColumnPlan, ConstantValue, NameCase, StringType, TimeType,
+        };
+        let mut constants: Vec<(String, ConstantValue)> = self
+            .add_column
+            .iter()
+            .map(|(name, value)| (name.clone(), ConstantValue::Text(value.clone())))
+            .collect();
+        if let Some(name) = &self.source_column {
+            constants.push((name.clone(), ConstantValue::InputPath));
+        }
+        ColumnPlan {
+            case: match self.names {
+                NameCaseArg::AsIs => NameCase::AsIs,
+                NameCaseArg::Lower => NameCase::Lower,
+                NameCaseArg::Upper => NameCase::Upper,
+            },
+            rename: self.rename.clone(),
+            constants,
+            strings: match self.string_type {
+                StringTypeArg::String => StringType::Utf8,
+                StringTypeArg::LargeString => StringType::LargeUtf8,
+            },
+            timestamps: self.timestamp_unit.map(Into::into),
+            times: self.time_type.map(|kind| match kind {
+                TimeTypeArg::Duration => {
+                    TimeType::Duration(self.time_unit.map_or(TimeUnit::Nanosecond, Into::into))
+                }
+                TimeTypeArg::TimeOfDay => {
+                    TimeType::TimeOfDay(self.time_unit.map_or(TimeUnit::Millisecond, Into::into))
+                }
+            }),
         }
     }
 }

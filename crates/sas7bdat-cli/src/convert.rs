@@ -40,6 +40,7 @@ impl ConvertArgs {
             column_indices: self.column_indices.clone(),
             encoding: self.encoding.clone(),
             strict: self.strict,
+            column_plan: self.shape.column_plan(),
         }
     }
 }
@@ -506,6 +507,7 @@ mod tests {
             max_rows: None,
             columns: None,
             column_indices: None,
+            shape: crate::cli::ColumnShapeOptions::default(),
             catalog: None,
         }
     }
