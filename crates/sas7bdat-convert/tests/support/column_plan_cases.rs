@@ -82,7 +82,7 @@ pub fn renames_retypes_and_adds_a_source_column(threads: Option<usize>) {
         constants: vec![("source_file".into(), ConstantValue::InputPath)],
         strings: StringType::LargeUtf8,
         timestamps: Some(TimeUnit::Millisecond),
-        times: None,
+        times: TimeType::default(),
     };
     convert(&input, &shaped, plan, SinkKind::Parquet, threads).unwrap();
 
@@ -135,19 +135,42 @@ pub fn times_of_day(threads: Option<usize>) {
     convert(
         &input,
         &plain,
-        ColumnPlan::default(),
+        ColumnPlan {
+            times: TimeType::Duration(TimeUnit::Nanosecond),
+            ..ColumnPlan::default()
+        },
         SinkKind::Parquet,
         threads,
     )
     .unwrap();
     let plan = ColumnPlan {
-        times: Some(TimeType::TimeOfDay(TimeUnit::Millisecond)),
+        times: TimeType::TimeOfDay(TimeUnit::Millisecond),
         ..ColumnPlan::default()
     };
     convert(&input, &shaped, plan, SinkKind::Parquet, threads).unwrap();
+    let default = dir.path().join("default.parquet");
+    convert(
+        &input,
+        &default,
+        ColumnPlan::default(),
+        SinkKind::Parquet,
+        threads,
+    )
+    .unwrap();
     let plain = read(&plain);
     let shaped = read(&shaped);
+    let default = read(&default);
     for column in 0..plain.num_columns() {
+        assert_eq!(
+            *plain.schema().field(column).data_type(),
+            DataType::Duration(TimeUnit::Nanosecond),
+            "durations are the opt-in"
+        );
+        assert_eq!(
+            *default.schema().field(column).data_type(),
+            DataType::Time64(TimeUnit::Microsecond),
+            "times of day in microseconds are the default"
+        );
         assert_eq!(
             *shaped.schema().field(column).data_type(),
             DataType::Time32(TimeUnit::Millisecond)

@@ -11,7 +11,7 @@ sas_columns(
   source_column = NULL,
   strings = c("string", "large_string"),
   timestamps = NULL,
-  times = NULL,
+  times = c("time_of_day", "duration"),
   time_unit = NULL
 )
 }
@@ -36,14 +36,15 @@ or \code{"large_string"}.}
 \code{"ns"}. \code{NULL} (default) keeps microseconds. A coarser unit rounds each
 instant down, towards the past.}
 
-\item{times}{How SAS times are written in Parquet. \code{NULL} (default) and
-\code{"duration"} keep elapsed times, which may exceed a day, but readers other
-than Arrow see them as integers. \code{"time_of_day"} writes Parquet's \code{TIME},
-which DuckDB and others read as a time, and fails a file holding a value
-outside one day.}
+\item{times}{How SAS times are written in Parquet. \code{"time_of_day"} (the
+default) writes Parquet's \code{TIME}, which \code{arrow::read_parquet()} reads as
+\code{hms} and DuckDB as \code{TIME}. A file holding a time outside one day, such as an
+elapsed 25:30 or a negative time, then fails, and its \code{error} says so.
+\code{"duration"} keeps such values, but \code{arrow} reads them as \code{difftime} and
+readers other than Arrow see integers.}
 
-\item{time_unit}{Unit for \code{times}: \code{"s"}, \code{"ms"}, \code{"us"} or \code{"ns"}. Defaults
-to \code{"ns"} for durations and \code{"ms"} for times of day.}
+\item{time_unit}{Unit for \code{times}: \code{"s"}, \code{"ms"}, \code{"us"} or \code{"ns"}. \code{NULL}
+(default) is \code{"us"} for times of day and \code{"ns"} for durations.}
 }
 \value{
 An object to pass as \code{columns}.
@@ -60,5 +61,5 @@ run that sets them fails.
 }
 \examples{
 sas_columns(names = "lower", source_column = "source_file")
-sas_columns(rename = c(PNR = "person_id"), times = "time_of_day")
+sas_columns(rename = c(PNR = "person_id"), times = "duration")
 }

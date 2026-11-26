@@ -60,7 +60,8 @@
 #'   the Parquet file's key-value metadata under `sas7bdat.metadata`. Ignored
 #'   for CSV and TSV.
 #' @param columns How the written columns are named and typed, from
-#'   [sas_columns()]. `NULL` (the default) writes them as read.
+#'   [sas_columns()]. `NULL` (the default) is `sas_columns()`: the names as read,
+#'   and SAS times as Parquet `TIME`.
 #' @param output_files One output path per input, in the same order, instead of
 #'   names derived from `output`. Every input must then be a file, and `output`
 #'   and `flatten` are not used.
@@ -178,13 +179,14 @@ convert_sas <- function(input,
 #' @param timestamps Unit of timestamps in Parquet: `"s"`, `"ms"`, `"us"` or
 #'   `"ns"`. `NULL` (default) keeps microseconds. A coarser unit rounds each
 #'   instant down, towards the past.
-#' @param times How SAS times are written in Parquet. `NULL` (default) and
-#'   `"duration"` keep elapsed times, which may exceed a day, but readers other
-#'   than Arrow see them as integers. `"time_of_day"` writes Parquet's `TIME`,
-#'   which DuckDB and others read as a time, and fails a file holding a value
-#'   outside one day.
-#' @param time_unit Unit for `times`: `"s"`, `"ms"`, `"us"` or `"ns"`. Defaults
-#'   to `"ns"` for durations and `"ms"` for times of day.
+#' @param times How SAS times are written in Parquet. `"time_of_day"` (the
+#'   default) writes Parquet's `TIME`, which `arrow::read_parquet()` reads as
+#'   `hms` and DuckDB as `TIME`. A file holding a time outside one day, such as an
+#'   elapsed 25:30 or a negative time, then fails, and its `error` says so.
+#'   `"duration"` keeps such values, but `arrow` reads them as `difftime` and
+#'   readers other than Arrow see integers.
+#' @param time_unit Unit for `times`: `"s"`, `"ms"`, `"us"` or `"ns"`. `NULL`
+#'   (default) is `"us"` for times of day and `"ns"` for durations.
 #' @return An object to pass as `columns`.
 #' @details Two written columns may not share a name. A rule that would give
 #'   them one fails that file, with both source columns named in `error`.
@@ -193,14 +195,14 @@ convert_sas <- function(input,
 #' @export
 #' @examples
 #' sas_columns(names = "lower", source_column = "source_file")
-#' sas_columns(rename = c(PNR = "person_id"), times = "time_of_day")
+#' sas_columns(rename = c(PNR = "person_id"), times = "duration")
 sas_columns <- function(names = c("asis", "lower", "upper"),
                         rename = NULL,
                         add = NULL,
                         source_column = NULL,
                         strings = c("string", "large_string"),
                         timestamps = NULL,
-                        times = NULL,
+                        times = c("time_of_day", "duration"),
                         time_unit = NULL) {
   names <- match.arg(names)
   strings <- match.arg(strings)
@@ -216,13 +218,8 @@ sas_columns <- function(names = c("asis", "lower", "upper"),
   if (!is.null(timestamps)) {
     timestamps <- match.arg(timestamps, units)
   }
-  if (!is.null(times)) {
-    times <- match.arg(times, c("duration", "time_of_day"))
-  }
+  times <- match.arg(times)
   if (!is.null(time_unit)) {
-    if (is.null(times)) {
-      stop("`time_unit` needs `times`", call. = FALSE)
-    }
     time_unit <- match.arg(time_unit, units)
   }
   structure(
@@ -246,9 +243,7 @@ print.fastsasconvert_columns <- function(x, ...) {
   if (!is.null(x$source_column)) cat("  source_column:", x$source_column, "\n")
   cat("  strings:", x$strings, "\n")
   if (!is.null(x$timestamps)) cat("  timestamps:", x$timestamps, "\n")
-  if (!is.null(x$times)) {
-    cat("  times:", x$times, if (!is.null(x$time_unit)) paste0("(", x$time_unit, ")"), "\n")
-  }
+  cat("  times:", x$times, if (!is.null(x$time_unit)) paste0("(", x$time_unit, ")"), "\n")
   invisible(x)
 }
 

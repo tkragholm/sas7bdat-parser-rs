@@ -124,7 +124,7 @@ fn column_plan(
     source_column: Option<String>,
     strings: &str,
     timestamps: Option<String>,
-    times: Option<String>,
+    times: &str,
     time_unit: Option<String>,
 ) -> std::result::Result<ColumnPlan, String> {
     let case = match case {
@@ -165,16 +165,10 @@ fn column_plan(
         .as_deref()
         .map(|unit| parse_unit(unit, "time_unit"))
         .transpose()?;
-    let times = match times.as_deref() {
-        None => {
-            if unit.is_some() {
-                return Err("time_unit needs times".to_string());
-            }
-            None
-        }
-        Some("duration") => Some(TimeType::Duration(unit.unwrap_or(TimeUnit::Nanosecond))),
-        Some("time_of_day") => Some(TimeType::TimeOfDay(unit.unwrap_or(TimeUnit::Millisecond))),
-        Some(other) => {
+    let times = match times {
+        "time_of_day" => TimeType::TimeOfDay(unit.unwrap_or(TimeUnit::Microsecond)),
+        "duration" => TimeType::Duration(unit.unwrap_or(TimeUnit::Nanosecond)),
+        other => {
             return Err(format!(
                 "unknown times {other:?}; expected duration or time_of_day"
             ));
@@ -419,7 +413,7 @@ fn convert_sas_impl(
     source_column: Option<String>,
     strings: &str,
     timestamps: Option<String>,
-    times: Option<String>,
+    times: &str,
     time_unit: Option<String>,
 ) -> Robj {
     let plan = match column_plan(

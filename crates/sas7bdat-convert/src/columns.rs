@@ -4,8 +4,9 @@
 //! A [`ColumnPlan`] is set once for a run. [`ColumnPlan::for_input`] fills in the
 //! values that depend on the file, [`ColumnPlan::resolve`] fixes the plan against
 //! that file's Arrow schema, and the [`ResolvedColumns`] it returns rewrites each
-//! record batch. The default plan changes nothing, and [`ColumnPlan::is_identity`]
-//! lets the writers skip the rewrite.
+//! record batch. The default plan keeps the names and writes SAS times as
+//! Parquet's `TIME`, the one type every reader shows as a time of day. A file the
+//! plan leaves unchanged, such as one without time columns, is not rewritten at all.
 //!
 //! Names are a rule rather than a list, so one plan fits files with different
 //! columns: a case rule for every column, and a rename map that overrides it for
@@ -20,10 +21,11 @@
 //! - Timestamps and durations change unit by floor division, so an instant
 //!   before 1970 rounds towards the past like any other. A finer unit multiplies,
 //!   and a value that no longer fits in 64 bits is an error.
-//! - A duration becomes a time of day only when every value lies in
-//!   `[0, 24 h)`. A value outside that range is an error that names the column,
-//!   because SAS stores elapsed times in the same type and a silent wrap would
-//!   turn 25 hours into 1 a.m.
+//! - The reader decodes SAS times as durations, since SAS stores elapsed times in
+//!   the same type. A duration becomes a time of day only when every value lies in
+//!   `[0, 24 h)`. A value outside that range fails the file and names the column
+//!   and the setting that keeps it, rather than wrapping 25 hours into 1 a.m.
+//!   [`TimeType::Duration`] writes elapsed times as they are.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -63,12 +65,22 @@ pub enum StringType {
 /// The Arrow type SAS time values are written as.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TimeType {
-    /// An elapsed time, which may exceed a day. Parquet has no duration type, so a
-    /// reader that ignores Arrow's embedded schema sees a plain integer.
+    /// An elapsed time, which may exceed a day or be negative. Parquet has no
+    /// duration type, so a reader that ignores Arrow's embedded schema, such as
+    /// DuckDB's own Parquet reader, sees a plain integer.
     Duration(TimeUnit),
     /// A time of day, Parquet's `TIME`. Seconds and milliseconds are `time32`,
-    /// microseconds and nanoseconds `time64`.
+    /// microseconds and nanoseconds `time64`. R's arrow reads it as `hms` and DuckDB
+    /// as `TIME`.
     TimeOfDay(TimeUnit),
+}
+
+impl Default for TimeType {
+    /// Microseconds, which is DuckDB's own `TIME` precision. SAS stores times as
+    /// seconds with a fraction, so a coarser unit would floor part of it away.
+    fn default() -> Self {
+        Self::TimeOfDay(TimeUnit::Microsecond)
+    }
 }
 
 /// The value of a constant column.
@@ -79,8 +91,8 @@ pub enum ConstantValue {
     InputPath,
 }
 
-/// How the written columns are named and typed. The default writes the file's
-/// columns unchanged.
+/// How the written columns are named and typed. The default keeps the names and
+/// changes only the time columns, to [`TimeType::default`].
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ColumnPlan {
     pub case: NameCase,
@@ -92,25 +104,25 @@ pub struct ColumnPlan {
     pub strings: StringType,
     /// The unit timestamps are written in. `None` keeps the reader's microseconds.
     pub timestamps: Option<TimeUnit>,
-    /// How times are written. `None` keeps the reader's nanosecond durations.
-    pub times: Option<TimeType>,
+    /// How times are written.
+    pub times: TimeType,
 }
 
 impl ColumnPlan {
-    /// Whether the plan leaves the written columns exactly as the reader produced them.
+    /// Whether the plan changes any column's name or adds a column.
     #[must_use]
-    pub fn is_identity(&self) -> bool {
-        self.case == NameCase::AsIs
-            && self.rename.is_empty()
-            && self.constants.is_empty()
-            && !self.changes_types()
+    pub fn renames_or_adds(&self) -> bool {
+        self.case != NameCase::AsIs || !self.rename.is_empty() || !self.constants.is_empty()
     }
 
-    /// Whether the plan converts any column's type. Only Parquet output has types to
-    /// convert, so the delimited writers refuse a plan for which this is true.
+    /// Whether any type setting differs from its default. CSV and TSV write values as
+    /// text, so the delimited writers refuse a plan for which this is true and
+    /// ignore the default.
     #[must_use]
-    pub fn changes_types(&self) -> bool {
-        self.strings != StringType::Utf8 || self.timestamps.is_some() || self.times.is_some()
+    pub fn sets_types(&self) -> bool {
+        self.strings != StringType::default()
+            || self.timestamps.is_some()
+            || self.times != TimeType::default()
     }
 
     /// This plan with every [`ConstantValue::InputPath`] replaced by `input`.
@@ -224,12 +236,11 @@ impl ColumnPlan {
                 |unit| DataType::Timestamp(unit, tz.clone()),
             ),
             DataType::Duration(_) => match self.times {
-                None => input.clone(),
-                Some(TimeType::Duration(unit)) => DataType::Duration(unit),
-                Some(TimeType::TimeOfDay(unit @ (TimeUnit::Second | TimeUnit::Millisecond))) => {
+                TimeType::Duration(unit) => DataType::Duration(unit),
+                TimeType::TimeOfDay(unit @ (TimeUnit::Second | TimeUnit::Millisecond)) => {
                     DataType::Time32(unit)
                 }
-                Some(TimeType::TimeOfDay(unit)) => DataType::Time64(unit),
+                TimeType::TimeOfDay(unit) => DataType::Time64(unit),
             },
             other => other.clone(),
         }
@@ -249,6 +260,20 @@ impl ResolvedColumns {
     #[must_use]
     pub fn schema(&self) -> &SchemaRef {
         &self.schema
+    }
+
+    /// Whether the rewrite changes anything for a file whose schema is `input`: a
+    /// name, a type, or an added column. Field metadata is carried over unchanged
+    /// and does not count.
+    #[must_use]
+    pub fn changes(&self, input: &Schema) -> bool {
+        !self.constants.is_empty()
+            || input.fields().len() != self.input_columns
+            || input
+                .fields()
+                .iter()
+                .zip(self.schema.fields())
+                .any(|(from, to)| from.name() != to.name() || from.data_type() != to.data_type())
     }
 
     /// The written name of the file's column `index`.
@@ -336,8 +361,9 @@ fn convert(array: &ArrayRef, target: &DataType, name: &str) -> Result<ArrayRef> 
                 #[allow(clippy::cast_precision_loss)]
                 let hours = bad as f64 / (3_600 * units_per_second(*to)) as f64;
                 bail!(
-                    "column `{name}` holds a time of {hours:.2} hours, outside one day; \
-                     write times as durations to keep it"
+                    "column `{name}` holds a time of {hours:.2} hours, outside one day, which \
+                     Parquet's TIME cannot hold. Write times as durations to keep it: \
+                     times = \"duration\" in R, --time-type duration on the command line"
                 );
             }
             Ok(i64_array(target, values, nulls))
@@ -446,14 +472,48 @@ mod tests {
     }
 
     #[test]
-    fn default_plan_is_identity() {
-        assert!(ColumnPlan::default().is_identity());
-        let plan = ColumnPlan {
+    fn default_plan_sets_nothing_but_writes_times_of_day() {
+        let plan = ColumnPlan::default();
+        assert!(!plan.renames_or_adds());
+        assert!(!plan.sets_types());
+        assert_eq!(plan.times, TimeType::TimeOfDay(TimeUnit::Microsecond));
+        let lower = ColumnPlan {
             case: NameCase::Lower,
             ..ColumnPlan::default()
         };
-        assert!(!plan.is_identity());
-        assert!(!plan.changes_types());
+        assert!(lower.renames_or_adds());
+        assert!(!lower.sets_types());
+        let durations = ColumnPlan {
+            times: TimeType::Duration(TimeUnit::Nanosecond),
+            ..ColumnPlan::default()
+        };
+        assert!(durations.sets_types());
+    }
+
+    #[test]
+    fn default_plan_leaves_a_file_without_times_unchanged() {
+        let input = schema(vec![
+            Field::new("A", DataType::Int64, true),
+            Field::new("S", DataType::Utf8, true),
+            Field::new("T", DataType::Timestamp(TimeUnit::Microsecond, None), true),
+        ]);
+        assert!(
+            !ColumnPlan::default()
+                .resolve(&input)
+                .unwrap()
+                .changes(&input)
+        );
+        let with_time = schema(vec![Field::new(
+            "TM",
+            DataType::Duration(TimeUnit::Nanosecond),
+            true,
+        )]);
+        assert!(
+            ColumnPlan::default()
+                .resolve(&with_time)
+                .unwrap()
+                .changes(&with_time)
+        );
     }
 
     #[test]
@@ -608,7 +668,7 @@ mod tests {
     #[test]
     fn times_of_day_and_the_one_day_limit() {
         let plan = ColumnPlan {
-            times: Some(TimeType::TimeOfDay(TimeUnit::Millisecond)),
+            times: TimeType::TimeOfDay(TimeUnit::Millisecond),
             ..ColumnPlan::default()
         };
         let input = schema(vec![Field::new(
@@ -640,6 +700,10 @@ mod tests {
         let batch = RecordBatch::try_new(SchemaRef::clone(&input), vec![late]).unwrap();
         let err = resolved.apply(&batch).unwrap_err().to_string();
         assert!(err.contains("`TM`") && err.contains("25.00 hours"), "{err}");
+        assert!(
+            err.contains("times = \"duration\"") && err.contains("--time-type duration"),
+            "{err}"
+        );
         let early: ArrayRef = Arc::new(DurationNanosecondArray::from(vec![Some(-1)]));
         let batch = RecordBatch::try_new(SchemaRef::clone(&input), vec![early]).unwrap();
         assert!(resolved.apply(&batch).is_err());
@@ -648,7 +712,7 @@ mod tests {
     #[test]
     fn time64_for_finer_units() {
         let plan = ColumnPlan {
-            times: Some(TimeType::TimeOfDay(TimeUnit::Microsecond)),
+            times: TimeType::TimeOfDay(TimeUnit::Microsecond),
             ..ColumnPlan::default()
         };
         let input = schema(vec![Field::new(

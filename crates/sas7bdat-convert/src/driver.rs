@@ -194,19 +194,19 @@ pub fn convert_file(
     resolve_column_indices(&dataset, selection)?;
     let projection = projection_from_selection(&dataset, selection)?;
     let plan = options.column_plan.for_input(input);
-    if !plan.is_identity() {
-        // Checked here too, so a bad rename or a name collision fails before the
-        // staging file exists.
+    // Checked here too, so a bad rename or a name collision fails before the staging
+    // file exists.
+    if plan.renames_or_adds() {
         let names: Vec<String> = projection.as_ref().map_or_else(
             || dataset.columns().iter().map(|c| c.name.clone()).collect(),
             |proj| proj.columns().iter().map(|c| c.name.clone()).collect(),
         );
         plan.output_names(&names)?;
-        if plan.changes_types() && options.layout.sink != SinkKind::Parquet {
-            return Err(anyhow!(
-                "string, timestamp and time types only apply to Parquet output"
-            ));
-        }
+    }
+    if plan.sets_types() && options.layout.sink != SinkKind::Parquet {
+        return Err(anyhow!(
+            "string, timestamp and time types only apply to Parquet output"
+        ));
     }
     let columns = projection
         .as_ref()

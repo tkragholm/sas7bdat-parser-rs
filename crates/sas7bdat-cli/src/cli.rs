@@ -163,18 +163,18 @@ pub struct ColumnShapeOptions {
     )]
     pub timestamp_unit: Option<TimeUnitArg>,
 
-    /// How SAS times are written in Parquet output. `duration` keeps values past 24 hours
-    /// but reads as an integer outside Arrow; `time-of-day` is Parquet's TIME and fails on
-    /// a value outside one day. Default: duration.
-    #[arg(long = "time-type", value_enum, help_heading = "Columns")]
-    pub time_type: Option<TimeTypeArg>,
+    /// How SAS times are written in Parquet output. `time-of-day` is Parquet's TIME,
+    /// which every reader shows as a time, and fails a file holding a value outside one
+    /// day. `duration` keeps elapsed times, including those past 24 hours or below zero,
+    /// but reads as an integer outside Arrow.
+    #[arg(long = "time-type", value_enum, default_value_t = TimeTypeArg::TimeOfDay, help_heading = "Columns")]
+    pub time_type: TimeTypeArg,
 
-    /// Unit for --time-type. Default: ns for duration, ms for time-of-day.
+    /// Unit for --time-type. Default: us for time-of-day, ns for duration.
     #[arg(
         long = "time-unit",
         value_enum,
         value_name = "UNIT",
-        requires = "time_type",
         help_heading = "Columns"
     )]
     pub time_unit: Option<TimeUnitArg>,
@@ -213,10 +213,11 @@ pub enum TimeUnitArg {
     Ns,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum TimeTypeArg {
-    Duration,
+    #[default]
     TimeOfDay,
+    Duration,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -657,14 +658,14 @@ impl ColumnShapeOptions {
                 StringTypeArg::LargeString => StringType::LargeUtf8,
             },
             timestamps: self.timestamp_unit.map(Into::into),
-            times: self.time_type.map(|kind| match kind {
+            times: match self.time_type {
                 TimeTypeArg::Duration => {
                     TimeType::Duration(self.time_unit.map_or(TimeUnit::Nanosecond, Into::into))
                 }
                 TimeTypeArg::TimeOfDay => {
-                    TimeType::TimeOfDay(self.time_unit.map_or(TimeUnit::Millisecond, Into::into))
+                    TimeType::TimeOfDay(self.time_unit.map_or(TimeUnit::Microsecond, Into::into))
                 }
-            }),
+            },
         }
     }
 }

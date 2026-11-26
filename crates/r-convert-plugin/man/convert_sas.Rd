@@ -68,7 +68,8 @@ the Parquet file's key-value metadata under \code{sas7bdat.metadata}. Ignored
 for CSV and TSV.}
 
 \item{columns}{How the written columns are named and typed, from
-\code{\link[=sas_columns]{sas_columns()}}. \code{NULL} (the default) writes them as read.}
+\code{\link[=sas_columns]{sas_columns()}}. \code{NULL} (the default) is \code{sas_columns()}: the names as read,
+and SAS times as Parquet \code{TIME}.}
 
 \item{output_files}{One output path per input, in the same order, instead of
 names derived from \code{output}. Every input must then be a file, and \code{output}

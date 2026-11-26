@@ -364,11 +364,15 @@ pub fn write_parquet(dataset: &Dataset, output: &Path, options: WriteOptions<'_>
         options.scan.projection,
     )?;
     let reshape = match options.columns {
-        Some(plan) if !plan.is_identity() => Some(Arc::new(
-            plan.resolve(&scan_schema)
-                .map_err(|err| Error::unsupported(err.to_string()))?,
-        )),
-        _ => None,
+        Some(plan) => {
+            let resolved = plan
+                .resolve(&scan_schema)
+                .map_err(|err| Error::unsupported(err.to_string()))?;
+            // A file the plan leaves as it is, such as one without time columns under
+            // the default plan, is written straight from the scan.
+            resolved.changes(&scan_schema).then(|| Arc::new(resolved))
+        }
+        None => None,
     };
     let schema = reshape.as_ref().map_or_else(
         || SchemaRef::clone(&scan_schema),
@@ -522,8 +526,8 @@ pub fn write_csv_or_tsv(
     );
 
     let (header_names, constants) = match options.columns {
-        Some(plan) if !plan.is_identity() => {
-            if plan.changes_types() {
+        Some(plan) if plan.renames_or_adds() || plan.sets_types() => {
+            if plan.sets_types() {
                 return Err(Error::unsupported(
                     "string, timestamp and time types only apply to Parquet output".to_string(),
                 )
