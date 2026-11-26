@@ -305,15 +305,17 @@ jobs:
               || { echo "::error::$name tarball carries no vendor.tar.xz"; exit 1; }
 
             echo "::group::install $name"
-            R CMD INSTALL "${name}"
+            R CMD INSTALL "${name}" 2>&1 | tee "${name}-install.log"
             echo "::endgroup::"
 
             # Positive evidence that Makevars.win took its vendored branch. Grepping
             # the log for `--offline` would not do: make echoes the whole recipe, both
-            # branches included, before the shell picks one. `cargo-home` exists only
-            # if the vendored branch actually ran, and its presence simultaneously
-            # confirms CARGO_HOME was redirected out of the user's home.
-            test -d "${name}/src/rust/target/cargo-home" \
+            # branches included, before the shell picks one. The vendored branch prints
+            # its CARGO_HOME, and only the shell's output has the expanded path at the
+            # start of a line, so a match shows both that the branch ran and that
+            # CARGO_HOME was redirected out of the user's home. The build tree itself is
+            # gone by now, removed after linking.
+            grep -Eq '^vendored build, CARGO_HOME=.*cargo-home$' "${name}-install.log" \
               || { echo "::error::$name built without the vendored branch"; exit 1; }
             echo "$name: vendored, offline, CARGO_HOME redirected"
 
