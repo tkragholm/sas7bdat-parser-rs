@@ -5,6 +5,14 @@ All notable changes to the `sas7bdat-polars` Python package. The format follows
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-11-26
+
+### Fixed
+
+- Count a sample's distinct values exactly, which 32-bit targets build.
+
+Built with sas7bdat 0.10.4.
+
 ## [0.10.4] - 2026-11-15
 
 ### Changed

@@ -1,6 +1,6 @@
 Package: fastsas
 Title: Fast SAS7BDAT Reader Backed by Rust
-Version: 0.3.2
+Version: 0.3.3
 Authors@R: c(
     person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre")),
     person("Authors of the bundled Rust crates", role = c("aut", "cph"),

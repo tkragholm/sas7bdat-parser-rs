@@ -1,3 +1,12 @@
+# fastsas 0.3.3
+
+## Bug fixes
+
+- `R CMD check --as-cran` passes without the WARNING about `abort`. The Rust build tree, whose standard library references `abort`, is removed once the package is linked.
+- The tests use at most two threads, as CRAN asks.
+
+Built with sas7bdat 0.10.4.
+
 # fastsas 0.3.2
 
 ## Bug fixes

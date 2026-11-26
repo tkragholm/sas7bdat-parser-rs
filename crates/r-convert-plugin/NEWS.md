@@ -1,3 +1,21 @@
+# fastsasconvert 0.4.0
+
+## New features
+
+- `convert_sas()` gains `columns`, made by the new `sas_columns()`, to set the written names by a case rule and renames, add constant columns such as the input's path, and set the Parquet types of strings, timestamps and times.
+- `convert_sas()` gains `output_files`, one destination per input in input order, and `labels`, which stores the SAS labels and formats in the Parquet file's metadata.
+
+## Changes
+
+- SAS times are written as Parquet `TIME` by default, which `arrow::read_parquet()` reads as `hms` and DuckDB as `TIME`. A file holding a time outside one day fails, and its `error` names the column and the fix: `sas_columns(times = "duration")` writes durations as earlier versions did.
+
+## Bug fixes
+
+- `R CMD check --as-cran` passes without WARNINGs. The Rust build tree is removed once the package is linked, and the bundled C code is built for the same macOS version as the Rust code.
+- The tests use at most two threads, as CRAN asks.
+
+Built with sas7bdat 0.10.4 and sas7bdat-convert 0.5.0.
+
 # fastsasconvert 0.3.2
 
 ## Bug fixes
