@@ -1,3 +1,13 @@
+# fastsasconvert 0.4.2
+
+## Changes
+
+- The compiled library keeps its symbols, as CRAN's policy asks. The installed package is larger as a result.
+- The example data is credited to its copyright holders in `Authors@R` and in the new `inst/COPYRIGHTS`, and the Apache License 2.0 it is distributed under ships as `inst/LICENSE-Apache-2.0`. Evan Miller is credited for ReadStat, from which parts of the bundled `sas7bdat` crate derive.
+- The examples and tests use `mix_and_missing.sas7bdat` from Parso. `people.sas7bdat`, whose licence is not stated, is no longer included.
+
+Built with sas7bdat 0.10.4, sas7bdat-convert 0.5.0.
+
 # fastsasconvert 0.4.1
 
 ## Documentation
