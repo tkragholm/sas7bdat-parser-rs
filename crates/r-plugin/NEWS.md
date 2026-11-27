@@ -1,3 +1,15 @@
+# fastsas 0.3.4
+
+## Bug fixes
+
+- The tests pass on Windows. A test file named `test-nul.R` gave the snapshot path `_snaps/nul.md`, and `NUL` is a reserved file name there.
+
+## Documentation
+
+- The README's links point to docs.rs and the GitHub repository, so they resolve from the installed package.
+
+Built with sas7bdat 0.10.4.
+
 # fastsas 0.3.3
 
 ## Bug fixes

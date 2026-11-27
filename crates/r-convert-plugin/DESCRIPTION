@@ -1,6 +1,6 @@
 Package: fastsasconvert
 Title: Convert 'SAS7BDAT' Files to Parquet Without Loading Them
-Version: 0.4.0
+Version: 0.4.1
 Authors@R: c(
     person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre")),
     person("Authors of the bundled Rust crates", role = c("aut", "cph"),

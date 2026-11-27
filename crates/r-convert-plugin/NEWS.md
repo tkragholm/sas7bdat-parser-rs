@@ -1,3 +1,11 @@
+# fastsasconvert 0.4.1
+
+## Documentation
+
+- The README's links point to the GitHub repository, so they resolve from the installed package.
+
+Built with sas7bdat 0.10.4, sas7bdat-convert 0.5.0.
+
 # fastsasconvert 0.4.0
 
 ## New features
