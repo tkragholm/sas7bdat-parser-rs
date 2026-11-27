@@ -147,7 +147,7 @@ those bytes.
 
 \examples{
 # A small file that ships with the package
-path <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+path <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas")
 df <- read_sas7bdat(path)
 df
 

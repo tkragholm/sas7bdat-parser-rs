@@ -1,0 +1,31 @@
+Copyright holders of material in fastsasconvert not written by its author
+=========================================================================
+
+The R code and the package's own Rust code are copyright Tobias Kragholm,
+under the licence stated in DESCRIPTION.
+
+Example data
+------------
+
+inst/extdata/mix_and_missing.sas7bdat is copied from the test data of Parso,
+https://github.com/epam/parso, copyright EPAM Systems, under the Apache
+License 2.0.
+
+The Apache License 2.0 is reproduced in inst/LICENSE-Apache-2.0. The files
+are unmodified copies.
+
+Code derived from ReadStat
+--------------------------
+
+Parts of the bundled 'sas7bdat' crate (its catalog reader, file probe and
+encoding table) derive from ReadStat, https://github.com/WizardMac/ReadStat,
+copyright 2013-2016 Evan Miller, under the MIT licence. The licence and
+copyright notice ship with the crate, as LICENSE-ReadStat in its directory
+inside src/rust/vendor.tar.xz.
+
+Bundled Rust crates
+-------------------
+
+The authors and licences of the Rust crates bundled in src/rust/vendor.tar.xz
+are listed in inst/AUTHORS. Each crate's licence text ships in its own
+directory inside that archive.

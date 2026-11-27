@@ -16,9 +16,9 @@ The source tarball is about 6 MB. Most of it is the bundled Rust sources in
 the Apache Arrow and Parquet crates and the zstd codec. Test suites,
 benchmarks and example data are removed from the bundle before it is packed.
 
-The installed size is reported as about 6 MB on Linux, almost all of it the
-compiled library. It is built with link-time optimisation and one codegen unit,
-and local symbols are stripped at link time.
+The installed size is about 6 MB, almost all of it the compiled library. It is
+built with link-time optimisation and one codegen unit, and the linker drops
+unreferenced sections. Symbols are kept, as the policy asks.
 
 ## Rust
 
@@ -26,8 +26,10 @@ The package is implemented in Rust and follows the CRAN guidance on using Rust.
 All crates are bundled as source in `src/rust/vendor.tar.xz`, and cargo builds
 from them offline, with two jobs and with `CARGO_HOME` inside the build
 directory. The rustc and cargo versions are printed before compilation, and the
-build tree is removed after linking. The authors and licences of the bundled
-crates are listed in `inst/AUTHORS`.
+build tree is removed after linking. Prebuilt binaries that some crates carry
+for targets R never builds are removed from the bundle. The authors and licences
+of the bundled crates are listed in `inst/AUTHORS`. `inst/COPYRIGHTS` covers the
+example data and the code derived from ReadStat.
 
 `SystemRequirements` states rustc >= 1.89, the highest minimum version declared
 by a bundled crate.

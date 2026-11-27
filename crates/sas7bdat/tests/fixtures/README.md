@@ -21,8 +21,7 @@ files, as continuous integration does.
 
 ## `people_nonascii.sas7bdat`
 
-A copy of `crates/r-plugin/inst/extdata/people.sas7bdat` (WINDOWS-1252, 5
-rows) with one byte changed: row 0's `GENDER` cell is `0xE9` (`é`) instead of
+A copy of `people.sas7bdat` in this directory (WINDOWS-1252, 5 rows) with one byte changed: row 0's `GENDER` cell is `0xE9` (`é`) instead of
 `M`. The original is pure ASCII, so it never reaches the transcoding path; this
 copy does. Used by
 `dataset::tests::batch_decode_transcodes_non_ascii_windows_1252_string`. It
@@ -33,7 +32,7 @@ WINDOWS-1252 file with non-ASCII text.
 To regenerate it:
 
 ```python
-data = bytearray(open("crates/r-plugin/inst/extdata/people.sas7bdat", "rb").read())
+data = bytearray(open("crates/sas7bdat/tests/fixtures/people.sas7bdat", "rb").read())
 assert data[1249] == ord("M")   # row 0 GENDER cell
 data[1249] = 0xE9               # windows-1252 'é'
 open("crates/sas7bdat/tests/fixtures/people_nonascii.sas7bdat", "wb").write(data)

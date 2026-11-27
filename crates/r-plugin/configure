@@ -7,15 +7,13 @@
 # 1. Whether cargo and rustc are usable. Without this the failure is a wall of make
 #    output ending in "cargo: not found", which does not tell a user what to install.
 #
-# 2. Which link-time strip flags the platform's linker accepts. This package's
-#    installed size sits near the 5 MB that `R CMD check` NOTEs, and discarding local
-#    symbols is what keeps it under. The flags are not portable: `--gc-sections` is
-#    GNU ld and is rejected by Apple's ld64, which spells the same idea `-dead_strip`.
-#    Rather than guess from `uname`, each candidate is offered to the actual linker
-#    and kept only if it links cleanly.
+# 2. Which flag the linker takes for dropping unreferenced code sections. GNU ld
+#    spells it `--gc-sections` and Apple's ld64 `-dead_strip`. Rather than guess
+#    from `uname`, each candidate is offered to the actual linker and kept only if
+#    it links cleanly. Symbols are left in place, as CRAN's policy asks.
 #
-# Nothing here is required for correctness — if every probe fails, the package builds
-# with no strip flags at all and is merely larger.
+# Nothing here is required for correctness. If every probe fails, the package builds
+# without the flag and is merely larger.
 
 set -u
 
@@ -70,16 +68,16 @@ EOF
 
 if ! $CC $CFLAGS -fPIC -c "$tmpdir/conftest.c" -o "$tmpdir/conftest.o" >/dev/null 2>&1; then
   echo "* could not compile a test object; skipping linker probes"
-  STRIP_FLAGS=""
+  GC_FLAGS=""
 else
-  STRIP_FLAGS=""
+  GC_FLAGS=""
   # A linker that does not know a flag may only warn about it, so a clean exit is
   # not enough — anything on stderr counts as a rejection.
-  for flag in -Wl,-x -Wl,-S -Wl,--gc-sections -Wl,-dead_strip; do
+  for flag in -Wl,--gc-sections -Wl,-dead_strip; do
     # shellcheck disable=SC2086
     if $CC $SHLIB_LDFLAGS -o "$tmpdir/conftest.so" "$tmpdir/conftest.o" \
-         $STRIP_FLAGS "$flag" 2>"$tmpdir/err" && [ ! -s "$tmpdir/err" ]; then
-      STRIP_FLAGS="${STRIP_FLAGS} ${flag}"
+         $GC_FLAGS "$flag" 2>"$tmpdir/err" && [ ! -s "$tmpdir/err" ]; then
+      GC_FLAGS="${GC_FLAGS} ${flag}"
       echo "* linker accepts ${flag}"
     else
       echo "* linker rejects ${flag}"
@@ -101,6 +99,6 @@ if [ "$(uname)" = Darwin ] && [ -z "${MACOSX_DEPLOYMENT_TARGET:-}" ]; then
 fi
 
 # ------------------------------------------------------------------------ generate
-sed -e "s|@STRIP_FLAGS@|${STRIP_FLAGS}|" -e "s|@DEPLOYMENT_TARGET@|${DEPLOYMENT_TARGET}|" src/Makevars.in > src/Makevars
+sed -e "s|@GC_FLAGS@|${GC_FLAGS}|" -e "s|@DEPLOYMENT_TARGET@|${DEPLOYMENT_TARGET}|" src/Makevars.in > src/Makevars
 echo "* wrote src/Makevars"
 exit 0

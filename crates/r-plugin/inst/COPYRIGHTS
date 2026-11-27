@@ -1,0 +1,38 @@
+Copyright holders of material in fastsas not written by its author
+==================================================================
+
+The R code and the package's own Rust code are copyright Tobias Kragholm,
+under the licence stated in DESCRIPTION.
+
+Example data
+------------
+
+The files in inst/extdata are copied from the test data of other open-source
+SAS readers, under the Apache License 2.0:
+
+- missing_test.sas7bdat, missing_formats.sas7bcat, test_data_win.sas7bdat and
+  test_formats_win.sas7bcat come from pyreadstat,
+  https://github.com/Roche/pyreadstat, copyright Hoffmann-La Roche and the
+  pyreadstat contributors.
+- dtdate.sas7bdat (named date_format_dtdate.sas7bdat there) and
+  mix_and_missing.sas7bdat come from Parso, https://github.com/epam/parso,
+  copyright EPAM Systems.
+
+The Apache License 2.0 is reproduced in inst/LICENSE-Apache-2.0. The files
+are unmodified copies.
+
+Code derived from ReadStat
+--------------------------
+
+Parts of the bundled 'sas7bdat' crate (its catalog reader, file probe and
+encoding table) derive from ReadStat, https://github.com/WizardMac/ReadStat,
+copyright 2013-2016 Evan Miller, under the MIT licence. The licence and
+copyright notice ship with the crate, as LICENSE-ReadStat in its directory
+inside src/rust/vendor.tar.xz.
+
+Bundled Rust crates
+-------------------
+
+The authors and licences of the Rust crates bundled in src/rust/vendor.tar.xz
+are listed in inst/AUTHORS. Each crate's licence text ships in its own
+directory inside that archive.

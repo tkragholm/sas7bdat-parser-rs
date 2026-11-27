@@ -52,7 +52,7 @@ test_that("times come back as seconds since midnight", {
 })
 
 test_that("temporal_as_numbers must be TRUE or FALSE", {
-  path <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+  path <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas")
   expect_error(read_sas7bdat(path, temporal_as_numbers = NA),
                class = "fastsas_error_argument")
 })

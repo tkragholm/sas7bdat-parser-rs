@@ -118,7 +118,7 @@ convert_sas(files[!file.exists(out)], "out", flatten = TRUE)
 
 \examples{
 # Convert a small file that ships with the package to Parquet
-path <- system.file("extdata", "people.sas7bdat", package = "fastsasconvert")
+path <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsasconvert")
 out <- file.path(tempdir(), "fastsas-example")
 result <- convert_sas(path, out, threads = 1)
 result[, c("input", "output", "status", "rows")]

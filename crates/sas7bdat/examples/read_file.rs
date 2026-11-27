@@ -5,8 +5,8 @@
 //! cargo run -p sas7bdat --example read_file -- path/to/file.sas7bdat
 //! ```
 //!
-//! With no argument it reads the five-row example file that ships with the R
-//! package, `crates/r-plugin/inst/extdata/people.sas7bdat`.
+//! With no argument it reads the five-row test file
+//! `crates/sas7bdat/tests/fixtures/people.sas7bdat`.
 
 use sas7bdat::{Dataset, Result};
 use std::ops::ControlFlow;
@@ -16,7 +16,7 @@ fn main() -> Result<()> {
     let path = std::env::args_os().nth(1).map_or_else(
         || {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../r-plugin/inst/extdata/people.sas7bdat")
+                .join("tests/fixtures/people.sas7bdat")
         },
         PathBuf::from,
     );

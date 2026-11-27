@@ -54,7 +54,7 @@ python -c 'import sas7bdat_polars as sp; print(sp.read_sas("airline.sas7bdat"))'
 The R packages ship example files, used in their help pages:
 
 ```r
-fastsas::read_sas7bdat(system.file("extdata", "people.sas7bdat", package = "fastsas"))
+fastsas::read_sas7bdat(system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas"))
 ```
 
 In a clone of the repository, `cargo run -p sas7bdat --example read_file`

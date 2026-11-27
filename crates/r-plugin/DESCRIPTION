@@ -3,6 +3,12 @@ Title: Fast 'SAS7BDAT' Reader Backed by Rust
 Version: 0.3.4
 Authors@R: c(
     person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre")),
+    person("Evan", "Miller", role = c("ctb", "cph"),
+           comment = "ReadStat, from which parts of the bundled 'sas7bdat' crate derive"),
+    person("Hoffmann-La Roche", role = "cph",
+           comment = "example data from 'pyreadstat', see inst/COPYRIGHTS"),
+    person("EPAM Systems", role = "cph",
+           comment = "example data from 'Parso', see inst/COPYRIGHTS"),
     person("Authors of the bundled Rust crates", role = c("aut", "cph"),
            comment = "see inst/AUTHORS"))
 Description: High-performance reader for 'SAS7BDAT' files. The parsing core is
@@ -13,8 +19,9 @@ License: MIT + file LICENSE
 URL: https://github.com/tkragholm/sas7bdat-parser-rs
 BugReports: https://github.com/tkragholm/sas7bdat-parser-rs/issues
 Encoding: UTF-8
-Copyright: See inst/AUTHORS for the copyright holders of the Rust
-    crates bundled in src/rust/vendor.tar.xz.
+Copyright: See inst/COPYRIGHTS for the example data and the code derived
+    from ReadStat, and inst/AUTHORS for the Rust crates bundled in
+    src/rust/vendor.tar.xz.
 Language: en-US
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.1

@@ -46,10 +46,8 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 
-# Note there is deliberately no `strip` here. Cargo applies `-Cstrip` at link time and
-# a `staticlib` has no link step, so it is silently a no-op: measured 5,208,872 ->
-# 5,208,504 bytes, i.e. nothing. The strip has to happen where R does the linking —
-# see `-Wl,-x -Wl,-S` in `../Makevars`.
+# There is no `strip` here. CRAN's policy asks packages to keep the symbols in their
+# shared objects, and cargo's `-Cstrip` would be a no-op on a `staticlib` anyway.
 
 # Sized rather than speed-optimised, because none of these runs per row and the
 # installed size sits near the 5 MB that `R CMD check` NOTEs. Worth 78 KB on x86-64

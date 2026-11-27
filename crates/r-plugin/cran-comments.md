@@ -25,8 +25,10 @@ The package is implemented in Rust and follows the CRAN guidance on using Rust.
 All crates are bundled as source in `src/rust/vendor.tar.xz`, and cargo builds
 from them offline, with two jobs and with `CARGO_HOME` inside the build
 directory. The rustc and cargo versions are printed before compilation, and the
-build tree is removed after linking. The authors and licences of the bundled
-crates are listed in `inst/AUTHORS`.
+build tree is removed after linking. Prebuilt binaries that some crates carry
+for targets R never builds are removed from the bundle. The authors and licences
+of the bundled crates are listed in `inst/AUTHORS`. `inst/COPYRIGHTS` covers the
+example data and the code derived from ReadStat.
 
 `SystemRequirements` states rustc >= 1.89, the highest minimum version declared
 by a bundled crate.

@@ -1,4 +1,4 @@
-fixture <- function() system.file("extdata", "people.sas7bdat", package = "fastsasconvert")
+fixture <- function() system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsasconvert")
 
 test_that("a file converts and reports what it produced", {
   f <- fixture()
@@ -12,8 +12,8 @@ test_that("a file converts and reports what it produced", {
   expect_equal(nrow(res), 1L)
   expect_equal(res$status, "ok")
   expect_true(is.na(res$error))
-  expect_equal(res$rows, 5)
-  expect_equal(res$columns, 6L)
+  expect_equal(res$rows, 48)
+  expect_equal(res$columns, 5L)
   expect_true(file.exists(res$output))
   expect_true(res$output_bytes > 0)
   # The measure that matters for a bulk run: nothing was read into R.
@@ -27,12 +27,12 @@ test_that("the input tree is mirrored under the output root", {
   out <- file.path(tempdir(), "tree-out")
   on.exit(unlink(c(src, out), recursive = TRUE), add = TRUE)
   dir.create(file.path(src, "a", "b"), recursive = TRUE, showWarnings = FALSE)
-  file.copy(f, file.path(src, "a", "b", "people.sas7bdat"))
+  file.copy(f, file.path(src, "a", "b", "mixed.sas7bdat"))
 
   res <- convert_sas(src, out)
 
   expect_equal(nrow(res), 1L)
-  expect_true(file.exists(file.path(out, "a", "b", "people.parquet")))
+  expect_true(file.exists(file.path(out, "a", "b", "mixed.parquet")))
 })
 
 test_that("flatten discards the tree", {
@@ -42,11 +42,11 @@ test_that("flatten discards the tree", {
   out <- file.path(tempdir(), "flat-out")
   on.exit(unlink(c(src, out), recursive = TRUE), add = TRUE)
   dir.create(file.path(src, "deep"), recursive = TRUE, showWarnings = FALSE)
-  file.copy(f, file.path(src, "deep", "people.sas7bdat"))
+  file.copy(f, file.path(src, "deep", "mixed.sas7bdat"))
 
   convert_sas(src, out, flatten = TRUE)
 
-  expect_true(file.exists(file.path(out, "people.parquet")))
+  expect_true(file.exists(file.path(out, "mixed.parquet")))
 })
 
 test_that("a bad file is a row, not an error", {
@@ -57,7 +57,7 @@ test_that("a bad file is a row, not an error", {
   on.exit(unlink(c(src, out), recursive = TRUE), add = TRUE)
   dir.create(src, showWarnings = FALSE)
   writeLines("not a sas file", file.path(src, "broken.sas7bdat"))
-  file.copy(fixture(), file.path(src, "people.sas7bdat"))
+  file.copy(fixture(), file.path(src, "mixed.sas7bdat"))
 
   res <- convert_sas(src, out)
 

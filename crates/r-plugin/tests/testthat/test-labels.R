@@ -34,16 +34,16 @@ test_that("a missing explicit catalog errors", {
 })
 
 test_that("a catalog beside the file that cannot be read is a warning", {
-  people <- system.file("extdata", "people.sas7bdat", package = "fastsas")
-  skip_if(people == "", "bundled fixture not installed")
+  data <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas")
+  skip_if(data == "", "bundled fixture not installed")
   dir <- tempfile()
   dir.create(dir)
   on.exit(unlink(dir, recursive = TRUE))
-  file.copy(people, file.path(dir, "people.sas7bdat"))
-  writeLines("not a catalog", file.path(dir, "people.sas7bcat"))
-  expect_warning(df <- read_sas7bdat(file.path(dir, "people.sas7bdat")), "catalog")
+  file.copy(data, file.path(dir, "mixed.sas7bdat"))
+  writeLines("not a catalog", file.path(dir, "mixed.sas7bcat"))
+  expect_warning(df <- read_sas7bdat(file.path(dir, "mixed.sas7bdat")), "catalog")
   expect_null(attr(df, "fastsas_warning"))
-  expect_identical(nrow(df), 5L)
+  expect_identical(nrow(df), 48L)
 })
 
 test_that("format.sas is set as haven sets it", {

@@ -1,7 +1,8 @@
 """The Arrow C stream is the whole boundary, and these pin what crosses it.
 
-Fixtures are the small files the R package ships (tracked in git, so these run
-everywhere): `people.sas7bdat` (5 rows, ID and GENDER), `dtdate.sas7bdat`
+Fixtures are small files tracked in git, so these run everywhere: the core's
+`people.sas7bdat` (5 rows, ID and GENDER), and from the R package
+`dtdate.sas7bdat`
 (sub-second datetimes), `test_data_win.sas7bdat` with its format catalog
 `test_formats_win.sas7bcat` (value labels), and the pandas corpus's
 `airline.sas7bdat` where it is present.
@@ -15,10 +16,9 @@ import polars as pl
 import pytest
 import sas7bdat_polars as sp
 
-EXTDATA = (
-    Path(__file__).resolve().parents[3] / "crates" / "r-plugin" / "inst" / "extdata"
-)
-PEOPLE = EXTDATA / "people.sas7bdat"
+REPO = Path(__file__).resolve().parents[3]
+EXTDATA = REPO / "crates" / "r-plugin" / "inst" / "extdata"
+PEOPLE = REPO / "crates" / "sas7bdat" / "tests" / "fixtures" / "people.sas7bdat"
 DTDATE = EXTDATA / "dtdate.sas7bdat"
 LABELLED = EXTDATA / "test_data_win.sas7bdat"
 CATALOG = EXTDATA / "test_formats_win.sas7bcat"

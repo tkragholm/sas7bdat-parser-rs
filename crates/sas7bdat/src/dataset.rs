@@ -839,10 +839,10 @@ mod tests {
         assert_eq!(stats.rows_emitted, collected.len() as u64);
     }
 
-    /// A small, git-tracked fixture (shipped with the R plugin) so the timing-breakdown
-    /// tests actually run in CI rather than skipping like the untracked-corpus tests above.
+    /// A small, git-tracked fixture so the timing-breakdown tests actually run in CI
+    /// rather than skipping like the untracked-corpus tests above.
     fn tracked_fixture() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../r-plugin/inst/extdata/people.sas7bdat")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/people.sas7bdat")
     }
 
     #[test]

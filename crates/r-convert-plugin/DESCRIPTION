@@ -3,6 +3,10 @@ Title: Convert 'SAS7BDAT' Files to Parquet Without Loading Them
 Version: 0.4.1
 Authors@R: c(
     person("Tobias", "Kragholm", , "tkragholm@gmail.com", role = c("aut", "cre")),
+    person("Evan", "Miller", role = c("ctb", "cph"),
+           comment = "ReadStat, from which parts of the bundled 'sas7bdat' crate derive"),
+    person("EPAM Systems", role = "cph",
+           comment = "example data from 'Parso', see inst/COPYRIGHTS"),
     person("Authors of the bundled Rust crates", role = c("aut", "cph"),
            comment = "see inst/AUTHORS"))
 Description: Converts 'SAS7BDAT' files to Parquet, CSV or tab-separated
@@ -14,8 +18,9 @@ License: MIT + file LICENSE
 URL: https://github.com/tkragholm/sas7bdat-parser-rs
 BugReports: https://github.com/tkragholm/sas7bdat-parser-rs/issues
 Encoding: UTF-8
-Copyright: See inst/AUTHORS for the copyright holders of the Rust
-    crates bundled in src/rust/vendor.tar.xz.
+Copyright: See inst/COPYRIGHTS for the example data and the code derived
+    from ReadStat, and inst/AUTHORS for the Rust crates bundled in
+    src/rust/vendor.tar.xz.
 Language: en-US
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.1

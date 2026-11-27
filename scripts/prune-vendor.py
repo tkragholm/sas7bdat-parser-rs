@@ -75,6 +75,15 @@ DROP_FILES = frozenset(
     }
 )
 
+# Prebuilt objects, libraries and executables. CRAN's policy admits no binary code in a
+# source package, and an archive inside it is no exception. They ship in crates for
+# targets an R build never uses: `wit-bindgen`, which only the WASI target compiles,
+# carries a `.a`, two `.o` files and a `.wasm`. A crate that needed one of these on a
+# host would fail the offline build that `vendor-r-package.sh` runs after pruning.
+BINARY_SUFFIXES = (
+    ".a", ".o", ".obj", ".lib", ".dll", ".so", ".dylib", ".exe", ".wasm",
+)
+
 
 def prune(root: str) -> tuple[int, int]:
     """Prune every crate under `root`. Returns (bytes removed, crates touched)."""
@@ -94,7 +103,7 @@ def prune(root: str) -> tuple[int, int]:
         for rel in list(files):
             head = rel.split("/")[0]
             base = rel.split("/")[-1].lower()
-            if head in DROP_DIRS or base in DROP_FILES:
+            if head in DROP_DIRS or base in DROP_FILES or base.endswith(BINARY_SUFFIXES):
                 path = os.path.join(crate_dir, rel)
                 if os.path.isfile(path):
                     removed += os.path.getsize(path)

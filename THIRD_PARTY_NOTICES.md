@@ -73,6 +73,10 @@ Unmodified.
 [Parso](https://github.com/epam/parso) (copyright EPAM Systems), licensed
 under the Apache License 2.0, see
 [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt). Unmodified.
+`mix_and_missing.sas7bdat` in `crates/r-plugin/inst/extdata/` and
+`crates/r-convert-plugin/inst/extdata/` is the corpus file of that name listed
+below. The R packages name their copyright holders in `inst/COPYRIGHTS` and
+ship the licence as `inst/LICENSE-Apache-2.0`.
 
 The following files in `crates/sas7bdat/tests/fixtures/corpus/parso/` are
 copied from Parso's `src/test/resources/`, at commit `3c514e66264f`, under the
@@ -92,13 +96,14 @@ same licence. Unmodified. Parso has no NOTICE file.
 
 ### `people.sas7bdat`
 
-- `crates/r-plugin/inst/extdata/people.sas7bdat` is a small synthetic teaching
-  dataset (5 rows, columns `ID` and `GENDER`) that has circulated in public
-  SAS7BDAT sample-file collections since at least 2014; the earliest known
-  source is Louisiana State University statistics course material (EXST7087,
-  Summer 2006). It contains no real-world data.
-- `crates/sas7bdat/tests/fixtures/people_nonascii.sas7bdat` is a copy of it
-  with one byte changed (see `crates/sas7bdat/tests/fixtures/README.md`).
+`crates/sas7bdat/tests/fixtures/people.sas7bdat` is a small
+synthetic teaching dataset (5 rows) that has circulated in public SAS7BDAT
+sample-file collections since at least 2014; the earliest known source is
+Louisiana State University statistics course material (EXST7087, Summer 2006).
+It contains no real-world data. It states no licence, so the R packages, which
+shipped it as example data up to fastsas 0.3.4 and fastsasconvert 0.4.1, no
+longer do. `people_nonascii.sas7bdat` beside it is a copy with one byte changed
+(see `crates/sas7bdat/tests/fixtures/README.md`).
 
 ### Untracked local corpus
 

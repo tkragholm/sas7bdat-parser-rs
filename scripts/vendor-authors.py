@@ -37,6 +37,15 @@ def _field(pattern: re.Pattern[str], text: str) -> str | None:
     return match.group(1) if match else None
 
 
+# What the crate's own manifest does not say but the package has to. ReadStat's
+# licence ships in the crate as LICENSE-ReadStat; this names its copyright holder in
+# the listing too.
+NOTES = {
+    "sas7bdat": "Parts derive from ReadStat, copyright 2013-2016 Evan Miller, under the\n"
+    "  MIT licence in the crate's LICENSE-ReadStat.",
+}
+
+
 def crate_entry(crate_dir: str) -> tuple[str, str, str] | None:
     manifest = os.path.join(crate_dir, "Cargo.toml")
     if not os.path.isfile(manifest):
@@ -59,6 +68,8 @@ def crate_entry(crate_dir: str) -> tuple[str, str, str] | None:
 
     name = os.path.basename(crate_dir)
     who = "; ".join(authors) if authors else "(no authors field; see crate sources)"
+    if name in NOTES:
+        who = f"{who}\n  {NOTES[name]}"
     return (f"{name} {version}", licence, who)
 
 

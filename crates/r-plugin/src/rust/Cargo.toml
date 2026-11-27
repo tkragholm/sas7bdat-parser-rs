@@ -36,8 +36,7 @@ opt-level = 3
 # sibling `fastsasconvert` manifest for the numbers behind both claims — this package
 # links a subset of the same crates, so the same reasoning applies.
 #
-# There is deliberately no `strip` here: cargo applies `-Cstrip` at link time and a
-# `staticlib` never links, so it is a silent no-op. Stripping happens via
-# `-Wl,-x -Wl,-S` in `../Makevars`, where R does the link.
+# There is no `strip` here. CRAN's policy asks packages to keep the symbols in their
+# shared objects, and cargo's `-Cstrip` would be a no-op on a `staticlib` anyway.
 lto = "fat"
 codegen-units = 1

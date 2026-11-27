@@ -6,7 +6,7 @@ test_that("read_sas is an alias for read_sas7bdat", {
 })
 
 test_that("bad arguments are rejected by name", {
-  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+  f <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
 
   # A non-logical `categorical` is an error: `isTRUE()` would turn every non-TRUE
@@ -25,7 +25,7 @@ test_that("bad arguments are rejected by name", {
 })
 
 test_that("valid arguments still work", {
-  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+  f <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
   expect_s3_class(read_sas7bdat(f, categorical = TRUE), "data.frame")
   expect_s3_class(read_sas7bdat(f, categorical = FALSE), "data.frame")
@@ -60,7 +60,7 @@ test_that("variable labels keep the whitespace haven keeps", {
 })
 
 test_that("io_backend selects a reader and rejects unknown names", {
-  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+  f <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
 
   # All three must produce identical output -- the backend changes how bytes are
@@ -75,7 +75,7 @@ test_that("io_backend selects a reader and rejects unknown names", {
 })
 
 test_that("threads bounds decode concurrency without changing results", {
-  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+  f <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
 
   expect_identical(read_sas7bdat(f, threads = 1), read_sas7bdat(f))

@@ -2,19 +2,10 @@ TARGET_DIR = $(CURDIR)/rust/target
 LIBDIR = $(TARGET_DIR)/release
 STATLIB = $(LIBDIR)/libfastsasconvert.a
 
-# This file is a template. `../configure` substitutes @STRIP_FLAGS@ with whichever
-# of `-Wl,-x`, `-Wl,-S`, `-Wl,--gc-sections` and `-Wl,-dead_strip` the platform's
-# linker actually accepts, and writes `Makevars`. Edit this file, never that one.
-#
-# Discarding local symbols at link time brings this package's installed size from
-# 8.15 MB to 4.07 MB on macOS, and from over to under the 5 MB that `R CMD check`
-# NOTEs on Linux. It has to happen here rather than in cargo's profile: `-Cstrip`
-# runs at link time and a `staticlib` never links, so setting `strip` in
-# `rust/Cargo.toml` has no effect (368 bytes of 5.2 MB).
-#
-# Only locals are discarded, so the exported entry points (`R_init_fastsasconvert`
-# and the extendr metadata symbol) are unaffected on both ELF and Mach-O.
-PKG_LIBS = -L$(LIBDIR) -lfastsasconvert @STRIP_FLAGS@
+# This file is a template. `../configure` substitutes @GC_FLAGS@ with the flag the
+# platform's linker takes for dropping unreferenced sections, and writes `Makevars`.
+# Edit this file, never that one.
+PKG_LIBS = -L$(LIBDIR) -lfastsasconvert @GC_FLAGS@
 
 CARGO_BUILD_ARGS = --lib --release --manifest-path=$(CURDIR)/rust/Cargo.toml --target-dir $(TARGET_DIR)
 

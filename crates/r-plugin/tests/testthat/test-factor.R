@@ -1,5 +1,5 @@
 test_that("categorical = TRUE round-trips; low-card cols become factors", {
-  f <- system.file("extdata", "people.sas7bdat", package = "fastsas")
+  f <- system.file("extdata", "mix_and_missing.sas7bdat", package = "fastsas")
   skip_if(f == "", "bundled fixture not installed")
 
   ch <- read_sas(f, categorical = FALSE)

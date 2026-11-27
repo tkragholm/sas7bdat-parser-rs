@@ -146,6 +146,8 @@ rustversion 1.0.23
 sas7bdat 0.10.4
   Licence: MIT
   Authors: (no authors field; see crate sources)
+  Parts derive from ReadStat, copyright 2013-2016 Evan Miller, under the
+  MIT licence in the crate's LICENSE-ReadStat.
 
 scopeguard 1.2.0
   Licence: MIT OR Apache-2.0
